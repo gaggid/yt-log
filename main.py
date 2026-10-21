@@ -10,7 +10,9 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-# Force UTF-8 on Windows console so Hindi text doesn't crash the process
+# Force UTF-8 everywhere on Windows — must be before any I/O
+os.environ["PYTHONUTF8"] = "1"
+os.environ["PYTHONIOENCODING"] = "utf-8"
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 if hasattr(sys.stderr, "reconfigure"):
@@ -35,12 +37,16 @@ _jobs: dict[str, dict] = {}
 def _hdrs():
     return {"Authorization": f"Bearer {config.API_KEY}"}
 
+def _clean(s: str) -> str:
+    """Strip lone surrogates that json.dumps chokes on."""
+    return s.encode("utf-8", errors="replace").decode("utf-8")
+
 async def _chat(client: httpx.AsyncClient, messages: list, **kwargs) -> str:
     payload = {"model": config.CHAT_MODEL, "messages": messages, **kwargs}
     r = await client.post(f"{config.BASE_URL}/chat/completions",
                           json=payload, headers=_hdrs(), timeout=120)
     r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"]
+    return _clean(r.json()["choices"][0]["message"]["content"])
 
 def _extract_json(text: str) -> dict:
     try:
@@ -61,19 +67,19 @@ async def research(client: httpx.AsyncClient, topic: str) -> str:
         server_tools=["web_search"], max_tokens=2500)
 
 async def make_script(client: httpx.AsyncClient, research_text: str, n: int) -> dict:
-    prompt = f"""You are a Hindi podcast scriptwriter. Based on the research below, write a {n}-segment solo-host podcast script.
+    prompt = f"""You are a Hinglish podcast scriptwriter. Based on the research below, write a {n}-segment solo-host podcast script in Hinglish (natural mix of Hindi and English using ONLY Latin/Roman alphabet — no Devanagari script).
 
 Research:
 {research_text}
 
 Return ONLY valid JSON (no markdown, no explanation):
 {{
-  "title": "Episode title in Hindi (Devanagari script)",
+  "title": "Episode title in Hinglish (Roman script only)",
   "description": "One line English description for YouTube",
   "segments": [
     {{
       "id": 1,
-      "narration": "Hindi text in Devanagari script, 3-5 conversational sentences, podcast tone",
+      "narration": "Hinglish narration in Roman script, 3-5 conversational sentences, podcast tone. Example: 'Aaj ki sabse badi khabar yeh hai ki...'",
       "image_prompt": "Detailed English cinematic image description for this topic segment. Include mood, setting, visual style.",
       "emotion": "calm"
     }}
@@ -81,7 +87,7 @@ Return ONLY valid JSON (no markdown, no explanation):
 }}
 
 emotion values: calm | excited | serious | dramatic | concerned | amused
-Exactly {n} segments. Return only JSON."""
+Exactly {n} segments. IMPORTANT: Use only Roman/Latin alphabet in title and narration — no Devanagari. Return only JSON."""
 
     content = await _chat(client,
         [{"role": "user", "content": prompt}],
@@ -156,7 +162,7 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
     log: list[str] = job["log"]
 
     def emit(msg: str, type_: str = "info"):
-        log.append(json.dumps({"type": type_, "message": msg}))
+        log.append(json.dumps({"type": type_, "message": _clean(msg)}))
 
     try:
         job["status"] = "running"
@@ -166,13 +172,13 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
             news = await research(client, topic)
             emit("✓ Research complete", "success")
 
-            emit(f"✍️ Generating Hindi podcast script ({n_segments} segments)...")
+            emit(f"✍️ Generating Hinglish podcast script ({n_segments} segments)...")
             script = await make_script(client, news, n_segments)
-            (job_dir / "script.json").write_text(
-                json.dumps(script, ensure_ascii=False, indent=2), encoding="utf-8")
+            with open(job_dir / "script.json", "w", encoding="utf-8") as _f:
+                json.dump(script, _f, ensure_ascii=False, indent=2)
             segs = script["segments"]
             n = len(segs)
-            emit(f"✓ Script: \"{script['title']}\" ({n} segments)", "success")
+            emit(f"✓ Script: \"{script.get('title', '')}\" ({n} segments)", "success")
 
             audio_paths = [job_dir / f"audio_{i:03d}.mp3" for i in range(n)]
             image_paths = [job_dir / f"image_{i:03d}.png" for i in range(n)]
@@ -204,6 +210,12 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
             job["description"] = script.get("description", "")
             emit(f"✅ Done! {size_mb}MB — ready to download", "done")
 
+    except UnicodeEncodeError as ue:
+        job["status"] = "error"
+        ctx = ascii(ue.object[max(0, ue.start - 5):ue.end + 5])
+        emit(f"❌ UnicodeEncodeError: codec={ue.encoding!r} pos={ue.start}-{ue.end} context={ctx}", "error")
+        for line in traceback.format_exc().splitlines():
+            emit(f"  {line}", "error")
     except Exception as e:
         job["status"] = "error"
         emit(f"❌ {type(e).__name__}: {e}", "error")
