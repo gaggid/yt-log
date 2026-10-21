@@ -67,19 +67,19 @@ async def research(client: httpx.AsyncClient, topic: str) -> str:
         server_tools=["web_search"], max_tokens=2500)
 
 async def make_script(client: httpx.AsyncClient, research_text: str, n: int) -> dict:
-    prompt = f"""You are a Hinglish podcast scriptwriter. Based on the research below, write a {n}-segment solo-host podcast script in Hinglish (natural mix of Hindi and English using ONLY Latin/Roman alphabet — no Devanagari script).
+    prompt = f"""You are a Hindi podcast scriptwriter. Based on the research below, write a {n}-segment solo-host podcast script.
 
 Research:
 {research_text}
 
 Return ONLY valid JSON (no markdown, no explanation):
 {{
-  "title": "Episode title in Hinglish (Roman script only)",
+  "title": "Episode title in Hindi (Devanagari script)",
   "description": "One line English description for YouTube",
   "segments": [
     {{
       "id": 1,
-      "narration": "Hinglish narration in Roman script, 3-5 conversational sentences, podcast tone. Example: 'Aaj ki sabse badi khabar yeh hai ki...'",
+      "narration": "Hindi narration in Devanagari script, 3-5 conversational sentences, podcast tone",
       "image_prompt": "Detailed English cinematic image description for this topic segment. Include mood, setting, visual style.",
       "emotion": "calm"
     }}
@@ -87,7 +87,7 @@ Return ONLY valid JSON (no markdown, no explanation):
 }}
 
 emotion values: calm | excited | serious | dramatic | concerned | amused
-Exactly {n} segments. IMPORTANT: Use only Roman/Latin alphabet in title and narration — no Devanagari. Return only JSON."""
+Exactly {n} segments. Return only JSON."""
 
     content = await _chat(client,
         [{"role": "user", "content": prompt}],
@@ -150,7 +150,7 @@ def ffmpeg_assemble(job_dir: Path, audio_paths: list, image_paths: list,
         "-c:a", "aac", "-b:a", "192k",
         "-r", "30", "-shortest",
         str(output)
-    ], check=True, capture_output=True)
+    ], check=True, capture_output=True, encoding="utf-8", errors="replace")
 
 # ── main pipeline ──────────────────────────────────────────────────────────────
 
@@ -172,7 +172,7 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
             news = await research(client, topic)
             emit("✓ Research complete", "success")
 
-            emit(f"✍️ Generating Hinglish podcast script ({n_segments} segments)...")
+            emit(f"✍️ Generating Hindi podcast script ({n_segments} segments)...")
             script = await make_script(client, news, n_segments)
             with open(job_dir / "script.json", "w", encoding="utf-8") as _f:
                 json.dump(script, _f, ensure_ascii=False, indent=2)
