@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Podcast Video Generator</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #0c0c0c; color: #ddd;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  min-height: 100vh;
+}
+header {
+  padding: 18px 28px; border-bottom: 1px solid #1e1e1e;
+  display: flex; align-items: baseline; gap: 12px;
+}
+header h1 { font-size: 1.25rem; font-weight: 600; color: #fff; }
+header span { font-size: 0.8rem; color: #555; }
+main { max-width: 780px; margin: 28px auto; padding: 0 16px 60px; }
+.card {
+  background: #141414; border: 1px solid #222;
+  border-radius: 10px; padding: 22px; margin-bottom: 18px;
+}
+.card-title {
+  font-size: 0.7rem; font-weight: 600; color: #555;
+  text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 14px;
+}
+label {
+  display: block; font-size: 0.72rem; color: #666;
+  margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.05em;
+}
+input[type=text], input[type=number], select, textarea {
+  width: 100%; background: #0c0c0c; border: 1px solid #2a2a2a;
+  color: #ddd; border-radius: 6px; padding: 9px 11px; font-size: 0.9rem;
+  font-family: inherit; outline: none; transition: border-color 0.15s;
+}
+input:focus, select:focus, textarea:focus { border-color: #444; }
+textarea { resize: vertical; min-height: 68px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+.grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-top: 14px; }
+.topic-row { margin-bottom: 14px; }
+.topic-input-wrap { display: flex; gap: 8px; }
+.topic-input-wrap input { flex: 1; }
+button {
+  background: #2563eb; color: #fff; border: none; border-radius: 6px;
+  padding: 9px 18px; font-size: 0.88rem; font-weight: 600; cursor: pointer;
+  white-space: nowrap; transition: background 0.15s;
+}
+button:hover { background: #1d4ed8; }
+button:disabled { background: #1e1e1e; color: #444; cursor: not-allowed; }
+.btn-secondary {
+  background: #1e1e1e; color: #888; border: 1px solid #2a2a2a;
+}
+.btn-secondary:hover { background: #252525; color: #aaa; }
+.btn-green { background: #15803d; }
+.btn-green:hover { background: #166534; }
+.generate-row {
+  margin-top: 18px; display: flex; align-items: center; gap: 12px;
+  padding-top: 18px; border-top: 1px solid #1e1e1e;
+}
+.job-label { font-size: 0.78rem; color: #555; font-family: monospace; }
+
+/* Progress log */
+#log-card { display: none; }
+#log {
+  background: #080808; border: 1px solid #1a1a1a; border-radius: 6px;
+  padding: 12px 14px; max-height: 300px; overflow-y: auto;
+  font-family: 'Menlo', 'Consolas', monospace; font-size: 0.78rem; line-height: 1.8;
+}
+.l-info  { color: #888; }
+.l-success { color: #4ade80; }
+.l-error { color: #f87171; }
+.l-done  { color: #60a5fa; font-weight: 700; }
+
+/* Video output */
+#output-card { display: none; }
+video { width: 100%; border-radius: 7px; background: #000; margin-bottom: 12px; }
+.output-actions { display: flex; gap: 10px; align-items: center; }
+.output-title { font-size: 0.85rem; color: #aaa; flex: 1; }
+
+/* Jobs history */
+#history-card { display: none; }
+.job-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 9px 12px; border: 1px solid #1a1a1a; border-radius: 6px;
+  margin-bottom: 7px; font-size: 0.82rem;
+}
+.job-meta { color: #666; font-size: 0.75rem; margin-top: 2px; }
+.badge {
+  padding: 2px 8px; border-radius: 4px;
+  font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+}
+.b-done    { background: #14532d; color: #4ade80; }
+.b-running { background: #1e3a5f; color: #60a5fa; }
+.b-error   { background: #3b0000; color: #f87171; }
+.b-queued  { background: #2a1f00; color: #fbbf24; }
+
+/* Voice picker */
+.voice-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px;
+}
+.voice-btn {
+  background: #0c0c0c; border: 1px solid #2a2a2a; color: #888;
+  border-radius: 5px; padding: 7px 6px; font-size: 0.72rem; cursor: pointer;
+  text-align: center; transition: all 0.1s;
+}
+.voice-btn:hover { border-color: #444; color: #ccc; }
+.voice-btn.active { border-color: #3b82f6; color: #60a5fa; background: #0f1a2e; }
+.voice-name { font-weight: 600; display: block; }
+.voice-lang { color: #555; font-size: 0.68rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎙 Podcast Video Generator</h1>
+  <span>Hindi script → TTS audio → AI images → 2K YouTube video</span>
+</header>
+<main>
+
+  <!-- Form -->
+  <div class="card">
+    <div class="card-title">Episode Setup</div>
+
+    <div class="topic-row">
+      <label>Topic (leave blank for auto today's news)</label>
+      <div class="topic-input-wrap">
+        <input type="text" id="topic" placeholder="e.g. India economy, AI, cricket, space..." />
+        <button class="btn-secondary" onclick="setTodaysNewsAndGenerate()" title="Research today's top news and generate">
+          📰 Generate Today's News
+        </button>
+      </div>
+    </div>
+
+    <div class="grid3">
+      <div>
+        <label>Segments</label>
+        <input type="number" id="segments" value="8" min="4" max="20" />
+      </div>
+      <div>
+        <label>Image Style</label>
+        <select id="style">
+          <option value="cinematic-poster">Cinematic Poster</option>
+          <option value="screen-print">Screen Print</option>
+          <option value="photorealistic">Photorealistic</option>
+          <option value="digital-art">Digital Art</option>
+          <option value="news-broadcast">News Broadcast</option>
+          <option value="illustration">Illustration</option>
+        </select>
+      </div>
+      <div>
+        <label>Custom Prompt Additions</label>
+        <input type="text" id="extra-prompt" placeholder="Focus on..." />
+      </div>
+    </div>
+
+    <div style="margin-top:16px">
+      <label>Voice</label>
+      <div class="voice-grid">
+        <div class="voice-btn active" data-voice="hf_alpha" onclick="selectVoice(this)">
+          <span class="voice-name">Alpha</span>
+          <span class="voice-lang">Hindi ♀</span>
+        </div>
+        <div class="voice-btn" data-voice="hf_beta" onclick="selectVoice(this)">
+          <span class="voice-name">Beta</span>
+          <span class="voice-lang">Hindi ♀</span>
+        </div>
+        <div class="voice-btn" data-voice="hm_omega" onclick="selectVoice(this)">
+          <span class="voice-name">Omega</span>
+          <span class="voice-lang">Hindi ♂</span>
+        </div>
+        <div class="voice-btn" data-voice="hm_psi" onclick="selectVoice(this)">
+          <span class="voice-name">Psi</span>
+          <span class="voice-lang">Hindi ♂</span>
+        </div>
+        <div class="voice-btn" data-voice="af_heart" onclick="selectVoice(this)">
+          <span class="voice-name">Heart</span>
+          <span class="voice-lang">English ♀</span>
+        </div>
+        <div class="voice-btn" data-voice="am_echo" onclick="selectVoice(this)">
+          <span class="voice-name">Echo</span>
+          <span class="voice-lang">English ♂</span>
+        </div>
+        <div class="voice-btn" data-voice="af_nova" onclick="selectVoice(this)">
+          <span class="voice-name">Nova</span>
+          <span class="voice-lang">English ♀</span>
+        </div>
+        <div class="voice-btn" data-voice="am_fenrir" onclick="selectVoice(this)">
+          <span class="voice-name">Fenrir</span>
+          <span class="voice-lang">English ♂</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="generate-row">
+      <button id="gen-btn" onclick="generate()">▶ Generate Video</button>
+      <span class="job-label" id="job-label"></span>
+    </div>
+  </div>
+
+  <!-- Progress -->
+  <div class="card" id="log-card">
+    <div class="card-title">Pipeline Progress</div>
+    <div id="log"></div>
+  </div>
+
+  <!-- Output -->
+  <div class="card" id="output-card">
+    <div class="card-title">Output</div>
+    <video id="player" controls playsinline></video>
+    <div class="output-actions">
+      <span class="output-title" id="output-title"></span>
+      <button class="btn-green" id="dl-btn" onclick="downloadVideo()">⬇ Download MP4</button>
+    </div>
+  </div>
+
+  <!-- History -->
+  <div class="card" id="history-card">
+    <div class="card-title">Previous Jobs</div>
+    <div id="history-list"></div>
+  </div>
+
+</main>
+
+<script>
+let selectedVoice = 'hf_alpha';
+let currentJobId = null;
+
+function selectVoice(el) {
+  document.querySelectorAll('.voice-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  selectedVoice = el.dataset.voice;
+}
+
+function setTodaysNewsAndGenerate() {
+  document.getElementById('topic').value = '';
+  generate();
+}
+
+async function generate() {
+  const btn = document.getElementById('gen-btn');
+  btn.disabled = true;
+  btn.textContent = '⟳ Starting...';
+
+  const topic = document.getElementById('topic').value.trim();
+  const extra = document.getElementById('extra-prompt').value.trim();
+  const fullTopic = extra ? `${topic} — ${extra}` : topic;
+
+  // Show log immediately with a local entry
+  const log = document.getElementById('log');
+  log.innerHTML = '';
+  document.getElementById('log-card').style.display = 'block';
+  document.getElementById('output-card').style.display = 'none';
+  document.getElementById('job-label').textContent = 'Connecting...';
+  appendLog(`Submitting job — topic: "${fullTopic || 'today\'s news'}"`, 'info');
+
+  let res;
+  try {
+    res = await fetch('/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        topic: fullTopic,
+        segments: parseInt(document.getElementById('segments').value),
+        style: document.getElementById('style').value,
+        voice: selectedVoice,
+      })
+    });
+  } catch (err) {
+    appendLog(`Failed to reach server: ${err.message}`, 'error');
+    btn.disabled = false;
+    btn.textContent = '▶ Generate Video';
+    return;
+  }
+
+  if (!res.ok) {
+    appendLog(`Server error ${res.status}`, 'error');
+    btn.disabled = false;
+    btn.textContent = '▶ Generate Video';
+    return;
+  }
+
+  const { job_id } = await res.json();
+  currentJobId = job_id;
+  btn.textContent = '⟳ Running...';
+  document.getElementById('job-label').textContent = `job ${job_id}`;
+  appendLog(`Job ${job_id} accepted — streaming progress...`, 'success');
+  streamProgress(job_id);
+}
+
+function streamProgress(jobId) {
+  const log = document.getElementById('log');
+  const es = new EventSource(`/status/${jobId}`);
+
+  es.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+
+    if (data.type === 'done') {
+      es.close();
+      const btn = document.getElementById('gen-btn');
+      btn.disabled = false;
+      btn.textContent = '▶ Generate Video';
+      document.getElementById('job-label').textContent =
+        data.status === 'done' ? `✓ job ${jobId}` : `✗ job ${jobId} failed`;
+      if (data.status === 'done') showOutput(jobId);
+      refreshHistory();
+      return;
+    }
+
+    const div = document.createElement('div');
+    div.className = `l-${data.type || 'info'}`;
+    const ts = new Date().toLocaleTimeString('en-IN', { hour12: false });
+    div.textContent = `[${ts}] ${data.message}`;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+  };
+
+  es.onerror = () => {
+    es.close();
+    const btn = document.getElementById('gen-btn');
+    btn.disabled = false;
+    btn.textContent = '▶ Generate Video';
+    appendLog('SSE connection lost. Check server console.', 'error');
+  };
+}
+
+function appendLog(msg, type = 'info') {
+  const log = document.getElementById('log');
+  const div = document.createElement('div');
+  div.className = `l-${type}`;
+  div.textContent = msg;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+function showOutput(jobId) {
+  const sec = document.getElementById('output-card');
+  const player = document.getElementById('player');
+  player.src = `/video/${jobId}`;
+  sec.style.display = 'block';
+  sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function downloadVideo() {
+  if (currentJobId) {
+    const a = document.createElement('a');
+    a.href = `/download/${currentJobId}`;
+    a.click();
+  }
+}
+
+async function refreshHistory() {
+  const res = await fetch('/jobs');
+  const jobs = await res.json();
+  if (!jobs.length) return;
+
+  document.getElementById('history-card').style.display = 'block';
+  const list = document.getElementById('history-list');
+  list.innerHTML = [...jobs].reverse().map(j => `
+    <div class="job-row">
+      <div>
+        <div>${j.title || j.topic || '—'}</div>
+        <div class="job-meta">${j.id} · ${(j.created_at || '').slice(0,16).replace('T',' ')}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        ${j.status === 'done'
+          ? `<a href="/download/${j.id}" style="color:#60a5fa;font-size:0.78rem;text-decoration:none">⬇ MP4</a>
+             <a onclick="playJob('${j.id}')" style="color:#888;font-size:0.78rem;cursor:pointer">▶ Play</a>`
+          : ''}
+        <span class="badge b-${j.status}">${j.status}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+function playJob(jobId) {
+  currentJobId = jobId;
+  showOutput(jobId);
+}
+
+// Load history on page load
+refreshHistory();
+</script>
+</body>
+</html>
