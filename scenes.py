@@ -77,7 +77,7 @@ Return ONLY JSON: {{"scenes": [{{"beat": 1, "visual": "...", "text": ""}}]}} wit
     scenes: list[dict] = []
     try:
         data = extract_json(await chat([{"role": "user", "content": prompt}],
-                                       response_format={"type": "json_object"}, max_tokens=2500))
+                                       response_format={"type": "json_object"}, max_tokens=4000))
         for s in data.get("scenes", []):
             v = str(s.get("visual", "")).strip()
             if v:
