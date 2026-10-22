@@ -465,13 +465,49 @@ async def download(job_id: str):
     safe = re.sub(r'[^\w\s-]', '', job.get("title", "podcast"))[:50].strip() or "podcast"
     return FileResponse(path, media_type="video/mp4", filename=f"{safe}.mp4")
 
+def _reconstruct_from_script(job_dir: Path) -> tuple[list[dict], list[Path]]:
+    """Rebuild shot_plan + audio_paths_flat from script.json + files on disk (legacy jobs)."""
+    script = json.loads((job_dir / "script.json").read_text(encoding="utf-8"))
+    shot_plan = []
+    for i, seg in enumerate(script.get("segments", [])):
+        for sc in seg.get("scenes", []):
+            idx = len(shot_plan)
+            img = job_dir / f"shot_{idx:03d}.png"
+            shot_plan.append({
+                "dur": sc["dur"],
+                "image": img,
+                "seg": i,
+                "palette": seg.get("palette", ""),
+                "scene": {k: v for k, v in sc.items() if k not in ("dur", "beat")},
+            })
+    # Reconstruct ordered audio flat list: for each segment/part, audio then optional silence
+    n_segs = len(script.get("segments", []))
+    audio_paths_flat: list[Path] = []
+    for i in range(n_segs):
+        k = 0
+        while True:
+            a = job_dir / f"audio_{i:03d}_{k:02d}.mp3"
+            if not a.exists():
+                break
+            audio_paths_flat.append(a)
+            sil = job_dir / f"silence_{i:03d}_{k:02d}.mp3"
+            if sil.exists():
+                audio_paths_flat.append(sil)
+            k += 1
+    return shot_plan, audio_paths_flat
+
+
 @app.post("/resume/{job_id}")
 async def resume_job(job_id: str, bg: BackgroundTasks):
-    """Re-run only the FFmpeg assembly step using saved shot_plan.json + audio_list_flat.json."""
+    """Re-run only the FFmpeg assembly step; reconstructs state from saved files if needed."""
     job_dir = JOBS_DIR / job_id
+    if not job_dir.exists():
+        raise HTTPException(404, "Job directory not found")
+    # Need at least script.json or shot_plan.json to proceed
     sp_file = job_dir / "shot_plan.json"
     al_file = job_dir / "audio_list_flat.json"
-    if not sp_file.exists() or not al_file.exists():
+    script_file = job_dir / "script.json"
+    if not sp_file.exists() and not script_file.exists():
         raise HTTPException(400, "No saved assembly data for this job — run full pipeline first")
     job = _jobs.get(job_id)
     if job and job["status"] == "running":
@@ -491,11 +527,17 @@ async def resume_job(job_id: str, bg: BackgroundTasks):
             entry.update(extra)
             log.append(json.dumps(entry, ensure_ascii=False))
         try:
-            raw_plan = json.loads(sp_file.read_text(encoding="utf-8"))
-            shot_plan = [{"dur": s["dur"], "image": Path(s["image"]),
-                          "seg": s["seg"], "palette": s["palette"], "scene": s["scene"]}
-                         for s in raw_plan]
-            audio_paths_flat = [Path(p) for p in json.loads(al_file.read_text(encoding="utf-8"))]
+            if sp_file.exists() and al_file.exists():
+                raw_plan = json.loads(sp_file.read_text(encoding="utf-8"))
+                shot_plan = [{"dur": s["dur"], "image": Path(s["image"]),
+                              "seg": s["seg"], "palette": s["palette"], "scene": s["scene"]}
+                             for s in raw_plan]
+                audio_paths_flat = [Path(p) for p in json.loads(al_file.read_text(encoding="utf-8"))]
+                emit("✓ Loaded saved shot plan", "success")
+            else:
+                emit("⟳ Reconstructing shot plan from script.json + files on disk…")
+                shot_plan, audio_paths_flat = await asyncio.to_thread(_reconstruct_from_script, job_dir)
+                emit(f"✓ Reconstructed: {len(shot_plan)} shots, {len(audio_paths_flat)} audio clips", "success")
             camera = job.get("camera") or config.DEFAULT_CAMERA
             output = job_dir / "output.mp4"
             total = len(shot_plan)
