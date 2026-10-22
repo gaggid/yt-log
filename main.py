@@ -190,25 +190,41 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
             async def chat_prompt(prompt: str):
                 return await chat([{"role": "user", "content": prompt}], max_tokens=2000, temperature=0.2)
 
-            # 1) research, then question the story and research the answers
-            emit("🔍 Researching topic via web search...")
-            notes = await content.research(chat, topic)
-            emit("✓ Research complete", "success")
+            # 1) fetch fresh headlines from Google News RSS (trusted sources, last 36h)
+            emit("📡 Fetching latest headlines from Google News RSS...")
+            candidates = await asyncio.to_thread(content.fetch_headlines, topic)
+            emit(f"✓ {len(candidates)} candidates fetched", "success")
 
-            emit("🧐 Dissecting the story: finding the contrarian angle and the questions listeners will ask...")
+            emit("🗞 Curating top stories (trusted sources first)...")
+            headlines = await content.curate_headlines(chat, candidates, topic)
+            emit(f"✓ {len(headlines)} stories selected", "research_result",
+                 topic=topic or "today's news",
+                 headlines=[{"title": h["title"], "source": h["source"],
+                              "age_h": h["age_h"], "trusted": h["trusted"]}
+                             for h in headlines])
+
+            # 2) synthesise research notes from curated headlines
+            emit("📝 Synthesising research notes...")
+            notes = await content.research(chat, topic, headlines or None)
+            emit("✓ Research notes ready", "success")
+
+            # 3) angles + uber story
+            emit("🧐 Finding contrarian angles and brain-work questions...")
             angles = await content.find_angles(chat, notes)
-            emit(f"✓ Contrarian take: {angles.get('contrarian_take', '-')[:160]}", "success")
-            emit("Research angles ready", "research_result",
+            uber_story = await content.find_uber_story(chat, headlines)
+            emit(f"✓ Uber story: {uber_story[:160]}", "success")
+            emit("Angles ready", "research_result",
                  topic=topic or "today's news",
                  core_claim=angles.get("core_claim", ""),
                  contrarian_take=angles.get("contrarian_take", ""),
+                 uber_story=uber_story,
                  questions=angles.get("questions", [])[:4])
             deep = await content.deep_research(chat, topic, angles)
-            emit(f"✓ Researched {len(angles.get('questions', []))} follow-up questions", "success")
+            emit(f"✓ Deep research done ({len(angles.get('questions', []))} questions answered)", "success")
 
             # 2) persona script (first person, Hinglish)
             emit(f"✍️ Writing first-person Hinglish script ({n_segments} segments)...")
-            script = await content.make_script(chat, notes, angles, deep, n_segments, topic)
+            script = await content.make_script(chat, notes, angles, deep, n_segments, topic, uber_story)
             segs = script["segments"]
             n = len(segs)
 

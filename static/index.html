@@ -429,12 +429,22 @@ function renderResearchCard(d) {
   const log = document.getElementById('log');
   const el = document.createElement('div');
   el.className = 'preview-card research-card';
-  const qs = (d.questions || []).map(q => `<div class="preview-q">• ${esc(q)}</div>`).join('');
-  el.innerHTML = `
-    <div class="preview-title">🔍 Research — ${esc(d.topic)}</div>
-    <div class="preview-claim"><strong>Story:</strong> ${esc(d.core_claim)}</div>
-    <div class="preview-take"><strong>Angle:</strong> ${esc(d.contrarian_take)}</div>
-    ${qs}`;
+  // Headlines list (first emit) or angles (second emit)
+  let body = '';
+  if (d.headlines && d.headlines.length) {
+    body = d.headlines.map(h =>
+      `<div class="preview-q">${h.trusted ? '✓' : '~'} <strong>${esc(h.title)}</strong> <span style="color:#555">${esc(h.source)} · ${h.age_h}h</span></div>`
+    ).join('');
+    el.innerHTML = `<div class="preview-title">🗞 Headlines — ${esc(d.topic)}</div>${body}`;
+  } else {
+    const qs = (d.questions || []).map(q => `<div class="preview-q">❓ ${esc(q)}</div>`).join('');
+    el.innerHTML = `
+      <div class="preview-title">🔍 Analysis — ${esc(d.topic)}</div>
+      ${d.uber_story ? `<div class="preview-take" style="margin-bottom:6px"><strong>Spine:</strong> ${esc(d.uber_story)}</div>` : ''}
+      ${d.core_claim ? `<div class="preview-claim"><strong>Story:</strong> ${esc(d.core_claim)}</div>` : ''}
+      ${d.contrarian_take ? `<div class="preview-take"><strong>Angle:</strong> ${esc(d.contrarian_take)}</div>` : ''}
+      ${qs}`;
+  }
   log.appendChild(el);
   log.scrollTop = log.scrollHeight;
 }

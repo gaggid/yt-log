@@ -1,10 +1,123 @@
 """Editorial steps: research -> angles/questions -> deeper research -> persona script -> beats -> scene plan.
 `chat` is an async callable chat(messages, **kwargs) -> str supplied by main.py."""
+import email.utils
+import html as _html
 import json
 import math
 import re
+import urllib.request
+import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 
 import config
+
+# ── News sourcing ──────────────────────────────────────────────────────────────
+
+_GN = "https://news.google.com/rss"
+_INDIA_FEEDS = [
+    _GN + "/headlines/section/topic/NATION?hl=en-IN&gl=IN&ceid=IN:en",
+    _GN + "/headlines/section/topic/BUSINESS?hl=en-IN&gl=IN&ceid=IN:en",
+    _GN + "/headlines/section/topic/TECHNOLOGY?hl=en-IN&gl=IN&ceid=IN:en",
+    _GN + "/headlines/section/topic/SCIENCE?hl=en-IN&gl=IN&ceid=IN:en",
+]
+_TRUSTED = {
+    "the hindu", "hindustan times", "indian express", "ndtv", "times of india",
+    "livemint", "mint", "economic times", "business standard", "the wire",
+    "scroll", "pti", "ani", "bbc", "reuters", "bloomberg", "moneycontrol",
+    "techcrunch", "wired", "nature", "science", "forbes india", "quartz",
+}
+_BAD = {"facebook", "reddit", "youtube", "instagram", "x.com", "twitter", "quora",
+        "linkedin", "whatsapp", "tiktok"}
+_MAX_AGE_H = 36
+
+
+def fetch_headlines(topic: str = "") -> list[dict]:
+    """Fetch recent India news from Google News RSS (last 36 h). Returns up to 50 candidates."""
+    from urllib.parse import quote_plus
+    now = datetime.now(timezone.utc)
+    feeds = list(_INDIA_FEEDS)
+    if topic:
+        feeds.append(_GN + "/search?q=" + quote_plus(f"{topic} India when:2d") + "&hl=en-IN&gl=IN&ceid=IN:en")
+    seen, out = set(), []
+    for url in feeds:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            raw = urllib.request.urlopen(req, timeout=20).read()
+            items = ET.fromstring(raw).findall(".//item")
+        except Exception:
+            continue
+        for it in items:
+            title = _html.unescape(it.findtext("title") or "").strip()
+            link = (it.findtext("link") or "").strip()
+            src = (it.findtext("source") or "").strip()
+            try:
+                dt = email.utils.parsedate_to_datetime(it.findtext("pubDate") or "")
+            except Exception:
+                continue
+            if not title or not link:
+                continue
+            if any(b in src.lower() for b in _BAD):
+                continue
+            age_h = (now - dt).total_seconds() / 3600
+            if age_h > _MAX_AGE_H or dt > now:
+                continue
+            key = re.sub(r"\W+", " ", title.lower())[:50]
+            if key in seen:
+                continue
+            seen.add(key)
+            # Strip trailing " - Outlet" from title
+            clean_title = re.sub(r"\s+-\s+[^-]{2,60}$", "", title).strip()
+            out.append({
+                "title": clean_title, "source": src, "url": link,
+                "date": dt.strftime("%Y-%m-%d"), "age_h": round(age_h, 1),
+                "trusted": any(t in src.lower() for t in _TRUSTED),
+            })
+    out.sort(key=lambda x: (not x["trusted"], x["age_h"]))
+    return out[:50]
+
+
+async def curate_headlines(chat, candidates: list[dict], topic: str = "") -> list[dict]:
+    """AI picks the 8 most important, distinct stories from RSS candidates."""
+    if not candidates:
+        return []
+    listing = "\n".join(
+        f"{i}: [{'✓' if c['trusted'] else '~'}] {c['title']} | {c['source']} | {c['age_h']}h ago"
+        for i, c in enumerate(candidates)
+    )
+    focus = (f"specifically about: {topic}" if topic
+             else "India science, technology, economy, and politics — stories with lasting significance")
+    prompt = (
+        f"You are a senior news editor. Pick the 8 most important, distinct stories. "
+        f"Focus: {focus}. Prefer [✓] trusted sources. No duplicate events.\n"
+        f"Return ONLY JSON: {{\"picks\": [0,3,7,...]}}\n\n{listing}"
+    )
+    try:
+        m = re.search(r"\{.*\}", await chat([{"role": "user", "content": prompt}],
+                                            max_tokens=200, temperature=0.1), re.DOTALL)
+        picks = [int(i) for i in json.loads(m.group()).get("picks", [])
+                 if str(i).isdigit() and int(i) < len(candidates)]
+        return [candidates[i] for i in picks[:10]]
+    except Exception:
+        return candidates[:8]
+
+
+async def find_uber_story(chat, headlines: list[dict]) -> str:
+    """Find the ONE overarching meta-narrative connecting today's curated stories."""
+    if not headlines:
+        return ""
+    listing = "\n".join(f"- {h['title']}" for h in headlines)
+    prompt = (
+        f"These are today's top India news stories:\n{listing}\n\n"
+        "What is the ONE meta-narrative that connects most of these? "
+        "Find the deeper structural shift in India's trajectory that these stories collectively reveal. "
+        "Be specific — not 'India is growing' but the exact tension or turning point at play. "
+        "2-3 sentences a podcast host can use as the spine of the whole episode. "
+        "Return ONLY the uber story text, nothing else."
+    )
+    try:
+        return (await chat([{"role": "user", "content": prompt}], max_tokens=300, temperature=0.3)).strip()
+    except Exception:
+        return ""
 
 PERSONA = """You ARE the host of a personal-feeling Indian podcast. Speak in FIRST PERSON, to ONE listener ("aap"), like a sharp
 friend on a late-night call, never like a news anchor.
@@ -42,26 +155,42 @@ def extract_json(text: str) -> dict:
         raise ValueError(f"No JSON found in response: {text[:200]}")
 
 
-async def research(chat, topic: str) -> str:
-    query = topic or "India top news stories today"
+async def research(chat, topic: str, headlines: list[dict] | None = None) -> str:
+    """Synthesise curated RSS headlines into rich research notes, or fall back to web_search."""
+    if headlines:
+        listing = "\n".join(
+            f"- {h['title']} [{h['source']}, {h['date']}]\n  URL: {h['url']}"
+            for h in headlines
+        )
+        return await chat([{"role": "user", "content":
+            "Summarise these curated news stories into detailed research notes for a podcast episode. "
+            "For each story: what happened, key numbers and facts, why it matters, and useful background context. "
+            "These notes are the ONLY facts the host will use — be thorough.\n\n"
+            f"Stories:\n{listing}"}], max_tokens=3000)
+    # Fallback for topic-specific research where RSS may not have enough
+    query = topic or "India science technology economy politics news today"
     return await chat([{"role": "user", "content":
-        f"Research and summarize the latest news about: {query}. "
-        "Find 6-8 key stories with facts, numbers, context and quotes. Be thorough."}],
+        f"Research the LATEST news (last 24-48 hours) about: {query}. "
+        "Focus on India. Use trusted sources: The Hindu, Economic Times, NDTV, Indian Express, Reuters, BBC. "
+        "Find 6-8 key stories with facts, numbers, and context. Be thorough."}],
         server_tools=["web_search"], max_tokens=2500)
 
 
 async def find_angles(chat, notes: str) -> dict:
-    prompt = f"""You are a sharp, sceptical analyst preparing a podcast. Read the research notes and find what makes the topic
-interesting and arguable.
+    prompt = f"""You are a sharp, sceptical analyst preparing a podcast. Read the research notes.
 
 Notes:
 {notes}
 
 Return ONLY JSON:
 {{"core_claim": "the one-line story everybody is repeating",
-  "contrarian_take": "a defensible opposite or overlooked angle",
-  "assumptions_to_challenge": ["...", "...", "..."],
-  "questions": ["6 specific questions a curious viewer will ask while listening, each answerable with facts"]}}"""
+  "contrarian_take": "a defensible opposite or deeply overlooked angle that challenges the mainstream read",
+  "assumptions_to_challenge": ["3 widely-held assumptions this story should force us to re-examine"],
+  "questions": [
+    "6 questions that put the listener's brain to work — not obvious FAQs but questions that reveal",
+    "hidden contradictions, second-order consequences, or uncomfortable implications;",
+    "questions the listener hasn't thought of yet that will make them stop and reconsider"
+  ]}}"""
     try:
         return extract_json(await chat([{"role": "user", "content": prompt}],
                                        response_format={"type": "json_object"}, max_tokens=1500))
@@ -80,13 +209,16 @@ async def deep_research(chat, topic: str, angles: dict) -> str:
         server_tools=["web_search"], max_tokens=2500)
 
 
-async def make_script(chat, notes: str, angles: dict, deep: str, n: int, topic: str) -> dict:
+async def make_script(chat, notes: str, angles: dict, deep: str, n: int, topic: str,
+                      uber_story: str = "") -> dict:
+    uber_line = (f"\nOVERARCHING NARRATIVE — use this as the spine of the entire episode, "
+                 f"return to it in hook and verdict:\n{uber_story}\n" if uber_story else "")
     prompt = f"""{PERSONA}
 
 {HINGLISH_RULES}
 
 Write a {n}-segment solo podcast episode (first person, one listener) about: {topic or "today's top news"}.
-
+{uber_line}
 Editorial material (use ONLY these facts):
 RESEARCH NOTES:
 {notes}
@@ -94,7 +226,8 @@ RESEARCH NOTES:
 THE STORY EVERYBODY REPEATS: {angles.get('core_claim', '')}
 YOUR CONTRARIAN TAKE: {angles.get('contrarian_take', '')}
 ASSUMPTIONS TO CHALLENGE: {json.dumps(angles.get('assumptions_to_challenge', []), ensure_ascii=False)}
-QUESTIONS THE LISTENER WILL ASK: {json.dumps(angles.get('questions', []), ensure_ascii=False)}
+BRAIN-WORK QUESTIONS (use these to make the listener think, not just listen):
+{json.dumps(angles.get('questions', []), ensure_ascii=False)}
 DEEPER ANSWERS:
 {deep}
 
@@ -102,16 +235,16 @@ Episode arc, spread in this order across the {n} segments:
 1. HOOK: a sensational but true claim or a provocative question in the first sentence; promise what they will learn.
 2. CONTEXT: what actually happened, fast.
 3. THE CATCH: challenge the popular story, dissect it with logic and numbers, show what most people miss.
-4. THE QUESTIONS: raise the listener's likely questions out loud and answer them with the deeper facts.
+4. THE QUESTIONS: for each brain-work question above, raise it out loud BEFORE answering ("Lekin sawaal ye hai ki...",
+   "Sochiye — agar ye sach hai toh..."). Make the listener feel like they discovered the answer themselves.
 5. OTHER SIDE: steelman the opposite view, then say where you land and why.
-6. COMMENT MOMENT (one segment around the middle-to-late part): ask a specific question and invite the listener to
-   write their view in the comments, personally ("aap kya sochte ho? comment mein likho").
-7. VERDICT: a crisp takeaway and one last open question for the comments.
-Merge or skip arc steps if there are few segments, but keep the hook first, the comment invitation, and the verdict last.
+6. COMMENT MOMENT: ask ONE specific, uncomfortable question and invite the listener to answer in comments.
+7. VERDICT: crisp takeaway that ties back to the overarching narrative. End with one open question.
+Merge or skip arc steps if there are few segments; keep hook first, comment invitation, and verdict last.
 
-Each segment narration: 5-7 sentences, every sentence moves the story forward. Keep a consistent voice across segments.
-After the hook opening sentence and before major topic transitions insert [pause:0.8s] — max 2 per segment, end of a
-complete sentence only, never mid-sentence.
+Each segment narration: 5-7 sentences, every sentence moves the story forward.
+After the hook opening sentence and before major topic transitions insert [pause:0.8s] — max 2 per segment,
+end of a complete sentence only, never mid-sentence.
 
 Return ONLY valid JSON:
 {{"title": "catchy Hinglish title (max 70 chars)", "description": "2-line English YouTube description",
