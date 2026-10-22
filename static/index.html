@@ -127,6 +127,13 @@ video { width: 100%; border-radius: 7px; background: #000; margin-bottom: 12px; 
 .voice-btn.active { border-color: #3b82f6; color: #60a5fa; background: #0f1a2e; }
 .voice-name { font-weight: 600; display: block; }
 .voice-lang { color: #555; font-size: 0.68rem; }
+.voice-test-btn {
+  display: block; width: 100%; margin-top: 5px; padding: 2px 0;
+  background: #1a2a1a; border: 1px solid #2a3a2a; color: #4ade80;
+  border-radius: 3px; font-size: 0.7rem; cursor: pointer;
+}
+.voice-test-btn:hover { background: #22332a; }
+.voice-test-btn:disabled { opacity: 0.4; cursor: default; }
 
 /* Deploy / uptime status bar */
 #status-bar {
@@ -205,24 +212,48 @@ video { width: 100%; border-radius: 7px; background: #000; margin-bottom: 12px; 
 
     <div style="margin-top:16px">
       <label>Voice</label>
+      <div style="font-size:0.65rem;color:#555;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.06em">Hindi Podcast model</div>
+      <div class="voice-grid" style="grid-template-columns:1fr 1fr;margin-bottom:10px">
+        <div class="voice-btn active" data-voice="anchor_m" onclick="selectVoice(this)">
+          <span class="voice-name">Anchor M</span>
+          <span class="voice-lang">Hindi ♂</span>
+          <button class="voice-test-btn" onclick="event.stopPropagation();previewVoice('anchor_m',this)">▶</button>
+        </div>
+        <div class="voice-btn" data-voice="anchor_f" onclick="selectVoice(this)">
+          <span class="voice-name">Anchor F</span>
+          <span class="voice-lang">Hindi ♀</span>
+          <button class="voice-test-btn" onclick="event.stopPropagation();previewVoice('anchor_f',this)">▶</button>
+        </div>
+      </div>
+      <div style="font-size:0.65rem;color:#555;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.06em">Kokoro model</div>
       <div class="voice-grid">
-        <div class="voice-btn active" data-voice="hm_omega" onclick="selectVoice(this)">
+        <div class="voice-btn" data-voice="hm_omega" onclick="selectVoice(this)">
           <span class="voice-name">Omega</span>
           <span class="voice-lang">Hindi ♂</span>
+          <button class="voice-test-btn" onclick="event.stopPropagation();previewVoice('hm_omega',this)">▶</button>
         </div>
         <div class="voice-btn" data-voice="hm_psi" onclick="selectVoice(this)">
           <span class="voice-name">Psi</span>
           <span class="voice-lang">Hindi ♂</span>
+          <button class="voice-test-btn" onclick="event.stopPropagation();previewVoice('hm_psi',this)">▶</button>
         </div>
         <div class="voice-btn" data-voice="hf_alpha" onclick="selectVoice(this)">
           <span class="voice-name">Alpha</span>
           <span class="voice-lang">Hindi ♀</span>
+          <button class="voice-test-btn" onclick="event.stopPropagation();previewVoice('hf_alpha',this)">▶</button>
         </div>
         <div class="voice-btn" data-voice="hf_beta" onclick="selectVoice(this)">
           <span class="voice-name">Beta</span>
           <span class="voice-lang">Hindi ♀</span>
+          <button class="voice-test-btn" onclick="event.stopPropagation();previewVoice('hf_beta',this)">▶</button>
         </div>
       </div>
+      <div style="margin-top:10px;display:flex;gap:8px;align-items:flex-start">
+        <textarea id="voice-sample" rows="2"
+          style="flex:1;font-size:0.82rem;resize:vertical"
+          placeholder="Type Hinglish text to preview…"></textarea>
+      </div>
+      <audio id="voice-preview-player" style="width:100%;margin-top:8px;display:none" controls></audio>
     </div>
 
     <div class="generate-row">
@@ -257,13 +288,47 @@ video { width: 100%; border-radius: 7px; background: #000; margin-bottom: 12px; 
 </main>
 
 <script>
-let selectedVoice = 'hm_omega';
+let selectedVoice = 'anchor_m';
 let currentJobId = null;
 
 function selectVoice(el) {
   document.querySelectorAll('.voice-btn').forEach(b => b.classList.remove('active'));
   el.classList.add('active');
   selectedVoice = el.dataset.voice;
+}
+
+async function previewVoice(voice, btn) {
+  const text = document.getElementById('voice-sample').value.trim();
+  if (!text) { alert('Add some text in the sample box first.'); return; }
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    const res = await fetch('/preview-voice', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voice, text })
+    });
+    if (res.status === 401) { location.href = '/login'; return; }
+    if (!res.ok) { alert(`Preview failed: ${res.status}`); return; }
+    const blob = await res.blob();
+    const player = document.getElementById('voice-preview-player');
+    player.src = URL.createObjectURL(blob);
+    player.style.display = 'block';
+    player.play();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '▶';
+  }
+}
+
+async function loadSampleText() {
+  try {
+    const res = await fetch('/sample-text');
+    if (!res.ok) return;
+    const { text } = await res.json();
+    const el = document.getElementById('voice-sample');
+    if (el && !el.value) el.value = text;
+  } catch (_) {}
 }
 
 function setTodaysNewsAndGenerate() {
@@ -583,6 +648,7 @@ setInterval(tickUptime, 1000);
 
 // Load history on page load
 refreshHistory();
+loadSampleText();
 </script>
 </body>
 </html>

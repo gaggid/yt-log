@@ -104,6 +104,29 @@ def _render_clip(img: Path, length: float, move: str, out: Path) -> None:
           "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", str(out)])
 
 
+_XFADE_BATCH = 8  # max simultaneous h264 streams; beyond this, decode buffers exhaust RAM
+
+
+def _xfade_chain(inputs: list[Path], durs: list[float], trans: list[str], T: float, out: Path) -> None:
+    """Xfade a batch of pre-rendered clips into one video segment (no audio)."""
+    n = len(inputs)
+    if n == 1:
+        _run([config.FFMPEG, "-y", "-i", str(inputs[0]), "-an", "-c:v", "copy", str(out)])
+        return
+    parts, prev, offset = [], "0:v", 0.0
+    for k in range(1, n):
+        offset += durs[k - 1]
+        lab = "vout" if k == n - 1 else f"x{k}"
+        parts.append(f"[{prev}][{k}:v]xfade=transition={trans[k-1]}:duration={T}:offset={offset:.3f}[{lab}]")
+        prev = lab
+    cmd = [config.FFMPEG, "-y"]
+    for p in inputs:
+        cmd += ["-i", str(p)]
+    cmd += ["-filter_complex", ";".join(parts), "-map", "[vout]",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", str(out)]
+    _run(cmd)
+
+
 def assemble(job_dir: Path, audio_paths: list, shots: list[dict], output: Path,
              camera: str = "auto", seed: str = "") -> dict:
     """shots: [{"image": Path, "dur": float}] in playback order; their durations must sum to the audio length."""
@@ -126,23 +149,58 @@ def assemble(job_dir: Path, audio_paths: list, shots: list[dict], output: Path,
 
     total = sum(s["dur"] for s in shots)
     trans = [rng.choice(TRANSITIONS) for _ in range(max(0, n - 1))]
-    if n == 1:
-        graph, last = "[0:v]null[vout]", "vout"
+    durs  = [s["dur"] for s in shots]
+
+    # When there are many clips, batch the xfade pass to avoid h264 decode-buffer exhaustion.
+    # Each batch → segment file; segments are then xfaded together (≤ a handful of streams).
+    if n > _XFADE_BATCH:
+        segs_dir = job_dir / "segments"
+        segs_dir.mkdir(exist_ok=True)
+        seg_files: list[Path] = []
+        seg_durs:  list[float] = []
+        for start in range(0, n, _XFADE_BATCH):
+            end = min(start + _XFADE_BATCH, n)
+            b_clips = clips[start:end]
+            b_durs  = durs[start:end]
+            b_trans = trans[start:end - 1]
+            seg_out = segs_dir / f"seg_{start:03d}.mp4"
+            _xfade_chain(b_clips, b_durs, b_trans, T, seg_out)
+            seg_files.append(seg_out)
+            # The segment's actual duration includes T extra at the tail (from the last clip's
+            # length extension) except for the very last segment.
+            seg_durs.append(sum(b_durs) + (T if end < n else 0))
+        # Pick inter-segment transitions from the same random stream for consistency.
+        seg_trans = [rng.choice(TRANSITIONS) for _ in range(len(seg_files) - 1)]
+        video_in = segs_dir / "video.mp4"
+        _xfade_chain(seg_files, seg_durs, seg_trans, T, video_in)
     else:
-        parts, prev, offset = [], "0:v", 0.0
-        for k in range(1, n):
-            offset += shots[k - 1]["dur"]
-            lab = "vout" if k == n - 1 else f"x{k}"
-            parts.append(f"[{prev}][{k}:v]xfade=transition={trans[k-1]}:duration={T}:offset={offset:.3f}[{lab}]")
-            prev = lab
-        graph = ";".join(parts)
-    cmd = [config.FFMPEG, "-y"]
-    for c in clips:
-        cmd += ["-i", str(c)]
-    cmd += ["-i", str(full_audio), "-filter_complex", graph,
-            "-map", "[vout]", "-map", f"{n}:a",
-            "-c:v", "libx264", "-preset", "medium", "-crf", "22", "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
-            "-r", str(config.VIDEO_FPS), "-t", f"{total:.3f}", "-movflags", "+faststart", str(output)]
+        video_in = segs_dir = None  # silence linter; handled below
+        if n == 1:
+            graph = "[0:v]null[vout]"
+        else:
+            parts, prev, offset = [], "0:v", 0.0
+            for k in range(1, n):
+                offset += durs[k - 1]
+                lab = "vout" if k == n - 1 else f"x{k}"
+                parts.append(f"[{prev}][{k}:v]xfade=transition={trans[k-1]}:duration={T}:offset={offset:.3f}[{lab}]")
+                prev = lab
+            graph = ";".join(parts)
+
+    # Final mux: combine video stream with full audio.
+    if n > _XFADE_BATCH:
+        cmd = [config.FFMPEG, "-y", "-i", str(video_in), "-i", str(full_audio),
+               "-map", "0:v", "-map", "1:a",
+               "-c:v", "libx264", "-preset", "medium", "-crf", "22", "-pix_fmt", "yuv420p",
+               "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
+               "-r", str(config.VIDEO_FPS), "-t", f"{total:.3f}", "-movflags", "+faststart", str(output)]
+    else:
+        cmd = [config.FFMPEG, "-y"]
+        for c in clips:
+            cmd += ["-i", str(c)]
+        cmd += ["-i", str(full_audio), "-filter_complex", graph,
+                "-map", "[vout]", "-map", f"{n}:a",
+                "-c:v", "libx264", "-preset", "medium", "-crf", "22", "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
+                "-r", str(config.VIDEO_FPS), "-t", f"{total:.3f}", "-movflags", "+faststart", str(output)]
     _run(cmd)
     return {"shots": n, "moves": moves, "transitions": trans, "seconds": round(total, 1)}

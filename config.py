@@ -46,7 +46,11 @@ PORT = int(os.environ.get("PORT", "8905"))
 CHAT_MODEL = "gemma4-12b-qat-uncensored-hauhaucs-balanced"
 IMAGE_MODEL = "z-image-turbo"
 
-DEFAULT_VOICE = "hm_omega"       # Hindi male
+TTS_MODEL        = os.environ.get("TTS_MODEL", "hindi-podcast")
+TTS_SPEED        = float(os.environ.get("TTS_SPEED", "1.0"))
+TTS_CFG_WEIGHT   = float(os.environ.get("TTS_CFG_WEIGHT", "0.3"))   # lower = cleaner, less echo
+TTS_EXAGGERATION = float(os.environ.get("TTS_EXAGGERATION", "0.65")) # expressiveness
+DEFAULT_VOICE = os.environ.get("DEFAULT_VOICE", "anchor_m")
 DEFAULT_STYLE = "graphic-novel"  # illustrated look hides AI face/anatomy errors
 DEFAULT_SEGMENTS = 8
 DEFAULT_CAMERA = "auto"

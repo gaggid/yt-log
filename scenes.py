@@ -12,8 +12,9 @@ class Memory:
     """What the episode has already shown, shared across segments."""
     def __init__(self):
         self.texts: set[str] = set()
-        self.visuals: list[str] = []        # stores subject+environment summary for dedup
-        self.environments: list[str] = []   # tracks environments used so we rotate them
+        self.visuals: list[str] = []
+        self.environments: list[str] = []
+        self.env_counts: dict[str, int] = {}   # hard usage counter per environment
 
 
 def _key(text: str) -> str:
@@ -98,7 +99,9 @@ async def _rewrite_illustrated(chat, beat: str, visual: str, clash: str) -> str:
 async def plan_scenes(chat, topic: str, role: str, beats: list[str], mem: Memory,
                       emotion: str = "neutral", geo: str = "auto",
                       character_bible: dict | None = None,
-                      style: str = "graphic-novel") -> list[dict]:
+                      style: str = "graphic-novel",
+                      visual_arc: dict | None = None,
+                      seg_idx: int = 0) -> list[dict]:
 
     numbered = "\n".join(f"{i+1}. {b}" for i, b in enumerate(beats))
     mood     = _MOOD_HINT.get(emotion, _MOOD_HINT["neutral"])
@@ -108,21 +111,34 @@ async def plan_scenes(chat, topic: str, role: str, beats: list[str], mem: Memory
 
     if is_cinematic:
         return await _plan_cinematic(chat, topic, role, beats, mem, emotion, mood, geo_line,
-                                     character_bible or {}, numbered, n)
+                                     character_bible or {}, numbered, n,
+                                     visual_arc or {}, seg_idx)
     else:
         return await _plan_illustrated(chat, topic, role, beats, mem, emotion, mood, geo_line,
                                        numbered, n)
 
 
 async def _plan_cinematic(chat, topic, role, beats, mem, emotion, mood,
-                          geo_line, bible, numbered, n) -> list[dict]:
+                          geo_line, bible, numbered, n,
+                          arc: dict, seg_idx: int) -> list[dict]:
     protagonist = bible.get("protagonist", {})
     char_desc   = protagonist.get("description", "Indian professional, early 30s")
     char_arc    = protagonist.get("arc", "")
-    envs        = "\n".join(f"  - {e}" for e in bible.get("environments", []))
     tone_arc    = bible.get("tone_arc", "")
-    shown_envs  = ", ".join(mem.environments[-6:]) or "(none yet)"
     shown_shots = "\n".join(f"  - {v[:100]}" for v in mem.visuals[-10:]) or "  - (none yet)"
+
+    # Visual arc constraints for this segment
+    arc_locs     = arc.get("locations", bible.get("environments", []))
+    seg_primary  = arc.get("segment_locations", {}).get(str(seg_idx + 1), "")
+    act_arc      = arc.get("act_arc", {})
+    motifs       = arc.get("motifs", [])
+    act_phase    = "opening" if seg_idx == 0 else ("closing" if seg_idx >= 2 else "middle")
+    act_desc     = act_arc.get(act_phase, "")
+
+    # Hard-blacklist envs used 2+ times; fallback env uses arc locations
+    overused = [e for e, c in mem.env_counts.items() if c >= 2]
+    arc_locs_str = "\n".join(f"  - {e}" for e in arc_locs) or "  - (use story-appropriate locations)"
+    max_protag   = max(1, round(n * 0.4))
 
     prompt = f"""You are a film director planning shot-by-shot coverage for a cinematic documentary segment.
 
@@ -135,34 +151,40 @@ PROTAGONIST: {char_desc}
 CHARACTER ARC: {char_arc}
 TONE ARC: {tone_arc}
 
-AVAILABLE ENVIRONMENTS:
-{envs}
+EPISODE VISUAL BLUEPRINT:
+Locked locations for this episode (use ONLY these):
+{arc_locs_str}
+This segment's primary location: {seg_primary or (arc_locs[seg_idx % len(arc_locs)] if arc_locs else 'story-appropriate location')}
+Emotional act — {act_phase}: {act_desc}
+Visual motifs to weave in: {', '.join(motifs) or '(none specified)'}
 {geo_line}
 
-SHOTS ALREADY USED THIS EPISODE (avoid repeating these compositions or environments):
+SHOTS ALREADY USED THIS EPISODE (avoid repeating):
 {shown_shots}
-ENVIRONMENTS RECENTLY USED (rotate away from these): {shown_envs}
+OVERUSED ENVIRONMENTS — do NOT use these: {', '.join(overused) or '(none yet)'}
 
 BEATS TO COVER (narrator speaks these in order):
 {numbered}
 
 INSTRUCTIONS:
-Think carefully about each beat before designing its shot. Ask yourself:
-  — What should the viewer FEEL here, not just understand?
-  — What is the subtext beneath the spoken words?
-  — Which shot scale and angle best delivers that feeling?
-  — What is the protagonist doing or feeling in this exact moment?
-  — What details in the foreground and background deepen the meaning?
+Think carefully about each beat. Ask yourself:
+  — What should the viewer FEEL, not just understand?
+  — What is the subtext beneath the words?
+  — Which shot scale and angle delivers that feeling?
   — What lighting tells the emotional story?
 
 Rules:
-- Use the protagonist in shots where a human presence serves the beat. Not every shot needs them.
-- Faces ARE allowed and encouraged for emotional beats (fear, confidence, resolve).
-- Never invent a new character — only the protagonist or anonymous background figures.
-- Environments must feel real and specific — no abstract voids or flat courtyards.
-- "text": a short phrase or question (max 8 words, Latin/digits only) that appears on screen as a subtitle.
-  Use ONLY where it genuinely sharpens the beat — max 2 per segment. Otherwise "".
-  Text already used this episode, never reuse: {', '.join(sorted(mem.texts)) or '(none)'}
+- "subject": SHORT phrase only — who or what is in frame, max 10 words.
+  NEVER write a full sentence or shot description here.
+  Good: "protagonist, tense expression" or "empty server rack corridor" or "hands on a contract"
+- Use the protagonist in at most {max_protag} of the {n} shots.
+  For abstract concepts — data, cost, policy, scale, corporate decisions — show the world,
+  objects, or environment WITHOUT the protagonist.
+- Faces ARE allowed for emotional beats (fear, resolve, confidence).
+- Never invent new characters — only the protagonist or anonymous background figures.
+- Environments MUST come from the locked episode locations above. No new environments.
+- "text": short phrase (max 8 words, Latin/digits) only where it sharpens the beat — max 2 per segment.
+  Text already used, never reuse: {', '.join(sorted(mem.texts)) or '(none)'}
 - "mood": one word — warm / cool / bright / muted / high-contrast / unsettling / hopeful.
 
 Return ONLY JSON with exactly {n} scene objects:
@@ -172,48 +194,56 @@ Return ONLY JSON with exactly {n} scene objects:
     try:
         data = extract_json(await chat([{"role": "user", "content": prompt}],
                                        response_format={"type": "json_object"}, max_tokens=4000))
-        for s in data.get("scenes", []):
-            if s.get("subject") or s.get("environment"):
+        for i, s in enumerate(data.get("scenes", [])):
+            subj = str(s.get("subject", "")).strip()
+            # Reject hallucinated paragraph-length subjects (model wrote a shot description)
+            if len(subj) > 80 or subj.count(". ") > 0:
+                subj = ""
+            env = str(s.get("environment", "")).strip()
+            if subj or env:
                 scenes.append({
                     "shot":        str(s.get("shot", "MS")).upper(),
                     "angle":       str(s.get("angle", "eye-level")),
                     "lighting":    str(s.get("lighting", "")),
-                    "subject":     str(s.get("subject", "")),
-                    "environment": str(s.get("environment", "")),
+                    "subject":     subj,
+                    "environment": env,
                     "layers":      str(s.get("layers", "")),
                     "text":        _clean_text(s.get("text"), cinematic=True),
                     "mood":        str(s.get("mood", "")).lower(),
+                    "beat_text":   beats[i] if i < len(beats) else "",
                 })
     except Exception:
         pass
 
-    # fallback: generate minimal cinematic scene if planner fell short
-    envs_list = bible.get("environments", ["modern office"])
+    # fallback: use arc locations so we never fall back to a generic studio
+    fallback_envs = arc_locs if arc_locs else bible.get("environments", ["modern Indian street"])
     while len(scenes) < n:
-        env = envs_list[len(scenes) % len(envs_list)]
+        env = fallback_envs[len(scenes) % len(fallback_envs)]
         scenes.append({
-            "shot": "MS", "angle": "eye-level",
-            "lighting": "natural light",
-            "subject": f"protagonist in {env}, thoughtful expression",
+            "shot": "MS", "angle": "eye-level", "lighting": "natural light",
+            "subject": "protagonist, thoughtful expression",
             "environment": env,
             "layers": f"foreground: out-of-focus elements; midground: protagonist; background: {env}",
-            "text": "", "mood": "neutral"
+            "text": "", "mood": "neutral",
+            "beat_text": beats[len(scenes)] if len(scenes) < len(beats) else "",
         })
     scenes = scenes[:n]
 
-    # episode-wide dedup
-    for beat, sc in zip(beats, scenes):
+    # episode-wide dedup + memory update
+    for beat_text, sc in zip(beats, scenes):
         summary = f"{sc['environment']} {sc['subject']}"
         k = _key(sc["text"])
         if k and k in mem.texts:
             sc["text"] = ""
         if _find_duplicate(summary, mem.visuals):
-            sc["subject"] = await _rewrite_cinematic(chat, beat, summary, mem.visuals[-1])
+            sc["subject"] = await _rewrite_cinematic(chat, beat_text, summary, mem.visuals[-1])
         if sc["text"]:
             mem.texts.add(_key(sc["text"]))
         mem.visuals.append(summary)
-        if sc["environment"]:
-            mem.environments.append(sc["environment"][:60])
+        env_key = sc["environment"][:60]
+        if env_key:
+            mem.environments.append(env_key)
+            mem.env_counts[env_key] = mem.env_counts.get(env_key, 0) + 1
 
     return scenes
 

@@ -156,6 +156,44 @@ def extract_json(text: str) -> dict:
         raise ValueError(f"No JSON found in response: {text[:200]}")
 
 
+async def make_visual_arc(chat, script: dict, topic: str, bible: dict) -> dict:
+    """Plan the episode's visual world ONCE before any scenes are designed.
+    Returns 4 locked locations, segment→location map, 3-act emotional arc, and 2 motifs."""
+    segs = script.get("segments", [])
+    n = len(segs)
+    summary = "\n".join(
+        f"Seg {i+1} [{s.get('role','').split('|')[0]}]: {s['narration'][:120]}…"
+        for i, s in enumerate(segs))
+    envs = ", ".join(bible.get("environments", []))
+    seg_keys = ", ".join(f'"{i+1}": "one of the 4 locations"' for i in range(n))
+    prompt = (
+        f"You are the production designer for a {n}-segment cinematic documentary.\n"
+        f"Topic: {topic}\n"
+        f"Protagonist: {bible.get('protagonist', {}).get('description', '')}\n"
+        f"Character environments from bible: {envs}\n\n"
+        f"Narration summary:\n{summary}\n\n"
+        "Design a VISUAL BLUEPRINT that gives this episode a coherent, linear visual journey.\n\n"
+        "1. Choose exactly 4 REAL, SPECIFIC locations (never generic 'studio' or 'office').\n"
+        "   Each must be visually distinct and grounded in the story world.\n"
+        f"2. Assign each of the {n} segments to ONE of those 4 locations as its primary environment.\n"
+        "3. Describe the emotional arc in 3 acts (what the viewer FEELS, not what is said).\n"
+        "4. Name 2 visual motifs to repeat across the episode (recurring object, gesture, or framing).\n\n"
+        "Return ONLY JSON:\n"
+        f'{{"locations": ["loc1","loc2","loc3","loc4"], '
+        f'"segment_locations": {{{seg_keys}}}, '
+        f'"act_arc": {{"opening": "…","middle": "…","closing": "…"}}, '
+        f'"motifs": ["motif1","motif2"]}}'
+    )
+    try:
+        data = extract_json(await chat([{"role": "user", "content": prompt}],
+                                       response_format={"type": "json_object"}, max_tokens=3000))
+        if data.get("locations"):
+            return data
+    except Exception:
+        pass
+    return {"locations": [], "segment_locations": {}, "act_arc": {}, "motifs": []}
+
+
 async def make_character_bible(chat, script: dict, topic: str) -> dict:
     """Generate a protagonist + environments + tone arc that will anchor every scene visually."""
     segs = script.get("segments", [])

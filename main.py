@@ -21,7 +21,7 @@ if hasattr(sys.stderr, "reconfigure"):
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 import art
@@ -111,27 +111,71 @@ async def _chat(client: httpx.AsyncClient, messages: list, **kwargs) -> str:
 
 # ── media steps ────────────────────────────────────────────────────────────────
 
+def _tts_payload(text: str, voice: str) -> dict:
+    p = {"input": text, "voice": voice, "response_format": "mp3", "speed": 1.15}
+    return p  # kokoro — no model field, server picks default
+
 async def tts_segment(client: httpx.AsyncClient, text: str, voice: str,
                       out: Path, sem: asyncio.Semaphore) -> float:
     async with sem:
-        r = await _post(client, "/audio/speech",
-                        json={"input": text, "voice": voice,
-                              "response_format": "mp3", "speed": 1.15},
-                        timeout=300)
+        r = await _post(client, "/audio/speech", json=_tts_payload(text, voice), timeout=300)
         out.write_bytes(r.content)
         dur = float(r.headers.get("X-Audio-Seconds", 0))
         if dur <= 0:
             dur = len(r.content) / 16000  # ~128kbps fallback
         return max(dur, 1.0)
 
-async def image_segment(client: httpx.AsyncClient, prompt: str,
-                        out: Path, sem: asyncio.Semaphore, seed: int | None = None) -> None:
-    body = {"model": config.IMAGE_MODEL, "prompt": prompt, "width": 1280, "height": 720,
-            "response_format": "b64_json", "quality": "standard", "n": 1}
-    if seed is not None:
-        body["seed"] = seed
+async def tts_podcast_segment(client: httpx.AsyncClient, devanagari_sentences: list[str],
+                              voice: str, out: Path, sem: asyncio.Semaphore) -> float:
+    """Podcast async endpoint for anchor_* voices — exposes cfg_weight / exaggeration."""
+    turns = [{"speaker": "HOST", "text": s} for s in devanagari_sentences]
     async with sem:
-        r = await _post(client, "/images/generations", json=body, timeout=300)
+        r = await _post(client, "/audio/podcast", json={
+            "model":        config.TTS_MODEL,
+            "script":       turns,
+            "voices":       {"HOST": voice},
+            "language":     "hi",
+            "cfg_weight":   config.TTS_CFG_WEIGHT,
+            "exaggeration": config.TTS_EXAGGERATION,
+            "gap_ms":       round(_SENT_PAUSE * 1000),
+            "response_format": "mp3",
+        }, timeout=60)
+    job_id = r.json()["id"]
+    # Poll outside the semaphore so it doesn't block other work
+    for _ in range(120):                      # up to 10 min
+        await asyncio.sleep(5)
+        poll = await client.get(f"{config.BASE_URL}/jobs/{job_id}",
+                                headers=_hdrs(), timeout=30)
+        data = poll.json()
+        if data["status"] == "succeeded":
+            audio = await client.get(data["result"]["url"], timeout=120)
+            out.write_bytes(audio.content)
+            return max(float(data["result"].get("duration_s", len(audio.content) / 16000)), 1.0)
+        if data["status"] in ("failed", "cancelled"):
+            raise RuntimeError(f"Podcast TTS failed: {data.get('error', data['status'])}")
+    raise TimeoutError("Podcast TTS timed out")
+
+
+async def image_segment(client: httpx.AsyncClient, prompt: str,
+                        out: Path, sem: asyncio.Semaphore,
+                        seed: int | None = None,
+                        ref_image: Path | None = None) -> None:
+    async with sem:
+        if ref_image and ref_image.exists():
+            form = {"model": config.IMAGE_MODEL, "prompt": prompt,
+                    "width": "1280", "height": "720",
+                    "response_format": "b64_json", "quality": "standard", "n": "1"}
+            if seed is not None:
+                form["seed"] = str(seed)
+            r = await _post(client, "/images/edits", timeout=300,
+                            files={"image": (ref_image.name, ref_image.read_bytes(), "image/png")},
+                            data=form)
+        else:
+            body = {"model": config.IMAGE_MODEL, "prompt": prompt, "width": 1280, "height": 720,
+                    "response_format": "b64_json", "quality": "standard", "n": 1}
+            if seed is not None:
+                body["seed"] = seed
+            r = await _post(client, "/images/generations", json=body, timeout=300)
         b64 = r.json()["data"][0]["b64_json"]
         out.write_bytes(base64.b64decode(b64))
 
@@ -287,6 +331,14 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
             job["character_bible"] = bible
             _save_meta(job_id)
 
+            # 2b2) Visual arc — 4 locked locations + 3-act emotional journey for the episode
+            emit("🗺 Planning visual story arc...")
+            visual_arc = await content.make_visual_arc(chat, script, topic, bible)
+            if visual_arc.get("locations"):
+                emit(f"✓ Visual arc: {', '.join(visual_arc['locations'][:3])}…", "success")
+            else:
+                emit("⚠ Visual arc empty — scenes will plan freely", "error")
+
             sem = asyncio.Semaphore(config.MAX_CONCURRENCY)
 
             # 2c) Character reference images (3 poses, white background)
@@ -311,8 +363,24 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
 
             async def narrate(i: int, seg: dict):
                 parts = seg.get("narration_parts", [seg["narration"]])
-                pdurs = seg.get("pause_durs", [])
                 label = f"Segment {i+1}/{n}"
+
+                if voice.startswith("anchor_"):
+                    # Podcast async endpoint: convert all sentences → Devanagari, submit once
+                    emit(f"🎙 {label}: TTS (podcast, cfg={config.TTS_CFG_WEIGHT})...")
+                    devanagari = []
+                    for part_text in parts:
+                        for sent in (_split_sentences(part_text) or [part_text]):
+                            devanagari.append(await speech.to_speech(chat_prompt, sent))
+                    p = job_dir / f"audio_{i:03d}_000.mp3"
+                    dur = await tts_podcast_segment(client, devanagari, voice, p, sem)
+                    audio_parts[i] = [p]
+                    durations[i] = dur
+                    emit(f"✓ {label} voice ready ({dur:.1f}s)", "success")
+                    return
+
+                # Kokoro path: per-sentence speech endpoint with explicit silence files
+                pdurs = seg.get("pause_durs", [])
                 emit(f"🎙 {label}: TTS ({len(parts)} part{'s' if len(parts)>1 else ''})...")
                 files, total = [], 0.0
                 clip_idx = 0
@@ -325,7 +393,6 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
                         files.append(p)
                         total += dur
                         clip_idx += 1
-                        # auto sentence-boundary pause (not after the last sentence of a part)
                         if si < len(sentences) - 1:
                             sil = job_dir / f"silence_{i:03d}_{clip_idx:03d}.mp3"
                             try:
@@ -335,7 +402,6 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
                                 clip_idx += 1
                             except Exception:
                                 pass
-                    # explicit [pause:Xs] after this part
                     if k < len(pdurs) and pdurs[k] > 0:
                         sil = job_dir / f"silence_{i:03d}_{clip_idx:03d}.mp3"
                         try:
@@ -344,7 +410,7 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
                             total += pdurs[k]
                             clip_idx += 1
                         except Exception:
-                            pass  # ffmpeg missing: skip silence
+                            pass
                 audio_parts[i] = files
                 durations[i] = max(total, 1.0)
                 emit(f"✓ {label} voice ready ({total:.1f}s, {len(files)} clips)", "success")
@@ -368,7 +434,8 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
                 scenes = await scenes_mod.plan_scenes(
                     chat, topic or script.get("title", ""), seg.get("role", ""),
                     beats, mem, emotion=emotion, geo="india",
-                    character_bible=bible, style=style)
+                    character_bible=bible, style=style,
+                    visual_arc=visual_arc, seg_idx=i)
                 seg["palette"] = palettes[i]
                 seg["scenes"] = [{"beat": b, "dur": round(d, 2), **sc} for b, d, sc in zip(beats, bdur, scenes)]
                 shot_plan += [{"scene": sc, "dur": d, "seg": i, "palette": palettes[i], "emotion": emotion}
@@ -396,12 +463,14 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
             _check_cancelled()
             # 6) images, one per scene
             total = len(shot_plan)
-            emit(f"🖼 Generating {total} images ({style})...")
+            char_ref = char_refs[0] if (style == "cinematic" and char_refs) else None
+            emit(f"🖼 Generating {total} images ({style}"
+                 f"{', with character reference' if char_ref else ''})...")
             for j, s in enumerate(shot_plan):
                 s["image"] = job_dir / f"shot_{j:03d}.png"
                 # prompt already built during draft phase; reuse it
                 try:
-                    await image_segment(client, s["prompt"], s["image"], sem)
+                    await image_segment(client, s["prompt"], s["image"], sem, ref_image=char_ref)
                 except Exception as e:
                     if j == 0:
                         raise
@@ -431,10 +500,12 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
                             s["scene"]["text"] = ""
                             s["prompt"] = art.compose(s["scene"], style, s["palette"], rng,
                                                       s.get("emotion", "neutral"))
-                            await image_segment(client, s["prompt"], s["image"], sem, rng.randrange(2**31))
+                            await image_segment(client, s["prompt"], s["image"], sem,
+                                                rng.randrange(2**31), ref_image=char_ref)
                         break
                     fixed += 1
-                    await image_segment(client, s["prompt"], s["image"], sem, rng.randrange(2**31))
+                    await image_segment(client, s["prompt"], s["image"], sem,
+                                        rng.randrange(2**31), ref_image=char_ref)
             emit(f"✓ Image check done ({fixed} regenerated)", "success")
 
             (job_dir / "image_prompts.json").write_text(
@@ -686,6 +757,48 @@ async def delete_job(job_id: str):
         import shutil as _shutil
         _shutil.rmtree(job_dir, ignore_errors=True)
     return {"ok": True}
+
+class PreviewRequest(BaseModel):
+    voice: str
+    text: str
+
+@app.post("/preview-voice")
+async def preview_voice(req: PreviewRequest):
+    """Transliterate Hinglish text → Devanagari, then TTS with the given voice. Returns MP3."""
+    async with httpx.AsyncClient() as client:
+        async def _cp(prompt: str) -> str:
+            return await _chat(client, [{"role": "user", "content": prompt}], max_tokens=4000, temperature=0.2)
+        spoken = await speech.to_speech(_cp, req.text)
+        if req.voice.startswith("anchor_"):
+            out = Path(f"/tmp/preview_{req.voice}.mp3")
+            await tts_podcast_segment(client, [spoken], req.voice, out,
+                                      asyncio.Semaphore(1))
+            return Response(content=out.read_bytes(), media_type="audio/mpeg")
+        r = await _post(client, "/audio/speech",
+                        json=_tts_payload(spoken, req.voice), timeout=60)
+        return Response(content=r.content, media_type="audio/mpeg")
+
+
+@app.get("/sample-text")
+async def sample_text():
+    """Return first 2-3 sentences from the most recent completed job's script."""
+    fallback = ("Kya aapko lagta hai AI sirf ek hype hai? Aaj ye reality ban raha hai. "
+                "Barclays ne five thousand jobs cut kar diye hain sirf AI efficiency ke liye.")
+    for d in sorted(JOBS_DIR.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+        sf = d / "script.json"
+        if not sf.exists():
+            continue
+        try:
+            segs = json.loads(sf.read_text(encoding="utf-8")).get("segments", [])
+            narr = segs[0]["narration"] if segs else ""
+            # first 2-3 sentences
+            import re as _re
+            sents = [s.strip() for s in _re.findall(r"[^।.?!]+[।.?!]*", narr) if s.strip()]
+            return {"text": " ".join(sents[:3])}
+        except Exception:
+            continue
+    return {"text": fallback}
+
 
 @app.get("/health")
 async def health():
