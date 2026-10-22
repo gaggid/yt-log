@@ -8,6 +8,7 @@ import re
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 
 import config
 
@@ -407,6 +408,71 @@ async def purge_english(chat, narration: str) -> str:
                 pass
         out.append(p)
     return " ".join(out)
+
+
+# ── Article URL input ─────────────────────────────────────────────────────────
+
+class _TextExtractor(HTMLParser):
+    _SKIP = {"script", "style", "nav", "footer", "aside", "header", "noscript"}
+    _BLOCK = {"h1", "h2", "h3", "p", "li", "blockquote"}
+
+    def __init__(self):
+        super().__init__()
+        self._skip = 0
+        self._stack: list[str] = []
+        self._cur: list[str] = []
+        self.title = ""
+        self.paragraphs: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self._SKIP:
+            self._skip += 1
+        if tag in self._BLOCK:
+            self._stack.append(tag)
+            self._cur = []
+
+    def handle_endtag(self, tag):
+        if tag in self._SKIP:
+            self._skip = max(0, self._skip - 1)
+        if tag in self._BLOCK and self._stack and self._stack[-1] == tag:
+            self._stack.pop()
+            text = " ".join(self._cur).strip()
+            if len(text) > 20:
+                if tag == "h1" and not self.title:
+                    self.title = text
+                else:
+                    self.paragraphs.append(text)
+            self._cur = []
+
+    def handle_data(self, data):
+        if self._skip or not self._stack:
+            return
+        chunk = data.strip()
+        if chunk:
+            self._cur.append(chunk)
+
+
+def parse_url(url: str) -> tuple[str, str]:
+    """Fetch a URL and extract (title, body_text). Sync — call via asyncio.to_thread."""
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    raw = urllib.request.urlopen(req, timeout=30).read()
+    # Detect charset from BOM or default utf-8
+    for enc in ("utf-8-sig", "utf-8", "latin-1"):
+        try:
+            html_text = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    ex = _TextExtractor()
+    ex.feed(html_text)
+    # Fallback title: grab <title>…</title>
+    if not ex.title:
+        m = re.search(r"<title[^>]*>(.*?)</title>", html_text, re.IGNORECASE | re.DOTALL)
+        if m:
+            ex.title = _html.unescape(m.group(1).strip())
+    title = ex.title or url
+    text = "\n\n".join(ex.paragraphs)
+    return title, text
 
 
 # ── timing: split narration into beats, one image per beat ────────────────────

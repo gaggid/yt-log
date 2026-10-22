@@ -176,6 +176,11 @@ video { width: 100%; border-radius: 7px; background: #000; margin-bottom: 12px; 
       </div>
     </div>
 
+    <div class="topic-row">
+      <label>Article URL <span style="font-weight:normal;opacity:.6">(optional — paste a news article link to use it as source instead of RSS)</span></label>
+      <input type="text" id="article-url" placeholder="https://..." style="width:100%" />
+    </div>
+
     <div class="grid3">
       <div>
         <label>Segments</label>
@@ -342,6 +347,7 @@ async function generate() {
   btn.textContent = '⟳ Starting...';
 
   const topic = document.getElementById('topic').value.trim();
+  const articleUrl = document.getElementById('article-url').value.trim();
   const extra = document.getElementById('extra-prompt').value.trim();
   const fullTopic = extra ? `${topic} — ${extra}` : topic;
 
@@ -351,7 +357,8 @@ async function generate() {
   document.getElementById('log-card').style.display = 'block';
   document.getElementById('output-card').style.display = 'none';
   document.getElementById('job-label').textContent = 'Connecting...';
-  appendLog(`Submitting job — topic: "${fullTopic || 'today\'s news'}"`, 'info');
+  const logLabel = articleUrl ? `article: ${articleUrl}` : (fullTopic || "today's news");
+  appendLog(`Submitting job — ${logLabel}`, 'info');
 
   let res;
   try {
@@ -360,6 +367,7 @@ async function generate() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         topic: fullTopic,
+        url: articleUrl,
         segments: parseInt(document.getElementById('segments').value),
         style: document.getElementById('style').value,
         camera: document.getElementById('camera').value,

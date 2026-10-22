@@ -223,7 +223,7 @@ def _load_jobs() -> None:
 # ── main pipeline ──────────────────────────────────────────────────────────────
 
 async def run_pipeline(job_id: str, topic: str, n_segments: int,
-                       style: str, voice: str, camera: str):
+                       style: str, voice: str, camera: str, url: str = ""):
     job = _jobs[job_id]
     job_dir = JOBS_DIR / job_id
     job_dir.mkdir(exist_ok=True)
@@ -248,24 +248,32 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
                 if job.get("status") == "cancelled":
                     raise RuntimeError("Job cancelled by user")
 
-            # 1) fetch fresh headlines from Google News RSS (trusted sources, last 36h)
-            emit("📡 Fetching latest headlines from Google News RSS...")
-            candidates = await asyncio.to_thread(content.fetch_headlines, topic)
-            emit(f"✓ {len(candidates)} candidates fetched", "success")
+            # 1) source content: article URL or live RSS headlines
+            if url:
+                emit(f"🔗 Fetching article: {url}")
+                art_title, art_text = await asyncio.to_thread(content.parse_url, url)
+                if not topic:
+                    topic = art_title
+                emit(f"✓ Article parsed: \"{art_title}\" ({len(art_text.split())} words)", "success")
+                notes = art_text
+                headlines: list[dict] = []
+            else:
+                emit("📡 Fetching latest headlines from Google News RSS...")
+                candidates = await asyncio.to_thread(content.fetch_headlines, topic)
+                emit(f"✓ {len(candidates)} candidates fetched", "success")
 
-            emit("🗞 Curating top stories (trusted sources first)...")
-            headlines = await content.curate_headlines(chat, candidates, topic)
-            emit(f"✓ {len(headlines)} stories selected", "research_result",
-                 topic=topic or "today's news",
-                 headlines=[{"title": h["title"], "source": h["source"],
-                              "age_h": h["age_h"], "trusted": h["trusted"]}
-                             for h in headlines])
+                emit("🗞 Curating top stories (trusted sources first)...")
+                headlines = await content.curate_headlines(chat, candidates, topic)
+                emit(f"✓ {len(headlines)} stories selected", "research_result",
+                     topic=topic or "today's news",
+                     headlines=[{"title": h["title"], "source": h["source"],
+                                  "age_h": h["age_h"], "trusted": h["trusted"]}
+                                 for h in headlines])
 
-            _check_cancelled()
-            # 2) synthesise research notes from curated headlines
-            emit("📝 Synthesising research notes...")
-            notes = await content.research(chat, topic, headlines or None)
-            emit("✓ Research notes ready", "success")
+                _check_cancelled()
+                emit("📝 Synthesising research notes...")
+                notes = await content.research(chat, topic, headlines or None)
+                emit("✓ Research notes ready", "success")
 
             _check_cancelled()
             # 3) angles + uber story
@@ -557,6 +565,7 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
 
 class GenerateRequest(BaseModel):
     topic: str = ""
+    url: str = ""
     segments: int = config.DEFAULT_SEGMENTS
     style: str = config.DEFAULT_STYLE
     voice: str = config.DEFAULT_VOICE
@@ -581,13 +590,14 @@ async def root():
 @app.post("/generate")
 async def generate(req: GenerateRequest, bg: BackgroundTasks):
     job_id = uuid.uuid4().hex[:8]
+    label = req.topic or (req.url and f"article: {req.url[:60]}") or "today's news"
     _jobs[job_id] = {
         "status": "queued",
-        "log": [json.dumps({"type": "info", "message": "⟳ Job {} queued — topic: {}".format(job_id, req.topic or "today's news")})],
+        "log": [json.dumps({"type": "info", "message": f"⟳ Job {job_id} queued — {label}"})],
         "created_at": datetime.now().isoformat(),
-        "topic": req.topic or "today's news",
+        "topic": label,
     }
-    bg.add_task(run_pipeline, job_id, req.topic, req.segments, req.style, req.voice, req.camera)
+    bg.add_task(run_pipeline, job_id, req.topic, req.segments, req.style, req.voice, req.camera, req.url)
     return {"job_id": job_id}
 
 @app.get("/status/{job_id}")
