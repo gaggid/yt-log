@@ -4,6 +4,22 @@ import re
 
 from content import extract_json
 
+_MOOD_HINT = {
+    "dramatic":  "tense, high-contrast compositions with strong diagonal lines",
+    "serious":   "still and weighty scenes, minimal movement, low horizon",
+    "calm":      "open, spacious scenes with soft diffuse light",
+    "excited":   "dynamic layouts with energetic implied motion and radiating shapes",
+    "concerned": "heavy overcast atmosphere, unresolved tension in the composition",
+    "neutral":   "balanced, clear compositions",
+}
+
+_GEO_INDIA = (
+    "The story is set in India. Where the beat naturally calls for it, include culturally specific visual cues: "
+    "South Asian architecture (tiled roofs, courtyard homes, bazaar streets), tropical light, coconut/banyan trees, "
+    "rupee ₹ symbol for money amounts, Indian urban or rural textures. "
+    "Apply only when it genuinely fits the beat — never force Indian imagery onto abstract or metaphorical ideas."
+)
+
 
 class Memory:
     """What the episode has already shown, shared across segments."""
@@ -49,31 +65,34 @@ async def _rewrite(chat, beat: str, visual: str, clash: str) -> str:
         return visual
 
 
-async def plan_scenes(chat, topic: str, role: str, beats: list[str], mem: Memory) -> list[dict]:
+async def plan_scenes(chat, topic: str, role: str, beats: list[str], mem: Memory,
+                      emotion: str = "neutral", geo: str = "auto") -> list[dict]:
     numbered = "\n".join(f"{i+1}. {b}" for i, b in enumerate(beats))
     shown = "\n".join(f"- {v[:90]}" for v in mem.visuals[-14:]) or "- (none yet)"
     used = ", ".join(sorted(mem.texts)) or "(none yet)"
+    mood = _MOOD_HINT.get(emotion, _MOOD_HINT["neutral"])
+    geo_line = f"\nCultural context: {_GEO_INDIA}" if geo == "india" else ""
     prompt = f"""You are the art director of an illustrated explainer video. Topic: {topic or 'news'}. Segment role: {role}.
+Segment mood: {emotion} — aim for {mood}.{geo_line}
 A narrator says the beats below, in order; each beat gets ONE still image shown while it is spoken.
 
 Beats (Hinglish narration):
 {numbered}
 
-For each beat design an image that VISUALLY EXPLAINS what is being said in that beat: a metaphor, a simple diagram made of
-shapes and icons, a before/after contrast, an object or scene that makes the idea obvious. A viewer with the sound off
-should still get the point. Keep one visual world across the story but make every image look different from the others.
+For each beat design an image that VISUALLY EXPLAINS what is being said: a metaphor, a simple diagram of shapes and icons,
+a before/after contrast, or a scene that makes the idea obvious without sound.
 Rules:
-- Describe the scene in English, 1-2 sentences, concrete subjects, where things are, camera distance. No style or colour
-  words (they are added later).
-- Every image must be NEW. Already used in this episode, do not repeat or paraphrase these:
+- Describe the scene in English, 1-2 sentences. Concrete subjects, spatial positions, camera distance.
+- No style or colour words — those are added later.
+- Every image must be visually distinct. Already shown this episode — do NOT repeat or paraphrase:
 {shown}
-- Never show faces or hands in close-up. People only as small figures, silhouettes or from behind.
-- Screens, charts, maps, books, documents and blackboards must be abstract (shapes, bars, icons, blank pages): never
-  describe anything that would need small readable writing.
-- Single full-frame image: no comic panels, no split screens, no multi-panel layouts.
-- On-image text ONLY where it truly helps (a key number, a name, a short question): "text" is 1-3 words, English letters and
-  digits only, otherwise "". Use text in at most 3 of every 10 beats. Texts already used, never reuse: {used}
-Return ONLY JSON: {{"scenes": [{{"beat": 1, "visual": "...", "text": ""}}]}} with exactly {len(beats)} scenes."""
+- People only as small figures, silhouettes or from behind. No close-up faces or hands.
+- Screens, charts, maps, books must be abstract (shapes, bars, icons): no small readable writing inside.
+- Single full-frame image only. No comic panels, no split screens.
+- "text": 1-3 word English/digit label only where it adds real value (key number, sharp question). Max 3 per 10 beats.
+  Already used text — never reuse: {used}
+- "mood": one word — warm / cool / bright / muted / high-contrast — matching how this beat should feel.
+Return ONLY JSON: {{"scenes": [{{"beat": 1, "visual": "...", "text": "", "mood": "warm"}}]}} with exactly {len(beats)} scenes."""
     scenes: list[dict] = []
     try:
         data = extract_json(await chat([{"role": "user", "content": prompt}],
@@ -81,12 +100,13 @@ Return ONLY JSON: {{"scenes": [{{"beat": 1, "visual": "...", "text": ""}}]}} wit
         for s in data.get("scenes", []):
             v = str(s.get("visual", "")).strip()
             if v:
-                scenes.append({"visual": v, "text": _clean_text(s.get("text"))})
+                scenes.append({"visual": v, "text": _clean_text(s.get("text")),
+                               "mood": str(s.get("mood", "")).strip().lower()})
     except Exception:
         pass
     fallback = ["wide establishing view of the topic", "symbolic object representing the idea", "abstract diagram of the idea"]
     while len(scenes) < len(beats):
-        scenes.append({"visual": f"{topic or 'the story'}: {fallback[len(scenes) % 3]}", "text": ""})
+        scenes.append({"visual": f"{topic or 'the story'}: {fallback[len(scenes) % 3]}", "text": "", "mood": ""})
     scenes = scenes[:len(beats)]
 
     # episode-wide de-duplication

@@ -317,6 +317,9 @@ def _units(text: str, need: int) -> list[str]:
     return units
 
 
+_MIN_BEAT_WORDS = 6
+
+
 def split_beats(text: str, k: int) -> list[str]:
     units = _units(text, k)
     k = min(k, len(units))
@@ -332,7 +335,16 @@ def split_beats(text: str, k: int) -> list[str]:
             cur = []
     if cur:
         beats.append(" ".join(cur))
-    return beats
+    # merge fragment beats (transition words, incomplete sentences) into neighbours
+    merged: list[str] = []
+    for b in beats:
+        if merged and len(b.split()) < _MIN_BEAT_WORDS:
+            merged[-1] += " " + b
+        else:
+            merged.append(b)
+    if len(merged) > 1 and len(merged[-1].split()) < _MIN_BEAT_WORDS:
+        merged[-2] += " " + merged.pop()
+    return merged
 
 
 def beat_durations(beats: list[str], seg_dur: float) -> list[float]:

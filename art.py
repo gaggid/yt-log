@@ -43,19 +43,43 @@ def segment_palettes(emotions: list[str], rng: random.Random) -> list[str]:
     return out
 
 
-def compose(scene: dict, style: str, palette: str, rng: random.Random) -> str:
-    """One natural-language prompt: scene, composition, style, palette, text clause."""
+_MOOD_LINES = {
+    "dramatic":     "The composition is high-contrast with strong diagonal tension.",
+    "serious":      "The scene is still and weighty with minimal movement.",
+    "calm":         "The scene is open and spacious with soft diffuse light.",
+    "excited":      "The layout is dynamic with energetic implied motion.",
+    "concerned":    "The atmosphere is heavy and uncertain.",
+}
+
+# When the scene's per-beat mood conflicts with the segment palette's warmth, nudge the light.
+_WARM_PALETTES = {"forest-gold", "sunset", "sand-terracotta", "indigo-coral"}
+_COOL_PALETTES  = {"slate-ice", "teal-amber", "mint-navy"}
+
+
+def compose(scene: dict, style: str, palette: str, rng: random.Random, emotion: str = "neutral") -> str:
+    """One natural-language prompt: scene, composition, style, palette, mood, text clause."""
     parts = [scene["visual"].strip().rstrip(".") + ".",
-             "Single full-bleed illustration filling the entire 16:9 frame edge to edge, "
-             "no panels, no borders, no frame, no white margins, the background is filled with colour or scenery all the way to every edge, never a blank white backdrop.",
+             "Full-bleed 16:9 illustration, background fills every edge, no panels, no borders, no white margins.",
              f"Style: {STYLES.get(style, STYLES[DEFAULT_STYLE])}.",
-             f"Colour palette: {PALETTES[palette]}.",
-             "People appear only as small figures or silhouettes, never as close-up faces or hands."]
+             f"Colour palette: {PALETTES[palette]}."]
+
+    # mood line: per-beat mood takes priority, fall back to segment emotion
+    beat_mood = scene.get("mood", "")
+    if beat_mood == "warm" and palette in _COOL_PALETTES:
+        parts.append("Warm the light: amber and cream tones catch the edges.")
+    elif beat_mood == "cool" and palette in _WARM_PALETTES:
+        parts.append("Cool the light: blue and silver tones settle over the scene.")
+    mood_line = _MOOD_LINES.get(emotion, "")
+    if mood_line:
+        parts.append(mood_line)
+
+    parts.append("People appear only as small figures or silhouettes, never as close-up faces or hands.")
+
     if scene.get("text"):
         place = rng.choice(["top", "bottom"])
-        parts.append(f'A short headline reading "{scene["text"]}" in bold clean lettering sits in the {place} third '
-                     "of the frame, fully visible and not covering the main subject. "
-                     "No other text, letters or numbers appear anywhere else in the image.")
+        parts.append(f'A short label reading "{scene["text"]}" in bold Latin letters and digits sits in the {place} '
+                     "third of the frame, fully legible, not covering the main subject. "
+                     "No other text, letters, numbers or logos anywhere else in the image.")
     else:
-        parts.append("The image contains no text, letters, numbers, logos or watermark.")
+        parts.append("The image contains no text, letters, numbers, logos or watermarks.")
     return " ".join(parts)

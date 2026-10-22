@@ -300,11 +300,15 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
                 k = content.choose_shot_count(durations[i])
                 beats = content.split_beats(seg["narration"], k)
                 bdur = content.beat_durations(beats, durations[i])
-                emit(f"🎞 Segment {i+1}/{n}: planning {len(beats)} scenes...")
-                scenes = await scenes_mod.plan_scenes(chat, topic or script.get("title", ""), seg.get("role", ""), beats, mem)
+                emotion = seg.get("emotion", "neutral")
+                emit(f"🎞 Segment {i+1}/{n}: planning {len(beats)} scenes ({emotion})...")
+                scenes = await scenes_mod.plan_scenes(
+                    chat, topic or script.get("title", ""), seg.get("role", ""),
+                    beats, mem, emotion=emotion, geo="india")
                 seg["palette"] = palettes[i]
                 seg["scenes"] = [{"beat": b, "dur": round(d, 2), **sc} for b, d, sc in zip(beats, bdur, scenes)]
-                shot_plan += [{"scene": sc, "dur": d, "seg": i, "palette": palettes[i]} for sc, d in zip(scenes, bdur)]
+                shot_plan += [{"scene": sc, "dur": d, "seg": i, "palette": palettes[i], "emotion": emotion}
+                              for sc, d in zip(scenes, bdur)]
             script["total_seconds"] = round(sum(durations), 1)
             with open(job_dir / "script.json", "w", encoding="utf-8") as _f:
                 json.dump(script, _f, ensure_ascii=False, indent=2)
@@ -316,7 +320,7 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
             emit(f"🖼 Generating {total} images ({style})...")
             for j, s in enumerate(shot_plan):
                 s["image"] = job_dir / f"shot_{j:03d}.png"
-                s["prompt"] = art.compose(s["scene"], style, s["palette"], rng)
+                s["prompt"] = art.compose(s["scene"], style, s["palette"], rng, s.get("emotion", "neutral"))
                 try:
                     await image_segment(client, s["prompt"], s["image"], sem)
                 except Exception as e:
@@ -346,7 +350,7 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
                     if attempt == 2:
                         if bad_text and want:                   # give up on the text: redraw without it
                             s["scene"]["text"] = ""
-                            s["prompt"] = art.compose(s["scene"], style, s["palette"], rng)
+                            s["prompt"] = art.compose(s["scene"], style, s["palette"], rng, s.get("emotion", "neutral"))
                             await image_segment(client, s["prompt"], s["image"], sem, rng.randrange(2**31))
                         break
                     fixed += 1
