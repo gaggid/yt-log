@@ -218,8 +218,14 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
             # 3) angles + uber story
             emit("🧐 Finding contrarian angles and brain-work questions...")
             angles = await content.find_angles(chat, notes)
+            n_qs = len(angles.get("questions", []))
+            if n_qs < 3:
+                emit(f"⚠ find_angles returned only {n_qs} questions — model likely misread the schema", "error")
             uber_story = await content.find_uber_story(chat, headlines)
-            emit(f"✓ Uber story: {uber_story[:160]}", "success")
+            if not uber_story:
+                emit("⚠ Uber story empty — model returned blank, continuing without spine", "error")
+            else:
+                emit(f"✓ Uber story: {uber_story[:160]}", "success")
             emit("Angles ready", "research_result",
                  topic=topic or "today's news",
                  core_claim=angles.get("core_claim", ""),

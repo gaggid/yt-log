@@ -115,7 +115,8 @@ async def find_uber_story(chat, headlines: list[dict]) -> str:
         "Return ONLY the uber story text, nothing else."
     )
     try:
-        return (await chat([{"role": "user", "content": prompt}], max_tokens=300, temperature=0.3)).strip()
+        result = (await chat([{"role": "user", "content": prompt}], max_tokens=300, temperature=0.3)).strip()
+        return result if len(result) > 20 else ""
     except Exception:
         return ""
 
@@ -229,15 +230,19 @@ async def find_angles(chat, notes: str) -> dict:
 Notes:
 {notes}
 
+Produce exactly:
+- core_claim: the one-line story everybody is already repeating
+- contrarian_take: a defensible opposite or deeply overlooked angle that challenges the mainstream read
+- assumptions_to_challenge: exactly 3 widely-held assumptions this story should force us to re-examine
+- questions: exactly 6 questions that put the listener's brain to work — NOT obvious FAQs.
+  Each question must reveal a hidden contradiction, a second-order consequence, or an uncomfortable
+  implication the listener has not considered yet. Make them specific to this story, not generic.
+
 Return ONLY JSON:
-{{"core_claim": "the one-line story everybody is repeating",
-  "contrarian_take": "a defensible opposite or deeply overlooked angle that challenges the mainstream read",
-  "assumptions_to_challenge": ["3 widely-held assumptions this story should force us to re-examine"],
-  "questions": [
-    "6 questions that put the listener's brain to work — not obvious FAQs but questions that reveal",
-    "hidden contradictions, second-order consequences, or uncomfortable implications;",
-    "questions the listener hasn't thought of yet that will make them stop and reconsider"
-  ]}}"""
+{{"core_claim": "...",
+  "contrarian_take": "...",
+  "assumptions_to_challenge": ["assumption 1", "assumption 2", "assumption 3"],
+  "questions": ["question 1", "question 2", "question 3", "question 4", "question 5", "question 6"]}}"""
     try:
         return extract_json(await chat([{"role": "user", "content": prompt}],
                                        response_format={"type": "json_object"}, max_tokens=1500))
