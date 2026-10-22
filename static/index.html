@@ -127,9 +127,27 @@ video { width: 100%; border-radius: 7px; background: #000; margin-bottom: 12px; 
 .voice-btn.active { border-color: #3b82f6; color: #60a5fa; background: #0f1a2e; }
 .voice-name { font-weight: 600; display: block; }
 .voice-lang { color: #555; font-size: 0.68rem; }
+
+/* Deploy / uptime status bar */
+#status-bar {
+  padding: 5px 28px; background: #0a0a0a; border-bottom: 1px solid #1a1a1a;
+  display: flex; align-items: center; gap: 18px; font-size: 0.7rem; color: #555;
+  font-family: 'Menlo', 'Consolas', monospace;
+}
+#status-bar .sb-commit { color: #444; }
+#status-bar .sb-uptime { color: #4a4a4a; }
+#status-bar .sb-deploy-flash {
+  color: #4ade80; font-weight: 700; animation: fadeout 4s forwards;
+}
+@keyframes fadeout { 0%{opacity:1} 70%{opacity:1} 100%{opacity:0} }
 </style>
 </head>
 <body>
+<div id="status-bar">
+  <span id="sb-commit" class="sb-commit">● loading…</span>
+  <span id="sb-uptime" class="sb-uptime">⏱ —</span>
+  <span id="sb-flash" style="display:none"></span>
+</div>
 <header>
   <h1>🎙 Podcast Video Generator</h1>
   <span style="flex:1">Hinglish script → TTS audio → AI illustrations → 2560×1440 (2K) video with camera moves</span>
@@ -435,6 +453,53 @@ function renderScriptCard(d) {
   log.appendChild(el);
   log.scrollTop = log.scrollHeight;
 }
+
+// ── Deploy / uptime status bar ──────────────────────────────────────────────
+let _serverStartedAt = null;
+let _uptimeBase = 0;  // seconds at last health fetch
+
+function fmtUptime(s) {
+  s = Math.floor(s);
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600),
+        m = Math.floor((s % 3600) / 60), sec = s % 60;
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m ${sec}s`;
+  return `${m}m ${sec}s`;
+}
+
+let _uptimeFetchedAt = null;
+
+async function fetchHealth() {
+  try {
+    const r = await fetch('/health');
+    if (!r.ok) return;
+    const d = await r.json();
+    _uptimeBase = d.uptime_s;
+    _uptimeFetchedAt = Date.now();
+    const commit = d.commit || '?';
+    const subject = d.subject ? ` — ${d.subject}` : '';
+    document.getElementById('sb-commit').textContent = `● ${commit}${subject}`;
+
+    if (_serverStartedAt && _serverStartedAt !== d.started_at) {
+      const flash = document.getElementById('sb-flash');
+      flash.className = 'sb-deploy-flash';
+      flash.textContent = '🔄 Redeployed!';
+      flash.style.display = '';
+      setTimeout(() => { flash.style.display = 'none'; }, 5000);
+    }
+    _serverStartedAt = d.started_at;
+  } catch (_) {}
+}
+
+function tickUptime() {
+  if (_uptimeFetchedAt === null) return;
+  const elapsed = (Date.now() - _uptimeFetchedAt) / 1000;
+  document.getElementById('sb-uptime').textContent = '⏱ ' + fmtUptime(_uptimeBase + elapsed);
+}
+
+fetchHealth();
+setInterval(fetchHealth, 30000);
+setInterval(tickUptime, 1000);
 
 // Load history on page load
 refreshHistory();

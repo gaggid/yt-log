@@ -45,6 +45,22 @@ def _make_silence(path: Path, seconds: float) -> None:
          "-t", f"{max(0.1, seconds):.2f}", "-c:a", "libmp3lame", "-q:a", "4", str(path)],
         capture_output=True, check=True)
 
+_STARTED_AT = datetime.now()
+
+
+def _git_info() -> dict:
+    try:
+        r = subprocess.run(["git", "log", "-1", "--format=%h|%s"],
+                           capture_output=True, text=True, encoding="utf-8",
+                           cwd=Path(__file__).parent)
+        parts = r.stdout.strip().split("|", 1)
+        return {"commit": parts[0], "subject": parts[1] if len(parts) > 1 else ""}
+    except Exception:
+        return {"commit": "unknown", "subject": ""}
+
+
+_GIT = _git_info()
+
 app = FastAPI(title="Podcast Video Generator")
 auth.install(app)
 
@@ -422,6 +438,16 @@ async def list_jobs():
     return [{"id": k, "status": v["status"], "topic": v.get("topic"),
              "title": v.get("title"), "created_at": v["created_at"]}
             for k, v in _jobs.items()]
+
+@app.get("/health")
+async def health():
+    return {
+        "started_at": _STARTED_AT.isoformat(),
+        "uptime_s": (datetime.now() - _STARTED_AT).total_seconds(),
+        "commit": _GIT["commit"],
+        "subject": _GIT["subject"],
+    }
+
 
 @app.get("/internal/busy")
 async def internal_busy():
