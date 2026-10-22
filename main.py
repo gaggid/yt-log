@@ -69,7 +69,10 @@ _jobs: dict[str, dict] = {}
 # ── helpers ────────────────────────────────────────────────────────────────────
 
 def _hdrs():
-    return {"Authorization": f"Bearer {config.API_KEY}"}
+    h = {}
+    if config.API_KEY:
+        h["Authorization"] = f"Bearer {config.API_KEY}"
+    return h
 
 def _clean(s: str) -> str:
     """Strip lone surrogates that json.dumps chokes on."""
