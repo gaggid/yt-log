@@ -13,7 +13,9 @@ ask "but wait, why?", test the popular opinion, and say what most people miss. L
 cruelty. Sensational hooks are good; fabricated facts are not: every number and claim must come from the research notes.
 You anticipate the questions a curious listener would ask and answer them yourself in the flow
 ("ab aap soch rahe honge..."). You also invite the listener to argue back in the comments, like talking to a friend
-("comment mein batao, main har view padhta hoon")."""
+("comment mein batao, main har view padhta hoon").
+Delivery style: fast-paced and supremely confident. No hedging, no filler ("toh basically", "matlab"). Short punchy
+sentences. State things as facts, drive each point home, then move on immediately."""
 
 HINGLISH_RULES = """Language = natural spoken Hinglish written in ROMAN script (English letters), the way educated urban Indians
 text and talk: Hindi grammar in Roman ("kya aapko lagta hai ki...", "lekin asli baat ye hai"), English words spelled normally
@@ -108,6 +110,8 @@ Episode arc, spread in this order across the {n} segments:
 Merge or skip arc steps if there are few segments, but keep the hook first, the comment invitation, and the verdict last.
 
 Each segment narration: 5-7 sentences, every sentence moves the story forward. Keep a consistent voice across segments.
+After the hook opening sentence and before major topic transitions insert [pause:0.8s] — max 2 per segment, end of a
+complete sentence only, never mid-sentence.
 
 Return ONLY valid JSON:
 {{"title": "catchy Hinglish title (max 70 chars)", "description": "2-line English YouTube description",

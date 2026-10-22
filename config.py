@@ -59,4 +59,4 @@ SHOT_MIN = 2.0
 SHOT_MAX = 5.0
 SHOT_TARGET = 3.5
 XFADE = 0.35                     # transition overlap, seconds
-VIDEO_W, VIDEO_H, VIDEO_FPS = 1920, 1080, 30
+VIDEO_W, VIDEO_H, VIDEO_FPS = 2560, 1440, 30

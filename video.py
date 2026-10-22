@@ -52,15 +52,15 @@ def _uniform(strip: Image.Image):
     return "white" if st.mean[0] > 228 else "black" if st.mean[0] < 22 else None
 
 
-def trim_frame(src: Path, dst: Path, safe: float = 0.015) -> Path:
-    """Crop off white/black comic frames and margins baked into a generated image, then re-crop to 16:9 plus a small
-    safe margin, so zoom-out and pans never reveal a blank canvas."""
+def trim_frame(src: Path, dst: Path) -> Path:
+    """Crop off white/black comic frames baked into a generated image, then enforce 16:9.
+    Conservative: only strips uniform borders up to 6% (white) / 2% (black) of the dimension.
+    No additional safe-margin inset — the 3× upscale in zoompan provides enough edge buffer."""
     im = Image.open(src).convert("RGB")
     W, H = im.size
     box = [0, 0, W, H]                                   # left, top, right, bottom
     for side in range(4):
-        horiz = side in (0, 2)
-        dim = W if horiz else H
+        dim = W if side in (0, 2) else H
         black = 0
         while (box[2] - box[0]) > W * 0.5 and (box[3] - box[1]) > H * 0.5:
             if side == 0:
@@ -72,20 +72,18 @@ def trim_frame(src: Path, dst: Path, safe: float = 0.015) -> Path:
             else:
                 strip = im.crop((box[0], box[3] - 1, box[2], box[3]))
             kind = _uniform(strip)
-            taken = (box[side] if side < 2 else dim - box[side])
-            if kind == "white" and taken < dim * 0.30:
+            taken = box[side] if side < 2 else dim - box[side]
+            if kind == "white" and taken < dim * 0.06:
                 pass
-            elif kind == "black" and black < dim * 0.025:
+            elif kind == "black" and black < dim * 0.02:
                 black += 1
             else:
                 break
             box[side] += 1 if side < 2 else -1
     x0, y0, x1, y1 = box
     w, h = x1 - x0, y1 - y0
-    x0, x1, y0, y1 = x0 + w * safe, x1 - w * safe, y0 + h * safe, y1 - h * safe
-    w, h = x1 - x0, y1 - y0
-    ratio = W / H
-    if w / h > ratio:                                    # keep 16:9: shrink the longer side around the centre
+    ratio = 16 / 9
+    if w / h > ratio:
         nw = h * ratio
         x0, x1 = x0 + (w - nw) / 2, x1 - (w - nw) / 2
     else:

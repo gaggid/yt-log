@@ -96,6 +96,24 @@ video { width: 100%; border-radius: 7px; background: #000; margin-bottom: 12px; 
 .b-error   { background: #3b0000; color: #f87171; }
 .b-queued  { background: #2a1f00; color: #fbbf24; }
 
+/* Inline preview cards (research + script) */
+.preview-card {
+  background: #0f1419; border-radius: 6px; padding: 10px 12px; margin: 5px 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.research-card { border: 1px solid #1e3a5f; }
+.script-card   { border: 1px solid #1a3a1a; }
+.preview-title { font-size: 0.72rem; font-weight: 700; margin-bottom: 7px; }
+.research-card .preview-title { color: #60a5fa; }
+.script-card   .preview-title { color: #4ade80; }
+.preview-claim { font-size: 0.75rem; color: #bbb; margin-bottom: 4px; }
+.preview-take  { font-size: 0.75rem; color: #a78bfa; margin-bottom: 5px; }
+.preview-q     { font-size: 0.72rem; color: #666; padding-left: 8px; line-height: 1.6; }
+.seg-row       { display: flex; gap: 8px; margin-bottom: 4px; align-items: flex-start; }
+.seg-role      { font-size: 0.6rem; font-weight: 700; text-transform: uppercase; color: #555;
+                 background: #111; padding: 2px 5px; border-radius: 3px; white-space: nowrap; flex-shrink: 0; }
+.seg-preview   { font-size: 0.72rem; color: #777; }
+
 /* Voice picker */
 .voice-grid {
   display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px;
@@ -114,7 +132,7 @@ video { width: 100%; border-radius: 7px; background: #000; margin-bottom: 12px; 
 <body>
 <header>
   <h1>🎙 Podcast Video Generator</h1>
-  <span style="flex:1">Hinglish script → TTS audio → AI illustrations → 1080p video with camera moves</span>
+  <span style="flex:1">Hinglish script → TTS audio → AI illustrations → 2560×1440 (2K) video with camera moves</span>
   <button class="btn-secondary" onclick="logout()">Sign out</button>
 </header>
 <main>
@@ -305,6 +323,9 @@ function streamProgress(jobId) {
       return;
     }
 
+    if (data.type === 'research_result') { renderResearchCard(data); return; }
+    if (data.type === 'script_result')   { renderScriptCard(data);   return; }
+
     const div = document.createElement('div');
     div.className = `l-${data.type || 'info'}`;
     const ts = new Date().toLocaleTimeString('en-IN', { hour12: false });
@@ -380,6 +401,39 @@ function playJob(jobId) {
 async function logout() {
   await fetch('/logout', { method: 'POST' });
   location.href = '/login';
+}
+
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function renderResearchCard(d) {
+  const log = document.getElementById('log');
+  const el = document.createElement('div');
+  el.className = 'preview-card research-card';
+  const qs = (d.questions || []).map(q => `<div class="preview-q">• ${esc(q)}</div>`).join('');
+  el.innerHTML = `
+    <div class="preview-title">🔍 Research — ${esc(d.topic)}</div>
+    <div class="preview-claim"><strong>Story:</strong> ${esc(d.core_claim)}</div>
+    <div class="preview-take"><strong>Angle:</strong> ${esc(d.contrarian_take)}</div>
+    ${qs}`;
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+}
+
+function renderScriptCard(d) {
+  const log = document.getElementById('log');
+  const el = document.createElement('div');
+  el.className = 'preview-card script-card';
+  const rows = (d.segments || []).map(s =>
+    `<div class="seg-row"><span class="seg-role">${esc(s.role)}</span><span class="seg-preview">${esc(s.preview)}</span></div>`
+  ).join('');
+  el.innerHTML = `
+    <div class="preview-title">✍️ Script — ${esc(d.title)}</div>
+    ${d.description ? `<div class="preview-claim" style="margin-bottom:6px">${esc(d.description)}</div>` : ''}
+    ${rows}`;
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
 }
 
 // Load history on page load

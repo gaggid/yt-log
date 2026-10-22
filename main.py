@@ -35,6 +35,16 @@ import video
 JOBS_DIR = Path(__file__).with_name("jobs")
 JOBS_DIR.mkdir(exist_ok=True)
 
+_PAUSE_RE = re.compile(r'\[pause:([0-9.]+)s\]', re.IGNORECASE)
+
+
+def _make_silence(path: Path, seconds: float) -> None:
+    """Generate a silent MP3 clip via FFmpeg."""
+    subprocess.run(
+        [config.FFMPEG, "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
+         "-t", f"{max(0.1, seconds):.2f}", "-c:a", "libmp3lame", "-q:a", "4", str(path)],
+        capture_output=True, check=True)
+
 app = FastAPI(title="Podcast Video Generator")
 auth.install(app)
 
@@ -77,7 +87,7 @@ async def tts_segment(client: httpx.AsyncClient, text: str, voice: str,
     async with sem:
         r = await _post(client, "/audio/speech",
                         json={"model": config.TTS_MODEL, "input": text,
-                              "voice": voice, "response_format": "mp3"},
+                              "voice": voice, "response_format": "mp3", "speed": 1.15},
                         timeout=300)
         out.write_bytes(r.content)
         dur = float(r.headers.get("X-Audio-Seconds", 0))
@@ -146,8 +156,10 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
     job_dir.mkdir(exist_ok=True)
     log: list[str] = job["log"]
 
-    def emit(msg: str, type_: str = "info"):
-        log.append(json.dumps({"type": type_, "message": _clean(msg)}))
+    def emit(msg: str, type_: str = "info", **extra):
+        entry = {"type": type_, "message": _clean(msg)}
+        entry.update(extra)
+        log.append(json.dumps(entry, ensure_ascii=False))
 
     try:
         job["status"] = "running"
@@ -167,6 +179,11 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
             emit("🧐 Dissecting the story: finding the contrarian angle and the questions listeners will ask...")
             angles = await content.find_angles(chat, notes)
             emit(f"✓ Contrarian take: {angles.get('contrarian_take', '-')[:160]}", "success")
+            emit("Research angles ready", "research_result",
+                 topic=topic or "today's news",
+                 core_claim=angles.get("core_claim", ""),
+                 contrarian_take=angles.get("contrarian_take", ""),
+                 questions=angles.get("questions", [])[:4])
             deep = await content.deep_research(chat, topic, angles)
             emit(f"✓ Researched {len(angles.get('questions', []))} follow-up questions", "success")
 
@@ -175,27 +192,64 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
             script = await content.make_script(chat, notes, angles, deep, n_segments, topic)
             segs = script["segments"]
             n = len(segs)
-            for sg in segs:                              # no full English sentences: the Hindi voice mangles them
-                sg["narration"] = await content.purge_english(chat, sg["narration"])
+
+            # Extract [pause:Xs] markers before purge_english so they aren't mangled
+            for sg in segs:
+                raw_parts = _PAUSE_RE.split(sg["narration"])
+                texts = [raw_parts[k].strip() for k in range(0, len(raw_parts), 2) if raw_parts[k].strip()]
+                pdurs = []
+                for k in range(1, len(raw_parts), 2):
+                    try:
+                        pdurs.append(float(raw_parts[k]))
+                    except ValueError:
+                        pdurs.append(0.8)
+                sg["narration_parts"] = texts or [sg["narration"]]
+                sg["pause_durs"] = pdurs[:max(0, len(sg["narration_parts"]) - 1)]
+
+            # Clean each part: no full English sentences (Hindi voice mangles them)
+            for sg in segs:
+                cleaned = []
+                for part in sg["narration_parts"]:
+                    cleaned.append(await content.purge_english(chat, part))
+                sg["narration_parts"] = cleaned
+                sg["narration"] = " ".join(cleaned)
+
             emit(f"✓ Script: \"{script.get('title', '')}\" ({n} segments)", "success")
+            emit("Script ready", "script_result",
+                 title=script.get("title", ""),
+                 description=script.get("description", ""),
+                 segments=[{"role": sg.get("role", ""), "preview": sg["narration"][:120]}
+                           for sg in segs])
 
-            # 3) pronunciation prep: English words -> Devanagari phonetics before TTS
-            emit("🔤 Preparing pronunciation (English words in Devanagari phonetics)...")
-            spoken = await speech.prepare(chat_prompt, [s["narration"] for s in segs])
-            for s, sp in zip(segs, spoken):
-                s["speech"] = sp
-
-            # 4) voice
-            audio_paths = [job_dir / f"audio_{i:03d}.mp3" for i in range(n)]
+            # 3) + 4) Pronunciation prep (per-part) + voice generation with inline pauses
+            emit("🔤 Preparing pronunciation + generating voice...")
+            audio_parts: list[list[Path]] = [[] for _ in range(n)]
             durations = [0.0] * n
             sem = asyncio.Semaphore(config.MAX_CONCURRENCY)
 
             async def narrate(i: int, seg: dict):
-                emit(f"🎙 Segment {i+1}/{n}: generating voice...")
-                durations[i] = await tts_segment(client, seg["speech"], voice, audio_paths[i], sem)
-                emit(f"✓ Segment {i+1}/{n} voice ready ({durations[i]:.1f}s)", "success")
+                parts = seg.get("narration_parts", [seg["narration"]])
+                pdurs = seg.get("pause_durs", [])
+                label = f"Segment {i+1}/{n}"
+                emit(f"🎙 {label}: TTS ({len(parts)} part{'s' if len(parts)>1 else ''})...")
+                files, total = [], 0.0
+                for k, part_text in enumerate(parts):
+                    spoken = await speech.to_speech(chat_prompt, part_text)
+                    p = job_dir / f"audio_{i:03d}_{k:02d}.mp3"
+                    dur = await tts_segment(client, spoken, voice, p, sem)
+                    files.append(p)
+                    total += dur
+                    if k < len(pdurs) and pdurs[k] > 0:
+                        sil = job_dir / f"silence_{i:03d}_{k:02d}.mp3"
+                        await asyncio.to_thread(_make_silence, sil, pdurs[k])
+                        files.append(sil)
+                        total += pdurs[k]
+                audio_parts[i] = files
+                durations[i] = max(total, 1.0)
+                emit(f"✓ {label} voice ready ({total:.1f}s, {len(files)} clips)", "success")
 
             await asyncio.gather(*[narrate(i, seg) for i, seg in enumerate(segs)])
+            audio_paths_flat = [p for parts in audio_parts for p in parts]
 
             # 5) scene plan: split each segment into beats (2-5s), design one explanatory visual per beat
             rng = random.Random(job_id)
@@ -265,7 +319,7 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
                            ensure_ascii=False, indent=2), encoding="utf-8")
             emit(f"🎬 Assembling {total} scenes (camera: {camera}, crossfades) with FFmpeg...")
             output = job_dir / "output.mp4"
-            stats = await asyncio.to_thread(video.assemble, job_dir, audio_paths, shot_plan,
+            stats = await asyncio.to_thread(video.assemble, job_dir, audio_paths_flat, shot_plan,
                                             output, camera, job_id)
 
             size_mb = output.stat().st_size // 1024 // 1024
