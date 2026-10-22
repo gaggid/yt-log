@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sign in</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0c0c0c; color: #ddd; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 16px; }
+form { width: 100%; max-width: 340px; background: #141414; border: 1px solid #222; border-radius: 10px; padding: 26px; }
+h1 { font-size: 1.1rem; font-weight: 600; color: #fff; margin-bottom: 4px; }
+p.sub { font-size: 0.78rem; color: #666; margin-bottom: 20px; }
+label { display: block; font-size: 0.72rem; color: #666; margin: 14px 0 5px; text-transform: uppercase; letter-spacing: 0.05em; }
+input { width: 100%; background: #0c0c0c; border: 1px solid #2a2a2a; color: #ddd; border-radius: 6px;
+  padding: 10px 11px; font-size: 0.95rem; outline: none; }
+input:focus { border-color: #444; }
+button { width: 100%; margin-top: 20px; background: #2563eb; color: #fff; border: none; border-radius: 6px;
+  padding: 11px; font-size: 0.9rem; font-weight: 600; cursor: pointer; }
+button:hover { background: #1d4ed8; }
+button:disabled { background: #1e1e1e; color: #555; cursor: not-allowed; }
+#err { color: #f87171; font-size: 0.8rem; margin-top: 14px; min-height: 1.1em; }
+</style>
+</head>
+<body>
+<form id="f" autocomplete="on">
+  <h1>🎙 Podcast Video Generator</h1>
+  <p class="sub">Sign in to continue</p>
+  <label for="u">Username</label>
+  <input id="u" name="username" autocomplete="username" autofocus required>
+  <label for="p">Password</label>
+  <input id="p" name="password" type="password" autocomplete="current-password" required>
+  <button id="b" type="submit">Sign in</button>
+  <div id="err" role="alert"></div>
+</form>
+<script>
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const b = document.getElementById('b'), err = document.getElementById('err');
+  b.disabled = true; err.textContent = '';
+  try {
+    const res = await fetch('/login', { method: 'POST', body: new URLSearchParams(new FormData(e.target)) });
+    if (res.ok) { location.href = '/'; return; }
+    err.textContent = (await res.json().catch(() => ({}))).detail || 'Sign in failed.';
+  } catch (x) { err.textContent = 'Cannot reach the server.'; }
+  b.disabled = false;
+});
+</script>
+</body>
+</html>

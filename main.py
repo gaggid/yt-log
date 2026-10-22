@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import os
+import random
 import re
 import subprocess
 import sys
@@ -23,12 +24,19 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
+import art
+import auth
 import config
+import content
+import scenes as scenes_mod
+import speech
+import video
 
-JOBS_DIR = Path("jobs")
+JOBS_DIR = Path(__file__).with_name("jobs")
 JOBS_DIR.mkdir(exist_ok=True)
 
 app = FastAPI(title="Podcast Video Generator")
+auth.install(app)
 
 _jobs: dict[str, dict] = {}
 
@@ -41,124 +49,101 @@ def _clean(s: str) -> str:
     """Strip lone surrogates that json.dumps chokes on."""
     return s.encode("utf-8", errors="replace").decode("utf-8")
 
+async def _post(client: httpx.AsyncClient, path: str, tries: int = 3, **kw) -> httpx.Response:
+    """POST with retries on connection errors, timeouts and 5xx (model reloads, tunnel hiccups)."""
+    for attempt in range(tries):
+        try:
+            r = await client.post(f"{config.BASE_URL}{path}", headers=_hdrs(), **kw)
+            if r.status_code < 500 and r.status_code != 429:
+                r.raise_for_status()
+                return r
+            err: Exception = httpx.HTTPStatusError(f"{r.status_code} {r.text[:200]}",
+                                                   request=r.request, response=r)
+        except (httpx.TransportError, httpx.TimeoutException) as e:
+            err = e
+        if attempt == tries - 1:
+            raise err
+        await asyncio.sleep(5 * (attempt + 1))
+
 async def _chat(client: httpx.AsyncClient, messages: list, **kwargs) -> str:
     payload = {"model": config.CHAT_MODEL, "messages": messages, **kwargs}
-    r = await client.post(f"{config.BASE_URL}/chat/completions",
-                          json=payload, headers=_hdrs(), timeout=120)
-    r.raise_for_status()
+    r = await _post(client, "/chat/completions", json=payload, timeout=300)
     return _clean(r.json()["choices"][0]["message"]["content"])
 
-def _extract_json(text: str) -> dict:
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        m = re.search(r'\{.*\}', text, re.DOTALL)
-        if m:
-            return json.loads(m.group())
-        raise ValueError(f"No JSON found in response: {text[:200]}")
-
-# ── pipeline steps ─────────────────────────────────────────────────────────────
-
-async def research(client: httpx.AsyncClient, topic: str) -> str:
-    query = topic or "India top news stories today"
-    return await _chat(client,
-        [{"role": "user", "content": f"Research and summarize the latest news about: {query}. "
-          "Find 6-8 key stories with facts, context, and quotes. Be thorough."}],
-        server_tools=["web_search"], max_tokens=2500)
-
-async def make_script(client: httpx.AsyncClient, research_text: str, n: int) -> dict:
-    prompt = f"""You are a Hindi podcast scriptwriter. Based on the research below, write a {n}-segment solo-host podcast script.
-
-Research:
-{research_text}
-
-Return ONLY valid JSON (no markdown, no explanation):
-{{
-  "title": "Episode title in Hindi (Devanagari script)",
-  "description": "One line English description for YouTube",
-  "segments": [
-    {{
-      "id": 1,
-      "narration": "Hindi narration in Devanagari script, 3-5 conversational sentences, podcast tone",
-      "image_prompt": "Detailed English cinematic image description for this topic segment. Include mood, setting, visual style.",
-      "emotion": "calm"
-    }}
-  ]
-}}
-
-emotion values: calm | excited | serious | dramatic | concerned | amused
-Exactly {n} segments. Return only JSON."""
-
-    content = await _chat(client,
-        [{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"}, max_tokens=5000)
-    return _extract_json(content)
+# ── media steps ────────────────────────────────────────────────────────────────
 
 async def tts_segment(client: httpx.AsyncClient, text: str, voice: str,
                       out: Path, sem: asyncio.Semaphore) -> float:
     async with sem:
-        r = await client.post(f"{config.BASE_URL}/audio/speech",
-                              json={"model": config.TTS_MODEL, "input": text,
-                                    "voice": voice, "response_format": "mp3"},
-                              headers=_hdrs(), timeout=180)
-        r.raise_for_status()
+        r = await _post(client, "/audio/speech",
+                        json={"model": config.TTS_MODEL, "input": text,
+                              "voice": voice, "response_format": "mp3"},
+                        timeout=300)
         out.write_bytes(r.content)
         dur = float(r.headers.get("X-Audio-Seconds", 0))
         if dur <= 0:
             dur = len(r.content) / 16000  # ~128kbps fallback
         return max(dur, 1.0)
 
-async def image_segment(client: httpx.AsyncClient, prompt: str, style: str,
-                        out: Path, sem: asyncio.Semaphore) -> None:
+async def image_segment(client: httpx.AsyncClient, prompt: str,
+                        out: Path, sem: asyncio.Semaphore, seed: int | None = None) -> None:
+    body = {"model": config.IMAGE_MODEL, "prompt": prompt, "width": 1280, "height": 720,
+            "response_format": "b64_json", "quality": "standard", "n": 1}
+    if seed is not None:
+        body["seed"] = seed
     async with sem:
-        r = await client.post(f"{config.BASE_URL}/images/generations",
-                              json={"model": config.IMAGE_MODEL,
-                                    "prompt": prompt, "width": 1280, "height": 720,
-                                    "style": style, "response_format": "b64_json",
-                                    "quality": "standard", "n": 1},
-                              headers=_hdrs(), timeout=300)
-        r.raise_for_status()
+        r = await _post(client, "/images/generations", json=body, timeout=300)
         b64 = r.json()["data"][0]["b64_json"]
         out.write_bytes(base64.b64decode(b64))
 
-def ffmpeg_assemble(job_dir: Path, audio_paths: list, image_paths: list,
-                    durations: list, output: Path) -> None:
-    # Concat audio
-    ac = job_dir / "audio_list.txt"
-    ac.write_text("\n".join(f"file '{p.resolve()}'" for p in audio_paths), encoding="utf-8")
-    full_audio = job_dir / "audio.mp3"
-    subprocess.run(
-        [config.FFMPEG, "-y", "-f", "concat", "-safe", "0",
-         "-i", str(ac), "-c", "copy", str(full_audio)],
-        check=True, capture_output=True
-    )
+def _norm(t: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (t or "").lower())
 
-    # Video concat: each image held for audio duration
-    vc = job_dir / "video_list.txt"
-    lines = []
-    for img, dur in zip(image_paths, durations):
-        lines += [f"file '{img.resolve()}'", f"duration {dur:.3f}"]
-    lines.append(f"file '{image_paths[-1].resolve()}'")  # FFmpeg requires last entry
-    vc.write_text("\n".join(lines), encoding="utf-8")
+async def inspect_image(client: httpx.AsyncClient, path: Path) -> dict:
+    """Vision QA via the gateway's multimodal model: what text is readable, is there a close-up face."""
+    b64 = base64.b64encode(path.read_bytes()).decode()
+    r = await _post(client, "/chat/completions", timeout=300, json={
+        "model": config.VISION_MODEL, "preset": "no-think-json", "temperature": 0, "max_tokens": 200,
+        "response_format": {"type": "json_object"},
+        "messages": [{"role": "user", "content": [
+            {"type": "text", "text": 'Look at this illustration. Reply ONLY with JSON: {"text": "<all readable text exactly '
+                                     'as written, letter by letter, or empty string>", "closeup_face": true or false '
+                                     '(true only if a human face fills a large part of the image)}'},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64," + b64}}]}]})
+    try:
+        return content.extract_json(r.json()["choices"][0]["message"]["content"])
+    except Exception:
+        return {}
 
-    subprocess.run([
-        config.FFMPEG, "-y",
-        "-f", "concat", "-safe", "0", "-i", str(vc),
-        "-i", str(full_audio),
-        "-vf", "scale=2560:1440:flags=lanczos,format=yuv420p",
-        "-c:v", "libx264", "-preset", "slow", "-crf", "18",
-        "-c:a", "aac", "-b:a", "192k",
-        "-r", "30", "-shortest",
-        str(output)
-    ], check=True, capture_output=True, encoding="utf-8", errors="replace")
+# ── job persistence (jobs survive server restarts / auto-deploys) ──────────────
+
+def _save_meta(job_id: str) -> None:
+    job = _jobs[job_id]
+    keep = {k: job.get(k) for k in ("status", "created_at", "topic", "title", "description", "output", "stats")}
+    (JOBS_DIR / job_id).mkdir(exist_ok=True)
+    (JOBS_DIR / job_id / "meta.json").write_text(json.dumps(keep, ensure_ascii=False), encoding="utf-8")
+
+def _load_jobs() -> None:
+    for d in sorted(JOBS_DIR.iterdir()):
+        mf = d / "meta.json"
+        if not d.is_dir() or not mf.exists():
+            continue
+        try:
+            m = json.loads(mf.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if m.get("status") in ("queued", "running"):
+            m["status"] = "error"           # server restarted mid-job
+        m["log"] = [json.dumps({"type": "info", "message": f"Job {d.name} restored from disk ({m['status']})"})]
+        _jobs[d.name] = m
 
 # ── main pipeline ──────────────────────────────────────────────────────────────
 
 async def run_pipeline(job_id: str, topic: str, n_segments: int,
-                       style: str, voice: str):
+                       style: str, voice: str, camera: str):
     job = _jobs[job_id]
     job_dir = JOBS_DIR / job_id
-    job_dir.mkdir()
+    job_dir.mkdir(exist_ok=True)
     log: list[str] = job["log"]
 
     def emit(msg: str, type_: str = "info"):
@@ -166,49 +151,128 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
 
     try:
         job["status"] = "running"
+        _save_meta(job_id)
         async with httpx.AsyncClient() as client:
+            async def chat(messages, **kw):
+                return await _chat(client, messages, **kw)
 
+            async def chat_prompt(prompt: str):
+                return await chat([{"role": "user", "content": prompt}], max_tokens=2000, temperature=0.2)
+
+            # 1) research, then question the story and research the answers
             emit("🔍 Researching topic via web search...")
-            news = await research(client, topic)
+            notes = await content.research(chat, topic)
             emit("✓ Research complete", "success")
 
-            emit(f"✍️ Generating Hindi podcast script ({n_segments} segments)...")
-            script = await make_script(client, news, n_segments)
-            with open(job_dir / "script.json", "w", encoding="utf-8") as _f:
-                json.dump(script, _f, ensure_ascii=False, indent=2)
+            emit("🧐 Dissecting the story: finding the contrarian angle and the questions listeners will ask...")
+            angles = await content.find_angles(chat, notes)
+            emit(f"✓ Contrarian take: {angles.get('contrarian_take', '-')[:160]}", "success")
+            deep = await content.deep_research(chat, topic, angles)
+            emit(f"✓ Researched {len(angles.get('questions', []))} follow-up questions", "success")
+
+            # 2) persona script (first person, Hinglish)
+            emit(f"✍️ Writing first-person Hinglish script ({n_segments} segments)...")
+            script = await content.make_script(chat, notes, angles, deep, n_segments, topic)
             segs = script["segments"]
             n = len(segs)
+            for sg in segs:                              # no full English sentences: the Hindi voice mangles them
+                sg["narration"] = await content.purge_english(chat, sg["narration"])
             emit(f"✓ Script: \"{script.get('title', '')}\" ({n} segments)", "success")
 
+            # 3) pronunciation prep: English words -> Devanagari phonetics before TTS
+            emit("🔤 Preparing pronunciation (English words in Devanagari phonetics)...")
+            spoken = await speech.prepare(chat_prompt, [s["narration"] for s in segs])
+            for s, sp in zip(segs, spoken):
+                s["speech"] = sp
+
+            # 4) voice
             audio_paths = [job_dir / f"audio_{i:03d}.mp3" for i in range(n)]
-            image_paths = [job_dir / f"image_{i:03d}.png" for i in range(n)]
             durations = [0.0] * n
             sem = asyncio.Semaphore(config.MAX_CONCURRENCY)
 
-            # Sequential because MAX_CONCURRENCY=1; gather still works correctly
-            async def process(i: int, seg: dict):
-                emit(f"⟳ Segment {i+1}/{n}: generating audio...")
-                dur = await tts_segment(client, seg["narration"], voice,
-                                        audio_paths[i], sem)
-                durations[i] = dur
-                emit(f"⟳ Segment {i+1}/{n}: generating image...")
-                await image_segment(client, seg["image_prompt"], style,
-                                    image_paths[i], sem)
-                emit(f"✓ Segment {i+1}/{n} done ({dur:.1f}s)", "success")
+            async def narrate(i: int, seg: dict):
+                emit(f"🎙 Segment {i+1}/{n}: generating voice...")
+                durations[i] = await tts_segment(client, seg["speech"], voice, audio_paths[i], sem)
+                emit(f"✓ Segment {i+1}/{n} voice ready ({durations[i]:.1f}s)", "success")
 
-            await asyncio.gather(*[process(i, seg) for i, seg in enumerate(segs)])
+            await asyncio.gather(*[narrate(i, seg) for i, seg in enumerate(segs)])
 
-            emit("🎬 Assembling 2K video with FFmpeg...")
+            # 5) scene plan: split each segment into beats (2-5s), design one explanatory visual per beat
+            rng = random.Random(job_id)
+            style = style if style in art.STYLES else art.DEFAULT_STYLE
+            palettes = art.segment_palettes([str(sg.get("emotion", "")) for sg in segs], rng)
+            mem = scenes_mod.Memory()
+            shot_plan: list[dict] = []
+            for i, seg in enumerate(segs):
+                k = content.choose_shot_count(durations[i])
+                beats = content.split_beats(seg["narration"], k)
+                bdur = content.beat_durations(beats, durations[i])
+                emit(f"🎞 Segment {i+1}/{n}: planning {len(beats)} scenes...")
+                scenes = await scenes_mod.plan_scenes(chat, topic or script.get("title", ""), seg.get("role", ""), beats, mem)
+                seg["palette"] = palettes[i]
+                seg["scenes"] = [{"beat": b, "dur": round(d, 2), **sc} for b, d, sc in zip(beats, bdur, scenes)]
+                shot_plan += [{"scene": sc, "dur": d, "seg": i, "palette": palettes[i]} for sc, d in zip(scenes, bdur)]
+            script["total_seconds"] = round(sum(durations), 1)
+            with open(job_dir / "script.json", "w", encoding="utf-8") as _f:
+                json.dump(script, _f, ensure_ascii=False, indent=2)
+            emit(f"✓ Scene plan saved: {len(shot_plan)} scenes, "
+                 f"{sum(1 for s in shot_plan if s['scene'].get('text'))} with on-image text", "success")
+
+            # 6) images, one per scene
+            total = len(shot_plan)
+            emit(f"🖼 Generating {total} images ({style})...")
+            for j, s in enumerate(shot_plan):
+                s["image"] = job_dir / f"shot_{j:03d}.png"
+                s["prompt"] = art.compose(s["scene"], style, s["palette"], rng)
+                try:
+                    await image_segment(client, s["prompt"], s["image"], sem)
+                except Exception as e:
+                    if j == 0:
+                        raise
+                    emit(f"⚠ Scene {j+1} image failed ({type(e).__name__}); reusing previous", "error")
+                    s["image"] = shot_plan[j - 1]["image"]
+                if (j + 1) % 4 == 0 or j + 1 == total:
+                    emit(f"⟳ Images {j+1}/{total}")
+
+            # 6b) vision QA: misspelled on-image text and close-up faces get regenerated with a new seed
+            emit("🔎 Checking images (text spelling, faces)...")
+            fixed = 0
+            for j, s in enumerate(shot_plan):
+                if j and s["image"] == shot_plan[j - 1]["image"]:
+                    continue
+                want = s["scene"].get("text", "")
+                for attempt in range(3):
+                    try:
+                        info = await inspect_image(client, s["image"])
+                    except Exception:
+                        break                                   # QA unavailable: keep the image
+                    bad_text = _norm(info.get("text", "")) != _norm(want) and (want or len(_norm(info.get("text", ""))) > 3)
+                    bad_face = bool(info.get("closeup_face"))
+                    if not (bad_text or bad_face):
+                        break
+                    if attempt == 2:
+                        if bad_text and want:                   # give up on the text: redraw without it
+                            s["scene"]["text"] = ""
+                            s["prompt"] = art.compose(s["scene"], style, s["palette"], rng)
+                            await image_segment(client, s["prompt"], s["image"], sem, rng.randrange(2**31))
+                        break
+                    fixed += 1
+                    await image_segment(client, s["prompt"], s["image"], sem, rng.randrange(2**31))
+            emit(f"✓ Image check done ({fixed} regenerated)", "success")
+
+            (job_dir / "image_prompts.json").write_text(
+                json.dumps([{"shot": j, "palette": s["palette"], "prompt": s["prompt"]} for j, s in enumerate(shot_plan)],
+                           ensure_ascii=False, indent=2), encoding="utf-8")
+            emit(f"🎬 Assembling {total} scenes (camera: {camera}, crossfades) with FFmpeg...")
             output = job_dir / "output.mp4"
-            await asyncio.to_thread(ffmpeg_assemble, job_dir, audio_paths,
-                                    image_paths, durations, output)
+            stats = await asyncio.to_thread(video.assemble, job_dir, audio_paths, shot_plan,
+                                            output, camera, job_id)
 
             size_mb = output.stat().st_size // 1024 // 1024
-            job["status"] = "done"
-            job["output"] = str(output)
-            job["title"] = script["title"]
-            job["description"] = script.get("description", "")
-            emit(f"✅ Done! {size_mb}MB — ready to download", "done")
+            job.update(status="done", output=str(output), title=script["title"],
+                       description=script.get("description", ""), stats=stats)
+            _save_meta(job_id)
+            emit(f"✅ Done! {size_mb}MB, {stats['seconds']}s, {stats['shots']} scenes — ready to download", "done")
 
     except UnicodeEncodeError as ue:
         job["status"] = "error"
@@ -221,6 +285,8 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
         emit(f"❌ {type(e).__name__}: {e}", "error")
         for line in traceback.format_exc().splitlines():
             emit(f"  {line}", "error")
+    finally:
+        _save_meta(job_id)
 
 # ── routes ─────────────────────────────────────────────────────────────────────
 
@@ -229,9 +295,11 @@ class GenerateRequest(BaseModel):
     segments: int = config.DEFAULT_SEGMENTS
     style: str = config.DEFAULT_STYLE
     voice: str = config.DEFAULT_VOICE
+    camera: str = config.DEFAULT_CAMERA
 
 @app.on_event("startup")
 async def startup():
+    _load_jobs()
     try:
         subprocess.run([config.FFMPEG, "-version"], capture_output=True, check=True)
         print(f"FFmpeg OK: {config.FFMPEG}")
@@ -239,10 +307,11 @@ async def startup():
         print(f"WARNING: ffmpeg not found at {config.FFMPEG} — video assembly will fail")
     if not config.API_KEY:
         print("WARNING: TRIPFICK_API_KEY not set")
+    print(f"Login: user '{config.APP_USER}', password in .env (APP_PASSWORD)")
 
 @app.get("/")
 async def root():
-    return FileResponse("static/index.html")
+    return FileResponse(Path(__file__).with_name("static") / "index.html")
 
 @app.post("/generate")
 async def generate(req: GenerateRequest, bg: BackgroundTasks):
@@ -253,7 +322,7 @@ async def generate(req: GenerateRequest, bg: BackgroundTasks):
         "created_at": datetime.now().isoformat(),
         "topic": req.topic or "today's news",
     }
-    bg.add_task(run_pipeline, job_id, req.topic, req.segments, req.style, req.voice)
+    bg.add_task(run_pipeline, job_id, req.topic, req.segments, req.style, req.voice, req.camera)
     return {"job_id": job_id}
 
 @app.get("/status/{job_id}")
@@ -291,7 +360,7 @@ async def download(job_id: str):
     if not job or job["status"] != "done":
         raise HTTPException(404)
     path = Path(job["output"])
-    safe = re.sub(r'[^\w\s-]', '', job.get("title", "podcast"))[:50].strip()
+    safe = re.sub(r'[^\w\s-]', '', job.get("title", "podcast"))[:50].strip() or "podcast"
     return FileResponse(path, media_type="video/mp4", filename=f"{safe}.mp4")
 
 @app.get("/jobs")
@@ -299,3 +368,17 @@ async def list_jobs():
     return [{"id": k, "status": v["status"], "topic": v.get("topic"),
              "title": v.get("title"), "created_at": v["created_at"]}
             for k, v in _jobs.items()]
+
+@app.get("/internal/busy")
+async def internal_busy():
+    """For watch.py (auto-deploy): true while a job is queued or running."""
+    return {"busy": any(j["status"] in ("queued", "running") for j in _jobs.values())}
+
+@app.get("/options")
+async def options():
+    return {"cameras": ["auto", *video.MOVES], "transitions": video.TRANSITIONS,
+            "styles": list(art.STYLES), "palettes": list(art.PALETTES)}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host=config.HOST, port=config.PORT)

@@ -114,7 +114,8 @@ video { width: 100%; border-radius: 7px; background: #000; margin-bottom: 12px; 
 <body>
 <header>
   <h1>🎙 Podcast Video Generator</h1>
-  <span>Hindi script → TTS audio → AI images → 2K YouTube video</span>
+  <span style="flex:1">Hinglish script → TTS audio → AI illustrations → 1080p video with camera moves</span>
+  <button class="btn-secondary" onclick="logout()">Sign out</button>
 </header>
 <main>
 
@@ -135,37 +136,40 @@ video { width: 100%; border-radius: 7px; background: #000; margin-bottom: 12px; 
     <div class="grid3">
       <div>
         <label>Segments</label>
-        <input type="number" id="segments" value="8" min="4" max="20" />
+        <input type="number" id="segments" value="4" min="2" max="20" />
       </div>
       <div>
         <label>Image Style</label>
         <select id="style">
-          <option value="cinematic-poster">Cinematic Poster</option>
-          <option value="screen-print">Screen Print</option>
-          <option value="photorealistic">Photorealistic</option>
-          <option value="digital-art">Digital Art</option>
-          <option value="news-broadcast">News Broadcast</option>
-          <option value="illustration">Illustration</option>
+          <option value="graphic-novel" selected>Graphic Novel (ink + halftone)</option>
+          <option value="flat-vector">Flat Vector Editorial</option>
+          <option value="ink-wash">Ink &amp; Watercolour Wash</option>
+          <option value="retro-poster">Retro Screen-print Poster</option>
+          <option value="paper-cut">Paper-cut Collage</option>
         </select>
       </div>
       <div>
-        <label>Custom Prompt Additions</label>
-        <input type="text" id="extra-prompt" placeholder="Focus on..." />
+        <label>Camera Movement</label>
+        <select id="camera">
+          <option value="auto" selected>Auto (slow zoom + gentle pans)</option>
+          <option value="zoom_in">Slow zoom in</option>
+          <option value="zoom_out">Slow zoom out</option>
+          <option value="pan_left">Slow pan left</option>
+          <option value="pan_right">Slow pan right</option>
+          <option value="tilt_up">Slow tilt up</option>
+          <option value="tilt_down">Slow tilt down</option>
+        </select>
       </div>
+    </div>
+    <div style="margin-top:14px">
+      <label>Custom Prompt Additions</label>
+      <input type="text" id="extra-prompt" placeholder="Focus on..." />
     </div>
 
     <div style="margin-top:16px">
       <label>Voice</label>
       <div class="voice-grid">
-        <div class="voice-btn active" data-voice="hf_alpha" onclick="selectVoice(this)">
-          <span class="voice-name">Alpha</span>
-          <span class="voice-lang">Hindi ♀</span>
-        </div>
-        <div class="voice-btn" data-voice="hf_beta" onclick="selectVoice(this)">
-          <span class="voice-name">Beta</span>
-          <span class="voice-lang">Hindi ♀</span>
-        </div>
-        <div class="voice-btn" data-voice="hm_omega" onclick="selectVoice(this)">
+        <div class="voice-btn active" data-voice="hm_omega" onclick="selectVoice(this)">
           <span class="voice-name">Omega</span>
           <span class="voice-lang">Hindi ♂</span>
         </div>
@@ -173,21 +177,13 @@ video { width: 100%; border-radius: 7px; background: #000; margin-bottom: 12px; 
           <span class="voice-name">Psi</span>
           <span class="voice-lang">Hindi ♂</span>
         </div>
-        <div class="voice-btn" data-voice="af_heart" onclick="selectVoice(this)">
-          <span class="voice-name">Heart</span>
-          <span class="voice-lang">English ♀</span>
+        <div class="voice-btn" data-voice="hf_alpha" onclick="selectVoice(this)">
+          <span class="voice-name">Alpha</span>
+          <span class="voice-lang">Hindi ♀</span>
         </div>
-        <div class="voice-btn" data-voice="am_echo" onclick="selectVoice(this)">
-          <span class="voice-name">Echo</span>
-          <span class="voice-lang">English ♂</span>
-        </div>
-        <div class="voice-btn" data-voice="af_nova" onclick="selectVoice(this)">
-          <span class="voice-name">Nova</span>
-          <span class="voice-lang">English ♀</span>
-        </div>
-        <div class="voice-btn" data-voice="am_fenrir" onclick="selectVoice(this)">
-          <span class="voice-name">Fenrir</span>
-          <span class="voice-lang">English ♂</span>
+        <div class="voice-btn" data-voice="hf_beta" onclick="selectVoice(this)">
+          <span class="voice-name">Beta</span>
+          <span class="voice-lang">Hindi ♀</span>
         </div>
       </div>
     </div>
@@ -223,7 +219,7 @@ video { width: 100%; border-radius: 7px; background: #000; margin-bottom: 12px; 
 </main>
 
 <script>
-let selectedVoice = 'hf_alpha';
+let selectedVoice = 'hm_omega';
 let currentJobId = null;
 
 function selectVoice(el) {
@@ -263,6 +259,7 @@ async function generate() {
         topic: fullTopic,
         segments: parseInt(document.getElementById('segments').value),
         style: document.getElementById('style').value,
+        camera: document.getElementById('camera').value,
         voice: selectedVoice,
       })
     });
@@ -273,6 +270,7 @@ async function generate() {
     return;
   }
 
+  if (res.status === 401) { location.href = '/login'; return; }
   if (!res.ok) {
     appendLog(`Server error ${res.status}`, 'error');
     btn.disabled = false;
@@ -351,6 +349,7 @@ function downloadVideo() {
 
 async function refreshHistory() {
   const res = await fetch('/jobs');
+  if (res.status === 401) { location.href = '/login'; return; }
   const jobs = await res.json();
   if (!jobs.length) return;
 
@@ -376,6 +375,11 @@ async function refreshHistory() {
 function playJob(jobId) {
   currentJobId = jobId;
   showOutput(jobId);
+}
+
+async function logout() {
+  await fetch('/logout', { method: 'POST' });
+  location.href = '/login';
 }
 
 // Load history on page load

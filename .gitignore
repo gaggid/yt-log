@@ -8,3 +8,4 @@ jobs/
 *.wav
 *.png
 .env
+logs/

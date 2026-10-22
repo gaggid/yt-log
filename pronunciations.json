@@ -1,0 +1,4 @@
+{
+  "_help": "Fix a word that sounds awkward: add \"english word (lowercase)\": \"Devanagari phonetics\". Applied before TTS, always wins.",
+  "dumber": "डम्बर"
+}
