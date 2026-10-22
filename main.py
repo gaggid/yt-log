@@ -260,9 +260,12 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
                     total += dur
                     if k < len(pdurs) and pdurs[k] > 0:
                         sil = job_dir / f"silence_{i:03d}_{k:02d}.mp3"
-                        await asyncio.to_thread(_make_silence, sil, pdurs[k])
-                        files.append(sil)
-                        total += pdurs[k]
+                        try:
+                            await asyncio.to_thread(_make_silence, sil, pdurs[k])
+                            files.append(sil)
+                            total += pdurs[k]
+                        except Exception:
+                            pass  # ffmpeg missing: skip silence, audio continues
                 audio_parts[i] = files
                 durations[i] = max(total, 1.0)
                 emit(f"✓ {label} voice ready ({total:.1f}s, {len(files)} clips)", "success")
