@@ -227,6 +227,7 @@ video { width: 100%; border-radius: 7px; background: #000; margin-bottom: 12px; 
 
     <div class="generate-row">
       <button id="gen-btn" onclick="generate()">▶ Generate Video</button>
+      <button id="cancel-btn" style="display:none;background:#7f1d1d" onclick="cancelCurrent()">⛔ Cancel</button>
       <span class="job-label" id="job-label"></span>
     </div>
   </div>
@@ -318,6 +319,7 @@ async function generate() {
   const { job_id } = await res.json();
   currentJobId = job_id;
   btn.textContent = '⟳ Running...';
+  document.getElementById('cancel-btn').style.display = '';
   document.getElementById('job-label').textContent = `job ${job_id}`;
   appendLog(`Job ${job_id} accepted — streaming progress...`, 'success');
   streamProgress(job_id);
@@ -335,6 +337,7 @@ function streamProgress(jobId) {
       const btn = document.getElementById('gen-btn');
       btn.disabled = false;
       btn.textContent = '▶ Generate Video';
+      document.getElementById('cancel-btn').style.display = 'none';
       document.getElementById('job-label').textContent =
         data.status === 'done' ? `✓ job ${jobId}` : `✗ job ${jobId} failed`;
       if (data.status === 'done') showOutput(jobId);
@@ -359,6 +362,7 @@ function streamProgress(jobId) {
     const btn = document.getElementById('gen-btn');
     btn.disabled = false;
     btn.textContent = '▶ Generate Video';
+    document.getElementById('cancel-btn').style.display = 'none';
     appendLog('SSE connection lost. Check server console.', 'error');
   };
 }
@@ -402,13 +406,16 @@ async function refreshHistory() {
         <div>${j.title || j.topic || '—'}</div>
         <div class="job-meta">${j.id} · ${(j.created_at || '').slice(0,16).replace('T',' ')}</div>
       </div>
-      <div style="display:flex;align-items:center;gap:10px">
+      <div style="display:flex;align-items:center;gap:8px">
         ${j.status === 'done'
           ? `<a href="/download/${j.id}" style="color:#60a5fa;font-size:0.78rem;text-decoration:none">⬇ MP4</a>
              <a onclick="playJob('${j.id}')" style="color:#888;font-size:0.78rem;cursor:pointer">▶ Play</a>`
           : j.status === 'error'
           ? `<a onclick="resumeJob('${j.id}')" style="color:#fbbf24;font-size:0.78rem;cursor:pointer">🔄 Resume</a>`
+          : (j.status === 'running' || j.status === 'queued')
+          ? `<a onclick="cancelJob('${j.id}')" style="color:#f87171;font-size:0.78rem;cursor:pointer">⛔ Cancel</a>`
           : ''}
+        <a onclick="deleteJob('${j.id}')" style="color:#555;font-size:0.78rem;cursor:pointer" title="Delete job and files">🗑</a>
         <span class="badge b-${j.status}">${j.status}</span>
       </div>
     </div>
@@ -444,6 +451,39 @@ async function resumeJob(jobId) {
   }
   appendLog(`Resuming assembly for job ${jobId}…`, 'success');
   streamProgress(jobId);
+}
+
+async function cancelCurrent() {
+  if (currentJobId) cancelJob(currentJobId);
+}
+
+async function cancelJob(jobId) {
+  const res = await fetch(`/cancel/${jobId}`, { method: 'POST' });
+  if (res.status === 401) { location.href = '/login'; return; }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({detail: res.statusText}));
+    appendLog(`Cancel failed: ${err.detail || res.status}`, 'error');
+    return;
+  }
+  appendLog(`Job ${jobId} cancellation requested…`, 'info');
+  refreshHistory();
+}
+
+async function deleteJob(jobId) {
+  if (!confirm(`Delete job ${jobId} and all its files?`)) return;
+  const res = await fetch(`/jobs/${jobId}`, { method: 'DELETE' });
+  if (res.status === 401) { location.href = '/login'; return; }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({detail: res.statusText}));
+    appendLog(`Delete failed: ${err.detail || res.status}`, 'error');
+    return;
+  }
+  if (currentJobId === jobId) {
+    currentJobId = null;
+    document.getElementById('output-card').style.display = 'none';
+    document.getElementById('job-label').textContent = '';
+  }
+  refreshHistory();
 }
 
 async function logout() {

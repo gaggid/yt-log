@@ -81,9 +81,12 @@ def _hdrs():
         h["Authorization"] = f"Bearer {config.API_KEY}"
     return h
 
+_THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL | re.IGNORECASE)
+
 def _clean(s: str) -> str:
-    """Strip lone surrogates that json.dumps chokes on."""
-    return s.encode("utf-8", errors="replace").decode("utf-8")
+    """Strip lone surrogates and thinking-token blocks that some models emit before their answer."""
+    s = s.encode("utf-8", errors="replace").decode("utf-8")
+    return _THINK_RE.sub("", s).strip()
 
 async def _post(client: httpx.AsyncClient, path: str, tries: int = 3, **kw) -> httpx.Response:
     """POST with retries on connection errors, timeouts and 5xx (model reloads, tunnel hiccups)."""
@@ -195,7 +198,11 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
                 return await _chat(client, messages, **kw)
 
             async def chat_prompt(prompt: str):
-                return await chat([{"role": "user", "content": prompt}], max_tokens=2000, temperature=0.2)
+                return await chat([{"role": "user", "content": prompt}], max_tokens=4000, temperature=0.2)
+
+            def _check_cancelled():
+                if job.get("status") == "cancelled":
+                    raise RuntimeError("Job cancelled by user")
 
             # 1) fetch fresh headlines from Google News RSS (trusted sources, last 36h)
             emit("📡 Fetching latest headlines from Google News RSS...")
@@ -210,11 +217,13 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
                               "age_h": h["age_h"], "trusted": h["trusted"]}
                              for h in headlines])
 
+            _check_cancelled()
             # 2) synthesise research notes from curated headlines
             emit("📝 Synthesising research notes...")
             notes = await content.research(chat, topic, headlines or None)
             emit("✓ Research notes ready", "success")
 
+            _check_cancelled()
             # 3) angles + uber story
             emit("🧐 Finding contrarian angles and brain-work questions...")
             angles = await content.find_angles(chat, notes)
@@ -232,9 +241,11 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
                  contrarian_take=angles.get("contrarian_take", ""),
                  uber_story=uber_story,
                  questions=angles.get("questions", [])[:4])
+            _check_cancelled()
             deep = await content.deep_research(chat, topic, angles)
             emit(f"✓ Deep research done ({len(angles.get('questions', []))} questions answered)", "success")
 
+            _check_cancelled()
             # 2) persona script (first person, Hinglish)
             emit(f"✍️ Writing first-person Hinglish script ({n_segments} segments)...")
             script = await content.make_script(chat, notes, angles, deep, n_segments, topic, uber_story)
@@ -276,6 +287,8 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
             job["character_bible"] = bible
             _save_meta(job_id)
 
+            sem = asyncio.Semaphore(config.MAX_CONCURRENCY)
+
             # 2c) Character reference images (3 poses, white background)
             if style == "cinematic":
                 ref_prompts = art.character_reference_prompts(bible)
@@ -290,11 +303,11 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
                         emit(f"⚠ Char ref {ri+1} failed: {e}", "error")
                 emit(f"✓ {len(char_refs)} character reference images saved", "success")
 
+            _check_cancelled()
             # 3) + 4) Pronunciation prep (per-part) + voice generation with inline pauses
             emit("🔤 Preparing pronunciation + generating voice...")
             audio_parts: list[list[Path]] = [[] for _ in range(n)]
             durations = [0.0] * n
-            sem = asyncio.Semaphore(config.MAX_CONCURRENCY)
 
             async def narrate(i: int, seg: dict):
                 parts = seg.get("narration_parts", [seg["narration"]])
@@ -380,6 +393,7 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
                  f"{sum(1 for s in shot_plan if s['scene'].get('text'))} with on-screen text — "
                  f"prompt_draft.json written", "success")
 
+            _check_cancelled()
             # 6) images, one per scene
             total = len(shot_plan)
             emit(f"🖼 Generating {total} images ({style})...")
@@ -452,6 +466,14 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
         emit(f"❌ UnicodeEncodeError: codec={ue.encoding!r} pos={ue.start}-{ue.end} context={ctx}", "error")
         for line in traceback.format_exc().splitlines():
             emit(f"  {line}", "error")
+    except RuntimeError as e:
+        if "cancelled" in str(e).lower():
+            job["status"] = "cancelled"
+        else:
+            job["status"] = "error"
+            emit(f"❌ {type(e).__name__}: {e}", "error")
+            for line in traceback.format_exc().splitlines():
+                emit(f"  {line}", "error")
     except Exception as e:
         job["status"] = "error"
         emit(f"❌ {type(e).__name__}: {e}", "error")
@@ -634,6 +656,36 @@ async def list_jobs():
     return [{"id": k, "status": v["status"], "topic": v.get("topic"),
              "title": v.get("title"), "created_at": v["created_at"]}
             for k, v in _jobs.items()]
+
+
+@app.post("/cancel/{job_id}")
+async def cancel_job(job_id: str):
+    """Mark a running/queued job as cancelled. The background task will notice and stop at next checkpoint."""
+    job = _jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if job["status"] not in ("running", "queued"):
+        raise HTTPException(400, f"Job is {job['status']}, not running")
+    job["status"] = "cancelled"
+    job["log"].append(json.dumps({"type": "error", "message": "⛔ Job cancelled by user"}))
+    _save_meta(job_id)
+    return {"ok": True}
+
+
+@app.delete("/jobs/{job_id}")
+async def delete_job(job_id: str):
+    """Delete a job from memory and its files from disk."""
+    job = _jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if job["status"] in ("running", "queued"):
+        job["status"] = "cancelled"
+    _jobs.pop(job_id, None)
+    job_dir = JOBS_DIR / job_id
+    if job_dir.exists():
+        import shutil as _shutil
+        _shutil.rmtree(job_dir, ignore_errors=True)
+    return {"ok": True}
 
 @app.get("/health")
 async def health():

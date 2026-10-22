@@ -13,7 +13,9 @@ STYLES = {
     "ink-wash": "expressive ink and watercolour wash illustration, soft gradients, visible brush texture, hand-painted",
     "retro-poster": "retro screen-printed poster illustration, layered inks, bold simple shapes, vintage paper grain",
     "paper-cut": "layered paper-cut collage illustration, soft shadows between layers, handcrafted tactile texture",
-    "cinematic": "photorealistic cinematic still, 35mm lens, shallow depth of field, professional colour grade, high production value, no illustrations, no artwork, no cartoon",
+    "cinematic": ("cinematic digital painting, semi-stylized realism — realistic proportions and cinematic lighting "
+                  "but with a painterly illustrated quality, visible brushwork, bold colour grading, "
+                  "graphic-novel depth without being a cartoon, not a photograph, not flat vector art"),
 }
 DEFAULT_STYLE = "graphic-novel"
 
@@ -164,7 +166,7 @@ def character_reference_prompts(bible: dict) -> list[str]:
     desc = bible.get("protagonist", {}).get("description", "Indian professional, early 30s")
     base = (f"{desc} "
             "Plain white studio background, clean neutral studio lighting, "
-            "photorealistic, sharp focus, high production value.")
+            "cinematic digital painting, semi-stylized realism, painterly quality, sharp focus.")
     return [
         f"Portrait close-up. {base} Calm neutral expression, looking directly at camera.",
         f"Half-body shot, slight three-quarter turn. {base} Relaxed confident posture.",

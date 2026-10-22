@@ -93,7 +93,7 @@ async def curate_headlines(chat, candidates: list[dict], topic: str = "") -> lis
     )
     try:
         m = re.search(r"\{.*\}", await chat([{"role": "user", "content": prompt}],
-                                            max_tokens=200, temperature=0.1), re.DOTALL)
+                                            max_tokens=2500, temperature=0.1), re.DOTALL)
         picks = [int(i) for i in json.loads(m.group()).get("picks", [])
                  if str(i).isdigit() and int(i) < len(candidates)]
         return [candidates[i] for i in picks[:10]]
@@ -115,7 +115,7 @@ async def find_uber_story(chat, headlines: list[dict]) -> str:
         "Return ONLY the uber story text, nothing else."
     )
     try:
-        result = (await chat([{"role": "user", "content": prompt}], max_tokens=300, temperature=0.3)).strip()
+        result = (await chat([{"role": "user", "content": prompt}], max_tokens=2500, temperature=0.3)).strip()
         return result if len(result) > 20 else ""
     except Exception:
         return ""
@@ -184,7 +184,7 @@ async def make_character_bible(chat, script: dict, topic: str) -> dict:
     )
     try:
         data = extract_json(await chat([{"role": "user", "content": prompt}],
-                                       max_tokens=600, temperature=0.4))
+                                       max_tokens=3000, temperature=0.4))
         if data.get("protagonist", {}).get("description"):
             return data
     except Exception:
@@ -214,18 +214,18 @@ async def research(chat, topic: str, headlines: list[dict] | None = None) -> str
             "Summarise these curated news stories into detailed research notes for a podcast episode. "
             "For each story: what happened, key numbers and facts, why it matters, and useful background context. "
             "These notes are the ONLY facts the host will use — be thorough.\n\n"
-            f"Stories:\n{listing}"}], max_tokens=3000)
+            f"Stories:\n{listing}"}], max_tokens=5000)
     # Fallback for topic-specific research where RSS may not have enough
     query = topic or "India science technology economy politics news today"
     return await chat([{"role": "user", "content":
         f"Research the LATEST news (last 24-48 hours) about: {query}. "
         "Focus on India. Use trusted sources: The Hindu, Economic Times, NDTV, Indian Express, Reuters, BBC. "
         "Find 6-8 key stories with facts, numbers, and context. Be thorough."}],
-        server_tools=["web_search"], max_tokens=2500)
+        server_tools=["web_search"], max_tokens=5000)
 
 
 async def find_angles(chat, notes: str) -> dict:
-    prompt = f"""You are a sharp, sceptical analyst preparing a podcast. Read the research notes.
+    prompt = f"""You are a sharp, sceptical analyst preparing a podcast episode. Read the research notes.
 
 Notes:
 {notes}
@@ -233,10 +233,28 @@ Notes:
 Produce exactly:
 - core_claim: the one-line story everybody is already repeating
 - contrarian_take: a defensible opposite or deeply overlooked angle that challenges the mainstream read
-- assumptions_to_challenge: exactly 3 widely-held assumptions this story should force us to re-examine
-- questions: exactly 6 questions that put the listener's brain to work — NOT obvious FAQs.
-  Each question must reveal a hidden contradiction, a second-order consequence, or an uncomfortable
-  implication the listener has not considered yet. Make them specific to this story, not generic.
+- assumptions_to_challenge: exactly 3 widely-held assumptions this story forces us to re-examine
+- questions: exactly 6 PARENT-LEVEL questions for the listener to wrestle with.
+
+HOW TO WRITE PARENT-LEVEL QUESTIONS — follow this 4-step method for each:
+  1. Identify the underlying tension: what is the REAL conflict here — cost vs productivity, innovation vs
+     accountability, convenience vs consumer psychology, efficiency vs human oversight?
+  2. Zoom out from the specific company or event to the ENTIRE industry or structural pattern it represents.
+  3. Frame the question around economics, incentives, risks, or second-order consequences — NOT around what
+     happened or why this one company did this specific thing.
+  4. The question must apply to multiple companies and potentially multiple industries, not just the one in
+     the news. Use the specific event as evidence inside the answer, not as the subject of the question.
+
+BAD question (event-level): "If Barclays cuts 5,000 jobs to integrate AI, what is the hidden cost of monitoring those systems?"
+GOOD question (industry-level): "Is AI genuinely reducing operating costs, or simply shifting visible labour costs into less visible AI oversight costs that will compound over time?"
+
+BAD question: "Why is Blinkit outperforming Instamart?"
+GOOD question: "Are digital businesses winning through better products or through a deeper understanding of human psychology — and if it is psychology, what does that mean for sustainable competitive moats?"
+
+Each question must:
+- Reveal a structural tension or economic paradox that applies industry-wide
+- Be open-ended with no obvious answer
+- Make the listener feel they have discovered something the mainstream narrative missed
 
 Return ONLY JSON:
 {{"core_claim": "...",
@@ -245,7 +263,7 @@ Return ONLY JSON:
   "questions": ["question 1", "question 2", "question 3", "question 4", "question 5", "question 6"]}}"""
     try:
         return extract_json(await chat([{"role": "user", "content": prompt}],
-                                       response_format={"type": "json_object"}, max_tokens=1500))
+                                       response_format={"type": "json_object"}, max_tokens=4000))
     except Exception:
         return {"core_claim": "", "contrarian_take": "", "assumptions_to_challenge": [], "questions": []}
 
@@ -258,7 +276,7 @@ async def deep_research(chat, topic: str, angles: dict) -> str:
         f"Topic: {topic or 'today news'}\nAnswer each question below with concrete, verifiable facts and numbers "
         f"(say when something is unknown), then give evidence FOR and AGAINST this contrarian take: "
         f"\"{angles.get('contrarian_take', '')}\".\nQuestions:\n{qs}"}],
-        server_tools=["web_search"], max_tokens=2500)
+        server_tools=["web_search"], max_tokens=5000)
 
 
 async def make_script(chat, notes: str, angles: dict, deep: str, n: int, topic: str,
@@ -346,7 +364,7 @@ async def purge_english(chat, narration: str) -> str:
                     "Example: 'Gold is a lazy asset that just sits there.' -> 'Gold ek lazy asset hai jo bas baitha rehta hai.' "
                     "Keep the meaning and the first-person voice, one sentence, no English clause left.\nSentence: " + p +
                     "\nReturn ONLY the Hinglish sentence."}],
-                    max_tokens=1500, temperature=0.3)).strip().strip('"') or p
+                    max_tokens=4000, temperature=0.3)).strip().strip('"') or p
             except Exception:
                 pass
         out.append(p)

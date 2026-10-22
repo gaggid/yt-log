@@ -78,7 +78,7 @@ async def _rewrite_cinematic(chat, beat: str, current: str, clash: str) -> str:
         "Return ONLY one short paragraph describing the new shot."
     )
     try:
-        return (await chat([{"role": "user", "content": prompt}], max_tokens=400, temperature=0.9)).strip()
+        return (await chat([{"role": "user", "content": prompt}], max_tokens=2500, temperature=0.9)).strip()
     except Exception:
         return current
 
@@ -90,7 +90,7 @@ async def _rewrite_illustrated(chat, beat: str, visual: str, clash: str) -> str:
         "composition. No faces, no readable text. Return ONLY the sentence."
     )
     try:
-        return (await chat([{"role": "user", "content": prompt}], max_tokens=400, temperature=0.9)).strip().strip('"')
+        return (await chat([{"role": "user", "content": prompt}], max_tokens=2500, temperature=0.9)).strip().strip('"')
     except Exception:
         return visual
 
