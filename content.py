@@ -155,6 +155,53 @@ def extract_json(text: str) -> dict:
         raise ValueError(f"No JSON found in response: {text[:200]}")
 
 
+async def make_character_bible(chat, script: dict, topic: str) -> dict:
+    """Generate a protagonist + environments + tone arc that will anchor every scene visually."""
+    segs = script.get("segments", [])
+    arc = "\n".join(
+        f"  [{s.get('role','').split('|')[0]}] {s['narration'][:100]}..."
+        for s in segs[:5])
+    prompt = (
+        f"You are a casting director and production designer for a short cinematic documentary.\n"
+        f"Topic: {topic or script.get('title', 'todays news')}\n"
+        f"Story arc:\n{arc}\n\n"
+        "Design one protagonist and a visual world that can carry this story.\n"
+        "The protagonist is a real-feeling person — not a generic stock-photo type.\n"
+        "Give precise physical details an image model can reproduce: age range, ethnicity, hair (length, colour, style), "
+        "face (jawline, eyes, glasses or not, stubble or not), clothing (specific colour, style, fit).\n"
+        "Return JSON exactly:\n"
+        '{"protagonist": {'
+        '"description": "3-4 sentences of precise physical appearance",'
+        '"arc": "emotional journey in one sentence — what they start feeling vs end feeling"'
+        '}, '
+        '"environments": ['
+        '"[env 1: specific location, time of day, light quality]",'
+        '"[env 2]",'
+        '"[env 3]"'
+        '], '
+        '"tone_arc": "one sentence: how visual mood shifts from opening shot to closing shot"}'
+    )
+    try:
+        data = extract_json(await chat([{"role": "user", "content": prompt}],
+                                       max_tokens=600, temperature=0.4))
+        if data.get("protagonist", {}).get("description"):
+            return data
+    except Exception:
+        pass
+    return {
+        "protagonist": {
+            "description": "Indian male professional, early 30s, wire-frame rectangular glasses, neat short black hair, light stubble, wearing a light blue collared shirt, slim build.",
+            "arc": "starts anxious and uncertain, ends confident and clear-eyed"
+        },
+        "environments": [
+            "modern open-plan Indian tech office, dusk, cool blue fluorescent light with city visible through glass partitions",
+            "busy Indian city street, mid-morning, harsh sunlight and vendor stalls",
+            "clean minimalist home study, evening, warm lamp light"
+        ],
+        "tone_arc": "opens in cool unsettling blue, transitions through tension to warm resolved amber by the final shot"
+    }
+
+
 async def research(chat, topic: str, headlines: list[dict] | None = None) -> str:
     """Synthesise curated RSS headlines into rich research notes, or fall back to web_search."""
     if headlines:

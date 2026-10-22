@@ -148,7 +148,7 @@ async def inspect_image(client: httpx.AsyncClient, path: Path) -> dict:
 
 def _save_meta(job_id: str) -> None:
     job = _jobs[job_id]
-    keep = {k: job.get(k) for k in ("status", "created_at", "topic", "title", "description", "output", "stats", "camera")}
+    keep = {k: job.get(k) for k in ("status", "created_at", "topic", "title", "description", "output", "stats", "camera", "character_bible")}
     (JOBS_DIR / job_id).mkdir(exist_ok=True)
     (JOBS_DIR / job_id / "meta.json").write_text(json.dumps(keep, ensure_ascii=False), encoding="utf-8")
 
@@ -256,6 +256,27 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
                  segments=[{"role": sg.get("role", ""), "preview": sg["narration"][:120]}
                            for sg in segs])
 
+            # 2b) Character bible — protagonist + environments + tone arc
+            emit("🎭 Building character bible...")
+            bible = await content.make_character_bible(chat, script, topic)
+            emit(f"✓ Protagonist: {bible['protagonist']['description'][:80]}...", "success")
+            job["character_bible"] = bible
+            _save_meta(job_id)
+
+            # 2c) Character reference images (3 poses, white background)
+            if style == "cinematic":
+                ref_prompts = art.character_reference_prompts(bible)
+                emit(f"📸 Generating {len(ref_prompts)} character reference images...")
+                char_refs: list[Path] = []
+                for ri, rp in enumerate(ref_prompts):
+                    rpath = job_dir / f"char_ref_{ri:02d}.png"
+                    try:
+                        await image_segment(client, rp, rpath, sem)
+                        char_refs.append(rpath)
+                    except Exception as e:
+                        emit(f"⚠ Char ref {ri+1} failed: {e}", "error")
+                emit(f"✓ {len(char_refs)} character reference images saved", "success")
+
             # 3) + 4) Pronunciation prep (per-part) + voice generation with inline pauses
             emit("🔤 Preparing pronunciation + generating voice...")
             audio_parts: list[list[Path]] = [[] for _ in range(n)]
@@ -304,7 +325,8 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
                 emit(f"🎞 Segment {i+1}/{n}: planning {len(beats)} scenes ({emotion})...")
                 scenes = await scenes_mod.plan_scenes(
                     chat, topic or script.get("title", ""), seg.get("role", ""),
-                    beats, mem, emotion=emotion, geo="india")
+                    beats, mem, emotion=emotion, geo="india",
+                    character_bible=bible, style=style)
                 seg["palette"] = palettes[i]
                 seg["scenes"] = [{"beat": b, "dur": round(d, 2), **sc} for b, d, sc in zip(beats, bdur, scenes)]
                 shot_plan += [{"scene": sc, "dur": d, "seg": i, "palette": palettes[i], "emotion": emotion}
@@ -312,15 +334,29 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
             script["total_seconds"] = round(sum(durations), 1)
             with open(job_dir / "script.json", "w", encoding="utf-8") as _f:
                 json.dump(script, _f, ensure_ascii=False, indent=2)
-            emit(f"✓ Scene plan saved: {len(shot_plan)} scenes, "
-                 f"{sum(1 for s in shot_plan if s['scene'].get('text'))} with on-image text", "success")
+
+            # Build prompts now so they can be reviewed before image generation starts
+            for s in shot_plan:
+                s["prompt"] = art.compose(s["scene"], style, s["palette"], rng, s.get("emotion", "neutral"))
+
+            draft = [{"shot": j, "seg": s["seg"], "dur": s["dur"],
+                      "beat": s["scene"].get("beat", ""),
+                      "emotion": s.get("emotion", ""),
+                      "scene": s["scene"],
+                      "prompt": s["prompt"]}
+                     for j, s in enumerate(shot_plan)]
+            (job_dir / "prompt_draft.json").write_text(
+                json.dumps(draft, ensure_ascii=False, indent=2), encoding="utf-8")
+            emit(f"✓ Scene plan: {len(shot_plan)} scenes, "
+                 f"{sum(1 for s in shot_plan if s['scene'].get('text'))} with on-screen text — "
+                 f"prompt_draft.json written", "success")
 
             # 6) images, one per scene
             total = len(shot_plan)
             emit(f"🖼 Generating {total} images ({style})...")
             for j, s in enumerate(shot_plan):
                 s["image"] = job_dir / f"shot_{j:03d}.png"
-                s["prompt"] = art.compose(s["scene"], style, s["palette"], rng, s.get("emotion", "neutral"))
+                # prompt already built during draft phase; reuse it
                 try:
                     await image_segment(client, s["prompt"], s["image"], sem)
                 except Exception as e:
@@ -350,7 +386,8 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
                     if attempt == 2:
                         if bad_text and want:                   # give up on the text: redraw without it
                             s["scene"]["text"] = ""
-                            s["prompt"] = art.compose(s["scene"], style, s["palette"], rng, s.get("emotion", "neutral"))
+                            s["prompt"] = art.compose(s["scene"], style, s["palette"], rng,
+                                                      s.get("emotion", "neutral"))
                             await image_segment(client, s["prompt"], s["image"], sem, rng.randrange(2**31))
                         break
                     fixed += 1
