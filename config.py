@@ -44,9 +44,7 @@ HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8905"))
 
 CHAT_MODEL = "gemma4-12b-qat-uncensored-hauhaucs-balanced"
-TTS_MODEL = "kokoro"
 IMAGE_MODEL = "z-image-turbo"
-VISION_MODEL = "qwen3.5-9b"       # multimodal; reads on-image text for QA
 
 DEFAULT_VOICE = "hm_omega"       # Hindi male
 DEFAULT_STYLE = "graphic-novel"  # illustrated look hides AI face/anatomy errors
@@ -57,6 +55,6 @@ MAX_CONCURRENCY = 1              # server limit
 # Shot timing: every image stays on screen SHOT_MIN..SHOT_MAX seconds.
 SHOT_MIN = 2.0
 SHOT_MAX = 5.0
-SHOT_TARGET = 3.5
+SHOT_TARGET = 5.0
 XFADE = 0.35                     # transition overlap, seconds
 VIDEO_W, VIDEO_H, VIDEO_FPS = 2560, 1440, 30

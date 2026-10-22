@@ -136,13 +136,10 @@ def assemble(job_dir: Path, audio_paths: list, shots: list[dict], output: Path,
             parts.append(f"[{prev}][{k}:v]xfade=transition={trans[k-1]}:duration={T}:offset={offset:.3f}[{lab}]")
             prev = lab
         graph = ";".join(parts)
-    gfile = job_dir / "filter.txt"
-    gfile.write_text(graph, encoding="utf-8")
-
     cmd = [config.FFMPEG, "-y"]
     for c in clips:
         cmd += ["-i", str(c)]
-    cmd += ["-i", str(full_audio), "-filter_complex_script", str(gfile),
+    cmd += ["-i", str(full_audio), "-filter_complex", graph,
             "-map", "[vout]", "-map", f"{n}:a",
             "-c:v", "libx264", "-preset", "medium", "-crf", "22", "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",

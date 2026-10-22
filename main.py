@@ -105,8 +105,8 @@ async def tts_segment(client: httpx.AsyncClient, text: str, voice: str,
                       out: Path, sem: asyncio.Semaphore) -> float:
     async with sem:
         r = await _post(client, "/audio/speech",
-                        json={"model": config.TTS_MODEL, "input": text,
-                              "voice": voice, "response_format": "mp3", "speed": 1.15},
+                        json={"input": text, "voice": voice,
+                              "response_format": "mp3", "speed": 1.15},
                         timeout=300)
         out.write_bytes(r.content)
         dur = float(r.headers.get("X-Audio-Seconds", 0))
@@ -132,7 +132,7 @@ async def inspect_image(client: httpx.AsyncClient, path: Path) -> dict:
     """Vision QA via the gateway's multimodal model: what text is readable, is there a close-up face."""
     b64 = base64.b64encode(path.read_bytes()).decode()
     r = await _post(client, "/chat/completions", timeout=300, json={
-        "model": config.VISION_MODEL, "preset": "no-think-json", "temperature": 0, "max_tokens": 200,
+        "model": config.CHAT_MODEL, "preset": "no-think-json", "temperature": 0, "max_tokens": 200,
         "response_format": {"type": "json_object"},
         "messages": [{"role": "user", "content": [
             {"type": "text", "text": 'Look at this illustration. Reply ONLY with JSON: {"text": "<all readable text exactly '
@@ -148,7 +148,7 @@ async def inspect_image(client: httpx.AsyncClient, path: Path) -> dict:
 
 def _save_meta(job_id: str) -> None:
     job = _jobs[job_id]
-    keep = {k: job.get(k) for k in ("status", "created_at", "topic", "title", "description", "output", "stats")}
+    keep = {k: job.get(k) for k in ("status", "created_at", "topic", "title", "description", "output", "stats", "camera")}
     (JOBS_DIR / job_id).mkdir(exist_ok=True)
     (JOBS_DIR / job_id / "meta.json").write_text(json.dumps(keep, ensure_ascii=False), encoding="utf-8")
 
@@ -356,6 +356,15 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
             (job_dir / "image_prompts.json").write_text(
                 json.dumps([{"shot": j, "palette": s["palette"], "prompt": s["prompt"]} for j, s in enumerate(shot_plan)],
                            ensure_ascii=False, indent=2), encoding="utf-8")
+            # Save everything needed to resume assembly if it fails
+            (job_dir / "shot_plan.json").write_text(
+                json.dumps([{"dur": s["dur"], "image": str(s["image"]), "seg": s["seg"],
+                             "palette": s["palette"], "scene": s["scene"]} for s in shot_plan],
+                           ensure_ascii=False, indent=2), encoding="utf-8")
+            (job_dir / "audio_list_flat.json").write_text(
+                json.dumps([str(p) for p in audio_paths_flat], ensure_ascii=False), encoding="utf-8")
+            job["camera"] = camera
+            _save_meta(job_id)
             emit(f"🎬 Assembling {total} scenes (camera: {camera}, crossfades) with FFmpeg...")
             output = job_dir / "output.mp4"
             stats = await asyncio.to_thread(video.assemble, job_dir, audio_paths_flat, shot_plan,
@@ -455,6 +464,58 @@ async def download(job_id: str):
     path = Path(job["output"])
     safe = re.sub(r'[^\w\s-]', '', job.get("title", "podcast"))[:50].strip() or "podcast"
     return FileResponse(path, media_type="video/mp4", filename=f"{safe}.mp4")
+
+@app.post("/resume/{job_id}")
+async def resume_job(job_id: str, bg: BackgroundTasks):
+    """Re-run only the FFmpeg assembly step using saved shot_plan.json + audio_list_flat.json."""
+    job_dir = JOBS_DIR / job_id
+    sp_file = job_dir / "shot_plan.json"
+    al_file = job_dir / "audio_list_flat.json"
+    if not sp_file.exists() or not al_file.exists():
+        raise HTTPException(400, "No saved assembly data for this job — run full pipeline first")
+    job = _jobs.get(job_id)
+    if job and job["status"] == "running":
+        raise HTTPException(409, "Job already running")
+    if job_id not in _jobs:
+        _jobs[job_id] = {"status": "queued", "created_at": datetime.now().isoformat(),
+                         "topic": "", "log": []}
+    job = _jobs[job_id]
+    job["status"] = "running"
+    job["log"] = [json.dumps({"type": "info", "message": f"⟳ Resuming assembly for job {job_id}"})]
+    _save_meta(job_id)
+
+    async def _do_resume():
+        log = job["log"]
+        def emit(msg, type_="info", **extra):
+            entry = {"type": type_, "message": _clean(msg)}
+            entry.update(extra)
+            log.append(json.dumps(entry, ensure_ascii=False))
+        try:
+            raw_plan = json.loads(sp_file.read_text(encoding="utf-8"))
+            shot_plan = [{"dur": s["dur"], "image": Path(s["image"]),
+                          "seg": s["seg"], "palette": s["palette"], "scene": s["scene"]}
+                         for s in raw_plan]
+            audio_paths_flat = [Path(p) for p in json.loads(al_file.read_text(encoding="utf-8"))]
+            camera = job.get("camera") or config.DEFAULT_CAMERA
+            output = job_dir / "output.mp4"
+            total = len(shot_plan)
+            emit(f"🎬 Assembling {total} scenes (camera: {camera}, crossfades) with FFmpeg...")
+            stats = await asyncio.to_thread(video.assemble, job_dir, audio_paths_flat, shot_plan,
+                                            output, camera, job_id)
+            size_mb = output.stat().st_size // 1024 // 1024
+            job.update(status="done", output=str(output), stats=stats)
+            _save_meta(job_id)
+            emit(f"✅ Done! {size_mb}MB, {stats['seconds']}s, {stats['shots']} scenes — ready to download", "done")
+        except Exception as e:
+            job["status"] = "error"
+            emit(f"❌ {type(e).__name__}: {e}", "error")
+            for line in traceback.format_exc().splitlines():
+                emit(f"  {line}", "error")
+            _save_meta(job_id)
+
+    bg.add_task(_do_resume)
+    return {"job_id": job_id, "status": "resuming"}
+
 
 @app.get("/jobs")
 async def list_jobs():
