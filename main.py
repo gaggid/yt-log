@@ -267,7 +267,8 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
                 durations[i] = max(total, 1.0)
                 emit(f"✓ {label} voice ready ({total:.1f}s, {len(files)} clips)", "success")
 
-            await asyncio.gather(*[narrate(i, seg) for i, seg in enumerate(segs)])
+            for i, seg in enumerate(segs):
+                await narrate(i, seg)
             audio_paths_flat = [p for parts in audio_parts for p in parts]
 
             # 5) scene plan: split each segment into beats (2-5s), design one explanatory visual per beat
