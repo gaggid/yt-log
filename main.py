@@ -36,6 +36,13 @@ JOBS_DIR = Path(__file__).with_name("jobs")
 JOBS_DIR.mkdir(exist_ok=True)
 
 _PAUSE_RE = re.compile(r'\[pause:([0-9.]+)s\]', re.IGNORECASE)
+_SENT_RE  = re.compile(r'[^।.?!]+[।.?!]*')
+_SENT_PAUSE = 0.35   # seconds of silence auto-inserted between every sentence
+
+
+def _split_sentences(text: str) -> list[str]:
+    """Split narration into individual sentences, stripping empties."""
+    return [s.strip() for s in _SENT_RE.findall(text) if s.strip()]
 
 
 def _make_silence(path: Path, seconds: float) -> None:
@@ -289,20 +296,36 @@ async def run_pipeline(job_id: str, topic: str, n_segments: int,
                 label = f"Segment {i+1}/{n}"
                 emit(f"🎙 {label}: TTS ({len(parts)} part{'s' if len(parts)>1 else ''})...")
                 files, total = [], 0.0
+                clip_idx = 0
                 for k, part_text in enumerate(parts):
-                    spoken = await speech.to_speech(chat_prompt, part_text)
-                    p = job_dir / f"audio_{i:03d}_{k:02d}.mp3"
-                    dur = await tts_segment(client, spoken, voice, p, sem)
-                    files.append(p)
-                    total += dur
+                    sentences = _split_sentences(part_text) or [part_text]
+                    for si, sent in enumerate(sentences):
+                        spoken = await speech.to_speech(chat_prompt, sent)
+                        p = job_dir / f"audio_{i:03d}_{clip_idx:03d}.mp3"
+                        dur = await tts_segment(client, spoken, voice, p, sem)
+                        files.append(p)
+                        total += dur
+                        clip_idx += 1
+                        # auto sentence-boundary pause (not after the last sentence of a part)
+                        if si < len(sentences) - 1:
+                            sil = job_dir / f"silence_{i:03d}_{clip_idx:03d}.mp3"
+                            try:
+                                await asyncio.to_thread(_make_silence, sil, _SENT_PAUSE)
+                                files.append(sil)
+                                total += _SENT_PAUSE
+                                clip_idx += 1
+                            except Exception:
+                                pass
+                    # explicit [pause:Xs] after this part
                     if k < len(pdurs) and pdurs[k] > 0:
-                        sil = job_dir / f"silence_{i:03d}_{k:02d}.mp3"
+                        sil = job_dir / f"silence_{i:03d}_{clip_idx:03d}.mp3"
                         try:
                             await asyncio.to_thread(_make_silence, sil, pdurs[k])
                             files.append(sil)
                             total += pdurs[k]
+                            clip_idx += 1
                         except Exception:
-                            pass  # ffmpeg missing: skip silence, audio continues
+                            pass  # ffmpeg missing: skip silence
                 audio_parts[i] = files
                 durations[i] = max(total, 1.0)
                 emit(f"✓ {label} voice ready ({total:.1f}s, {len(files)} clips)", "success")
