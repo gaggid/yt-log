@@ -9,7 +9,7 @@ from story import db, llm, settings as settings_mod
 from story.pipeline import manager
 from fastapi.responses import FileResponse
 
-from . import imgplan, imgprompts, intake, jobs, planner, providers, storyboard
+from . import editorial, export, imgplan, imgprompts, intake, jobs, planner, providers, storyboard
 
 router = APIRouter(prefix="/api/plans")
 
@@ -64,6 +64,20 @@ async def probe_providers():
     return await asyncio.to_thread(providers.probe, settings_mod.get(), settings_mod.api_key())
 
 
+@router.get("/schema")
+async def plan_schema():
+    from .export_schema import SCHEMA
+    return SCHEMA
+
+
+@router.get("/exports/{plan_id}/{name}")
+async def export_file(plan_id: str, name: str):
+    f = export.export_dir(plan_id) / name
+    if "/" in name or "\\" in name or ".." in name or not f.is_file():
+        raise HTTPException(404, "export not found")
+    return FileResponse(f, media_type="application/json", filename=name)
+
+
 @router.get("/previews/{plan_id}/{name}")
 async def preview_file(plan_id: str, name: str):
     f = imgplan.preview_dir(plan_id) / name
@@ -76,6 +90,9 @@ async def preview_file(plan_id: str, name: str):
 async def plan(plan_id: str):
     p = _guard(planner.get_plan, plan_id)
     p["job"] = jobs.status(plan_id)
+    p["approval"] = editorial.approval_state(p)
+    p["content_hash"] = editorial.content_hash(p)
+    p["exports"] = export.list_exports(plan_id)
     return p
 
 
@@ -239,6 +256,42 @@ async def patch_asset(asset_id: str, patch: dict):
     locked = a["locked"] if "locked" not in patch else (1 if patch["locked"] else 0)
     db.ex("UPDATE assets SET data=?, locked=?, rev=rev+1, updated_at=? WHERE id=?", (db.jdump(data), locked, db.now(), asset_id))
     return planner.get_plan(a["plan_id"])
+
+
+@router.post("/{plan_id}/review")
+async def review_plan(plan_id: str):
+    """Run every automatic check, score the twelve dimensions, and say what stands between the plan and approval."""
+    return await asyncio.to_thread(_guard, editorial.signoff, plan_id)
+
+
+class Approve(BaseModel):
+    note: str = ""
+
+
+@router.post("/{plan_id}/approve")
+async def approve_plan(plan_id: str, body: Approve | None = None):
+    return await asyncio.to_thread(_guard, editorial.approve, plan_id, (body.note if body else ""))
+
+
+@router.post("/{plan_id}/unapprove")
+async def unapprove_plan(plan_id: str):
+    return _guard(editorial.unapprove, plan_id)
+
+
+@router.get("/{plan_id}/history")
+async def plan_history(plan_id: str):
+    _guard(planner.get_plan, plan_id)
+    return editorial.history(plan_id)
+
+
+@router.post("/{plan_id}/export")
+async def export_plan(plan_id: str):
+    def go():
+        try:
+            return export.save(plan_id)
+        except export.ExportError as e:
+            raise HTTPException(400, str(e))
+    return await asyncio.to_thread(_guard, go)
 
 
 class ImageModels(BaseModel):

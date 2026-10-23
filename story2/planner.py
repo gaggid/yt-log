@@ -70,6 +70,8 @@ def list_plans(candidate_id: str = "", project_id: str = "") -> list[dict]:
         r["beats_written"] = len({s["beat"] for s in segs if s["beat"] in beats})
         r["spoken_s"] = round(sum(s["duration_s"] for s in segs), 1)
         r["scenes"] = db.one("SELECT COUNT(*) n FROM scenes WHERE plan_id=?", (r["id"],))["n"]
+        from . import export                                           # late import: export builds on this module
+        r["exports"] = len(export.list_exports(r["id"]))
     return rows
 
 
@@ -284,11 +286,12 @@ def validate_plan(plan_id: str) -> dict:
     target = float(plan["settings"]["minutes"]) * 60
     got = sum(s["duration_s"] for s in plan["segments"])
     if plan["segments"] and not (0.6 * target <= got <= 1.5 * target):
-        issues.append({"where": "plan", "kind": "duration", "text": f"narration is about {got / 60:.1f} min; target is {target / 60:.1f} min", "detail": ""})
+        issues.append({"where": "plan", "kind": "duration", "level": "warn", "text": f"narration is about {got / 60:.1f} min; target is {target / 60:.1f} min", "detail": ""})
     share = leak.overlap_share(" ".join(total_plain), story["evidence"]["passages"])
-    report = {"ok": not issues, "issues": issues, "duration_s": round(got, 1), "target_s": target, "copied_share": share,
+    report = {"ok": not any(i.get("level") != "warn" for i in issues), "issues": issues, "duration_s": round(got, 1), "target_s": target, "copied_share": share,
               "segments": {k: len(v) for k, v in per_seg.items()}}
     for sid, found in per_seg.items():
         db.ex("UPDATE segments SET issues=? WHERE id=?", (db.jdump(found), sid))
-    db.ex("UPDATE plans SET validation=?, updated_at=? WHERE id=?", (db.jdump(report), db.now(), plan_id))
+    keep = {k: v for k, v in (plan["validation"] or {}).items() if k in ("storyboard", "prompts", "scores", "signoff")}      # other checks keep their last report
+    db.ex("UPDATE plans SET validation=?, updated_at=? WHERE id=?", (db.jdump({**keep, **report}), db.now(), plan_id))
     return report

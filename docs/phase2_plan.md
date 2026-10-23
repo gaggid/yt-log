@@ -104,3 +104,20 @@ Tested on real hi_male audio of the finished Knight Capital plan.
   request, one steady emotion per segment, fixed `seed`, `temperature` about 0.6. A repeated word appeared in one part: raise `repetition_penalty` (1.1 default) to 1.25.
 - **Voices.** Svara has exactly one male voice per language, no style notes, and `speed` preserves pitch, so no deeper "documentary" voice exists in it. Male voice
   samples for the Devanagari languages are in `data/tts_test/voices/`. For a heavy voice: Svara reference-clip cloning (experimental) or the `hindi-podcast` cloning model.
+
+## Batch C and D: what was built (2026-10-24)
+
+**Batch C: model-aware prompts** (`story2/providers.py`, `imgprompts.py`, `imgplan.py`)
+- Provider facts come from the gateway config, with the source named: Qwen Image 2.1 (int8, 25 steps, cfg 1, ignores a negative prompt) and FLUX.2 Klein 9B base (FP8, 28 steps, cfg 4, honours a negative prompt). Both: edits take at most 3 references, no masks, text in images unreliable. No prompt enhancer is exposed.
+- Licences are never inferred. FLUX weights are described by the gateway as non-commercial (`restricted`); Qwen's are `unverified`. A person ticks a box per model.
+- Qwen compiler: labelled 12-part brief with left/centre/right, constraints and exclusions inside the prompt. FLUX compiler: natural prose with the camera and materials late, positive-form exclusions plus a real `negative_prompt`.
+- Charts, documents, maps and screens are never drawn: the prompt asks for an empty backdrop and the content goes into `prompts.*.overlay` for a later deterministic step.
+- Validation checks the prompt against the scene (subject, action, location, camera, lighting, fixed facts, continuity attributes, exclusions, exact text, factual-looking numbers, vague wording, source leaks, length, staleness).
+- Preview is a separate explicit action, off by default, one image per click; it records the exact request and result.
+
+**Batch D: review and export** (`story2/editorial.py`, `export.py`, `export_schema.py`)
+- Twelve separately scored dimensions, each with the measurement, a reason and fixes that link to the scenes or parts. No single combined score. Measured checks, not a retention forecast.
+- Sign-off lists blockers (errors, unapproved parts, missing or stale prompts) and warnings (weak dimensions, unconfirmed licences, unverified facts). Approval is stored with a content hash, so any later change shows as "changed since approval".
+- Export: `docs/plan_schema.json` (JSON Schema 2020-12, version 1.0.0). `public` holds what may be spoken, shown or sent to a model; `evidence` holds the fact-checking trail. The public part is scanned for source pointers and copied wording; a finding refuses the export. Beat `facts` moved to `evidence.blueprint_facts` after the first real export showed copied wording in them.
+- Saved exports are numbered (`data/plan_exports/<plan>/video-plan_<plan>_vNNN_<hash>.json`) and never overwritten.
+- TTS notes inside the export record what was measured: 148 wpm, one segment per request, gateway `timeout_s` of at least 600, one steady emotion per segment.

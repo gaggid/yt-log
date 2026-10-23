@@ -12,3 +12,5 @@ Pillow
 # development / tests:
 # pytest
 # reportlab
+# exported plan validation
+jsonschema
