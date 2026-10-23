@@ -48,16 +48,16 @@ def _pct(n: float, d: float) -> float:
 
 def content_hash(plan: dict) -> str:
     """Identity of what would be exported: wording, scenes, prompts, registry and the settings that change them. Approval state, previews,
-    ratings, issue lists and revision counters are left out, so approving or checking does not change it."""
+    ratings, issue lists, revision counters and timings are left out: timings are derived from the narration and, later, from the real audio,
+    so making the voice must not make an approved plan look changed."""
     skip = {"previews", "issues"}
     doc = {
         "format": plan["format"], "blueprint": plan["blueprint"],
         "narrator": {k: plan["narrator"].get(k) for k in ("name", "voice", "gender", "person", "language")},
-        "minutes": plan["settings"].get("minutes"), "wpm": plan["settings"].get("wpm"),
-        "image_models": {k: v for k, v in (plan["settings"].get("image_models") or {}).items() if k in ("default", "by_type")},
+        "minutes": plan["settings"].get("minutes"),         "image_models": {k: v for k, v in (plan["settings"].get("image_models") or {}).items() if k in ("default", "by_type")},
         "segments": [{"id": s["id"], "seq": s["seq"], "beat": s["beat"], "sentences": s["sentences"], "annotated": s["annotated"],
                       "pronounce": s["pronounce"], "emphasis": s["emphasis"]} for s in plan["segments"]],
-        "scenes": [{"id": s["id"], "seq": s["seq"], "seg": s["segment_id"], "range": [s["s_from"], s["s_to"]], "start": s["start_s"], "end": s["end_s"],
+        "scenes": [{"id": s["id"], "seq": s["seq"], "seg": s["segment_id"], "range": [s["s_from"], s["s_to"]],
                     "data": {k: v for k, v in s["data"].items() if k not in skip}} for s in plan["scenes"]],
         "assets": [{"id": a["id"], "name": a["name"], "kind": a["kind"], "data": a["data"]} for a in plan["assets"]],
     }

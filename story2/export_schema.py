@@ -22,7 +22,8 @@ SENTENCE = _obj(["n", "text", "emotion", "pause_after_s"], {
 SEGMENT = _obj(["id", "seq", "beat", "plain", "annotated", "sentences", "duration_s", "scene_ids", "status"], {
     "id": _STR, "seq": _NUM, "beat": _STR, "beat_name": _STR, "plain": _STR, "annotated": _STR, "sentences": {"type": "array", "items": SENTENCE, "minItems": 1},
     "emphasis": _STRS, "pronounce": {"type": "array", "items": _OBJ}, "duration_s": {"type": "number", "minimum": 0}, "scene_ids": _STRS,
-    "status": {"enum": ["draft", "edited", "approved", "rejected"]}, "locked": {"type": "boolean"}})
+    "status": {"enum": ["draft", "edited", "approved", "rejected"]}, "locked": {"type": "boolean"},
+    "audio": _obj(["file", "duration_s"], {"file": _STR, "duration_s": {"type": "number", "minimum": 0}, "attempt": _INT, "approved": {"type": "boolean"}, "voice": _STR})})
 
 PROMPT = _obj(["adapter", "model", "adapter_version", "mode", "prompt", "negative_prompt", "size", "params", "references", "source_hash"], {
     "adapter": {"enum": ["qwen", "flux"]}, "model": _STR, "adapter_version": _STR,

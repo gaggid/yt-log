@@ -21,6 +21,7 @@ import config
 from story import db
 from story.api import router as story_router
 from story2.api import router as plans_router
+from story3.api import router as media_router
 from story.pipeline import manager
 
 STATIC = Path(__file__).with_name("static")
@@ -53,6 +54,7 @@ app = FastAPI(title="Source-to-Story", lifespan=lifespan)
 auth.install(app)
 app.include_router(story_router)
 app.include_router(plans_router)
+app.include_router(media_router)
 
 
 @app.get("/")

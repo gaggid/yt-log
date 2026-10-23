@@ -105,6 +105,12 @@ def build(plan_id: str, refresh: bool = True, export_rev: int = 0) -> dict:
     ev, pub = story["evidence"], story["public"]
     beats = plan["blueprint"]["beats"]
     names = {b["id"]: b["name"] for b in beats}
+    try:                                                                  # real voice files, when Phase 3 has made them
+        from story3 import store as media
+        voice_id = plan["narrator"].get("voice") or "hi_male"
+        audio = {s["id"]: media.chosen_voice(plan_id, s, voice_id) for s in plan["segments"]}
+    except Exception:  # noqa: BLE001 - an export must never fail because media is missing
+        audio = {}
     segs = sorted(plan["segments"], key=lambda s: (s["seq"], s["id"]))
     scenes = sorted(plan["scenes"], key=lambda s: (s["start_s"], s["seq"]))
     ap = editorial.approval_state(plan)
@@ -122,7 +128,9 @@ def build(plan_id: str, refresh: bool = True, export_rev: int = 0) -> dict:
         "narration": {"segments": [
             {"id": s["id"], "seq": s["seq"], "beat": s["beat"], "beat_name": names.get(s["beat"], ""), "plain": s["plain"], "annotated": s["annotated"],
              "sentences": [{"n": i, **x} for i, x in enumerate(s["sentences"], 1)], "emphasis": s["emphasis"], "pronounce": s["pronounce"],
-             "duration_s": s["duration_s"], "scene_ids": [sc["id"] for sc in scenes if sc["segment_id"] == s["id"]], "status": s["status"], "locked": s["locked"]}
+             "duration_s": s["duration_s"], "scene_ids": [sc["id"] for sc in scenes if sc["segment_id"] == s["id"]], "status": s["status"], "locked": s["locked"],
+             **({"audio": {"file": audio[s["id"]]["file"], "duration_s": audio[s["id"]]["meta"]["duration_s"], "attempt": audio[s["id"]]["attempt"],
+                           "approved": audio[s["id"]]["approved"], "voice": audio[s["id"]]["meta"].get("voice")}} if audio.get(s["id"]) else {})}
             for s in segs]},
         "scenes": [_public_scene(sc, plan) for sc in scenes],
         "assets": [{"id": a["id"], "kind": a["kind"], "name": a["name"], "description": a["data"].get("description", ""), "fixed": a["data"].get("fixed", []),

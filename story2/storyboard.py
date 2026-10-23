@@ -31,8 +31,20 @@ def fact_numbers(text: str) -> set[str]:
     out |= {str(v) for w, v in _NUMWORDS.items() if re.search(rf"\b{w}\b", text.lower())}
     return {x for x in out if x}
 
-def sentence_seconds(seg: dict, wpm: float) -> list[float]:
-    return [svara.spoken_seconds(x["text"], wpm, x.get("pause_after_s") or 0) for x in seg["sentences"]]
+def sentence_seconds(seg: dict, wpm: float, real_s: float | None = None) -> list[float]:
+    """Seconds per sentence: estimated from the words, or, when the segment has real audio, spread over its measured length in the same proportions."""
+    est = [svara.spoken_seconds(x["text"], wpm, x.get("pause_after_s") or 0) for x in seg["sentences"]]
+    total = sum(est)
+    return [e * real_s / total for e in est] if real_s and total else est
+
+
+def real_audio(plan_id: str) -> dict[str, float]:
+    """Measured audio length per segment (Phase 3 voice), or nothing when no voice has been made."""
+    try:
+        from story3 import store as media
+        return media.audio_seconds(plan_id)
+    except Exception:  # noqa: BLE001 - timing must never fail because media is unavailable
+        return {}
 
 
 def _scene_row(r: dict) -> dict:
@@ -193,6 +205,7 @@ async def make_storyboard(plan_id: str, backend, s: dict | None = None, segment_
     facts = intake.facts_text(story["public"])
     ev = story["evidence"]["paragraph_ids"]
     wpm = plan["settings"].get("wpm", planner.WPM)
+    real = real_audio(plan_id)
     caller = llm.JsonCaller(backend, s)
     todo = [x for x in plan["segments"] if not segment_ids or x["id"] in segment_ids]
     protected = {sc["segment_id"] for sc in get_scenes(plan_id) if sc["locked"] or sc["status"] == "approved"}
@@ -204,7 +217,7 @@ async def make_storyboard(plan_id: str, backend, s: dict | None = None, segment_
         if seg["id"] in protected:
             continue
         assets = get_assets(plan_id)
-        secs = sentence_seconds(seg, wpm)
+        secs = sentence_seconds(seg, wpm, real.get(seg["id"]))
         n = len(secs)
         lines = "\n".join(f"{i}. ({secs[i - 1]:.1f}s) {x['text']}" for i, x in enumerate(seg["sentences"], 1))
         prior = [x for x in get_scenes(plan_id) if x["seq"] < seg["seq"]]
@@ -245,7 +258,7 @@ async def regenerate_scene(scene_id: str, backend, s: dict | None = None, note: 
     plan = planner.get_plan(sc0["plan_id"])
     seg = next(x for x in plan["segments"] if x["id"] == sc0["segment_id"])
     story = planner._story_for(plan)
-    secs = sentence_seconds(seg, plan["settings"].get("wpm", planner.WPM))
+    secs = sentence_seconds(seg, plan["settings"].get("wpm", planner.WPM), real_audio(plan["id"]).get(seg["id"]))
     a, b = sc0["s_from"], sc0["s_to"]
     lines = "\n".join(f"{i}. ({secs[i - 1]:.1f}s) {seg['sentences'][i - 1]['text']}" for i in range(a, b + 1))
     assets = get_assets(plan["id"])
@@ -280,13 +293,14 @@ def retime(plan_id: str) -> float:
     """Derive every scene's start, end and duration from the current narration. Returns total seconds."""
     plan = planner.get_plan(plan_id)
     wpm = plan["settings"].get("wpm", planner.WPM)
+    real = real_audio(plan_id)
     by_seg: dict[str, list[dict]] = {}
     for sc in get_scenes(plan_id):
         by_seg.setdefault(sc["segment_id"], []).append(sc)
     t = 0.0
     with db.tx() as c:
         for seg in plan["segments"]:
-            sd = sentence_seconds(seg, wpm)
+            sd = sentence_seconds(seg, wpm, real.get(seg["id"]))
             for sc in sorted(by_seg.get(seg["id"], []), key=lambda x: x["s_from"]):
                 a, b = max(1, sc["s_from"]), min(len(sd), sc["s_to"])
                 st = t + sum(sd[:a - 1])

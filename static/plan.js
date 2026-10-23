@@ -82,14 +82,15 @@ window.newPlan = async function (cid, status) {
 
 window.viewPlan = async function (id) {
   const my = route_id;
-  let P = null, PV = {}, sig = '', seenRun = false;
+  let P = null, PV = {}, MS = null, sig = '', seenRun = false;
   const app = $('#app');
   const busyJob = () => P && P.job && P.job.state === 'running';
   const editing = () => { const a = document.activeElement; return a && a.closest && a.closest('#plan') && ['TEXTAREA', 'INPUT', 'SELECT'].includes(a.tagName); };
 
   async function load(force) {
-    const p = await api('/plans/' + id);
-    const s = JSON.stringify([p.rev, p.job.state, p.job.done, p.job.label, p.segments.map(x => x.rev), p.scenes.map(x => [x.rev, x.stale, x.start_s, x.status, x.locked]), p.assets.map(x => x.rev), p.validation ? 1 : 0, p.narrator.name, p.content_hash, p.approval && p.approval.state, p.exports.length, ((p.validation || {}).scores || {}).computed_at]);
+    const [p, m] = await Promise.all([api('/plans/' + id), api('/media/' + id).catch(() => null)]);
+    MS = m && m.voice;
+    const s = JSON.stringify([MS && [MS.have, MS.approved, MS.export.current, MS.segments.map(r => r.attempts.map(a => a.id + a.status + a.approved + a.current))], p.rev, p.job.state, p.job.done, p.job.label, p.segments.map(x => x.rev), p.scenes.map(x => [x.rev, x.stale, x.start_s, x.status, x.locked]), p.assets.map(x => x.rev), p.validation ? 1 : 0, p.narrator.name, p.content_hash, p.approval && p.approval.state, p.exports.length, ((p.validation || {}).scores || {}).computed_at]);
     const changed = s !== sig; P = p;
     if (changed || force) { sig = s; if (!editing() || force) render(); }
     if (p.job.state === 'running') seenRun = true;
@@ -156,6 +157,13 @@ window.viewPlan = async function (id) {
         export: 'Exported', compile_prompts: 'Image prompts written', image_models: 'Image model settings changed', preview: 'Preview image made', fix_repeats: 'Camera repeats fixed', registry: 'Recurring assets listed'};
       box.innerHTML = h.length ? h.map(x => `<div>${fmtDate(x.ts)} · ${esc(label[x.what] || x.what.replace(/_/g, ' '))}${x.detail && x.detail.rev ? ' v' + x.detail.rev : ''}${x.detail && x.detail.note ? ' · “' + esc(x.detail.note) + '”' : ''}</div>`).join('') : 'No changes recorded yet.';
     },
+    async voiceAll(b) {
+      const eta = MS && MS.eta_missing_s ? ` It takes about ${hd(MS.eta_missing_s)}.` : '';
+      if (!await confirmDlg('Make the voice?', `Svara will read the ${MS ? MS.total - MS.have : ''} part(s) that have no voice yet.${eta} The model server handles one job at a time, so other steps wait. You can leave this page; finished parts are saved and you can stop at any time.`, 'Start')) return;
+      await run(b, `/media/${id}/voice`, {only_missing: true});
+    },
+    async voiceOne(b, sid) { await run(b, `/media/${id}/voice`, {segment_ids: [sid], only_missing: false}); toast('Making this part again (about a minute or two).'); },
+    async voiceApprove(iid, on) { await act(null, () => api(`/media/item/${iid}`, {method: 'PATCH', json: {approved: on}}), on ? 'Recording approved' : 'Approval removed'); await load(true); },
     async validate(b) { const r = await act(b, () => api(`/plans/${id}/validate`, {method: 'POST'})); if (r) { await load(true); toast(r.ok ? 'No blocking problems found' : 'Some problems need attention'); } },
     async narrator(el) { await act(null, () => api(`/plans/${id}/narrator`, {method: 'PATCH', json: {name: el.value}}), 'Narrator name saved'); await load(true); },
     async minutes(el) { await act(null, () => api(`/plans/${id}/settings`, {method: 'PATCH', json: {minutes: +el.value}}), 'Target length saved'); await load(true); },
@@ -220,6 +228,7 @@ window.viewPlan = async function (id) {
     const issues = [...(v.issues || []).map(i => ({...i, part: 'Narration', level: i.level || 'error'})), ...((vs && vs.issues) || []).map(i => ({...i, part: 'Storyboard'})), ...((vp && vp.issues) || []).map(i => ({...i, part: 'Image prompts'}))];
     const compiled = p.scenes.length > 0 && p.scenes.every(s => s.data.prompts && s.data.prompts.qwen), promptStale = !!(vp && vp.issues.some(i => i.kind === 'stale'));
     const sc = v.scores || null, so = v.signoff || null, reviewed = !!(sc && sc.content_hash === p.content_hash);
+    const voiceDone = !!(MS && MS.total && MS.have === MS.total), exportReady = !!(MS && MS.export.exists && MS.export.current);
     const ap = p.approval || {state: 'draft'}, approved = ap.state === 'approved', lastExp = (p.exports || [])[0], exported = !!(lastExp && lastExp.content_hash === p.content_hash);
     const missingBeats = p.blueprint ? p.blueprint.beats.filter(b => !p.segments.some(s => s.beat === b.id)) : [];
     const segNoScene = p.segments.filter(s => !p.scenes.some(c => c.segment_id === s.id));
@@ -239,7 +248,7 @@ window.viewPlan = async function (id) {
     if (stale) warns.push(`${stale} scene(s) follow narration you changed: look at them, then approve.`);
     if (nRepeat) warns.push(`${nRepeat} scene(s) repeat the previous camera: use “Fix camera repeats”.`);
     if (p.scenes.length && !segNoScene.length && (!compiled || promptStale)) warns.push(promptStale ? 'Some scenes changed after their image prompts were written: press “Write image prompts”.' : 'Image prompts are not written yet: press “Write image prompts”.');
-    return {sc, so, reviewed, ap, approved, lastExp, exported, compiled, promptStale, j, running, v, vs, issues, missingBeats, segNoScene, errors, nRepeat, stale, checked, blocks, warns};
+    return {voiceDone, exportReady, sc, so, reviewed, ap, approved, lastExp, exported, compiled, promptStale, j, running, v, vs, issues, missingBeats, segNoScene, errors, nRepeat, stale, checked, blocks, warns};
   }
 
   function render() {
@@ -247,10 +256,10 @@ window.viewPlan = async function (id) {
     const imSet = {default: 'qwen-image-2.1', by_type: {}, previews_enabled: false, ...(p.settings.image_models || {})};
     imSet.licence_checks = {'qwen-image-2.1': true, 'flux2-klein-9b': true, ...(imSet.licence_checks || {})};
     const modelFor = d => d.model || (imSet.by_type || {})[d.visual_type] || imSet.default;
-    const a = analyse(), {sc, so, reviewed, ap, approved, lastExp, exported, compiled, promptStale, j, running, v, vs, issues, missingBeats, segNoScene, errors, nRepeat, checked, blocks, warns} = a;
+    const a = analyse(), {voiceDone, exportReady, sc, so, reviewed, ap, approved, lastExp, exported, compiled, promptStale, j, running, v, vs, issues, missingBeats, segNoScene, errors, nRepeat, checked, blocks, warns} = a;
     const dis = running ? 'disabled' : '';
     const steps = [['Story', true], ['Blueprint', !!p.blueprint], ['Narration', p.segments.length && p.blueprint && !missingBeats.length], ['Storyboard', p.scenes.length && !segNoScene.length], ['Image prompts', compiled && !promptStale],
-      ['Checked', checked && !errors.length], ['Reviewed', reviewed], ['Approved', approved], ['Exported', exported]];
+      ['Checked', checked && !errors.length], ['Reviewed', reviewed], ['Approved', approved], ['Exported', exported], ['Voice', voiceDone]];
     const firstOpen = steps.findIndex(s => !s[1]);
     const sceneAt = wid => p.scenes.find(x => x.id === wid) || null;
     const groups = []; for (const i of issues) { const k = i.part + '|' + i.kind + '|' + (i.kind === 'repeat' ? '' : i.text); let g = groups.find(x => x.k === k); if (!g) groups.push(g = {k, i, where: []}); g.where.push(i.where); }
@@ -263,7 +272,7 @@ window.viewPlan = async function (id) {
     // side panel: one row per action, in the order you do them
     const act_ = (n, label, onclick, {done, ok = true, why = '', next = false, cls = ''}) => `<div class="act ${done ? 'done' : next ? 'next' : ''}">
         <div class="an">${done ? '✓' : n}</div><div style="flex:1;min-width:0"><button class="${next ? 'primary' : cls}" style="width:100%" ${ok && !running ? '' : 'disabled'} onclick="${onclick}">${label}</button>${!ok && why ? `<div class="small mute mt-s">${esc(why)}</div>` : ''}</div></div>`;
-    const nextKey = !p.blueprint ? 'blueprint' : missingBeats.length ? 'narration' : (segNoScene.length || !p.scenes.length) ? 'storyboard' : (!compiled || promptStale) ? 'prompts' : !checked ? 'check' : nRepeat ? 'repeats' : !reviewed ? 'review' : !approved ? (so && so.blockers.length ? 'blocked' : 'approve') : !exported ? 'export' : 'done';
+    const nextKey = !p.blueprint ? 'blueprint' : missingBeats.length ? 'narration' : (segNoScene.length || !p.scenes.length) ? 'storyboard' : (!compiled || promptStale) ? 'prompts' : !checked ? 'check' : nRepeat ? 'repeats' : !reviewed ? 'review' : !approved ? (so && so.blockers.length ? 'blocked' : 'approve') : !exported ? 'export' : !voiceDone ? 'voice' : 'done';
     const side = `<aside class="plan-side"><div class="card pad">
         ${running ? `<div class="jobbox"><b>${esc(j.kind)}</b> <span class="mute small">${esc(j.label)}</span>${bar(j.total ? 100 * j.done / j.total : 5)}<div class="small mute">${hd(j.elapsed_s)}${j.eta_s ? ' · about ' + hd(j.eta_s) + ' left' : ''}</div><button class="small mt-s" onclick="_plan.cancel(this)">Stop after this step</button><div class="small mute mt-s">You can leave the page; finished parts are saved.</div></div>` : ''}
         <div class="small mute" style="text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Do these in order</div>
@@ -276,25 +285,27 @@ window.viewPlan = async function (id) {
         ${act_(7, reviewed ? 'Review and score again' : 'Review and score', '_plan.review(this)', {done: reviewed, ok: p.scenes.length > 0 && compiled, why: 'Write the image prompts first.', next: nextKey === 'review'})}
         ${act_(8, approved ? 'Approved' : ap.state === 'changed' ? 'Approve the changed plan' : 'Approve the plan', '_plan.approve(this)', {done: approved, ok: reviewed, why: 'Review and score first.', next: nextKey === 'approve'})}
         ${act_(9, exported ? 'Export again' : 'Export for the next modules', '_plan.export(this)', {done: exported, ok: p.scenes.length > 0 && compiled, why: 'Write the image prompts first.', next: nextKey === 'export'})}
-        ${act_(10, 'Go to the first problem', '_plan.firstProblem()', {done: false, ok: issues.some(i => i.level === 'error') || a.stale > 0, why: 'No errors to fix.', cls: 'small'})}
+        ${act_(10, voiceDone ? 'Make the voice again' : MS && MS.have ? 'Make the missing voice' : 'Make the voice', '_plan.voiceAll(this)', {done: voiceDone, ok: exportReady, why: exported ? 'Export again first.' : 'Export first.', next: nextKey === 'voice'})}
+        ${act_(11, 'Go to the first problem', '_plan.firstProblem()', {done: false, ok: issues.some(i => i.level === 'error') || a.stale > 0, why: 'No errors to fix.', cls: 'small'})}
         <div class="small mute" style="text-transform:uppercase;letter-spacing:.04em;margin:12px 0 6px">When you are happy</div>
         <button class="small" style="width:100%" ${p.segments.length && !running ? '' : 'disabled'} onclick="_plan.approveAll(this,'narration')">Approve all narration (${segApproved}/${p.segments.length})</button>
         <button class="small mt-s" style="width:100%" ${p.scenes.length && !running ? '' : 'disabled'} onclick="_plan.approveAll(this,'scenes')">Approve all scenes (${scApproved}/${p.scenes.length})</button>
         <div class="small mute mt-s">Approved and locked parts are never overwritten when something else is regenerated.</div>
         <div class="small mute" style="text-transform:uppercase;letter-spacing:.04em;margin:12px 0 6px">Jump to</div>
-        <div class="row small" style="gap:4px 12px">${[['sec-top', 'Top'], p.blueprint && ['sec-blueprint', 'Blueprint'], p.segments.length && ['sec-narration', 'Narration'], p.segments.length && ['sec-assets', 'Continuity'], p.scenes.length && ['sec-models', 'Image models'], p.scenes.length && ['sec-storyboard', 'Storyboard'], p.scenes.length && ['sec-review', 'Review and export'], (groups.length || v.ok != null) && ['sec-results', 'Check results']].filter(Boolean).map(([id_, l]) => `<a href="#" onclick="_plan.go('${id_}');return false">${l}</a>`).join('')}</div>
+        <div class="row small" style="gap:4px 12px">${[['sec-top', 'Top'], p.blueprint && ['sec-blueprint', 'Blueprint'], p.segments.length && ['sec-narration', 'Narration'], p.segments.length && ['sec-assets', 'Continuity'], p.scenes.length && ['sec-models', 'Image models'], p.scenes.length && ['sec-storyboard', 'Storyboard'], p.scenes.length && ['sec-review', 'Review and export'], MS && ['sec-voice', 'Voice'], (groups.length || v.ok != null) && ['sec-results', 'Check results']].filter(Boolean).map(([id_, l]) => `<a href="#" onclick="_plan.go('${id_}');return false">${l}</a>`).join('')}</div>
       </div></aside>`;
 
     const banner = blocks.length
       ? `<div class="banner block"><b>Stopping you from moving on</b><ul class="tight">${blocks.map(b => `<li>${esc(b)}</li>`).join('')}</ul>${warns.length ? `<div class="small mt-s">Also: ${warns.map(esc).join(' · ')}</div>` : ''}</div>`
       : warns.length ? `<div class="banner warn"><b>Nothing blocks you, but note:</b><ul class="tight">${warns.map(w => `<li>${esc(w)}</li>`).join('')}</ul></div>`
-      : nextKey === 'done' ? `<div class="banner good"><b>Done.</b> Export v${lastExp.rev} is saved and matches your latest changes. <a href="/api/plans/exports/${esc(p.id)}/${esc(lastExp.file)}" download>Download it</a>. The image, voice and video modules will read this file; they are not built yet, so nothing more is needed here unless you want changes.</div>`
+      : nextKey === 'done' ? `<div class="banner good"><b>Done so far.</b> Export v${lastExp.rev} is saved and the voice is made (${mmss(MS.real_s)} of real speech). Pictures and the video are the next batches. <a href="/api/plans/exports/${esc(p.id)}/${esc(lastExp.file)}" download>Download the export</a>. Listen to each part below and approve the ones you like.</div>`
       : `<div class="banner good"><b>Nothing is blocking you.</b> Narration, storyboard and image prompts are consistent and checked.</div>`;
     const NEXT = {blueprint: ['Plan the story', 'Decide how this story is told.', '_plan.blueprint(this)'], narration: ['Write the narration', 'Write the spoken narration for each part.', '_plan.narration(this,' + !!(missingBeats.length && p.segments.length) + ')'],
       storyboard: ['Design the storyboard', 'Design the scenes that go with the narration.', '_plan.storyboard(this)'], prompts: ['Write image prompts', 'Turn each scene into prompts for the image models. Instant, no model needed.', '_plan.compile(this)'],
       check: ['Check everything', 'Look for mistakes before you review.', '_plan.validate(this)'], repeats: ['Fix camera repeats', 'Some scenes repeat the previous camera.', '_plan.fixRepeats(this)'],
       review: ['Review and score', 'See twelve scores with reasons, and what stands between this plan and approval.', '_plan.review(this)'], approve: ['Approve the plan', 'Sign off the exact version you reviewed.', '_plan.approve(this)'],
       export: ['Export', 'Save the file the image, voice and video modules will read.', '_plan.export(this)'],
+      voice: ['Make the voice', 'Svara reads each narration part; scenes are re-timed to the real audio. About ' + (MS ? hd(MS.eta_missing_s) : 'a while') + '.', '_plan.voiceAll(this)'],
       blocked: ['See what blocks approval', `${so ? so.blockers.length : 0} thing(s) stand between this plan and approval: ${so ? so.blockers.map(b => b.text).join(' ') : ''}`, "_plan.go('sec-review')"]};
     const nx = NEXT[nextKey];
     const nextBar = nx ? `<div class="nextbar"><span><b>Next:</b> ${esc(nx[1])}</span><button class="primary" ${running ? 'disabled' : ''} onclick="${nx[2]}">${esc(nx[0])}</button></div>` : '';
@@ -377,6 +388,24 @@ window.viewPlan = async function (id) {
         <div class="row mt-s"><button ${dis} ${p.scenes.length ? '' : 'disabled'} onclick="_plan.export(this)">${p.exports.length ? 'Export again (new version)' : 'Export now'}</button>${!approved && p.exports.length === 0 ? '<span class="mute small">You can export before approval; the file will say it is not ready for generation and why.</span>' : ''}</div>
         ${p.exports.length ? `<table class="mt-s small" style="width:100%"><tr><th align="left">Version</th><th align="left">Saved</th><th align="left">Size</th><th align="left">Ready for generation</th><th></th></tr>${p.exports.map((e, i) => `<tr><td>v${e.rev}${i === 0 ? (exported ? ' (current)' : ' (older than your last change)') : ''}</td><td>${fmtDate(e.created_at)}</td><td>${Math.round(e.bytes / 1024)} KB</td><td>${e.ready ? '<span class="ok">yes</span>' : '<span class="mute">no, see file</span>'}</td><td><a href="/api/plans/exports/${esc(p.id)}/${esc(e.file)}" download>Download</a></td></tr><tr><td colspan="5" class="mute small" style="word-break:break-all">${esc(e.path)}</td></tr>`).join('')}</table>` : ''}
         <details class="mt" ontoggle="if(this.open)_plan.loadHistory(this)"><summary><b>Change history</b> <span class="mute small">every approval, regeneration and export</span></summary><div class="hist mt-s small mute">Loading…</div></details></div>` : ''}
+
+      ${MS && p.scenes.length ? `<div class="card pad mt" id="sec-voice"><div class="row"><h3 style="margin:0">Voice</h3>${MS.have === MS.total && MS.total ? badge('good', 'all parts voiced') : badge('queued', MS.have + ' of ' + MS.total + ' parts voiced')}<span class="sp"></span>
+          <button class="small primary" ${dis} ${exportReady ? '' : 'disabled'} onclick="_plan.voiceAll(this)">${MS.have ? 'Make the missing parts' : 'Make the voice for all parts'}</button></div>
+        <div class="mute small mt-s">Svara reads each narration part (${esc(MS.voice)}) exactly as exported. ${MS.have ? `Measured speaking time so far: <b>${mmss(MS.real_s)}</b> for the parts voiced (the plan estimated ${mmss(MS.estimated_s)} for all). ` : ''}Scenes are re-timed to the real audio automatically.
+          ${MS.eta_missing_s ? `Making the rest takes about <b>${hd(MS.eta_missing_s)}</b> (the model server speaks about ${MS.speed_ratio}x slower than real time, and other jobs wait meanwhile).` : ''}</div>
+        ${!MS.export.exists ? `<div class="needbox mt-s"><b>Export first.</b> Media is made from the exported file, so the plan and the file cannot disagree. Use “Export” in the side panel.</div>`
+          : !MS.export.current ? `<div class="needbox mt-s"><b>The plan changed after export v${MS.export.rev}.</b> Export again before making the voice, so the voice matches what you approved. <button class="small" ${dis} onclick="_plan.export(this)">Export again</button></div>` : ''}
+        ${MS.segments.map(r => { const ch = r.attempts.find(a => a.id === r.chosen); const old = r.attempts.filter(a => a.status === 'done' && !a.current).length; return `<div class="seg ${ch && ch.approved ? 'approved' : ''}" style="padding:10px 14px"><div class="row"><b>${esc(r.name)}</b>
+          <span class="mute small">${ch ? `${ch.duration_s.toFixed(1)}s real` : 'no voice yet'} · about ${r.expected_s.toFixed(0)}s expected</span>${ch && ch.approved ? badge('approved', 'approved') : ch ? badge('info', 'latest attempt') : badge('queued', 'not made')}<span class="sp"></span>
+          ${ch ? `<button class="small" ${dis} onclick="_plan.voiceApprove('${ch.id}',${!ch.approved})">${ch.approved ? 'Unapprove' : 'Approve'}</button>` : ''}
+          <button class="small" ${dis} ${exportReady ? '' : 'disabled'} onclick="_plan.voiceOne(this,'${r.segment_id}')">${ch ? 'Make again' : 'Make this part'}</button></div>
+          ${ch ? `<audio controls preload="none" src="${esc(ch.url)}" style="width:100%;margin-top:6px"></audio>` : ''}
+          ${r.attempts.filter(a => a.status === 'failed').slice(-1).map(a => `<div class="iss error">✗ Last try failed: ${esc(a.error)}</div>`).join('')}
+          ${ch ? ch.flags.map(f => `<div class="iss warn">⚠ ${esc(f)}</div>`).join('') : ''}
+          ${old ? `<div class="iss warn">⚠ ${old} earlier recording(s) were made from different wording and are ignored.</div>` : ''}
+          ${r.attempts.filter(a => a.status === 'done' && a.current && a.id !== r.chosen).length ? `<div class="small mute mt-s">Other recordings: ${r.attempts.filter(a => a.status === 'done' && a.current && a.id !== r.chosen).map(a => `<a href="${esc(a.url)}" target="_blank">attempt ${a.attempt} (${a.duration_s.toFixed(1)}s)</a> <a href="#" onclick="_plan.voiceApprove('${a.id}',true);return false">use this one</a>`).join(' · ')}</div>` : ''}
+          <details class="mt-s"><summary class="small mute">What is spoken</summary><div class="small" lang="hi">${esc(r.plain)}</div></details></div>`; }).join('')}
+        <div class="mute small mt-s">Listen to each part. If a word is repeated or skipped, press “Make again” (it uses a new seed). Approving a recording locks it in for the video.</div></div>` : ''}
 
       ${issues.length || v.ok != null || vs ? `<div class="card pad mt" id="sec-results"><h3 style="margin:0 0 6px">Check results</h3>${groups.length ? `<ul class="tight">${groups.map(g => `<li class="${g.i.level === 'warn' ? '' : 'err'}"><b>${g.i.level === 'warn' ? 'Check' : 'Fix'}</b> · ${esc(g.i.part)} · ${esc((g.i.kind || '').replace(/_/g, ' '))}: ${esc(g.i.kind === 'repeat' ? `${g.where.length} scene(s) use the same camera distance and angle as the scene before` : g.i.text)}
           <div class="small mute">${g.where.map(w => { const sc = sceneAt(w); return sc ? `<a href="#" onclick="_plan.jump('${sc.id}');return false">${mmss(sc.start_s)}</a>` : (p.segments.some(x => x.id === w) ? `<a href="#" onclick="_plan.go('seg-${w}');return false">${esc(segName(w))}</a>` : esc(w === 'plan' ? 'whole plan' : w)); }).join(' · ')}</div></li>`).join('')}</ul>` : '<span class="ok">✓ No problems found.</span>'}

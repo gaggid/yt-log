@@ -353,6 +353,32 @@
                   },
                   "locked": {
                     "type": "boolean"
+                  },
+                  "audio": {
+                    "type": "object",
+                    "required": [
+                      "file",
+                      "duration_s"
+                    ],
+                    "properties": {
+                      "file": {
+                        "type": "string"
+                      },
+                      "duration_s": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "attempt": {
+                        "type": "integer"
+                      },
+                      "approved": {
+                        "type": "boolean"
+                      },
+                      "voice": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": true
                   }
                 },
                 "additionalProperties": true
