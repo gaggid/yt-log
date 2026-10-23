@@ -1,10 +1,10 @@
-"""The exported data contract (schema version 1.0). Independent of any model or provider: the next module
+"""The exported data contract (schema version 1.1). Independent of any model or provider: the next module
 should depend on this file's shapes only. See docs/story_schema.md."""
 from typing import Literal
 
 from pydantic import BaseModel
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 
 
 class SourceRef(BaseModel):
@@ -24,7 +24,10 @@ class Person(BaseModel):
 
 class TimelineEntry(BaseModel):
     when: str = ""
+    when_basis: Literal["stated", "inferred", ""] = ""   # stated = the date appears in the cited passages
     what: str
+    basis: Literal["quoted", "summarised", "inferred", ""] = ""
+    paragraph_ids: list[int] = []
 
 
 class Claim(BaseModel):
@@ -32,6 +35,7 @@ class Claim(BaseModel):
     quote: str = ""
     quote_verified: bool | None = None       # None = no quote given; False = quote not found in cited passages
     support: Literal["strong", "moderate", "weak"] = "moderate"
+    basis: Literal["quoted", "summarised", "inferred", ""] = ""   # quoted only when the quote was found verbatim
     paragraph_ids: list[int] = []
 
 
@@ -50,6 +54,22 @@ class Scores(BaseModel):
     factors: dict[str, Factor]
     evidence_reason: str = ""
     evidence_breakdown: dict = {}
+    completeness: float | None = None         # 0-100, how much of a whole story the evidence holds; separate from evidence_score
+    completeness_breakdown: dict = {}
+
+
+class Flag(BaseModel):
+    code: str                                 # nature | gap | stitched | date_no_year | date_inferred | title
+    text: str
+
+
+class Figure(BaseModel):
+    id: str
+    page: int
+    caption: str = ""
+    credit: str = ""                          # source credit printed on the page, if any
+    rights_flag: bool = False                 # true when the page shows a copyright / permission notice
+    file: str = ""                            # path relative to the figures folder of the export, if images are included
 
 
 class Review(BaseModel):
@@ -76,6 +96,7 @@ class StoryRecord(BaseModel):
     title: str
     premise: str
     kind: str = ""
+    nature: Literal["story", "anecdote", "explainer", "hypothetical", ""] = ""
     curiosity_question: str = ""
     opening_hook: str = ""
     overview: str = ""
@@ -90,6 +111,9 @@ class StoryRecord(BaseModel):
     claims: list[Claim] = []
     uncertainties: list[str] = []
     research_questions: list[str] = []
+    gaps: list[str] = []
+    flags: list[Flag] = []
+    figures: list[Figure] = []
     scores: Scores
     review: Review
     references: list[SourceRef]

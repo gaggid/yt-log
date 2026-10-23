@@ -290,7 +290,7 @@ def test_review_edit_merge_split_and_export(book):
     again = ExportDoc.model_validate_json(export.to_json(doc))                # canonical JSON round-trips the contract
     ids = {s.id for s in again.stories}
     assert parts[0]["id"] in ids and parts[1]["id"] not in ids and a["id"] not in ids
-    assert again.schema_version == "1.0" and again.source.title == "Big Book" and len(again.source.chapters) == 8
+    assert again.schema_version == "1.1" and again.source.title == "Big Book" and len(again.source.chapters) == 8
     for s in again.stories:
         assert s.references and all(r.text and r.locator for r in s.references)
         assert set(s.scores.factors) == set(scoring.FACTORS) and s.scores.evidence_score >= 0

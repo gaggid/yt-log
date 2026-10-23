@@ -1,4 +1,4 @@
-# Story export schema v1.0
+# Story export schema v1.1
 
 The export is the contract between this module (source to story candidates) and the next one (script generation).
 It contains no model-specific fields: nothing in it depends on Gemma, the gateway, prompts or chunking.
@@ -15,7 +15,7 @@ bumps MAJOR. Consumers should check the major version.
 
 | field | type | notes |
 |---|---|---|
-| `schema_version` | string | `"1.0"` |
+| `schema_version` | string | `"1.1"` |
 | `exported_at` | ISO 8601 UTC | |
 | `generator` | object | `{module, schema_version}` |
 | `source` | object | the book or article, see below |
@@ -34,15 +34,19 @@ bumps MAJOR. Consumers should check the major version.
 | `id` | string | stable, e.g. `S-1a2b3c-004`. Never reused. Merge and split create new ids. |
 | `title`, `premise` | string | working title; one-sentence premise |
 | `kind` | string | `incident`, `multi_passage`, `multi_chapter`, `case_study`, `surprising_fact`, `decision_sequence` |
+| `nature` | string | `story` (documented event with a turning point and outcome), `anecdote` (short real example), `explainer` (teaches a concept), `hypothetical` (imagined scenario), or empty for stories exported before 1.1. Scripts should treat only `story` as a narrative; the rest are supporting material. |
 | `curiosity_question`, `opening_hook` | string | editorial ideas, not narration |
 | `overview` | string | short factual overview |
 | `people` | `[{name, role}]` | |
-| `chronology` | `[{when, what}]` | `when` is as stated in the source, may be empty |
+| `chronology` | `[{when, when_basis, what, basis, paragraph_ids}]` | `when` is as stated in the source, may be empty. `when_basis` is `stated` only if the date appears in the cited passages, else `inferred`. `basis` is `quoted`, `summarised` or `inferred`. |
 | `conflict`, `stakes`, `turning_point`, `outcome` | string | empty when the source does not support them |
 | `audience_interest` | string | why a general audience may care |
 | `context_needed` | string[] | background required to follow the story |
 | `claims` | array | key factual claims, see below |
 | `uncertainties` | string[] | conflicting accounts, gaps, unverified items |
+| `gaps` | string[] | things the source does not say (outcome, year, names). Do not invent them. |
+| `flags` | `[{code, text}]` | `nature` (label was downgraded), `gap`, `stitched` (passages far apart), `date_no_year`, `date_inferred`, `title` (possible name clash, from model knowledge, unverified) |
+| `figures` | `[{id, page, caption, credit, rights_flag, file}]` | charts or figures on or next to the cited pages. `rights_flag` means a copyright or permission notice is printed on the page: clear rights before reuse. `file` is relative to the project's figures folder (served at `/api/projects/{id}/figures/{figure id}/image`). |
 | `research_questions` | string[] | what to check next |
 | `scores` | object | see below |
 | `review` | object | `{status: pending|approved|rejected, needs_research, notes, edited}` |
@@ -55,19 +59,25 @@ bumps MAJOR. Consumers should check the major version.
 ### `claims[]`
 `claim`, `quote` (verbatim text the model said supports it, may be empty), `quote_verified`
 (`true` = found in the cited passages, `false` = **not found**, `null` = no quote), `support`
-(`strong|moderate|weak`), `paragraph_ids` (links into `references[].paragraph_id`).
+(`strong|moderate|weak`), `basis` (`quoted` only if the quote was found verbatim; otherwise `summarised` or `inferred`),
+`paragraph_ids` (links into `references[].paragraph_id`).
 
 ### `scores`
 - `story_score` 0-100: weighted mean of five factors (hook, narrative, payoff, emotion, standalone), weights
   configurable in Settings. Before any manual override.
 - `evidence_score` 0-100: kept separate on purpose. 50% the model's assessment, 30% share of claims whose quote was
   found in the source, 20% breadth of supporting passages.
-- `priority` 0-100: `story_score * (1 - k + k * evidence_score / 100)`, with `k` = "evidence influence" (default 0.4),
-  so a dramatic story with thin evidence ranks lower.
+- `completeness` 0-100: does the evidence hold a whole story? Turning point, stated outcome, conflict or stakes, a real
+  chronology, and passages that sit close together. Capped by `nature` (explainer 40, hypothetical 30, anecdote 60).
+  It is separate from `evidence_score`: perfectly quoted passages can still be an explainer or a stitched-together sequence.
+- `priority` 0-100: `story_score * (1 - k + k * evidence_score / 100) * (1 - c + c * completeness / 100)`, with `k` =
+  "evidence influence" and `c` = "completeness influence" (default 0.4 each), so a dramatic story with thin evidence, or
+  without a real arc, ranks lower.
 - `story_score_override`, `priority_override`: manual values set in review, or `null`.
 - `effective_priority`: the override if set, otherwise `priority`. **Sort by this.**
 - `factors`: `{hook|narrative|payoff|emotion|standalone: {score 0-10, reason}}`.
 - `evidence_reason`, `evidence_breakdown`: why the evidence score is what it is.
+- `completeness`, `completeness_breakdown`: the completeness score and its parts.
 
 ### `references[]`
 `paragraph_id` (stable within the source), `page` (PDF page, else `null`), `section` (article section or chapter),

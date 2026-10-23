@@ -29,6 +29,7 @@ STAGE_LABELS = {
     "discover": "Finding stories", "discover_global": "Finding cross-chapter stories",
     "draft": "Drafting story records", "finalize": "Linking related stories",
 }
+NATURE_RANK = {"story": 0, "": 1, "anecdote": 1, "explainer": 2, "hypothetical": 3}
 MAX_SPLIT_DEPTH = 3
 MAX_FAIL_STREAK = 3
 
@@ -91,6 +92,19 @@ def render_item(p: dict, a: int, b: int) -> str:
 
 def render_items(paras: dict[int, dict], items) -> str:
     return "\n\n".join(render_item(paras[i], a, b) for i, a, b in items)
+
+
+def render_pack(paras: dict[int, dict], ids: list[int], context_ids: set[int] | None = None) -> str:
+    """Passages for a draft, in source order, with page markers so the model (and reviewers) can place them in the book."""
+    out, page = [], object()
+    for i in sorted(ids):
+        p = paras[i]
+        if p["page"] != page:
+            page = p["page"]
+            if page:
+                out.append(f"--- page {page} ---")
+        out.append(render_item(p, 0, -1))
+    return "\n\n".join(out)
 
 
 def _ids_str(ids) -> str:
@@ -284,7 +298,9 @@ class Pipeline:
                     break
             else:
                 raise BudgetExceeded(f"chapter {r['idx']} notes do not fit the input budget even at the lowest detail")
-        for n, grp in enumerate(pack(sizes, limit)):
+        win = max(1, int(self.s.get("discover_window_chapters", 3)))
+        groups = [g[k:k + win] for g in pack(sizes, limit) for k in range(0, len(g), win)]
+        for n, grp in enumerate(groups):
             add_task(self.pid, "discover", f"w{n:03d}", n,
                      {"chapters": [recs[i]["idx"] for i in grp], "levels": {str(recs[i]["idx"]): levels[recs[i]["idx"]] for i in grp}})
 
@@ -298,8 +314,9 @@ class Pipeline:
         for stage in ("discover", "discover_global"):
             for r in done_results(self.pid, stage):
                 stubs.extend(r.get("stubs", []))
+        stubs.extend(self._uncovered_seeds(stubs))
         merged = dedupe_stubs(stubs, self.paras)
-        merged.sort(key=lambda s: (-s["potential"], min(s["para_ids"])))
+        merged.sort(key=lambda s: (NATURE_RANK.get(s.get("nature", ""), 1), -s["potential"], min(s["para_ids"])))
         cap = int(self.s["max_candidates"])
         chosen, leads = merged[:cap], merged[cap:]
         for n, st in enumerate(chosen):
@@ -313,6 +330,22 @@ class Pipeline:
             msg = "No story candidates were found in this source."
             if msg not in w:
                 set_project(self.pid, warnings=w + [msg])
+
+    def _uncovered_seeds(self, stubs: list[dict]) -> list[dict]:
+        """Raw story seeds noticed while reading that discovery did not shortlist. They become low-priority leads, so a
+        chapter summary that favours broad themes can never hide a concrete event from the review."""
+        taken = [set(s["para_ids"]) for s in stubs]
+        out = []
+        for rec in done_results(self.pid, "rollup"):
+            for sd in rec.get("seeds", []):
+                ids = set(sd["para_ids"])
+                if not ids or any(len(ids & t) / len(ids) >= 0.5 for t in taken):
+                    continue
+                taken.append(ids)
+                out.append({"title": sd["title"], "premise": sd["premise"] or sd["title"], "why": "Noticed while reading; not shortlisted by discovery.",
+                            "nature": "", "kind": "incident", "potential": 3.0, "para_ids": sorted(ids), "origin": "seed",
+                            "chapter_idxs": uniq(self.paras[i]["chapter_idx"] for i in sorted(ids) if i in self.paras)})
+        return out
 
     def _plan_finalize(self) -> None:
         add_task(self.pid, "finalize", "all", 0, {})
@@ -458,7 +491,8 @@ class Pipeline:
             parts.append(text)
             allowed |= ids
         user = f"{self.src_header()}\nOVERVIEW: {idx.get('overview', '')}\n\nCHAPTER NOTES:\n\n" + "\n\n".join(parts)
-        res, usage = await self._call(P.DISCOVER.replace("{max_items}", "8"), user, Discovery)
+        n_items = min(12, 3 * len(t["input"]["chapters"]) + 2)
+        res, usage = await self._call(P.DISCOVER.replace("{max_items}", str(n_items)), user, Discovery)
         stubs, dropped = prune_ids([s.model_dump() for s in res.value.candidates], allowed)
         return {"stubs": self._finish_stubs(stubs), "dropped": dropped}, usage
 
@@ -524,7 +558,20 @@ class Pipeline:
             else:
                 left.append(i)
         warnings = []
-        sections = [head + "RAW PASSAGES:\n" + "\n\n".join(render_item(paras[i], 0, -1) for i in raw_ids)]
+        # surrounding paragraphs of the same chapter give the model the setup and aftermath around each cited passage
+        room = limit * 0.75 - used
+        near = []
+        for i in raw_ids:
+            for j in (i - 1, i + 1):
+                if j in paras and j not in raw_ids and j not in near and paras[j]["chapter_idx"] == paras[i]["chapter_idx"]:
+                    cost = self.est(render_item(paras[j], 0, -1)) + 2
+                    if cost <= room * 0.5:
+                        near.append(j)
+                        room -= cost
+                        used += cost
+        shown = sorted(raw_ids + near)
+        sections = [head + "RAW PASSAGES:\n(source order; --- page N --- markers show where each passage sits in the book)\n\n"
+                    + render_pack(paras, shown)]
         note_ids: set[int] = set()
         if left:
             anas = self._analyses()
@@ -560,8 +607,8 @@ class Pipeline:
                 sections.append(block)
                 room -= self.est(block)
         user = "\n\n".join(sections)
-        valid_ids = set(raw_ids) | note_ids
-        raw_text = {i: paras[i]["text"] for i in raw_ids}
+        valid_ids = set(shown) | note_ids
+        raw_text = {i: paras[i]["text"] for i in shown}
 
         def validate(d: DraftOut):
             if not any(set(c.para_ids) & valid_ids or c.quote for c in d.claims):
@@ -677,25 +724,64 @@ def save_candidate(pid: str, task_id: int | None, d: DraftOut, stub: dict, raw_t
         verified = scoring.verify_quote(c.quote, [raw_text[i] for i in cited if i in raw_text] or all_raw)
         if c.quote and verified and not [i for i in cited if i in raw_text]:
             cited = [i for i, t in raw_text.items() if scoring.verify_quote(c.quote, [t])]
-        claims.append({"claim": c.claim, "quote": c.quote, "para_ids": cited, "support": c.support, "quote_verified": verified})
+        # provenance: "quoted" must be backed by a quote that was actually found; the model's word is never enough
+        basis = c.basis or ("quoted" if verified else "summarised")
+        if basis == "quoted" and verified is not True:
+            basis = "summarised"
+        claims.append({"claim": c.claim, "quote": c.quote, "para_ids": cited, "support": c.support,
+                       "quote_verified": verified, "basis": basis})
     refs = sorted({i for i in stub["para_ids"] if i in valid_ids} | {i for c in claims for i in c["para_ids"]})
     if not refs:
         raise ValueError("story has no valid source references")
+    page_of = {r["idx"]: r["page"] for r in db.q("SELECT idx,page FROM paras WHERE project_id=?", (pid,))}
+    pages = [page_of[i] for i in refs if page_of.get(i)]
+    span = (max(pages) - min(pages)) if pages else None
+    cited_text = [raw_text[i] for i in refs if i in raw_text] or all_raw
+
+    chronology, flags = [], []
+    for e in d.chronology:
+        ids = [i for i in e.para_ids if i in valid_ids]
+        texts = [raw_text[i] for i in ids if i in raw_text] or cited_text
+        basis = "inferred" if not ids else (e.basis or "summarised")
+        chronology.append({"when": e.when, "when_basis": scoring.date_basis(e.when, texts), "what": e.what,
+                           "basis": basis, "para_ids": ids})
+    if any(c["when"] and c["when_basis"] == "stated" and not re.search(r"\b\d{4}\b", c["when"]) for c in chronology) \
+            and not scoring.has_year(cited_text):
+        flags.append({"code": "date_no_year", "text": "Dates in the source carry no year; do not state one without checking."})
+    if any(c["when_basis"] == "inferred" for c in chronology):
+        flags.append({"code": "date_inferred", "text": "Some dates are not stated in the cited passages (marked inferred)."})
+
+    nature, notes = scoring.final_nature(d.nature or stub.get("nature", ""), cited_text, len(chronology), bool(d.outcome))
+    for n in notes:
+        flags.append({"code": "nature", "text": n})
+    if span is not None and span > 40:
+        flags.append({"code": "stitched", "text": f"Cited passages are {span} pages apart ({min(pages)}-{max(pages)}); "
+                                                  "the sequence may be assembled from separate sections."})
+    for g in d.gaps + ([] if d.outcome else ["The outcome is not stated in the cited passages."]):
+        flags.append({"code": "gap", "text": g})
+    for t in d.title_flags:
+        flags.append({"code": "title", "text": f"Possible name clash (from model knowledge, unverified): {t}"})
+
     ev100, breakdown = scoring.evidence_score(d.evidence.score, claims, len(refs))
     factors = {k: getattr(d.scores, k).model_dump() for k in scoring.FACTORS}
     story = scoring.story_score({k: v["score"] for k, v in factors.items()}, s["weights"])
-    prio = scoring.priority(story, ev100, s["evidence_influence"])
+    shell = {"turning_point": d.turning_point, "outcome": d.outcome, "conflict": d.conflict, "stakes": d.stakes,
+             "chronology": chronology}
+    comp, comp_detail = scoring.completeness(shell, nature, span)
+    prio = scoring.priority(story, ev100, s["evidence_influence"], comp, s.get("completeness_influence", 0.0))
     unverified = sum(1 for c in claims if c["quote"] and c["quote_verified"] is False)
     if unverified:
         warnings = warnings + [f"{unverified} supporting quote(s) could not be found verbatim in the cited passages."]
     data = {
-        "curiosity_question": d.curiosity_question, "opening_hook": d.opening_hook, "overview": d.overview,
-        "people": [p.model_dump() for p in d.people], "chronology": [x.model_dump() for x in d.chronology],
+        "nature": nature, "curiosity_question": d.curiosity_question, "opening_hook": d.opening_hook, "overview": d.overview,
+        "people": [p.model_dump() for p in d.people], "chronology": chronology,
         "conflict": d.conflict, "stakes": d.stakes, "turning_point": d.turning_point, "outcome": d.outcome,
         "audience_interest": d.audience_interest, "context_needed": d.context_needed, "claims": claims,
         "uncertainties": d.uncertainties, "research_questions": d.research_questions,
+        "gaps": d.gaps, "flags": flags,
         "scores": factors,
         "evidence": {**d.evidence.model_dump(), "score_100": ev100, "breakdown": breakdown},
+        "completeness": {"score": comp, **comp_detail},
         "why": stub.get("why", ""), "chapter_idxs": stub.get("chapter_idxs", []),
         "warnings": warnings, "related": [], "duplicate_warnings": [],
         "lineage": {"merged_from": [], "split_from": None, "lead_titles": [stub["title"]] + stub.get("merged_titles", [])},
@@ -703,9 +789,9 @@ def save_candidate(pid: str, task_id: int | None, d: DraftOut, stub: dict, raw_t
     }
     with db.tx() as c:
         cid = next_story_id(pid, c)
-        c.execute("INSERT INTO candidates(id,project_id,task_id,title,premise,kind,story_score,evidence_score,priority,"
-                  "origin,created_at,updated_at,data) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                  (cid, pid, task_id, d.title, d.premise, stub.get("kind", ""), story, ev100, prio, "pipeline",
+        c.execute("INSERT INTO candidates(id,project_id,task_id,title,premise,kind,nature,completeness,story_score,evidence_score,"
+                  "priority,origin,created_at,updated_at,data) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  (cid, pid, task_id, d.title, d.premise, stub.get("kind", ""), nature, comp, story, ev100, prio, "pipeline",
                    db.now(), db.now(), db.jdump(data)))
         for i in refs:
             c.execute("INSERT INTO candidate_refs(candidate_id,para_idx) VALUES(?,?)", (cid, i))

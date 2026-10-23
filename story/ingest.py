@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
+from . import textfix
 
 MAX_PARA_CHARS = 1500
 MAX_DOWNLOAD = 25 * 1024 * 1024
@@ -73,11 +74,11 @@ def _split_long(text: str, limit: int = MAX_PARA_CHARS) -> list[str]:
     return out
 
 
-def paras_from_text(text: str) -> list[str]:
+def paras_from_text(text: str, vocab: "textfix.Vocab | None" = None) -> list[str]:
     """Reflow raw extracted text into paragraphs: blank lines split; failing that, short sentence-ending
     lines mark paragraph ends (PDF text often has only single newlines)."""
     text = text.replace("\x00", "").replace("\r", "")
-    text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)
+    text = (vocab or textfix.Vocab([text])).fix_breaks(text)
     blocks = [b for b in re.split(r"\n\s*\n", text) if b.strip()]
     spaced = []
     for b in blocks:                                    # a heading line on top of body lines is its own paragraph
@@ -108,7 +109,7 @@ def paras_from_text(text: str) -> list[str]:
     for b in blocks:
         t = re.sub(r"\s+", " ", b).strip()
         if t:
-            out.extend(_split_long(t))
+            out.extend(_split_long(vocab.fix_split_letters(t) if vocab else t))
     return out
 
 
@@ -287,8 +288,9 @@ def extract_pdf(path: Path, title_hint: str = "", ocr: bool = False) -> Extracte
             f"{len(empty)} of {n} pages have no extractable text"
             + (" - this looks like a scanned PDF; enable OCR or supply a text version." if share > 0.5 else "."))
     cleaned = strip_page_furniture(raw)
+    vocab = textfix.Vocab(cleaned)
     for i, t in enumerate(cleaned):
-        for para in paras_from_text(t):
+        for para in paras_from_text(t, vocab):
             ex.paras.append(ParaIn(para, page=i + 1))
     total = sum(len(p.text) for p in ex.paras)
     if ex.paras:

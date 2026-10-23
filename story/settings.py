@@ -21,12 +21,14 @@ DEFAULTS: dict = {
     "max_candidates": 30,         # story drafts per source; further leads stay listed and can be expanded
     "weights": {"hook": 25, "narrative": 20, "payoff": 20, "emotion": 15, "standalone": 20},
     "evidence_influence": 0.4,    # 0 = priority ignores evidence quality, 1 = priority scales fully with it
+    "completeness_influence": 0.4,  # how much a missing turn/outcome or scattered evidence lowers priority (0 = ignore)
+    "discover_window_chapters": 3,  # chapters (or sections) shown to one story-discovery call; smaller = more thorough
     "ocr": False,
 }
 
 _INT = {"context_limit", "output_reserve", "chunk_tokens", "chunk_overlap", "concurrency", "retries",
-        "transport_retries", "timeout_s", "max_candidates"}
-_FLOAT = {"safety_margin", "chars_per_token", "temperature", "evidence_influence", "retry_backoff_s"}
+        "transport_retries", "timeout_s", "max_candidates", "discover_window_chapters"}
+_FLOAT = {"safety_margin", "chars_per_token", "temperature", "evidence_influence", "completeness_influence", "retry_backoff_s"}
 _STR = {"base_url", "model", "json_mode"}
 _BOOL = {"ocr"}
 
@@ -81,6 +83,10 @@ def validate(patch: dict) -> dict:
         raise SettingsError("safety_margin must be between 0 and 0.5")
     if not 0 <= merged["evidence_influence"] <= 1:
         raise SettingsError("evidence_influence must be between 0 and 1")
+    if not 0 <= merged["completeness_influence"] <= 1:
+        raise SettingsError("completeness_influence must be between 0 and 1")
+    if merged["discover_window_chapters"] < 1:
+        raise SettingsError("discover_window_chapters must be at least 1")
     if merged["chunk_tokens"] < 500 or merged["chunk_overlap"] < 0 or merged["chunk_overlap"] >= merged["chunk_tokens"]:
         raise SettingsError("chunk_tokens must be >= 500 and larger than chunk_overlap")
     if merged["concurrency"] < 1 or merged["retries"] < 0 or merged["timeout_s"] < 5:

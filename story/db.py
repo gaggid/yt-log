@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS tasks(
 );
 CREATE TABLE IF NOT EXISTS candidates(
   id TEXT PRIMARY KEY, project_id TEXT, task_id INTEGER,
-  title TEXT, premise TEXT, kind TEXT DEFAULT '',
+  title TEXT, premise TEXT, kind TEXT DEFAULT '', nature TEXT DEFAULT '', completeness REAL,
   status TEXT DEFAULT 'pending', research INTEGER DEFAULT 0,
   story_score REAL DEFAULT 0, evidence_score REAL DEFAULT 0, priority REAL DEFAULT 0,
   score_override REAL, priority_override REAL,
@@ -44,6 +44,11 @@ CREATE TABLE IF NOT EXISTS candidates(
   superseded_by TEXT, created_at REAL, updated_at REAL, data TEXT DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS cand_proj ON candidates(project_id, status);
+CREATE TABLE IF NOT EXISTS figures(
+  id TEXT PRIMARY KEY, project_id TEXT, page INTEGER, kind TEXT, caption TEXT DEFAULT '', credit TEXT DEFAULT '',
+  rights INTEGER DEFAULT 0, file TEXT
+);
+CREATE INDEX IF NOT EXISTS fig_proj ON figures(project_id, page);
 CREATE TABLE IF NOT EXISTS candidate_refs(
   candidate_id TEXT, para_idx INTEGER, PRIMARY KEY(candidate_id, para_idx)
 );
@@ -64,6 +69,11 @@ def init(path: Path | str | None = None) -> None:
         c.executescript(SCHEMA)
         if "skip" not in {r[1] for r in c.execute("PRAGMA table_info(chapters)")}:
             c.execute("ALTER TABLE chapters ADD COLUMN skip INTEGER DEFAULT 0")
+        have = {r[1] for r in c.execute("PRAGMA table_info(candidates)")}
+        if "nature" not in have:
+            c.execute("ALTER TABLE candidates ADD COLUMN nature TEXT DEFAULT ''")
+        if "completeness" not in have:
+            c.execute("ALTER TABLE candidates ADD COLUMN completeness REAL")
 
 
 def db_path() -> Path:

@@ -62,7 +62,7 @@ def test_full_workflow_over_http(client):
     assert client.patch(f"/api/stories/{sid}", json={"bogus": 1}).status_code == 400
 
     ex = client.get(f"/api/projects/{pid}/export?statuses=approved").json()
-    assert ex["schema_version"] == "1.0" and [s["id"] for s in ex["stories"]] == [sid]
+    assert ex["schema_version"] == "1.1" and [s["id"] for s in ex["stories"]] == [sid]
     csv = client.get(f"/api/projects/{pid}/export?format=csv&statuses=all")
     assert csv.headers["content-type"].startswith("text/csv") and sid in csv.text
 

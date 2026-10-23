@@ -2,7 +2,7 @@
 Every operation keeps the source links (candidate_refs) intact."""
 import copy
 
-from . import db
+from . import db, figures
 from .pipeline import next_story_id, uniq
 
 STATUSES = ("pending", "approved", "rejected")
@@ -30,7 +30,8 @@ def _row(c: dict) -> dict:
 
 
 def list_candidates(pid: str, status: str = "", q: str = "", min_priority: float | None = None, research: bool | None = None,
-                    kind: str = "", sort: str = "priority", desc: bool = True, include_superseded: bool = False) -> list[dict]:
+                    kind: str = "", sort: str = "priority", desc: bool = True, include_superseded: bool = False,
+                    nature: str = "") -> list[dict]:
     where, args = ["c.project_id=?"], [pid]
     if status:
         where.append("c.status=?")
@@ -46,6 +47,10 @@ def list_candidates(pid: str, status: str = "", q: str = "", min_priority: float
     if kind:
         where.append("c.kind=?")
         args.append(kind)
+    if nature:
+        wanted = ["" if n == "unlabelled" else n for n in nature.split(",") if n]
+        where.append(f"c.nature IN ({','.join('?' * len(wanted))})")
+        args += wanted
     sql = ("SELECT c.*, COALESCE(c.score_override,c.story_score) AS eff_story, COALESCE(c.priority_override,c.priority) AS eff_priority,"
            "(SELECT COUNT(*) FROM candidate_refs r WHERE r.candidate_id=c.id) AS n_refs FROM candidates c WHERE "
            + " AND ".join(where))
@@ -61,9 +66,11 @@ def list_candidates(pid: str, status: str = "", q: str = "", min_priority: float
         r["duplicates"] = len(d.get("duplicate_warnings", []))
         r["claims"] = len(d.get("claims", []))
         r["chapter_idxs"] = d.get("chapter_idxs", [])
+        r["flags"] = len(d.get("flags", []))
+        r["completeness"] = r["completeness"] if r["completeness"] is not None else 0
         r["pages"] = pages_of(pid, r["id"])
         out.append(r)
-    col = {"priority": "eff_priority", "story": "eff_story", "evidence": "evidence_score",
+    col = {"priority": "eff_priority", "story": "eff_story", "evidence": "evidence_score", "completeness": "completeness",
            "created": "created_at", "id": "id"}.get(sort)
     out.sort(key=(lambda r: r[col]) if col else (lambda r: r["title"].lower()), reverse=desc)
     return out
@@ -104,6 +111,7 @@ def get_candidate(cid: str) -> dict:
         raise ReviewError("story not found")
     r = _row(r)
     r["refs"] = get_refs(r["project_id"], cid)
+    r["figures"] = figures.for_paras(r["project_id"], [x["idx"] for x in r["refs"]])
     return r
 
 
@@ -203,11 +211,12 @@ def merge(cid_list: list[str], title: str = "", premise: str = "") -> dict:
     with db.tx() as con:
         new = next_story_id(pid, con)
         con.execute("INSERT INTO candidates(id,project_id,title,premise,kind,research,story_score,evidence_score,priority,"
-                    "score_override,priority_override,notes,origin,edited,created_at,updated_at,data) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "score_override,priority_override,notes,origin,edited,created_at,updated_at,data,nature,completeness) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (new, pid, title.strip() or base["title"], premise.strip() or base["premise"], base["kind"],
                      1 if research else 0, base["story_score"], base["evidence_score"], base["priority"],
-                     base["score_override"], base["priority_override"], notes, "merge", 1, db.now(), db.now(), db.jdump(d)))
+                     base["score_override"], base["priority_override"], notes, "merge", 1, db.now(), db.now(), db.jdump(d),
+                     base["nature"], base["completeness"]))
         for i in refs:
             con.execute("INSERT INTO candidate_refs(candidate_id,para_idx) VALUES(?,?)", (new, i))
         for c in cs:
@@ -248,11 +257,12 @@ def split(cid: str, groups: list[dict]) -> list[dict]:
             d["related"], d["duplicate_warnings"] = [], []
             new = next_story_id(pid, con)
             con.execute("INSERT INTO candidates(id,project_id,title,premise,kind,research,story_score,evidence_score,priority,"
-                        "score_override,priority_override,notes,origin,edited,created_at,updated_at,data) "
-                        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        "score_override,priority_override,notes,origin,edited,created_at,updated_at,data,nature,completeness) "
+                        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (new, pid, g["title"].strip(), (g.get("premise") or c["premise"]).strip(), c["kind"],
                          1 if c["research"] else 0, c["story_score"], c["evidence_score"], c["priority"],
-                         c["score_override"], c["priority_override"], c["notes"], "split", 1, db.now(), db.now(), db.jdump(d)))
+                         c["score_override"], c["priority_override"], c["notes"], "split", 1, db.now(), db.now(), db.jdump(d),
+                         c["nature"], c["completeness"]))
             for i in ids:
                 con.execute("INSERT INTO candidate_refs(candidate_id,para_idx) VALUES(?,?)", (new, i))
             new_ids.append(new)
@@ -263,13 +273,13 @@ def split(cid: str, groups: list[dict]) -> list[dict]:
     return [get_candidate(i) for i in new_ids]
 
 
-def rescore_project(pid: str, weights: dict, influence: float) -> int:
+def rescore_project(pid: str, weights: dict, influence: float, c_influence: float = 0.0) -> int:
     """Recompute story/priority scores from stored factor scores after the weights changed."""
     from . import scoring
     n = 0
     for c in db.q("SELECT id,data FROM candidates WHERE project_id=? AND status!='superseded'", (pid,)):
         d = db.jload(c["data"], {})
-        s, ev, pr = scoring.rescore(d, weights, influence)
+        s, ev, pr = scoring.rescore(d, weights, influence, c_influence)
         db.ex("UPDATE candidates SET story_score=?, evidence_score=?, priority=? WHERE id=?", (s, ev, pr, c["id"]))
         n += 1
     return n

@@ -126,7 +126,7 @@ def estimate(pid: str, now: float | None = None) -> dict:
         forecast["analyze"] = True
     multi = sum(1 for tk in ch_tokens.values() if tk > chunk_target * 0.9) or (1 if n_ch == 1 and n_chunks > 1 else 0)
     plan = {
-        "rollup": multi, "index": 1 if n_ch >= 2 else 0, "discover": max(1, -(-n_ch // 12)) if n_ch else 0,
+        "rollup": multi, "index": 1 if n_ch >= 2 else 0, "discover": max(1, -(-n_ch // max(1, int(s.get("discover_window_chapters", 3))))) if n_ch else 0,
         "discover_global": 1 if n_ch >= 3 else 0,
         "draft": min(int(s["max_candidates"]), max(3, round(n_chunks * 0.6 + n_ch * 0.8))) if n_ch else 0,
         "finalize": 1,

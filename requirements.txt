@@ -4,9 +4,11 @@ httpx
 python-multipart
 pydantic>=2
 pypdf>=4
+# figures: find and render chart/figure pages (also used by optional OCR)
+pypdfium2
+Pillow
 # optional OCR for scanned PDFs (also needs the Tesseract program installed):
 # pytesseract
-# pypdfium2
 # development / tests:
 # pytest
 # reportlab

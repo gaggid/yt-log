@@ -5,7 +5,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
-from . import db, eta, export, guide, llm, pipeline, projects, review, settings as settings_mod
+from . import db, eta, export, figures, guide, llm, pipeline, projects, review, settings as settings_mod
 from .pipeline import manager
 from .tokens import Budget
 
@@ -213,6 +213,21 @@ async def analysis(pid: str):
                           "entities": r["entities"][:15], "open_questions": r["open_questions"][:10]} for r in recs]}
 
 
+@router.get("/projects/{pid}/figures")
+async def list_figures(pid: str):
+    _project_or_404(pid)
+    return figures.list_figures(pid)
+
+
+@router.get("/projects/{pid}/figures/{fid}/image")
+async def figure_image(pid: str, fid: str):
+    _project_or_404(pid)
+    p = figures.image_path(pid, fid)
+    if not p:
+        raise HTTPException(404, "figure not found")
+    return FileResponse(p, media_type="image/jpeg")
+
+
 # ── processing control ──────────────────────────────────────────────────────
 
 @router.get("/projects/{pid}/progress")
@@ -308,16 +323,17 @@ async def expand(pid: str, body: ExpandIn):
 async def rescore(pid: str):
     _project_or_404(pid)
     s = settings_mod.get()
-    return {"rescored": review.rescore_project(pid, s["weights"], s["evidence_influence"])}
+    return {"rescored": review.rescore_project(pid, s["weights"], s["evidence_influence"], s["completeness_influence"])}
 
 
 # ── stories ─────────────────────────────────────────────────────────────────
 
 @router.get("/projects/{pid}/stories")
 async def stories(pid: str, status: str = "", q: str = "", min_priority: float | None = None,
-                  research: bool | None = None, kind: str = "", sort: str = "priority", desc: bool = True):
+                  research: bool | None = None, kind: str = "", sort: str = "priority", desc: bool = True,
+                  nature: str = ""):
     _project_or_404(pid)
-    return review.list_candidates(pid, status, q, min_priority, research, kind, sort, desc)
+    return review.list_candidates(pid, status, q, min_priority, research, kind, sort, desc, nature=nature)
 
 
 @router.get("/stories/{cid}")

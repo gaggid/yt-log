@@ -65,6 +65,14 @@ ol.steps li.now{color:var(--ink);border-color:var(--accent);font-weight:600}ol.s
 .passage{border-left:3px solid var(--line);padding:6px 12px;margin:8px 0;background:var(--bg);border-radius:0 8px 8px 0;white-space:pre-wrap}
 h2{font-size:17px;margin:0 0 10px}h4{margin:18px 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--mute)}
 ul.tight{margin:4px 0;padding-left:20px}
+.nat{font-size:12px;border-radius:999px;padding:1px 9px;font-weight:600;border:1px solid var(--line)}
+.nat-story{background:var(--okbg,#e6f4ea);color:var(--ok,#1e7a3c)}.nat-anecdote{background:var(--infobg,#e8f0fe);color:var(--info,#1a56c4)}
+.nat-explainer,.nat-hypothetical{background:var(--warnbg);color:var(--warn)}
+.prov{font-size:11px;color:var(--mute);border:1px solid var(--line);border-radius:6px;padding:0 5px;margin-left:4px}
+.prov-inferred{color:var(--warn);border-color:var(--warn)}
+.figs{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.fig img{width:100%;border:1px solid var(--line);border-radius:6px;display:block}
+.flagbox{background:var(--warnbg);color:var(--warn);padding:6px 12px;border-radius:8px;margin:6px 0;font-size:13px}
 .warnbox{background:var(--warnbg);color:var(--warn);padding:8px 12px;border-radius:8px;margin:8px 0}
 .errbox{background:var(--badbg);color:var(--bad);padding:8px 12px;border-radius:8px;margin:8px 0}
 .hint{background:var(--accent-soft);padding:10px 14px;border-radius:10px}
@@ -150,6 +158,9 @@ const textDlg = (title, label, value = '', multiline = false) =>
   dialog({title, html: `<label class="f">${esc(label)}${multiline ? `<textarea id="td" style="min-height:160px">${esc(value)}</textarea>` : `<input id="td" value="${esc(value)}">`}</label>`,
     buttons: [{label: 'Cancel', value: null}, {label: 'Save', primary: true, collect: l => l.querySelector('#td').value}]});
 async function logout() { await fetch('/logout', {method: 'POST'}); location = '/login'; }
+const NAT = {story: 'Story', anecdote: 'Anecdote', explainer: 'Explainer', hypothetical: 'Hypothetical'};
+const natBadge = n => `<span class="nat nat-${esc(n || 'none')}" title="${esc({story: 'A documented event with a turning point and an outcome', anecdote: 'A short real example, not a full arc', explainer: 'Teaches a concept; supporting material, not a narrative', hypothetical: 'An imagined scenario, not something that happened'}[n] || 'Not labelled (found before types existed)')}">${esc(NAT[n] || 'Unlabelled')}</span>`;
+const prov = (b, kind) => b ? `<span class="prov ${b === 'inferred' ? 'prov-inferred' : ''}" title="${kind === 'date' ? (b === 'stated' ? 'This date appears in the cited passages' : 'This date is not in the cited passages') : ({quoted: 'Stated word for word in the source', summarised: 'The source says this in other words', inferred: 'Connected or concluded by the model; check it'}[b] || '')}">${esc(b)}</span>` : '';
 const badge = (s, label) => `<span class="badge b-${esc(s)}">${esc(label ?? s)}</span>`;
 const bar = (p, cls = '') => `<div class="bar ${cls}"><i style="width:${Math.max(0, Math.min(100, p))}%"></i></div>`;
 const closeOverlay = () => { $('#overlay').innerHTML = ''; document.removeEventListener('keydown', drawerKeys); storyOpen = null; setQuery({s: null}); };
@@ -396,13 +407,14 @@ async function saveScope(btn) {
 /* ───────── stories tab ───────── */
 let sf = {}, storyRows = [], selected = new Set(), storyOpen = null, loadedFound = 0;
 async function tabStories(id) {
-  sf = Object.assign({status: '', q: '', min: '', research: false, sort: 'priority'}, LS.get('sf:' + id, {}));
+  sf = Object.assign({status: '', q: '', min: '', research: false, sort: 'priority', type: 'main'}, LS.get('sf:' + id, {}));
   selected = new Set(LS.get('sel:' + id, []));
   $('#tab').innerHTML = `
     <div class="row">
       <input id="sq" placeholder="Search stories" value="${esc(sf.q)}" style="flex:1;min-width:180px">
       <select id="sst"><option value="">All (merged ones hidden)</option>${[['pending', 'to review'], ['approved', 'approved'], ['rejected', 'rejected']].map(([v, l]) => `<option value="${v}" ${sf.status === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
-      <select id="ssort">${[['priority', 'Priority'], ['story', 'Story score'], ['evidence', 'Evidence'], ['title', 'Title'], ['created', 'Order found']].map(([v, l]) => `<option value="${v}" ${sf.sort === v ? 'selected' : ''}>Sort: ${l}</option>`).join('')}</select>
+      <select id="ssort">${[['priority', 'Priority'], ['story', 'Story score'], ['evidence', 'Evidence'], ['completeness', 'Completeness'], ['title', 'Title'], ['created', 'Order found']].map(([v, l]) => `<option value="${v}" ${sf.sort === v ? 'selected' : ''}>Sort: ${l}</option>`).join('')}</select>
+      <select id="stype" title="Stories are documented events with an outcome. Explainers teach a concept and are supporting material.">${[['main', 'Stories & anecdotes'], ['story', 'Full stories only'], ['explainer', 'Explainers & hypotheticals'], ['all', 'Everything']].map(([v, l]) => `<option value="${v}" ${sf.type === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
       <label class="small"><input type="checkbox" id="sres" ${sf.research ? 'checked' : ''}> needs research</label>
       <input id="smin" type="number" min="0" max="100" placeholder="min priority" value="${esc(sf.min)}" style="width:120px">
     </div>
@@ -413,6 +425,7 @@ async function tabStories(id) {
   $('#sq').oninput = e => { sf.q = e.target.value; clearTimeout(sf.t); sf.t = setTimeout(reload, 250); };
   $('#sst').onchange = e => { sf.status = e.target.value; reload(); };
   $('#ssort').onchange = e => { sf.sort = e.target.value; reload(); };
+  $('#stype').onchange = e => { sf.type = e.target.value; reload(); };
   $('#sres').onchange = e => { sf.research = e.target.checked; reload(); };
   $('#smin').oninput = e => { sf.min = e.target.value; clearTimeout(sf.t); sf.t = setTimeout(reload, 250); };
   await loadStories(); updatePick();
@@ -423,6 +436,7 @@ async function loadStories() {
   const y = scrollY;
   const qs = new URLSearchParams({q: sf.q, status: sf.status, sort: sf.sort, desc: sf.sort !== 'title'});
   if (sf.min !== '') qs.set('min_priority', sf.min); if (sf.research) qs.set('research', true);
+  const NT = {main: 'story,anecdote,unlabelled', story: 'story', explainer: 'explainer,hypothetical'}[sf.type]; if (NT) qs.set('nature', NT);
   storyRows = await api(`/projects/${P.id}/stories?` + qs); loadedFound = PR ? PR.next.counts.found : 0;
   const f = $('#fresh'); if (f) f.innerHTML = '';
   const el = $('#slist'); if (!el) return;
@@ -434,15 +448,16 @@ async function loadStories() {
   el.innerHTML = storyRows.map(s => `<div class="story ${storyOpen === s.id ? 'cur' : ''}" data-id="${s.id}" onclick="openStory('${s.id}')">
     <input type="checkbox" onclick="event.stopPropagation();pick('${s.id}',this.checked)" ${selected.has(s.id) ? 'checked' : ''}>
     <div><h3>${esc(s.title)}</h3><div class="mute">${esc(s.premise)}</div>
-      <div class="row small mt-s" style="gap:6px">${badge(s.status, s.status === 'pending' ? 'to review' : s.status)}${s.research ? badge('research', 'needs research') : ''}${s.edited ? badge('info', 'edited') : ''}
+      <div class="row small mt-s" style="gap:6px">${natBadge(s.nature)}${badge(s.status, s.status === 'pending' ? 'to review' : s.status)}${s.research ? badge('research', 'needs research') : ''}${s.edited ? badge('info', 'edited') : ''}
         <span class="mute">${esc(s.id)} · ${s.n_refs} passage${s.n_refs === 1 ? '' : 's'}${s.pages ? ' · p. ' + esc(s.pages) : ''}${s.kind ? ' · ' + esc(s.kind.replace(/_/g, ' ')) : ''}</span>
-        ${s.warnings ? `<span style="color:var(--warn)">⚠ ${s.warnings}</span>` : ''}${s.duplicates ? `<span style="color:var(--warn)">possible duplicate</span>` : ''}</div></div>
+        ${s.warnings ? `<span style="color:var(--warn)">⚠ ${s.warnings}</span>` : ''}${s.flags ? `<span style="color:var(--warn)" title="Open the story to see what is missing or uncertain">${s.flags} to check</span>` : ''}${s.duplicates ? `<span style="color:var(--warn)">possible duplicate</span>` : ''}</div></div>
     <div class="score"><b>${Math.round(s.eff_priority)}</b><span class="mute small">priority</span>
       <div class="mt-s small" title="How compelling the story is">story ${Math.round(s.eff_story)}</div>${bar(s.eff_story)}
-      <div class="small" title="How well the source supports it">evidence ${Math.round(s.evidence_score)}</div>${bar(s.evidence_score, 'ev')}</div></div>`).join('');
+      <div class="small" title="How accurately the source supports it">evidence ${Math.round(s.evidence_score)}</div>${bar(s.evidence_score, 'ev')}
+      <div class="small" title="How much of a whole story (turning point, outcome, passages close together) the source holds">complete ${Math.round(s.completeness)}</div>${bar(s.completeness)}</div></div>`).join('');
   scrollTo(0, y);
 }
-function clearFilters() { sf = {status: '', q: '', min: '', research: false, sort: 'priority'}; LS.set('sf:' + P.id, sf); tabStories(P.id); }
+function clearFilters() { sf = {status: '', q: '', min: '', research: false, sort: 'priority', type: 'all'}; LS.set('sf:' + P.id, sf); tabStories(P.id); }
 function storiesFreshness() {
   const f = $('#fresh'); if (!f || !PR) return;
   const now = PR.next.counts.found;
@@ -469,7 +484,7 @@ async function openStory(sid) {
   const refs = S.refs, ro = S.status === 'superseded';
   $('#overlay').innerHTML = `<div class="scrim" onclick="closeStory()"></div><div class="drawer" id="drawer">
     <div class="dh"><div class="row"><button class="small" onclick="stepStory(-1)" ${pos <= 0 ? 'disabled' : ''}>‹ Previous</button><span class="small mute">${pos >= 0 ? `${pos + 1} of ${total}` : ''}</span><button class="small" onclick="stepStory(1)" ${pos < 0 || pos >= total - 1 ? 'disabled' : ''}>Next ›</button>
-      <span class="sp"></span><span class="mute small">${esc(S.id)}${S.origin !== 'pipeline' ? ' · ' + esc(S.origin) : ''}</span><button class="small" onclick="closeStory()">Close ✕</button></div>
+      <span class="sp"></span><span class="mute small">${natBadge(S.nature)} ${esc(S.id)}${S.origin !== 'pipeline' ? ' · ' + esc(S.origin) : ''}</span><button class="small" onclick="closeStory()">Close ✕</button></div>
       ${ro ? '' : `<div class="row mt-s"><button class="good" onclick="decide('approved', this)">✓ Approve &amp; next</button><button class="bad" onclick="decide('rejected', this)">✗ Reject &amp; next</button><button onclick="stepStory(1)">Skip</button>
         <button class="small" onclick="toggleResearch(this)">${S.research ? 'Clear research flag' : 'Needs research'}</button><span class="sp"></span>${badge(S.status, S.status === 'pending' ? 'to review' : S.status)}${S.research ? badge('research', 'needs research') : ''}</div>
         <div class="small mute mt-s"><kbd>a</kbd> approve · <kbd>r</kbd> reject · <kbd>j</kbd>/<kbd>k</kbd> next/previous · <kbd>Esc</kbd> close</div>`}</div>
@@ -477,12 +492,14 @@ async function openStory(sid) {
     ${ro ? `<div class="warnbox">This story was merged or split into: ${esc(S.superseded_by || '')}. It is read-only history.</div>` : ''}
     <label class="f mt-s">Title<input id="e-title" value="${esc(S.title)}"></label>
     <label class="f mt-s">Premise (one sentence)<textarea id="e-premise">${esc(S.premise)}</textarea></label>
+    ${(d.flags || []).map(f => `<div class="flagbox">${esc({nature: 'Type', gap: 'Missing', stitched: 'Scattered', date_no_year: 'Dates', date_inferred: 'Dates', title: 'Title'}[f.code] || 'Check')}: ${esc(f.text)}</div>`).join('')}
     ${(d.warnings || []).map(w => `<div class="warnbox">⚠ ${esc(w)}</div>`).join('')}
     ${(d.duplicate_warnings || []).length ? `<div class="warnbox">Possible duplicate of: ${d.duplicate_warnings.map(x => `<a href="#" onclick="openStory('${x.id}');return false">${esc(x.title)}</a> (${Math.round(x.overlap * 100)}% shared passages)`).join(', ')}. Use Merge in the list if they are the same story.</div>` : ''}
     <h4>Scores</h4>
     <div class="grid g3"><div class="card pad"><div class="mute small">Priority</div><b style="font-size:24px">${Math.round(S.eff_priority)}</b>${S.priority_override != null ? `<div class="small mute">your override (computed ${Math.round(S.priority)})</div>` : '<div class="small mute">story score scaled by evidence</div>'}</div>
       <div class="card pad"><div class="mute small">Story appeal</div><b style="font-size:24px">${Math.round(S.eff_story)}</b>${S.score_override != null ? `<div class="small mute">your override (computed ${Math.round(S.story_score)})</div>` : '<div class="small mute">hook, narrative, payoff…</div>'}</div>
-      <div class="card pad"><div class="mute small">Evidence quality</div><b style="font-size:24px">${Math.round(S.evidence_score)}</b>${bar(S.evidence_score, 'ev')}</div></div>
+      <div class="card pad"><div class="mute small">Evidence accuracy</div><b style="font-size:24px">${Math.round(S.evidence_score)}</b>${bar(S.evidence_score, 'ev')}<div class="small mute">are the quotes real?</div></div>
+      <div class="card pad"><div class="mute small">Completeness</div><b style="font-size:24px">${Math.round(S.completeness || 0)}</b>${bar(S.completeness || 0)}<div class="small mute" title="${esc(JSON.stringify(d.completeness?.parts || {}))}">${d.completeness ? `turn ${d.completeness.parts.turning_point ? '✓' : '✗'} · outcome ${d.completeness.parts.outcome ? '✓' : '✗'} · span ${d.completeness.page_span ?? '?'} pp.` : 'is it a whole story?'}</div></div></div>
     <table class="mt-s"><tbody>${Object.entries(d.scores || {}).map(([k, v]) => `<tr><td style="width:130px">${esc(k)}</td><td style="width:60px"><b>${v.score}</b>/10</td><td class="small">${esc(v.reason)}</td></tr>`).join('')}
       <tr><td>evidence</td><td><b>${d.evidence?.score ?? ''}</b>/10</td><td class="small">${esc(d.evidence?.reason || '')}<div class="mute">${d.evidence?.breakdown ? `${d.evidence.breakdown.quotes_verified}/${d.evidence.breakdown.quotes_checked} quotes found in the source · ${d.evidence.breakdown.supporting_passages} supporting passage(s)` : ''}</div></td></tr></tbody></table>
     <div class="row mt-s"><label class="f">Override story score<input type="number" id="e-sov" min="0" max="100" value="${S.score_override ?? ''}"></label>
@@ -493,11 +510,13 @@ async function openStory(sid) {
     <label class="f mt-s">Your notes<textarea id="e-notes">${esc(S.notes)}</textarea></label>
     <div class="row mt-s"><button class="primary" id="savebtn" onclick="saveStory(this)">Save changes</button><span class="small" id="dirtyflag"></span></div>
     <h4>People</h4>${(d.people || []).length ? `<ul class="tight">${d.people.map(p => `<li><b>${esc(p.name)}</b> ${esc(p.role)}</li>`).join('')}</ul>` : '<span class="mute">none</span>'}
-    <h4>Chronology</h4>${(d.chronology || []).length ? `<ul class="tight">${d.chronology.map(c => `<li>${c.when ? `<b>${esc(c.when)}</b> ` : ''}${esc(c.what)}</li>`).join('')}</ul>` : '<span class="mute">none</span>'}
+    <h4>Chronology</h4>${(d.chronology || []).length ? `<ul class="tight">${d.chronology.map(c => `<li>${c.when ? `<b>${esc(c.when)}</b>${prov(c.when_basis, 'date')} ` : ''}${esc(c.what)}${prov(c.basis)}</li>`).join('')}</ul>` : '<span class="mute">none</span>'}
     <h4>Context needed</h4>${ul(d.context_needed)}
-    <h4>Key claims and evidence</h4>${(d.claims || []).map(c => `<div class="mt-s"><b>${esc(c.claim)}</b> ${badge(c.support === 'strong' ? 'approved' : c.support === 'weak' ? 'warn' : 'info', c.support)}
+    <h4>Key claims and evidence</h4>${(d.claims || []).map(c => `<div class="mt-s"><b>${esc(c.claim)}</b>${prov(c.basis)} ${badge(c.support === 'strong' ? 'approved' : c.support === 'weak' ? 'warn' : 'info', c.support)}
       ${c.quote ? `<div class="passage small">“${esc(c.quote)}” ${c.quote_verified ? '<span class="ok">✓ found in source</span>' : '<span class="err">✗ not found word for word</span>'}</div>` : '<div class="mute small">no direct quote</div>'}
       <div class="small mute">passages: ${(c.para_ids || []).map(i => 'P' + i).join(', ') || '—'}</div></div>`).join('')}
+    ${(S.figures || []).length ? `<h4>Charts and figures near these passages</h4><div class="figs">${S.figures.map(f => `<div class="fig"><a href="/api/projects/${S.project_id}/figures/${f.id}/image" target="_blank"><img loading="lazy" src="/api/projects/${S.project_id}/figures/${f.id}/image" alt="page ${f.page}"></a>
+      <div class="small">p. ${f.page}${f.caption ? ' · ' + esc(f.caption) : ''}</div>${f.rights_flag ? `<div class="small" style="color:var(--warn)" title="${esc(f.credit)}">© rights notice on page: clear before reuse</div>` : ''}</div>`).join('')}</div>` : ''}
     <h4>Uncertainties and conflicting accounts</h4>${ul(d.uncertainties)}
     <h4>Suggested research questions</h4>${ul(d.research_questions)}
     ${(d.related || []).length ? `<h4>Related stories</h4><ul class="tight">${d.related.map(x => `<li><a href="#" onclick="openStory('${x.id}');return false">${esc(x.title)}</a> <span class="mute small">${Math.round(x.overlap * 100)}% shared passages</span></li>`).join('')}</ul>` : ''}
@@ -632,7 +651,7 @@ async function viewSettings() {
     <div class="card pad mt"><h4 style="margin-top:0">Reliability</h4>
       <div class="grid g3">${n('concurrency', 'Concurrency', 1, 'Parallel requests; the gateway serves one at a time.')}${n('retries', 'Invalid-reply retries')}${n('transport_retries', 'Connection retries')}${n('retry_backoff_s', 'Retry backoff (s)', 1)}${n('timeout_s', 'Request timeout (s)', 10)}${n('temperature', 'Temperature', 0.05)}</div></div>
     <div class="card pad mt"><h4 style="margin-top:0">Stories &amp; scoring</h4>
-      <div class="grid g3">${n('max_candidates', 'Stories to write up per source', 1, 'Further leads stay listed.')}${n('evidence_influence', 'Evidence influence (0–1)', 0.05, '0 ignores evidence in priority; 1 scales fully.')}</div>
+      <div class="grid g3">${n('max_candidates', 'Stories to write up per source', 1, 'Further leads stay listed.')}${n('evidence_influence', 'Evidence influence (0–1)', 0.05, '0 ignores evidence in priority; 1 scales fully.')}${n('completeness_influence', 'Completeness influence (0–1)', 0.05, 'How much a missing outcome or scattered passages lower priority.')}${n('discover_window_chapters', 'Chapters per discovery call', 1, 'Smaller finds more stories but takes longer.')}</div>
       <div class="grid g3 mt-s">${Object.entries(s.weights).map(([k, v]) => `<label class="f">Weight: ${esc(k)}<input type="number" data-w="${k}" value="${v}"></label>`).join('')}</div>
       <label class="small mt-s" style="display:block"><input type="checkbox" data-s="ocr" ${s.ocr ? 'checked' : ''}> Try OCR on scanned PDF pages (needs Tesseract installed)</label></div>
     <div class="row mt"><button class="primary" onclick="saveSettings(this)">Save settings</button><span class="mute small">After changing scoring weights, use “Re-score” on a project's Stories tab.</span></div>

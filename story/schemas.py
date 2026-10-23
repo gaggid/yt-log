@@ -29,19 +29,28 @@ def _ids(v):
     return list(dict.fromkeys(out))
 
 
+# Paragraph labels are citation keys only: "[P12]", "[P12, P14]", "(P12)" must never leak into prose fields.
+_TAG = re.compile(r"\s*[\[(]\s*P\d+(?:\s*(?:[,;–-]|and)?\s*P?\d+)*\s*[\])]")
+
+
+def strip_tags(t: str) -> str:
+    return re.sub(r"\s{2,}", " ", _TAG.sub("", t)).strip()
+
+
 def _str(v):
     if v is None:
         return ""
     if isinstance(v, (list, tuple)):
-        return "; ".join(str(x) for x in v)
-    return str(v).strip()
+        return strip_tags("; ".join(str(x) for x in v))
+    return strip_tags(str(v))
 
 
 def _strs(v):
     if v is None:
         return []
     if isinstance(v, str):
-        return [v.strip()] if v.strip() else []
+        v = strip_tags(v)
+        return [v] if v else []
     return [s for s in (_str(x) for x in v) if s]
 
 
@@ -65,9 +74,36 @@ class M(BaseModel):
 
 # ── chunk analysis ──────────────────────────────────────────────────────────
 
+NATURES = ("story", "anecdote", "explainer", "hypothetical")
+
+
+def _nature(v):
+    v = _str(v).lower().replace(" ", "_").replace("-", "_")
+    alias = {"case_study": "story", "narrative": "story", "example": "anecdote", "illustration": "explainer",
+             "lesson": "explainer", "tutorial": "explainer", "scenario": "hypothetical", "hypothetical_example": "hypothetical"}
+    v = alias.get(v, v)
+    return v if v in NATURES else ""
+
+
+def _basis(v):
+    v = _str(v).lower()
+    return v if v in ("quoted", "summarised", "inferred") else ""
+
+
+def _when_basis(v):
+    v = _str(v).lower()
+    return v if v in ("stated", "inferred") else ""
+
+
+Nature = Annotated[str, BeforeValidator(_nature)]
+Basis = Annotated[str, BeforeValidator(_basis)]
+WhenBasis = Annotated[str, BeforeValidator(_when_basis)]
+
+
 class Event(M):
     what: Str
     when: Str = ""
+    when_basis: WhenBasis = ""
     who: StrList = []
     para_ids: ParaIds = []
 
@@ -155,6 +191,7 @@ class Stub(M):
     title: Str
     premise: Str
     why: Str = ""
+    nature: Nature = ""
     kind: Annotated[str, BeforeValidator(_kind)] = "incident"
     potential: Annotated[float, BeforeValidator(_num)] = 5
     para_ids: ParaIds = []
@@ -203,6 +240,7 @@ def _support(v):
 
 class Claim(M):
     claim: Str
+    basis: Basis = ""
     quote: Str = ""
     para_ids: ParaIds = []
     support: Annotated[str, BeforeValidator(_support)] = "moderate"
@@ -215,12 +253,16 @@ class Person(M):
 
 class TimelineEntry(M):
     when: Str = ""
+    when_basis: WhenBasis = ""
     what: Str
+    basis: Basis = ""
+    para_ids: ParaIds = []
 
 
 class DraftOut(M):
     title: Str
     premise: Str
+    nature: Nature = ""
     curiosity_question: Str = ""
     opening_hook: Str = ""
     overview: Str
@@ -234,6 +276,8 @@ class DraftOut(M):
     context_needed: StrList = []
     claims: list[Claim] = Field(default_factory=list)
     uncertainties: StrList = []
+    gaps: StrList = []
+    title_flags: StrList = []
     research_questions: StrList = []
     scores: Scores
     evidence: Factor

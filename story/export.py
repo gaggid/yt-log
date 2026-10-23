@@ -3,7 +3,7 @@ import csv
 import io
 from datetime import datetime, timezone
 
-from . import db, projects, review
+from . import db, figures, projects, review
 from .contract import (SCHEMA_VERSION, ExportDoc, Lineage, Related, Review, Scores, SourceInfo, SourceRef,
                        StoryRecord)
 
@@ -41,20 +41,23 @@ def _story(cid: str, include_text: bool) -> StoryRecord:
                       chapter_title=r["chapter_title"] or "", locator=r["locator"], text=r["text"] if include_text else "")
             for r in c["refs"]]
     return StoryRecord(
-        id=c["id"], title=c["title"], premise=c["premise"], kind=c["kind"] or "",
+        id=c["id"], title=c["title"], premise=c["premise"], kind=c["kind"] or "", nature=c["nature"] or "",
         curiosity_question=d.get("curiosity_question", ""), opening_hook=d.get("opening_hook", ""),
-        overview=d.get("overview", ""), people=d.get("people", []), chronology=d.get("chronology", []),
+        overview=d.get("overview", ""), people=d.get("people", []), chronology=[{**x, "paragraph_ids": x.get("para_ids", [])} for x in d.get("chronology", [])],
         conflict=d.get("conflict", ""), stakes=d.get("stakes", ""), turning_point=d.get("turning_point", ""),
         outcome=d.get("outcome", ""), audience_interest=d.get("audience_interest", ""),
         context_needed=d.get("context_needed", []),
         claims=[{"claim": x["claim"], "quote": x.get("quote", ""), "quote_verified": x.get("quote_verified"),
-                 "support": x.get("support", "moderate"), "paragraph_ids": x.get("para_ids", [])} for x in d.get("claims", [])],
+                 "support": x.get("support", "moderate"), "basis": x.get("basis", ""),
+                 "paragraph_ids": x.get("para_ids", [])} for x in d.get("claims", [])],
+        gaps=d.get("gaps", []), flags=d.get("flags", []), figures=figures.for_paras(c["project_id"], [r["idx"] for r in c["refs"]]),
         uncertainties=d.get("uncertainties", []), research_questions=d.get("research_questions", []),
         scores=Scores(story_score=c["story_score"], evidence_score=c["evidence_score"], priority=c["priority"],
                       story_score_override=c["score_override"], priority_override=c["priority_override"],
                       effective_priority=c["eff_priority"],
                       factors={k: {"score": v["score"], "reason": v.get("reason", "")} for k, v in sc.items()},
-                      evidence_reason=ev.get("reason", ""), evidence_breakdown=ev.get("breakdown", {})),
+                      evidence_reason=ev.get("reason", ""), evidence_breakdown=ev.get("breakdown", {}),
+                      completeness=c["completeness"], completeness_breakdown=(d.get("completeness") or {}).get("parts", {})),
         review=Review(status=c["status"], needs_research=c["research"], notes=c["notes"], edited=c["edited"]),
         references=refs,
         related=[Related(**x) for x in d.get("related", [])],
@@ -69,7 +72,7 @@ def to_json(doc: ExportDoc) -> str:
 
 
 CSV_COLUMNS = ["id", "title", "premise", "status", "needs_research", "effective_priority", "story_score", "evidence_score",
-               "hook", "narrative", "payoff", "emotion", "standalone", "kind", "curiosity_question", "opening_hook",
+               "hook", "narrative", "payoff", "emotion", "standalone", "kind", "nature", "completeness", "flags", "figures", "curiosity_question", "opening_hook",
                "overview", "conflict", "stakes", "turning_point", "outcome", "pages", "sections", "paragraph_ids",
                "claims", "unverified_quotes", "uncertainties", "research_questions", "duplicate_of", "related", "notes"]
 
@@ -86,7 +89,9 @@ def to_csv(doc: ExportDoc) -> str:
             "needs_research": s.review.needs_research, "effective_priority": s.scores.effective_priority,
             "story_score": s.scores.story_score, "evidence_score": s.scores.evidence_score,
             **{k: f[k].score if k in f else "" for k in ("hook", "narrative", "payoff", "emotion", "standalone")},
-            "kind": s.kind, "curiosity_question": s.curiosity_question, "opening_hook": s.opening_hook,
+            "kind": s.kind, "nature": s.nature, "completeness": s.scores.completeness,
+            "flags": " | ".join(f.text for f in s.flags), "figures": " ".join(f"p{f.page}" for f in s.figures),
+            "curiosity_question": s.curiosity_question, "opening_hook": s.opening_hook,
             "overview": s.overview, "conflict": s.conflict, "stakes": s.stakes, "turning_point": s.turning_point,
             "outcome": s.outcome, "pages": review.compress_pages(pages),
             "sections": " | ".join(dict.fromkeys(r.section or r.chapter_title for r in s.references if r.section or r.chapter_title)),

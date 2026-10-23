@@ -64,6 +64,19 @@ def _store(pid: str, ex: ingest.Extracted, *, title: str, author: str, fmt: str,
              db.jdump(ex.warnings + (extra_warnings or [])), db.jdump(ex.meta)))
 
 
+def _add_figures(pid: str, orig: Path, ex: ingest.Extracted) -> None:
+    from . import figures
+    try:
+        recs = figures.extract(orig, pid, ex.paras)
+    except Exception as e:  # noqa: BLE001 - figures are an extra; never fail the import over them
+        db.ex("UPDATE projects SET warnings=? WHERE id=?", (db.jdump(ex.warnings + [f"Figures could not be extracted: {e}"]), pid))
+        return
+    if recs:
+        rights = sum(r["rights"] for r in recs)
+        ex.meta["figures"] = {"pages": len(recs), "with_rights_notice": rights}
+        db.ex("UPDATE projects SET meta=? WHERE id=?", (db.jdump(ex.meta), pid))
+
+
 def new_id() -> str:
     return uuid.uuid4().hex[:8]
 
@@ -87,6 +100,8 @@ def import_file(filename: str, data: bytes, title: str = "", author: str = "") -
         else:
             ex = ingest.extract_text(ingest.decode_bytes(data), title=title or stem)
         _store(pid, ex, title=title or ex.title or stem, author=author, fmt=ex.fmt, url="", orig=orig, sha=sha)
+        if ext == ".pdf":
+            _add_figures(pid, orig, ex)
     except Exception as e:
         shutil.rmtree(sources_dir() / pid, onerror=_rm_ro)
         if isinstance(e, (ProjectError, ingest.IngestError)):
@@ -144,7 +159,7 @@ def _rm_ro(func, path, _exc):
 def delete(pid: str) -> None:
     with db.tx() as c:
         c.execute("DELETE FROM candidate_refs WHERE candidate_id IN (SELECT id FROM candidates WHERE project_id=?)", (pid,))
-        for t in ("candidates", "tasks", "paras", "chapters", "runs"):
+        for t in ("candidates", "tasks", "paras", "chapters", "runs", "figures"):
             c.execute(f"DELETE FROM {t} WHERE project_id=?", (pid,))
         c.execute("DELETE FROM projects WHERE id=?", (pid,))
     shutil.rmtree(sources_dir() / pid, onerror=_rm_ro)
