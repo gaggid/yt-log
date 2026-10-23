@@ -163,6 +163,14 @@ window.viewPlan = async function (id) {
       await run(b, `/media/${id}/voice`, {only_missing: true});
     },
     async voiceOne(b, sid) { await run(b, `/media/${id}/voice`, {segment_ids: [sid], only_missing: false}); toast('Making this part again (about a minute or two).'); },
+    async voiceApproveAll(b) {
+      const todo = MS.segments.map(r => r.attempts.find(a => a.id === r.chosen)).filter(a => a && !a.approved && !(a.flags || []).length);
+      if (!todo.length) return toast('Nothing to approve.');
+      const flagged = MS.segments.filter(r => { const a = r.attempts.find(x => x.id === r.chosen); return a && (a.flags || []).length; }).length;
+      if (!await confirmDlg('Approve all voice?', `${todo.length} finished take(s) will be approved as they are.${flagged ? ` ${flagged} take(s) with a warning are left for you to listen to.` : ''} You can unapprove any part later.`, 'Approve')) return;
+      await act(b, async () => { for (const a of todo) await api(`/media/item/${a.id}`, {method: 'PATCH', json: {approved: true}}); return todo.length; }, n => `Approved ${n} voice take(s)`);
+      await load(true);
+    },
     async voiceApprove(iid, on) { await act(null, () => api(`/media/item/${iid}`, {method: 'PATCH', json: {approved: on}}), on ? 'Recording approved' : 'Approval removed'); await load(true); },
     async validate(b) { const r = await act(b, () => api(`/plans/${id}/validate`, {method: 'POST'})); if (r) { await load(true); toast(r.ok ? 'No blocking problems found' : 'Some problems need attention'); } },
     async narrator(el) { await act(null, () => api(`/plans/${id}/narrator`, {method: 'PATCH', json: {name: el.value}}), 'Narrator name saved'); await load(true); },
@@ -229,6 +237,7 @@ window.viewPlan = async function (id) {
     const compiled = p.scenes.length > 0 && p.scenes.every(s => s.data.prompts && s.data.prompts.qwen), promptStale = !!(vp && vp.issues.some(i => i.kind === 'stale'));
     const sc = v.scores || null, so = v.signoff || null, reviewed = !!(sc && sc.content_hash === p.content_hash);
     const voiceDone = !!(MS && MS.total && MS.have === MS.total), exportReady = !!(MS && MS.export.exists && MS.export.current);
+    const voiceToApprove = MS ? MS.segments.map(r => r.attempts.find(a => a.id === r.chosen)).filter(a => a && !a.approved && !(a.flags || []).length) : [];
     const ap = p.approval || {state: 'draft'}, approved = ap.state === 'approved', lastExp = (p.exports || [])[0], exported = !!(lastExp && lastExp.content_hash === p.content_hash);
     const missingBeats = p.blueprint ? p.blueprint.beats.filter(b => !p.segments.some(s => s.beat === b.id)) : [];
     const segNoScene = p.segments.filter(s => !p.scenes.some(c => c.segment_id === s.id));
@@ -248,7 +257,7 @@ window.viewPlan = async function (id) {
     if (stale) warns.push(`${stale} scene(s) follow narration you changed: look at them, then approve.`);
     if (nRepeat) warns.push(`${nRepeat} scene(s) repeat the previous camera: use “Fix camera repeats”.`);
     if (p.scenes.length && !segNoScene.length && (!compiled || promptStale)) warns.push(promptStale ? 'Some scenes changed after their image prompts were written: press “Write image prompts”.' : 'Image prompts are not written yet: press “Write image prompts”.');
-    return {voiceDone, exportReady, sc, so, reviewed, ap, approved, lastExp, exported, compiled, promptStale, j, running, v, vs, issues, missingBeats, segNoScene, errors, nRepeat, stale, checked, blocks, warns};
+    return {voiceToApprove, voiceDone, exportReady, sc, so, reviewed, ap, approved, lastExp, exported, compiled, promptStale, j, running, v, vs, issues, missingBeats, segNoScene, errors, nRepeat, stale, checked, blocks, warns};
   }
 
   function render() {
@@ -256,7 +265,7 @@ window.viewPlan = async function (id) {
     const imSet = {default: 'qwen-image-2.1', by_type: {}, previews_enabled: false, ...(p.settings.image_models || {})};
     imSet.licence_checks = {'qwen-image-2.1': true, 'flux2-klein-9b': true, ...(imSet.licence_checks || {})};
     const modelFor = d => d.model || (imSet.by_type || {})[d.visual_type] || imSet.default;
-    const a = analyse(), {voiceDone, exportReady, sc, so, reviewed, ap, approved, lastExp, exported, compiled, promptStale, j, running, v, vs, issues, missingBeats, segNoScene, errors, nRepeat, checked, blocks, warns} = a;
+    const a = analyse(), {voiceToApprove, voiceDone, exportReady, sc, so, reviewed, ap, approved, lastExp, exported, compiled, promptStale, j, running, v, vs, issues, missingBeats, segNoScene, errors, nRepeat, checked, blocks, warns} = a;
     const dis = running ? 'disabled' : '';
     const steps = [['Story', true], ['Blueprint', !!p.blueprint], ['Narration', p.segments.length && p.blueprint && !missingBeats.length], ['Storyboard', p.scenes.length && !segNoScene.length], ['Image prompts', compiled && !promptStale],
       ['Checked', checked && !errors.length], ['Reviewed', reviewed], ['Approved', approved], ['Exported', exported], ['Voice', voiceDone]];
@@ -390,6 +399,7 @@ window.viewPlan = async function (id) {
         <details class="mt" ontoggle="if(this.open)_plan.loadHistory(this)"><summary><b>Change history</b> <span class="mute small">every approval, regeneration and export</span></summary><div class="hist mt-s small mute">Loading…</div></details></div>` : ''}
 
       ${MS && p.scenes.length ? `<div class="card pad mt" id="sec-voice"><div class="row"><h3 style="margin:0">Voice</h3>${MS.have === MS.total && MS.total ? badge('good', 'all parts voiced') : badge('queued', MS.have + ' of ' + MS.total + ' parts voiced')}<span class="sp"></span>
+          <button class="small" ${dis || !voiceToApprove.length ? 'disabled' : ''} title="Approves every finished take that has no warning" onclick="_plan.voiceApproveAll(this)">Approve all voice (${voiceToApprove.length})</button>
           <button class="small primary" ${dis} ${exportReady ? '' : 'disabled'} onclick="_plan.voiceAll(this)">${MS.have ? 'Make the missing parts' : 'Make the voice for all parts'}</button></div>
         <div class="mute small mt-s">Svara reads each narration part (${esc(MS.voice)}) exactly as exported. ${MS.have ? `Measured speaking time so far: <b>${mmss(MS.real_s)}</b> for the parts voiced (the plan estimated ${mmss(MS.estimated_s)} for all). ` : ''}Scenes are re-timed to the real audio automatically.
           ${MS.eta_missing_s ? `Making the rest takes about <b>${hd(MS.eta_missing_s)}</b> (the model server speaks about ${MS.speed_ratio}x slower than real time, and other jobs wait meanwhile).` : ''}</div>
