@@ -19,6 +19,18 @@ MAX_SAME_TYPE_RUN = 3
 
 # ── helpers ─────────────────────────────────────────────────────────────────
 
+_NUMWORDS = {"zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+             "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17,
+             "eighteen": 18, "nineteen": 19, "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70,
+             "eighty": 80, "ninety": 90, "hundred": 100}
+
+
+def fact_numbers(text: str) -> set[str]:
+    """Every number the facts mention, as digits, counting spelled-out numbers ("four sessions" -> 4)."""
+    out = {m.strip(",.") for m in re.findall(r"\d[\d,.]*", text)}
+    out |= {str(v) for w, v in _NUMWORDS.items() if re.search(rf"\b{w}\b", text.lower())}
+    return {x for x in out if x}
+
 def sentence_seconds(seg: dict, wpm: float) -> list[float]:
     return [svara.spoken_seconds(x["text"], wpm, x.get("pause_after_s") or 0) for x in seg["sentences"]]
 
@@ -391,6 +403,32 @@ def edit_scene(scene_id: str, patch: dict) -> dict:
     return get_scene(scene_id)
 
 
+async def fix_repeats(plan_id: str, backend, s: dict | None = None, progress=None) -> int:
+    """Redraw, one by one and in order, every unlocked scene that repeats the previous scene's camera distance and angle."""
+    cam = lambda sc: (sc["data"]["composition"].get("distance", "").strip().lower(), sc["data"]["composition"].get("camera_angle", "").strip().lower())  # noqa: E731
+    first = [sc for sc in sorted(get_scenes(plan_id), key=lambda x: x["start_s"])]
+    todo = [cur["id"] for prev, cur in zip(first, first[1:]) if cam(prev) == cam(cur) and all(cam(prev)) and not (cur["locked"] or cur["status"] == "approved")]
+    done = fixed = 0
+    for sid in todo:
+        ordered = sorted(get_scenes(plan_id), key=lambda x: x["start_s"])
+        i = next(k for k, x in enumerate(ordered) if x["id"] == sid)
+        if progress:
+            progress(done, len(todo), f"scene {done + 1} of {len(todo)}")
+        done += 1
+        if i == 0 or cam(ordered[i - 1]) != cam(ordered[i]):
+            continue                                              # an earlier redraw already fixed this one
+        nxt = f" and from the next scene ({'/'.join(cam(ordered[i + 1]))})" if i + 1 < len(ordered) else ""
+        note = (f"Keep the same story beat and subject idea, but change the camera. The previous scene used distance "
+                f"'{cam(ordered[i - 1])[0]}' and angle '{cam(ordered[i - 1])[1]}'; use a clearly different distance AND a different angle{nxt}.")
+        await regenerate_scene(sid, backend, s, note)
+        fixed += 1
+    retime(plan_id)
+    if progress:
+        progress(len(todo), len(todo), "done")
+    store.log(plan_id, "fix_repeats", {"redrawn": fixed})
+    return fixed
+
+
 # ── validation ──────────────────────────────────────────────────────────────
 
 def validate_storyboard(plan_id: str) -> dict:
@@ -398,6 +436,7 @@ def validate_storyboard(plan_id: str) -> dict:
     story = planner._story_for(plan)
     prof = leak.profile(story["evidence"]["project_id"], story["evidence"]["passages"])
     facts = intake.facts_text(story["public"]).lower()
+    known_numbers = fact_numbers(facts)
     scenes = get_scenes(plan_id)
     seg_ids = {s["id"] for s in plan["segments"]}
     issues: list[dict] = []
@@ -431,7 +470,7 @@ def validate_storyboard(plan_id: str) -> dict:
             if len(t["text"].split()) > 8:
                 add(sc, "text", "on-screen text is longer than 8 words")
             for num in re.findall(r"\d[\d,.]*", t["text"]):
-                if num.strip(",.") and num.strip(",.") not in facts:
+                if num.strip(",.") and num.strip(",.") not in known_numbers and num.strip(",.") not in facts:
                     add(sc, "text", f"on-screen number {num} is not in the story's facts")
         if d["visual_type"] in NEEDS_ASSET and not d["feasibility"]["needs_asset"]:
             add(sc, "feasibility", "needs a verified asset but none is described")

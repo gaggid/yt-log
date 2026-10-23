@@ -90,6 +90,7 @@ window.viewPlan = async function (id) {
     async registry(b) { await run(b, `/plans/${id}/registry`); },
     async storyboard(b) { await run(b, `/plans/${id}/storyboard`); },
     async cancel(b) { await act(b, () => api(`/plans/${id}/cancel`, {method: 'POST'}), 'Stopping after this step…'); },
+    async fixRepeats(b) { if (!await confirmDlg('Redraw scenes that repeat the camera?', 'Each flagged scene is redrawn with a different camera distance and angle, keeping the same idea. Locked and approved scenes are skipped. About 30 seconds per scene.', 'Redraw them')) return; await run(b, `/plans/${id}/fix-repeats`); },
     async validate(b) { const r = await act(b, () => api(`/plans/${id}/validate`, {method: 'POST'})); if (r) { await load(true); toast(r.ok ? 'No blocking problems found' : 'Some problems need attention'); } },
     async narrator(el) { await act(null, () => api(`/plans/${id}/narrator`, {method: 'PATCH', json: {name: el.value}}), 'Narrator name saved'); await load(true); },
     async minutes(el) { await act(null, () => api(`/plans/${id}/settings`, {method: 'PATCH', json: {minutes: +el.value}}), 'Target length saved'); await load(true); },
@@ -152,6 +153,10 @@ window.viewPlan = async function (id) {
     const btnFn = {blueprint: 'blueprint', narration: 'narration', storyboard: 'storyboard', validate: 'validate'};
     const v = p.validation || {}, vs = v.storyboard;
     const issues = [...(v.issues || []).map(i => ({...i, part: 'Narration'})), ...((vs && vs.issues) || []).map(i => ({...i, part: 'Storyboard'}))];
+    const sceneAt = wid => { const sc = p.scenes.find(x => x.id === wid); return sc ? sc : null; };
+    const groups = []; for (const i of issues) { const k = i.part + '|' + i.kind + '|' + (i.kind === 'repeat' ? '' : i.text); let g = groups.find(x => x.k === k); if (!g) groups.push(g = {k, i, where: []}); g.where.push(i.where); }
+    groups.sort((a, b) => (a.i.level === 'error' ? 0 : 1) - (b.i.level === 'error' ? 0 : 1));
+    const nRepeat = issues.filter(i => i.kind === 'repeat').length;
     const segName = sid => { const s = p.segments.find(x => x.id === sid); const b = s && p.blueprint && p.blueprint.beats.find(x => x.id === s.beat); return b ? b.name : sid; };
     const ordered = [...p.scenes].sort((a, b) => a.start_s - b.start_s);
     const total = p.duration_s || 1;
@@ -205,7 +210,9 @@ window.viewPlan = async function (id) {
             ${d.text_on_screen.length ? `<div class="small mt-s">On-screen text: ${d.text_on_screen.map(t => '“' + esc(t.text) + '”').join(', ')}</div>` : ''}
             ${(s.issues || []).map(i => `<div class="iss ${i.level}">${i.level === 'error' ? '✗' : '⚠'} ${esc(i.kind.replace(/_/g, ' '))}: ${esc(i.text)}</div>`).join('')}</div></div>`; }).join('')}</div>` : ''}
 
-      ${issues.length || v.ok != null || vs ? `<div class="card pad mt"><h3 style="margin:0 0 6px">Check results</h3>${issues.length ? `<ul class="tight">${issues.map(i => `<li class="${i.level === 'warn' ? '' : 'err'}">${esc(i.part)} · ${esc((i.kind || '').replace(/_/g, ' '))}: ${esc(i.text)}</li>`).join('')}</ul>` : '<span class="ok">✓ No problems found.</span>'}
+      ${issues.length || v.ok != null || vs ? `<div class="card pad mt"><h3 style="margin:0 0 6px">Check results</h3>${groups.length ? `<ul class="tight">${groups.map(g => `<li class="${g.i.level === 'warn' ? '' : 'err'}"><b>${g.i.level === 'warn' ? 'Check' : 'Fix'}</b> · ${esc(g.i.part)} · ${esc((g.i.kind || '').replace(/_/g, ' '))}: ${esc(g.i.kind === 'repeat' ? `${g.where.length} scene(s) use the same camera distance and angle as the scene before` : g.i.text)}
+          <div class="small mute">${g.where.map(w => { const sc = sceneAt(w); return sc ? `<a href="#" onclick="_plan.jump('${sc.id}');return false">${mmss(sc.start_s)}</a>` : esc(w === 'plan' ? 'whole plan' : (segName(w) || w)); }).join(' · ')}</div></li>`).join('')}</ul>
+        ${nRepeat ? `<div class="row mt-s"><button ${dis} onclick="_plan.fixRepeats(this)">Fix the ${nRepeat} camera repeats automatically</button><span class="mute small">Redraws only those scenes, one by one.</span></div>` : ''}` : '<span class="ok">✓ No problems found.</span>'}
         <div class="mute small mt-s">Narration ${mmss(v.duration_s || 0)} · scenes add up to ${vs ? mmss(vs.scene_seconds) : '–'} · copied wording ${Math.round((v.copied_share || 0) * 100)}%</div></div>` : ''}
     </div>`;
     document.querySelectorAll('.sent textarea').forEach(t => { t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; });

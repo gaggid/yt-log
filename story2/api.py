@@ -129,6 +129,13 @@ async def narration(plan_id: str, body: NarrationReq | None = None):
     return _start(plan_id, "narration", step)
 
 
+@router.post("/{plan_id}/fix-repeats")
+async def fix_repeats(plan_id: str):
+    async def step(be, s, progress):
+        await storyboard.fix_repeats(plan_id, be, s, progress)
+    return _start(plan_id, "fix repeats", step)
+
+
 @router.post("/{plan_id}/registry")
 async def registry(plan_id: str):
     async def step(be, s, progress):

@@ -48,7 +48,7 @@ class P2BFake(P2Fake):
             n = len(re.findall(r"^\d+\. \(", user, re.M))
             if "Design exactly ONE scene" in user:
                 a, b = map(int, re.search(r"\[(\d+), (\d+)\]", user).groups())
-                return LLMResult(json.dumps({"scenes": [scene_json(a, b, subject="a different anonymous figure", **self.scene_over)]}))
+                return LLMResult(json.dumps({"scenes": [scene_json(a, b, subject="a different anonymous figure", dist="close", angle="low", **self.scene_over)]}))
             if self.bad_coverage:                                    # overlapping and gappy: the code must repair it
                 scenes = [scene_json(1, max(1, n - 1)), scene_json(max(1, n - 1), n)] if n > 2 else [scene_json(1, 1)]
             else:
@@ -246,3 +246,18 @@ def test_phase2b_api_jobs(tmp_path, monkeypatch):
         assert jobs.busy() is False
         assert c.post(f"/api/plans/scenes/{sid}/regenerate", json={"note": "closer"}).status_code == 200
         assert wait()["state"] == "done"
+
+
+def test_number_words_count_as_facts_and_repeats_can_be_fixed(env):
+    assert {"4", "21.70"} <= storyboard.fact_numbers("consolidated for four sessions, hit 21.70")
+    over = {"composition": {"distance": "medium", "camera_angle": "eye level"},
+            "text_on_screen": [{"text": "4 sessions", "placement": "x"}]}
+    pid, cid, be, p = boarded(env, per_segment=1, scene_over=over)
+    # the fake facts do not contain "four", so the number is still reported; "17" style numbers from facts would pass
+    rep = storyboard.validate_storyboard(p["id"])
+    assert any(i["kind"] == "repeat" for i in rep["issues"])
+    be.scene_over = {}                                                       # redraws now come back with the fake's different camera
+    fixed = asyncio.run(storyboard.fix_repeats(p["id"], be))
+    assert fixed >= 1
+    again = storyboard.validate_storyboard(p["id"])
+    assert len([i for i in again["issues"] if i["kind"] == "repeat"]) < len([i for i in rep["issues"] if i["kind"] == "repeat"])
