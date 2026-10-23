@@ -109,6 +109,8 @@ Charts, documents, screens, maps and diagrams cannot be drawn reliably by an ima
 text or quotes: use that visual type, describe in "needs_asset" what verified content it must show (only numbers and events given
 in the facts), and give a "fallback" picture an image model can make instead (for example the setting around the screen).
 
+Vary the camera. Distances: extreme wide | wide | medium | close | extreme close. Angles: eye level | high | low | overhead | side.
+No two neighbouring scenes may share the same distance AND angle, and do not use "medium, eye level" more than once in three scenes.
 Describe only what is VISIBLE, in concrete words. Say who or what, how many, where in the frame (left, centre, right), what they
 are doing at this exact instant, camera angle and distance, light and its direction, colours. No vague words like "dramatic",
 "tense" or "epic": say which visible details create that effect. One clear focal point per scene.

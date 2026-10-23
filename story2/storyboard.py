@@ -437,7 +437,7 @@ def validate_storyboard(plan_id: str) -> dict:
             add(sc, "feasibility", "needs a verified asset but none is described")
         text = " . ".join([d["subject"], d["action"], d["generation_intent"], *[t["text"] for t in d["text_on_screen"]],
                            d["narrative"]["purpose"], d["narrative"]["takeaway"]])
-        for f in leak.check(text, prof):
+        for f in leak.check(text, prof, scene=True):
             add(sc, "source_leak", f"{f.kind}: {f.text}")
     for seg in plan["segments"]:
         c = cov[seg["id"]]
@@ -459,9 +459,9 @@ def validate_storyboard(plan_id: str) -> dict:
     ordered = sorted([sc for sc in scenes if sc["segment_id"] in seg_ids], key=lambda x: x["start_s"])
     for prev, cur in zip(ordered, ordered[1:]):
         a, b = prev["data"], cur["data"]
-        same = (a["visual_type"], a["composition"].get("distance", "").lower(), a["composition"].get("camera_angle", "").lower())
-        if same == (b["visual_type"], b["composition"].get("distance", "").lower(), b["composition"].get("camera_angle", "").lower()) and same[1]:
-            add(cur, "repeat", "same type, distance and angle as the previous scene", "warn")
+        cam = lambda d: (d["composition"].get("distance", "").strip().lower(), d["composition"].get("camera_angle", "").strip().lower())  # noqa: E731
+        if cam(a) == cam(b) and cam(a)[0] and cam(a)[1]:
+            add(cur, "repeat", "same camera distance and angle as the previous scene: change one of them", "warn")
     run = 1
     for prev, cur in zip(ordered, ordered[1:]):
         run = run + 1 if prev["data"]["visual_type"] == cur["data"]["visual_type"] else 1

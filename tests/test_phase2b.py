@@ -129,6 +129,13 @@ def test_repeated_composition_and_runs_are_flagged(env):
     assert "repeat" in kinds and "variety" in kinds
 
 
+def test_text_scenes_are_not_source_leaks_but_real_ones_still_are():
+    prof = leak.SourceProfile(title="Some Long Book Title")
+    assert not [f for f in leak.check("The text appears in the centre of the frame", prof, scene=True) if f.kind == "self_reference"]
+    assert [f for f in leak.check("The text appears in the centre of the frame", prof) if f.kind == "self_reference"]
+    assert [f for f in leak.check("a hand holds the book up to the camera", prof, scene=True) if f.kind == "self_reference"]
+
+
 def test_narration_edit_keeps_alignment_and_marks_scenes(env):
     pid, cid, be, p = boarded(env)
     seg = p["segments"][0]

@@ -74,7 +74,7 @@ def _author_names(author: str) -> list[str]:
     return names
 
 
-def check(text: str, prof: SourceProfile, ngram: int = NGRAM) -> list[Finding]:
+def check(text: str, prof: SourceProfile, ngram: int = NGRAM, scene: bool = False) -> list[Finding]:
     out: list[Finding] = []
     low = text.lower()
     for t in _title_variants(prof.title):
@@ -90,6 +90,8 @@ def check(text: str, prof: SourceProfile, ngram: int = NGRAM) -> list[Finding]:
         if len(ch) >= 12 and ch.lower() in low and not ch.lower().startswith(("front", "contents", "index")):
             out.append(Finding("part_title", ch, "a section title of the source"))
     for m in _SELF_REF.finditer(text):
+        if scene and m.group(0).lower().split()[-1] in ("text", "passage", "excerpt"):
+            continue                              # "the text appears in the centre" describes a picture, not the source
         out.append(Finding("self_reference", m.group(0), "talks about the source instead of the story"))
     for m in _PARTS.finditer(text):
         out.append(Finding("part_title", m.group(0), "points to a section of the source"))
