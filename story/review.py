@@ -273,13 +273,38 @@ def split(cid: str, groups: list[dict]) -> list[dict]:
     return [get_candidate(i) for i in new_ids]
 
 
+def _reclassify(pid: str, cid: str, d: dict) -> str:
+    """Apply the current nature and completeness rules to a stored story, with no model call. Only downgrades the label."""
+    from . import scoring
+    if not d.get("scores"):
+        return d.get("nature", "")
+    texts = [r["text"] for r in get_refs(pid, cid)]
+    chron = d.get("chronology", [])
+    stated = sum(1 for c in chron if c.get("when_basis") == "stated")
+    nature, notes = scoring.final_nature(d.get("model_nature") or d.get("nature") or "story", texts, len(chron),
+                                         bool(d.get("outcome")), stated)
+    rank = ["story", "anecdote", "hypothetical", "explainer"]
+    old = d.get("nature", "")
+    if old in ("explainer", "hypothetical") or (old == "anecdote" and nature == "story"):
+        nature = old                                       # never promote a label a previous pass or a person lowered
+    d["nature"] = nature
+    d["flags"] = [f for f in d.get("flags", []) if f.get("code") != "nature"] + [{"code": "nature", "text": n} for n in notes]
+    comp = d.get("completeness") or {}
+    shell = {k: d.get(k) for k in ("turning_point", "outcome", "conflict", "stakes", "chronology")}
+    score, detail = scoring.completeness(shell, nature, comp.get("page_span"))
+    d["completeness"] = {"score": score, **detail}
+    return nature
+
+
 def rescore_project(pid: str, weights: dict, influence: float, c_influence: float = 0.0) -> int:
     """Recompute story/priority scores from stored factor scores after the weights changed."""
     from . import scoring
     n = 0
     for c in db.q("SELECT id,data FROM candidates WHERE project_id=? AND status!='superseded'", (pid,)):
         d = db.jload(c["data"], {})
+        nature = _reclassify(pid, c["id"], d)
         s, ev, pr = scoring.rescore(d, weights, influence, c_influence)
-        db.ex("UPDATE candidates SET story_score=?, evidence_score=?, priority=? WHERE id=?", (s, ev, pr, c["id"]))
+        db.ex("UPDATE candidates SET story_score=?, evidence_score=?, priority=?, nature=?, completeness=?, data=? WHERE id=?",
+              (s, ev, pr, nature, (d.get("completeness") or {}).get("score"), db.jdump(d), c["id"]))
         n += 1
     return n

@@ -128,7 +128,7 @@ def estimate(pid: str, now: float | None = None) -> dict:
     plan = {
         "rollup": multi, "index": 1 if n_ch >= 2 else 0, "discover": max(1, -(-n_ch // max(1, int(s.get("discover_window_chapters", 3))))) if n_ch else 0,
         "discover_global": 1 if n_ch >= 3 else 0,
-        "draft": min(int(s["max_candidates"]), max(3, round(n_chunks * 0.6 + n_ch * 0.8))) if n_ch else 0,
+        "draft": min(int(s["max_candidates"]), max(3, round(n_chunks * 1.6 + n_ch * 0.5))) if n_ch else 0,
         "finalize": 1,
     }
     for st in STAGES[1:]:

@@ -115,3 +115,23 @@ def test_figure_captions_credits_and_spaced_headings():
     assert not figures._caption("The weather was fine and nothing else happened here.")
     assert figures.RIGHTS_RE.search("esignal � 2009. a division of Data Corp. all rights reserved. Used with permission.")
     assert not figures.RIGHTS_RE.search("The results were permitted to run.")
+
+
+def test_story_needs_a_stated_date_and_rescore_reclassifies_without_the_model(env):
+    assert scoring.final_nature("story", ["x"], 4, True, stated_dates=0)[0] == "anecdote"
+    assert scoring.final_nature("story", ["x"], 4, True, stated_dates=2)[0] == "story"
+    pid = projects.import_text(make_book(3, 8))
+    run(pid, FakeBackend())
+    cid = review.list_candidates(pid)[0]["id"]
+    d = review.get_candidate(cid)["data"]
+    d["nature"], d["model_nature"] = "story", "story"
+    d["chronology"] = [{"when": "1901", "when_basis": "stated", "what": f"e{i}", "basis": "quoted", "para_ids": []} for i in range(4)]
+    d["outcome"] = "it ended"
+    db.ex("UPDATE candidates SET data=?, nature='story' WHERE id=?", (json.dumps(d), cid))
+    review.rescore_project(pid, {"hook": 25, "narrative": 20, "payoff": 20, "emotion": 15, "standalone": 20}, 0.4, 0.4)
+    assert review.get_candidate(cid)["nature"] == "story" and review.get_candidate(cid)["completeness"] > 60
+    d["chronology"] = [{**c, "when_basis": "inferred"} for c in d["chronology"]]
+    db.ex("UPDATE candidates SET data=? WHERE id=?", (json.dumps(d), cid))
+    review.rescore_project(pid, {"hook": 25, "narrative": 20, "payoff": 20, "emotion": 15, "standalone": 20}, 0.4, 0.4)
+    c = review.get_candidate(cid)
+    assert c["nature"] == "anecdote" and c["completeness"] <= 60 and any(f["code"] == "nature" for f in c["data"]["flags"])

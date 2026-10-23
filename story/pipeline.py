@@ -751,7 +751,8 @@ def save_candidate(pid: str, task_id: int | None, d: DraftOut, stub: dict, raw_t
     if any(c["when_basis"] == "inferred" for c in chronology):
         flags.append({"code": "date_inferred", "text": "Some dates are not stated in the cited passages (marked inferred)."})
 
-    nature, notes = scoring.final_nature(d.nature or stub.get("nature", ""), cited_text, len(chronology), bool(d.outcome))
+    stated = sum(1 for c in chronology if c["when_basis"] == "stated")
+    nature, notes = scoring.final_nature(d.nature or stub.get("nature", ""), cited_text, len(chronology), bool(d.outcome), stated)
     for n in notes:
         flags.append({"code": "nature", "text": n})
     if span is not None and span > 40:
@@ -773,7 +774,7 @@ def save_candidate(pid: str, task_id: int | None, d: DraftOut, stub: dict, raw_t
     if unverified:
         warnings = warnings + [f"{unverified} supporting quote(s) could not be found verbatim in the cited passages."]
     data = {
-        "nature": nature, "curiosity_question": d.curiosity_question, "opening_hook": d.opening_hook, "overview": d.overview,
+        "nature": nature, "model_nature": d.nature or stub.get("nature", ""), "curiosity_question": d.curiosity_question, "opening_hook": d.opening_hook, "overview": d.overview,
         "people": [p.model_dump() for p in d.people], "chronology": chronology,
         "conflict": d.conflict, "stakes": d.stakes, "turning_point": d.turning_point, "outcome": d.outcome,
         "audience_interest": d.audience_interest, "context_needed": d.context_needed, "claims": claims,

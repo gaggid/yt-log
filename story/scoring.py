@@ -120,10 +120,15 @@ def completeness(d: dict, nature: str, page_span: int | None) -> tuple[float, di
     return float(min(raw, cap)), {"parts": parts, "raw": raw, "cap": cap, "nature": nature, "page_span": page_span}
 
 
-def final_nature(model_nature: str, raw_texts: list[str], chronology_n: int, has_outcome: bool) -> tuple[str, list[str]]:
-    """Reconcile the model's label with evidence. Only ever downgrades (story -> anecdote/hypothetical)."""
+def final_nature(model_nature: str, raw_texts: list[str], chronology_n: int, has_outcome: bool,
+                 stated_dates: int | None = None) -> tuple[str, list[str]]:
+    """Reconcile the model's label with evidence. Only ever downgrades (story -> anecdote/hypothetical).
+    A real story is anchored in time: at least one date or period must be stated in the cited passages."""
     notes: list[str] = []
     nat = model_nature or "story"
+    if nat == "story" and stated_dates == 0:
+        notes.append("No date or period for these events is stated in the cited passages: treated as an anecdote, not a documented story.")
+        nat = "anecdote"
     if nat in ("story", "anecdote") and hypothetical_hits(raw_texts) >= 3 and chronology_n <= 2:
         notes.append("Passages read like a hypothetical walkthrough, not a documented event.")
         nat = "hypothetical"
