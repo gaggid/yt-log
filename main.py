@@ -60,6 +60,11 @@ async def root():
     return FileResponse(STATIC / "index.html")
 
 
+@app.get("/plan.js")
+async def plan_js():
+    return FileResponse(STATIC / "plan.js", media_type="application/javascript", headers={"Cache-Control": "no-cache"})
+
+
 @app.get("/health")
 async def health():
     return {"started_at": _STARTED_AT.isoformat(), "uptime_s": (datetime.now() - _STARTED_AT).total_seconds(),
@@ -69,7 +74,8 @@ async def health():
 @app.get("/internal/busy")
 async def internal_busy():
     """For watch.py (auto-deploy): true while any source is being processed."""
-    return {"busy": manager.busy()}
+    from story2 import jobs
+    return {"busy": manager.busy() or jobs.busy()}
 
 
 if __name__ == "__main__":

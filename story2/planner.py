@@ -31,8 +31,11 @@ def get_plan(plan_id: str) -> dict:
     r = _row(db.one("SELECT * FROM plans WHERE id=?", (plan_id,)))
     if not r:
         raise PlanError("plan not found")
+    from . import storyboard
     r["segments"] = list_segments(plan_id)
     r["duration_s"] = round(sum(s["duration_s"] for s in r["segments"]), 1)
+    r["scenes"] = storyboard.get_scenes(plan_id)
+    r["assets"] = storyboard.get_assets(plan_id)
     return r
 
 
@@ -109,7 +112,8 @@ def _segment_fields(sentences: list[dict], wpm: float) -> dict:
     return {"sentences": sents, "plain": plain, "annotated": annotated, "duration_s": svara.spoken_seconds(plain, wpm, pauses)}
 
 
-async def make_narration(plan_id: str, backend, s: dict | None = None, beat_ids: list[str] | None = None) -> dict:
+async def make_narration(plan_id: str, backend, s: dict | None = None, beat_ids: list[str] | None = None,
+                         progress=None, only_missing: bool = False) -> dict:
     """Write narration beat by beat (Devanagari needs many tokens per word, so one beat per call), saving each beat as it is done.
     Locked or approved segments are left exactly as they are; only the requested beats (default: all) are written."""
     s = s or settings_mod.get()
@@ -119,7 +123,9 @@ async def make_narration(plan_id: str, backend, s: dict | None = None, beat_ids:
     story = _story_for(plan)
     bp = plan["blueprint"]
     kept_beats = {x["beat"] for x in plan["segments"] if x["locked"] or x["status"] == "approved"}
-    want = [b for b in bp["beats"] if (not beat_ids or b["id"] in beat_ids) and b["id"] not in kept_beats]
+    have = {x["beat"] for x in plan["segments"]}
+    want = [b for b in bp["beats"] if (not beat_ids or b["id"] in beat_ids) and b["id"] not in kept_beats
+            and not (only_missing and b["id"] in have)]
     if not want:
         return plan
     minutes = float(plan["settings"]["minutes"])
@@ -142,7 +148,9 @@ async def make_narration(plan_id: str, backend, s: dict | None = None, beat_ids:
               .replace("{minutes}", f"{minutes / n_beats:.1f}").replace("{words}", str(per_beat))
               .replace("{per_beat}", str(per_beat)).replace("{min_beat}", str(int(per_beat * 0.7))))
     tokens_out = 0
-    for beat in want:
+    for k, beat in enumerate(want):
+        if progress:
+            progress(k, len(want), f"beat {k + 1} of {len(want)}: {beat['name']}")
         before = [x for x in list_segments(plan_id) if order.get(x["beat"], 99) < order[beat["id"]]]
         said = " ".join(x["plain"] for x in before)[-1200:]
         user = (f"STORY FACTS:\n{intake.facts_text(story['public'])}\n\nBLUEPRINT (structure: {bp['structure']}):\n"
@@ -165,6 +173,10 @@ async def make_narration(plan_id: str, backend, s: dict | None = None, beat_ids:
                            db.jdump(seg.facts_used), f["duration_s"], db.jdump(ev_ids), db.now()))
     store.log(plan_id, "narration", {"beats": [b["id"] for b in want], "tokens_out": tokens_out})
     db.ex("UPDATE plans SET rev=rev+1, validation=NULL, updated_at=? WHERE id=?", (db.now(), plan_id))
+    from . import storyboard
+    storyboard.after_narration(plan_id)
+    if progress:
+        progress(len(want), len(want), "done")
     return get_plan(plan_id)
 
 
@@ -205,6 +217,10 @@ def edit_segment(seg_id: str, sentences: list[dict] | None = None, text: str | N
     if not sets:
         return get_plan(seg["plan_id"])
     db.ex(f"UPDATE segments SET {', '.join(sets)}, rev=rev+1, issues='[]', updated_at=? WHERE id=?", [*args, db.now(), seg_id])
+    if sentences is not None:
+        from . import storyboard
+        storyboard.on_segment_changed(seg_id, len(old), len(sentences))
+        storyboard.retime(seg["plan_id"])
     db.ex("UPDATE plans SET validation=NULL, rev=rev+1, updated_at=? WHERE id=?", (db.now(), seg["plan_id"]))
     store.log(seg["plan_id"], "segment", {"id": seg_id, "fields": [k for k in ("sentences",) if sentences is not None] + list(fields)})
     return get_plan(seg["plan_id"])

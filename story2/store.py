@@ -15,6 +15,18 @@ CREATE TABLE IF NOT EXISTS segments(
   status TEXT DEFAULT 'draft', locked INTEGER DEFAULT 0, rev INTEGER DEFAULT 1, issues TEXT DEFAULT '[]', updated_at REAL
 );
 CREATE INDEX IF NOT EXISTS seg_plan ON segments(plan_id, seq);
+CREATE TABLE IF NOT EXISTS scenes(
+  id TEXT PRIMARY KEY, plan_id TEXT, seq REAL, segment_id TEXT, s_from INTEGER DEFAULT 1, s_to INTEGER DEFAULT 1,
+  data TEXT DEFAULT '{}', start_s REAL DEFAULT 0, end_s REAL DEFAULT 0, duration_s REAL DEFAULT 0,
+  status TEXT DEFAULT 'draft', locked INTEGER DEFAULT 0, stale INTEGER DEFAULT 0, rev INTEGER DEFAULT 1,
+  issues TEXT DEFAULT '[]', updated_at REAL
+);
+CREATE INDEX IF NOT EXISTS scene_plan ON scenes(plan_id, seq);
+CREATE TABLE IF NOT EXISTS assets(
+  id TEXT PRIMARY KEY, plan_id TEXT, kind TEXT, name TEXT, data TEXT DEFAULT '{}', locked INTEGER DEFAULT 0,
+  rev INTEGER DEFAULT 1, updated_at REAL
+);
+CREATE INDEX IF NOT EXISTS asset_plan ON assets(plan_id);
 CREATE TABLE IF NOT EXISTS plan_revisions(
   id INTEGER PRIMARY KEY AUTOINCREMENT, plan_id TEXT, ts REAL, what TEXT, detail TEXT DEFAULT '{}'
 );

@@ -100,6 +100,7 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:8px;
 <main id="app"></main>
 <div id="overlay"></div>
 <div id="toasts"></div>
+<script src="/plan.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -177,6 +178,7 @@ function route() {
   document.removeEventListener('keydown', drawerKeys);
   const h = (location.hash.slice(1) || '/').split('?')[0]; let m;
   if (h === '/settings') return viewSettings();
+  if ((m = h.match(/^\/plan\/([\w-]+)$/))) return viewPlan(m[1]);
   if ((m = h.match(/^\/p\/([0-9a-f]+)(?:\/(\w+))?$/))) return viewProject(m[1], m[2] || 'progress');
   return viewDashboard();
 }
@@ -520,12 +522,14 @@ async function openStory(sid) {
     <h4>Uncertainties and conflicting accounts</h4>${ul(d.uncertainties)}
     <h4>Suggested research questions</h4>${ul(d.research_questions)}
     ${(d.related || []).length ? `<h4>Related stories</h4><ul class="tight">${d.related.map(x => `<li><a href="#" onclick="openStory('${x.id}');return false">${esc(x.title)}</a> <span class="mute small">${Math.round(x.overlap * 100)}% shared passages</span></li>`).join('')}</ul>` : ''}
+    ${ro ? '' : '<div id="plan-links"></div>'}
     <h4>Why it was identified</h4><div>${esc(d.why || '—')}</div>
     <h4>Supporting source passages (${refs.length})</h4>
     ${ro ? '' : `<div class="row small"><span class="mute">Covers two different stories? You can divide the passages between two new stories.</span><button class="small" onclick="splitDlg()">Split this story…</button></div>`}
     ${refs.map(r => `<div class="passage"><div class="small mute"><b>${esc(r.locator)}</b>${r.chapter_title ? ' · ' + esc(r.chapter_title) : ''} · P${r.idx}</div>${esc(r.text)}</div>`).join('')}
     </div></div>`;
   document.querySelectorAll('#drawer input, #drawer textarea').forEach(el => el.addEventListener('input', markDirty));
+  if (!ro && window.planLinks) planLinks(S.id, S.status).then(h => { const e = $('#plan-links'); if (e) e.innerHTML = h; });
   document.removeEventListener('keydown', drawerKeys); document.addEventListener('keydown', drawerKeys);
 }
 const ul = a => (a || []).length ? `<ul class="tight">${a.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '<span class="mute">none</span>';

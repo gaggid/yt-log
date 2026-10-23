@@ -65,3 +65,78 @@ Return ONLY this JSON object:
 One segment per beat (a long beat may use two). Target about {minutes} minutes of speech: roughly {words} words in total, so
 each segment needs about {per_beat} words (at least {min_beat}). Do not rush a beat into two sentences; give the viewer time to follow.
 The first segment must hook honestly with something true from the story. The last must land the ending of the blueprint."""
+
+
+REGISTRY = """[TASK:p2_registry]
+You are a visual continuity supervisor for a long-form 16:9 explainer video about ONE true story.
+List the recurring visual assets the video needs so every scene looks like the same film: people (as roles), places, key
+props, and one overall visual style. Do not write scenes.
+
+Return ONLY this JSON object:
+{"assets": [{
+  "name": "short unique name, e.g. 'the trader', 'trading floor', 'style'",
+  "kind": "person | place | prop | style",
+  "description": "approved visual attributes: for a person age range, build, clothing for the period, posture; for a place architecture, materials, light; for a style the look in concrete terms (film stock or illustration technique, palette, contrast, grain)",
+  "fixed": ["attributes that must stay identical in every scene"],
+  "flexible": ["attributes that may change between scenes"],
+  "period": "time period if known, otherwise empty",
+  "fictionalisation": "generic_reconstruction | source_supported | real_person_no_likeness | fictional",
+  "evidence_note": "what in the story supports this asset, in plain words, or 'creative choice'"
+}]}
+Rules:
+- Exactly one "style" asset: the visual language of the whole video.
+- People are roles ("the trader", "the analyst"), not real faces. A real, named person is NEVER given an invented face presented
+  as a real likeness: use kind person with fictionalisation real_person_no_likeness (shown from behind, as a silhouette, hands,
+  or an anonymous figure). Invented generic people are generic_reconstruction.
+- Only describe appearance that the story supports or that you clearly mark as a creative choice. Do not invent facts.
+- Keep it small: 3 to 8 assets in total.
+- Never mention a book, an author, a chapter, a page or a source."""
+
+SCENES = """[TASK:p2_scenes]
+You are a storyboard artist for a long-form 16:9 explainer video. You receive one narration segment, its numbered sentences
+(with their spoken seconds), the story facts and the continuity assets. Design the scenes that show this segment.
+
+Each scene covers a run of consecutive sentences ("sentences": [first, last], 1-based, inclusive). Together the scenes must
+cover EVERY sentence of the segment exactly once, in order, with no gaps and no overlaps. A scene usually lasts 4 to 12
+seconds; a long reveal may hold longer; do not cut faster than the viewer can understand.
+
+For every scene answer: what does the viewer learn, notice or feel from this picture that the previous picture did not give?
+Do not repeat a keyword from the narration as a generic picture. Vary the visual type and composition between neighbouring scenes.
+
+Visual types: reconstruction | establishing | character | metaphor | object_process | montage | map_timeline | data_chart |
+document_archival | screen_interface | diagram | comparison | text_led | minimalist | atmospheric | transition.
+Charts, documents, screens, maps and diagrams cannot be drawn reliably by an image model and must never show invented numbers,
+text or quotes: use that visual type, describe in "needs_asset" what verified content it must show (only numbers and events given
+in the facts), and give a "fallback" picture an image model can make instead (for example the setting around the screen).
+
+Describe only what is VISIBLE, in concrete words. Say who or what, how many, where in the frame (left, centre, right), what they
+are doing at this exact instant, camera angle and distance, light and its direction, colours. No vague words like "dramatic",
+"tense" or "epic": say which visible details create that effect. One clear focal point per scene.
+People are anonymous figures (role, clothing, posture), seen from behind, in silhouette, or as hands, unless the continuity asset
+says otherwise. No logos, no readable brand text, no invented text. On-screen text only when essential, 8 words at most.
+
+Return ONLY this JSON object:
+{"scenes": [{
+  "sentences": [1, 2],
+  "purpose": "why this scene exists in the story",
+  "new_information": "what is new for the viewer compared with the previous scene",
+  "takeaway": "what the viewer understands or feels after it",
+  "emotional_effect": "the intended feeling, one short phrase",
+  "visual_type": "one of the types above",
+  "subject": "the main subject, precisely",
+  "action": "the exact visible action at this instant",
+  "location": "where", "period": "when, only if known",
+  "props": ["objects that must be visible"],
+  "composition": {"position": "where the subject sits in the frame", "left": "", "centre": "", "right": "", "camera_angle": "", "distance": "", "perspective": "", "framing": ""},
+  "lighting": "source, direction, softness, contrast, time of day",
+  "palette": "main colours", "atmosphere": "air, weather, haze, mood in visible terms", "style": "the treatment, matching the style asset",
+  "foreground": "", "middle": "", "background": "",
+  "motion_intent": "how it could move later (slow push in, pan, static hold)",
+  "text_on_screen": [{"text": "exact words", "placement": "where"}],
+  "assets": ["names of continuity assets used"],
+  "fixed_by_facts": ["visual details that come from the story's facts"],
+  "creative_choices": ["details that are our creative decisions"],
+  "exclusions": ["things that must not appear"],
+  "needs_asset": "", "fallback": ""
+}]}
+Never mention a book, an author, a chapter, a page or a source. Use only facts given; do not invent names, numbers or outcomes."""
