@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Podcast Video Generator</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #0c0c0c; color: #ddd;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  min-height: 100vh;
+}
+header {
+  padding: 18px 28px; border-bottom: 1px solid #1e1e1e;
+  display: flex; align-items: baseline; gap: 12px;
+}
+header h1 { font-size: 1.25rem; font-weight: 600; color: #fff; }
+header span { font-size: 0.8rem; color: #555; }
+main { max-width: 780px; margin: 28px auto; padding: 0 16px 60px; }
+.card {
+  background: #141414; border: 1px solid #222;
+  border-radius: 10px; padding: 22px; margin-bottom: 18px;
+}
+.card-title {
+  font-size: 0.7rem; font-weight: 600; color: #555;
+  text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 14px;
+}
+label {
+  display: block; font-size: 0.72rem; color: #666;
+  margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.05em;
+}
+input[type=text], input[type=number], select, textarea {
+  width: 100%; background: #0c0c0c; border: 1px solid #2a2a2a;
+  color: #ddd; border-radius: 6px; padding: 9px 11px; font-size: 0.9rem;
+  font-family: inherit; outline: none; transition: border-color 0.15s;
+}
+input:focus, select:focus, textarea:focus { border-color: #444; }
+textarea { resize: vertical; min-height: 68px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+.grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-top: 14px; }
+.topic-row { margin-bottom: 14px; }
+.topic-input-wrap { display: flex; gap: 8px; }
+.topic-input-wrap input { flex: 1; }
+button {
+  background: #2563eb; color: #fff; border: none; border-radius: 6px;
+  padding: 9px 18px; font-size: 0.88rem; font-weight: 600; cursor: pointer;
+  white-space: nowrap; transition: background 0.15s;
+}
+button:hover { background: #1d4ed8; }
+button:disabled { background: #1e1e1e; color: #444; cursor: not-allowed; }
+.btn-secondary {
+  background: #1e1e1e; color: #888; border: 1px solid #2a2a2a;
+}
+.btn-secondary:hover { background: #252525; color: #aaa; }
+.btn-green { background: #15803d; }
+.btn-green:hover { background: #166534; }
+.generate-row {
+  margin-top: 18px; display: flex; align-items: center; gap: 12px;
+  padding-top: 18px; border-top: 1px solid #1e1e1e;
+}
+.job-label { font-size: 0.78rem; color: #555; font-family: monospace; }
+
+/* Progress log */
+#log-card { display: none; }
+#log {
+  background: #080808; border: 1px solid #1a1a1a; border-radius: 6px;
+  padding: 12px 14px; max-height: 300px; overflow-y: auto;
+  font-family: 'Menlo', 'Consolas', monospace; font-size: 0.78rem; line-height: 1.8;
+}
+.l-info  { color: #888; }
+.l-success { color: #4ade80; }
+.l-error { color: #f87171; }
+.l-done  { color: #60a5fa; font-weight: 700; }
+
+/* Video output */
+#output-card { display: none; }
+video { width: 100%; border-radius: 7px; background: #000; margin-bottom: 12px; }
+.output-actions { display: flex; gap: 10px; align-items: center; }
+.output-title { font-size: 0.85rem; color: #aaa; flex: 1; }
+
+/* Jobs history */
+#history-card { display: none; }
+.job-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 9px 12px; border: 1px solid #1a1a1a; border-radius: 6px;
+  margin-bottom: 7px; font-size: 0.82rem;
+}
+.job-meta { color: #666; font-size: 0.75rem; margin-top: 2px; }
+.badge {
+  padding: 2px 8px; border-radius: 4px;
+  font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+}
+.b-done    { background: #14532d; color: #4ade80; }
+.b-running { background: #1e3a5f; color: #60a5fa; }
+.b-error   { background: #3b0000; color: #f87171; }
+.b-queued  { background: #2a1f00; color: #fbbf24; }
+
+/* Inline preview cards (research + script) */
+.preview-card {
+  background: #0f1419; border-radius: 6px; padding: 10px 12px; margin: 5px 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.research-card { border: 1px solid #1e3a5f; }
+.script-card   { border: 1px solid #1a3a1a; }
+.preview-title { font-size: 0.72rem; font-weight: 700; margin-bottom: 7px; }
+.research-card .preview-title { color: #60a5fa; }
+.script-card   .preview-title { color: #4ade80; }
+.preview-claim { font-size: 0.75rem; color: #bbb; margin-bottom: 4px; }
+.preview-take  { font-size: 0.75rem; color: #a78bfa; margin-bottom: 5px; }
+.preview-q     { font-size: 0.72rem; color: #666; padding-left: 8px; line-height: 1.6; }
+.seg-row       { display: flex; gap: 8px; margin-bottom: 4px; align-items: flex-start; }
+.seg-role      { font-size: 0.6rem; font-weight: 700; text-transform: uppercase; color: #555;
+                 background: #111; padding: 2px 5px; border-radius: 3px; white-space: nowrap; flex-shrink: 0; }
+.seg-preview   { font-size: 0.72rem; color: #777; }
+
+/* Voice picker */
+.voice-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px;
+}
+.voice-btn {
+  background: #0c0c0c; border: 1px solid #2a2a2a; color: #888;
+  border-radius: 5px; padding: 7px 6px; font-size: 0.72rem; cursor: pointer;
+  text-align: center; transition: all 0.1s;
+}
+.voice-btn:hover { border-color: #444; color: #ccc; }
+.voice-btn.active { border-color: #3b82f6; color: #60a5fa; background: #0f1a2e; }
+.voice-name { font-weight: 600; display: block; }
+.voice-lang { color: #555; font-size: 0.68rem; }
+.voice-test-btn {
+  display: block; width: 100%; margin-top: 5px; padding: 2px 0;
+  background: #1a2a1a; border: 1px solid #2a3a2a; color: #4ade80;
+  border-radius: 3px; font-size: 0.7rem; cursor: pointer;
+}
+.voice-test-btn:hover { background: #22332a; }
+.voice-test-btn:disabled { opacity: 0.4; cursor: default; }
+
+/* Deploy / uptime status bar */
+#status-bar {
+  padding: 5px 28px; background: #0a0a0a; border-bottom: 1px solid #1a1a1a;
+  display: flex; align-items: center; gap: 18px; font-size: 0.7rem; color: #555;
+  font-family: 'Menlo', 'Consolas', monospace;
+}
+#status-bar .sb-commit { color: #444; }
+#status-bar .sb-uptime { color: #4a4a4a; }
+#status-bar .sb-deploy-flash {
+  color: #4ade80; font-weight: 700; animation: fadeout 4s forwards;
+}
+@keyframes fadeout { 0%{opacity:1} 70%{opacity:1} 100%{opacity:0} }
+</style>
+</head>
+<body>
+<div id="status-bar">
+  <span id="sb-commit" class="sb-commit">● loading…</span>
+  <span id="sb-uptime" class="sb-uptime">⏱ —</span>
+  <span id="sb-flash" style="display:none"></span>
+</div>
+<header>
+  <h1>🎙 Podcast Video Generator</h1>
+  <span style="flex:1">Hinglish script → TTS audio → AI illustrations → 2560×1440 (2K) video with camera moves</span>
+  <button class="btn-secondary" onclick="logout()">Sign out</button>
+</header>
+<main>
+
+  <!-- Form -->
+  <div class="card">
+    <div class="card-title">Episode Setup</div>
+
+    <div class="topic-row">
+      <label>Topic (leave blank for auto today's news)</label>
+      <div class="topic-input-wrap">
+        <input type="text" id="topic" placeholder="e.g. India economy, AI, cricket, space..." />
+        <button class="btn-secondary" onclick="setTodaysNewsAndGenerate()" title="Research today's top news and generate">
+          📰 Generate Today's News
+        </button>
+      </div>
+    </div>
+
+    <div class="topic-row">
+      <label>Article URL <span style="font-weight:normal;opacity:.6">(optional — paste a news article link to use it as source instead of RSS)</span></label>
+      <input type="text" id="article-url" placeholder="https://..." style="width:100%" />
+    </div>
+
+    <div class="grid3">
+      <div>
+        <label>Segments</label>
+        <input type="number" id="segments" value="4" min="2" max="20" />
+      </div>
+      <div>
+        <label>Image Style</label>
+        <select id="style">
+          <option value="cinematic" selected>Cinematic (photorealistic, character-driven)</option>
+          <option value="graphic-novel">Graphic Novel (ink + halftone)</option>
+          <option value="flat-vector">Flat Vector Editorial</option>
+          <option value="ink-wash">Ink &amp; Watercolour Wash</option>
+          <option value="retro-poster">Retro Screen-print Poster</option>
+          <option value="paper-cut">Paper-cut Collage</option>
+        </select>
+      </div>
+      <div>
+        <label>Camera Movement</label>
+        <select id="camera">
+          <option value="auto" selected>Auto (slow zoom + gentle pans)</option>
+          <option value="zoom_in">Slow zoom in</option>
+          <option value="zoom_out">Slow zoom out</option>
+          <option value="pan_left">Slow pan left</option>
+          <option value="pan_right">Slow pan right</option>
+          <option value="tilt_up">Slow tilt up</option>
+          <option value="tilt_down">Slow tilt down</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-top:14px">
+      <label>Custom Prompt Additions</label>
+      <input type="text" id="extra-prompt" placeholder="Focus on..." />
+    </div>
+
+    <div style="margin-top:16px">
+      <label>Voice</label>
+      <div style="font-size:0.65rem;color:#555;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.06em">Hindi Podcast model</div>
+      <div class="voice-grid" style="grid-template-columns:1fr 1fr;margin-bottom:10px">
+        <div class="voice-btn active" data-voice="anchor_m" onclick="selectVoice(this)">
+          <span class="voice-name">Anchor M</span>
+          <span class="voice-lang">Hindi ♂</span>
+          <button class="voice-test-btn" onclick="event.stopPropagation();previewVoice('anchor_m',this)">▶</button>
+        </div>
+        <div class="voice-btn" data-voice="anchor_f" onclick="selectVoice(this)">
+          <span class="voice-name">Anchor F</span>
+          <span class="voice-lang">Hindi ♀</span>
+          <button class="voice-test-btn" onclick="event.stopPropagation();previewVoice('anchor_f',this)">▶</button>
+        </div>
+      </div>
+      <div style="font-size:0.65rem;color:#555;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.06em">Kokoro model</div>
+      <div class="voice-grid">
+        <div class="voice-btn" data-voice="hm_omega" onclick="selectVoice(this)">
+          <span class="voice-name">Omega</span>
+          <span class="voice-lang">Hindi ♂</span>
+          <button class="voice-test-btn" onclick="event.stopPropagation();previewVoice('hm_omega',this)">▶</button>
+        </div>
+        <div class="voice-btn" data-voice="hm_psi" onclick="selectVoice(this)">
+          <span class="voice-name">Psi</span>
+          <span class="voice-lang">Hindi ♂</span>
+          <button class="voice-test-btn" onclick="event.stopPropagation();previewVoice('hm_psi',this)">▶</button>
+        </div>
+        <div class="voice-btn" data-voice="hf_alpha" onclick="selectVoice(this)">
+          <span class="voice-name">Alpha</span>
+          <span class="voice-lang">Hindi ♀</span>
+          <button class="voice-test-btn" onclick="event.stopPropagation();previewVoice('hf_alpha',this)">▶</button>
+        </div>
+        <div class="voice-btn" data-voice="hf_beta" onclick="selectVoice(this)">
+          <span class="voice-name">Beta</span>
+          <span class="voice-lang">Hindi ♀</span>
+          <button class="voice-test-btn" onclick="event.stopPropagation();previewVoice('hf_beta',this)">▶</button>
+        </div>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:8px;align-items:flex-start">
+        <textarea id="voice-sample" rows="2"
+          style="flex:1;font-size:0.82rem;resize:vertical"
+          placeholder="Type Hinglish text to preview…"></textarea>
+      </div>
+      <audio id="voice-preview-player" style="width:100%;margin-top:8px;display:none" controls></audio>
+    </div>
+
+    <div class="generate-row">
+      <button id="gen-btn" onclick="generate()">▶ Generate Video</button>
+      <button id="cancel-btn" style="display:none;background:#7f1d1d" onclick="cancelCurrent()">⛔ Cancel</button>
+      <span class="job-label" id="job-label"></span>
+    </div>
+  </div>
+
+  <!-- Progress -->
+  <div class="card" id="log-card">
+    <div class="card-title">Pipeline Progress</div>
+    <div id="log"></div>
+  </div>
+
+  <!-- Output -->
+  <div class="card" id="output-card">
+    <div class="card-title">Output</div>
+    <video id="player" controls playsinline></video>
+    <div class="output-actions">
+      <span class="output-title" id="output-title"></span>
+      <button class="btn-green" id="dl-btn" onclick="downloadVideo()">⬇ Download MP4</button>
+    </div>
+  </div>
+
+  <!-- History -->
+  <div class="card" id="history-card">
+    <div class="card-title">Previous Jobs</div>
+    <div id="history-list"></div>
+  </div>
+
+</main>
+
+<script>
+let selectedVoice = 'anchor_m';
+let currentJobId = null;
+
+function selectVoice(el) {
+  document.querySelectorAll('.voice-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  selectedVoice = el.dataset.voice;
+}
+
+async function previewVoice(voice, btn) {
+  const text = document.getElementById('voice-sample').value.trim();
+  if (!text) { alert('Add some text in the sample box first.'); return; }
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    const res = await fetch('/preview-voice', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voice, text })
+    });
+    if (res.status === 401) { location.href = '/login'; return; }
+    if (!res.ok) { alert(`Preview failed: ${res.status}`); return; }
+    const blob = await res.blob();
+    const player = document.getElementById('voice-preview-player');
+    player.src = URL.createObjectURL(blob);
+    player.style.display = 'block';
+    player.play();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '▶';
+  }
+}
+
+async function loadSampleText() {
+  try {
+    const res = await fetch('/sample-text');
+    if (!res.ok) return;
+    const { text } = await res.json();
+    const el = document.getElementById('voice-sample');
+    if (el && !el.value) el.value = text;
+  } catch (_) {}
+}
+
+function setTodaysNewsAndGenerate() {
+  document.getElementById('topic').value = '';
+  generate();
+}
+
+async function generate() {
+  const btn = document.getElementById('gen-btn');
+  btn.disabled = true;
+  btn.textContent = '⟳ Starting...';
+
+  const topic = document.getElementById('topic').value.trim();
+  const articleUrl = document.getElementById('article-url').value.trim();
+  const extra = document.getElementById('extra-prompt').value.trim();
+  const fullTopic = extra ? `${topic} — ${extra}` : topic;
+
+  // Show log immediately with a local entry
+  const log = document.getElementById('log');
+  log.innerHTML = '';
+  document.getElementById('log-card').style.display = 'block';
+  document.getElementById('output-card').style.display = 'none';
+  document.getElementById('job-label').textContent = 'Connecting...';
+  const logLabel = articleUrl ? `article: ${articleUrl}` : (fullTopic || "today's news");
+  appendLog(`Submitting job — ${logLabel}`, 'info');
+
+  let res;
+  try {
+    res = await fetch('/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        topic: fullTopic,
+        url: articleUrl,
+        segments: parseInt(document.getElementById('segments').value),
+        style: document.getElementById('style').value,
+        camera: document.getElementById('camera').value,
+        voice: selectedVoice,
+      })
+    });
+  } catch (err) {
+    appendLog(`Failed to reach server: ${err.message}`, 'error');
+    btn.disabled = false;
+    btn.textContent = '▶ Generate Video';
+    return;
+  }
+
+  if (res.status === 401) { location.href = '/login'; return; }
+  if (!res.ok) {
+    appendLog(`Server error ${res.status}`, 'error');
+    btn.disabled = false;
+    btn.textContent = '▶ Generate Video';
+    return;
+  }
+
+  const { job_id } = await res.json();
+  currentJobId = job_id;
+  btn.textContent = '⟳ Running...';
+  document.getElementById('cancel-btn').style.display = '';
+  document.getElementById('job-label').textContent = `job ${job_id}`;
+  appendLog(`Job ${job_id} accepted — streaming progress...`, 'success');
+  streamProgress(job_id);
+}
+
+function streamProgress(jobId) {
+  const log = document.getElementById('log');
+  const es = new EventSource(`/status/${jobId}`);
+
+  es.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+
+    if (data.type === 'done') {
+      es.close();
+      const btn = document.getElementById('gen-btn');
+      btn.disabled = false;
+      btn.textContent = '▶ Generate Video';
+      document.getElementById('cancel-btn').style.display = 'none';
+      document.getElementById('job-label').textContent =
+        data.status === 'done' ? `✓ job ${jobId}` : `✗ job ${jobId} failed`;
+      if (data.status === 'done') showOutput(jobId);
+      else showResumeButton(jobId);
+      refreshHistory();
+      return;
+    }
+
+    if (data.type === 'research_result') { renderResearchCard(data); return; }
+    if (data.type === 'script_result')   { renderScriptCard(data);   return; }
+
+    const div = document.createElement('div');
+    div.className = `l-${data.type || 'info'}`;
+    const ts = new Date().toLocaleTimeString('en-IN', { hour12: false });
+    div.textContent = `[${ts}] ${data.message}`;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+  };
+
+  es.onerror = () => {
+    es.close();
+    const btn = document.getElementById('gen-btn');
+    btn.disabled = false;
+    btn.textContent = '▶ Generate Video';
+    document.getElementById('cancel-btn').style.display = 'none';
+    appendLog('SSE connection lost. Check server console.', 'error');
+  };
+}
+
+function appendLog(msg, type = 'info') {
+  const log = document.getElementById('log');
+  const div = document.createElement('div');
+  div.className = `l-${type}`;
+  div.textContent = msg;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+function showOutput(jobId) {
+  const sec = document.getElementById('output-card');
+  const player = document.getElementById('player');
+  player.src = `/video/${jobId}`;
+  sec.style.display = 'block';
+  sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function downloadVideo() {
+  if (currentJobId) {
+    const a = document.createElement('a');
+    a.href = `/download/${currentJobId}`;
+    a.click();
+  }
+}
+
+async function refreshHistory() {
+  const res = await fetch('/jobs');
+  if (res.status === 401) { location.href = '/login'; return; }
+  const jobs = await res.json();
+  if (!jobs.length) return;
+
+  document.getElementById('history-card').style.display = 'block';
+  const list = document.getElementById('history-list');
+  list.innerHTML = [...jobs].reverse().map(j => `
+    <div class="job-row">
+      <div>
+        <div>${j.title || j.topic || '—'}</div>
+        <div class="job-meta">${j.id} · ${(j.created_at || '').slice(0,16).replace('T',' ')}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        ${j.status === 'done'
+          ? `<a href="/download/${j.id}" style="color:#60a5fa;font-size:0.78rem;text-decoration:none">⬇ MP4</a>
+             <a onclick="playJob('${j.id}')" style="color:#888;font-size:0.78rem;cursor:pointer">▶ Play</a>`
+          : j.status === 'error'
+          ? `<a onclick="resumeJob('${j.id}')" style="color:#fbbf24;font-size:0.78rem;cursor:pointer">🔄 Resume</a>`
+          : (j.status === 'running' || j.status === 'queued')
+          ? `<a onclick="cancelJob('${j.id}')" style="color:#f87171;font-size:0.78rem;cursor:pointer">⛔ Cancel</a>`
+          : ''}
+        <a onclick="deleteJob('${j.id}')" style="color:#555;font-size:0.78rem;cursor:pointer" title="Delete job and files">🗑</a>
+        <span class="badge b-${j.status}">${j.status}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+function playJob(jobId) {
+  currentJobId = jobId;
+  showOutput(jobId);
+}
+
+function showResumeButton(jobId) {
+  const log = document.getElementById('log');
+  const div = document.createElement('div');
+  div.style.marginTop = '10px';
+  div.innerHTML = `<button class="btn-secondary" onclick="resumeJob('${jobId}')">🔄 Resume Assembly (reuse saved images + audio)</button>`;
+  log.appendChild(div);
+}
+
+async function resumeJob(jobId) {
+  const log = document.getElementById('log');
+  document.getElementById('log-card').style.display = 'block';
+  document.getElementById('output-card').style.display = 'none';
+  currentJobId = jobId;
+  document.getElementById('job-label').textContent = `resuming ${jobId}`;
+
+  const res = await fetch(`/resume/${jobId}`, { method: 'POST' });
+  if (res.status === 401) { location.href = '/login'; return; }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({detail: res.statusText}));
+    appendLog(`Resume failed: ${err.detail || res.status}`, 'error');
+    return;
+  }
+  appendLog(`Resuming assembly for job ${jobId}…`, 'success');
+  streamProgress(jobId);
+}
+
+async function cancelCurrent() {
+  if (currentJobId) cancelJob(currentJobId);
+}
+
+async function cancelJob(jobId) {
+  const res = await fetch(`/cancel/${jobId}`, { method: 'POST' });
+  if (res.status === 401) { location.href = '/login'; return; }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({detail: res.statusText}));
+    appendLog(`Cancel failed: ${err.detail || res.status}`, 'error');
+    return;
+  }
+  appendLog(`Job ${jobId} cancellation requested…`, 'info');
+  refreshHistory();
+}
+
+async function deleteJob(jobId) {
+  if (!confirm(`Delete job ${jobId} and all its files?`)) return;
+  const res = await fetch(`/jobs/${jobId}`, { method: 'DELETE' });
+  if (res.status === 401) { location.href = '/login'; return; }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({detail: res.statusText}));
+    appendLog(`Delete failed: ${err.detail || res.status}`, 'error');
+    return;
+  }
+  if (currentJobId === jobId) {
+    currentJobId = null;
+    document.getElementById('output-card').style.display = 'none';
+    document.getElementById('job-label').textContent = '';
+  }
+  refreshHistory();
+}
+
+async function logout() {
+  await fetch('/logout', { method: 'POST' });
+  location.href = '/login';
+}
+
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function renderResearchCard(d) {
+  const log = document.getElementById('log');
+  const el = document.createElement('div');
+  el.className = 'preview-card research-card';
+  // Headlines list (first emit) or angles (second emit)
+  let body = '';
+  if (d.headlines && d.headlines.length) {
+    body = d.headlines.map(h =>
+      `<div class="preview-q">${h.trusted ? '✓' : '~'} <strong>${esc(h.title)}</strong> <span style="color:#555">${esc(h.source)} · ${h.age_h}h</span></div>`
+    ).join('');
+    el.innerHTML = `<div class="preview-title">🗞 Headlines — ${esc(d.topic)}</div>${body}`;
+  } else {
+    const qs = (d.questions || []).map(q => `<div class="preview-q">❓ ${esc(q)}</div>`).join('');
+    el.innerHTML = `
+      <div class="preview-title">🔍 Analysis — ${esc(d.topic)}</div>
+      ${d.uber_story ? `<div class="preview-take" style="margin-bottom:6px"><strong>Spine:</strong> ${esc(d.uber_story)}</div>` : ''}
+      ${d.core_claim ? `<div class="preview-claim"><strong>Story:</strong> ${esc(d.core_claim)}</div>` : ''}
+      ${d.contrarian_take ? `<div class="preview-take"><strong>Angle:</strong> ${esc(d.contrarian_take)}</div>` : ''}
+      ${qs}`;
+  }
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+}
+
+function renderScriptCard(d) {
+  const log = document.getElementById('log');
+  const el = document.createElement('div');
+  el.className = 'preview-card script-card';
+  const rows = (d.segments || []).map(s =>
+    `<div class="seg-row"><span class="seg-role">${esc(s.role)}</span><span class="seg-preview">${esc(s.preview)}</span></div>`
+  ).join('');
+  el.innerHTML = `
+    <div class="preview-title">✍️ Script — ${esc(d.title)}</div>
+    ${d.description ? `<div class="preview-claim" style="margin-bottom:6px">${esc(d.description)}</div>` : ''}
+    ${rows}`;
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+}
+
+// ── Deploy / uptime status bar ──────────────────────────────────────────────
+let _serverStartedAt = null;
+let _uptimeBase = 0;  // seconds at last health fetch
+
+function fmtUptime(s) {
+  s = Math.floor(s);
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600),
+        m = Math.floor((s % 3600) / 60), sec = s % 60;
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m ${sec}s`;
+  return `${m}m ${sec}s`;
+}
+
+let _uptimeFetchedAt = null;
+
+async function fetchHealth() {
+  try {
+    const r = await fetch('/health');
+    if (!r.ok) return;
+    const d = await r.json();
+    _uptimeBase = d.uptime_s;
+    _uptimeFetchedAt = Date.now();
+    const commit = d.commit || '?';
+    const subject = d.subject ? ` — ${d.subject}` : '';
+    document.getElementById('sb-commit').textContent = `● ${commit}${subject}`;
+
+    if (_serverStartedAt && _serverStartedAt !== d.started_at) {
+      const flash = document.getElementById('sb-flash');
+      flash.className = 'sb-deploy-flash';
+      flash.textContent = '🔄 Redeployed!';
+      flash.style.display = '';
+      setTimeout(() => { flash.style.display = 'none'; }, 5000);
+    }
+    _serverStartedAt = d.started_at;
+  } catch (_) {}
+}
+
+function tickUptime() {
+  if (_uptimeFetchedAt === null) return;
+  const elapsed = (Date.now() - _uptimeFetchedAt) / 1000;
+  document.getElementById('sb-uptime').textContent = '⏱ ' + fmtUptime(_uptimeBase + elapsed);
+}
+
+fetchHealth();
+setInterval(fetchHealth, 30000);
+setInterval(tickUptime, 1000);
+
+// Load history on page load
+refreshHistory();
+loadSampleText();
+</script>
+</body>
+</html>

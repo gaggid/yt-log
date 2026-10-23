@@ -1,0 +1,835 @@
+import asyncio
+import base64
+import json
+import os
+import random
+import re
+import subprocess
+import sys
+import traceback
+import uuid
+from datetime import datetime
+from pathlib import Path
+
+# Force UTF-8 everywhere on Windows — must be before any I/O
+os.environ["PYTHONUTF8"] = "1"
+os.environ["PYTHONIOENCODING"] = "utf-8"
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+import httpx
+from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi.responses import FileResponse, Response, StreamingResponse
+from pydantic import BaseModel
+
+import art
+import auth
+import config
+import content
+import scenes as scenes_mod
+import speech
+import video
+
+JOBS_DIR = Path(__file__).with_name("jobs")
+JOBS_DIR.mkdir(exist_ok=True)
+
+_PAUSE_RE = re.compile(r'\[pause:([0-9.]+)s\]', re.IGNORECASE)
+_SENT_RE  = re.compile(r'[^।.?!]+[।.?!]*')
+_SENT_PAUSE = 0.35   # seconds of silence auto-inserted between every sentence
+
+
+def _split_sentences(text: str) -> list[str]:
+    """Split narration into individual sentences, stripping empties."""
+    return [s.strip() for s in _SENT_RE.findall(text) if s.strip()]
+
+
+def _make_silence(path: Path, seconds: float) -> None:
+    """Generate a silent MP3 clip via FFmpeg."""
+    subprocess.run(
+        [config.FFMPEG, "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
+         "-t", f"{max(0.1, seconds):.2f}", "-c:a", "libmp3lame", "-q:a", "4", str(path)],
+        capture_output=True, check=True)
+
+_STARTED_AT = datetime.now()
+
+
+def _git_info() -> dict:
+    try:
+        r = subprocess.run(["git", "log", "-1", "--format=%h|%s"],
+                           capture_output=True, text=True, encoding="utf-8",
+                           cwd=Path(__file__).parent)
+        parts = r.stdout.strip().split("|", 1)
+        return {"commit": parts[0], "subject": parts[1] if len(parts) > 1 else ""}
+    except Exception:
+        return {"commit": "unknown", "subject": ""}
+
+
+_GIT = _git_info()
+
+app = FastAPI(title="Podcast Video Generator")
+auth.install(app)
+
+_jobs: dict[str, dict] = {}
+
+# ── helpers ────────────────────────────────────────────────────────────────────
+
+def _hdrs():
+    h = {}
+    if config.API_KEY:
+        h["Authorization"] = f"Bearer {config.API_KEY}"
+    return h
+
+_THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL | re.IGNORECASE)
+
+def _clean(s: str) -> str:
+    """Strip lone surrogates and thinking-token blocks that some models emit before their answer."""
+    s = s.encode("utf-8", errors="replace").decode("utf-8")
+    return _THINK_RE.sub("", s).strip()
+
+async def _post(client: httpx.AsyncClient, path: str, tries: int = 3, **kw) -> httpx.Response:
+    """POST with retries on connection errors, timeouts and 5xx (model reloads, tunnel hiccups)."""
+    for attempt in range(tries):
+        try:
+            r = await client.post(f"{config.BASE_URL}{path}", headers=_hdrs(), **kw)
+            if r.status_code < 500 and r.status_code != 429:
+                r.raise_for_status()
+                return r
+            err: Exception = httpx.HTTPStatusError(f"{r.status_code} {r.text[:200]}",
+                                                   request=r.request, response=r)
+        except (httpx.TransportError, httpx.TimeoutException) as e:
+            err = e
+        if attempt == tries - 1:
+            raise err
+        await asyncio.sleep(5 * (attempt + 1))
+
+async def _chat(client: httpx.AsyncClient, messages: list, **kwargs) -> str:
+    payload = {"model": config.CHAT_MODEL, "messages": messages, **kwargs}
+    r = await _post(client, "/chat/completions", json=payload, timeout=300)
+    return _clean(r.json()["choices"][0]["message"]["content"])
+
+# ── media steps ────────────────────────────────────────────────────────────────
+
+def _tts_payload(text: str, voice: str) -> dict:
+    p = {"input": text, "voice": voice, "response_format": "mp3", "speed": 1.15}
+    return p  # kokoro — no model field, server picks default
+
+async def tts_segment(client: httpx.AsyncClient, text: str, voice: str,
+                      out: Path, sem: asyncio.Semaphore) -> float:
+    async with sem:
+        r = await _post(client, "/audio/speech", json=_tts_payload(text, voice), timeout=300)
+        out.write_bytes(r.content)
+        dur = float(r.headers.get("X-Audio-Seconds", 0))
+        if dur <= 0:
+            dur = len(r.content) / 16000  # ~128kbps fallback
+        return max(dur, 1.0)
+
+async def tts_podcast_segment(client: httpx.AsyncClient, devanagari_sentences: list[str],
+                              voice: str, out: Path, sem: asyncio.Semaphore) -> float:
+    """Podcast async endpoint for anchor_* voices — exposes cfg_weight / exaggeration."""
+    turns = [{"speaker": "HOST", "text": s} for s in devanagari_sentences]
+    async with sem:
+        r = await _post(client, "/audio/podcast", json={
+            "model":        config.TTS_MODEL,
+            "script":       turns,
+            "voices":       {"HOST": voice},
+            "language":     "hi",
+            "cfg_weight":   config.TTS_CFG_WEIGHT,
+            "exaggeration": config.TTS_EXAGGERATION,
+            "gap_ms":       round(_SENT_PAUSE * 1000),
+            "response_format": "mp3",
+        }, timeout=60)
+    job_id = r.json()["id"]
+    # Poll outside the semaphore so it doesn't block other work
+    for _ in range(120):                      # up to 10 min
+        await asyncio.sleep(5)
+        poll = await client.get(f"{config.BASE_URL}/jobs/{job_id}",
+                                headers=_hdrs(), timeout=30)
+        data = poll.json()
+        if data["status"] == "succeeded":
+            audio = await client.get(data["result"]["url"], timeout=120)
+            out.write_bytes(audio.content)
+            return max(float(data["result"].get("duration_s", len(audio.content) / 16000)), 1.0)
+        if data["status"] in ("failed", "cancelled"):
+            raise RuntimeError(f"Podcast TTS failed: {data.get('error', data['status'])}")
+    raise TimeoutError("Podcast TTS timed out")
+
+
+async def image_segment(client: httpx.AsyncClient, prompt: str,
+                        out: Path, sem: asyncio.Semaphore,
+                        seed: int | None = None,
+                        ref_image: Path | None = None) -> None:
+    async with sem:
+        if ref_image and ref_image.exists():
+            form = {"model": config.IMAGE_MODEL, "prompt": prompt,
+                    "width": "1280", "height": "720",
+                    "response_format": "b64_json", "quality": "standard", "n": "1"}
+            if seed is not None:
+                form["seed"] = str(seed)
+            r = await _post(client, "/images/edits", timeout=300,
+                            files={"image": (ref_image.name, ref_image.read_bytes(), "image/png")},
+                            data=form)
+        else:
+            body = {"model": config.IMAGE_MODEL, "prompt": prompt, "width": 1280, "height": 720,
+                    "response_format": "b64_json", "quality": "standard", "n": 1}
+            if seed is not None:
+                body["seed"] = seed
+            r = await _post(client, "/images/generations", json=body, timeout=300)
+        b64 = r.json()["data"][0]["b64_json"]
+        out.write_bytes(base64.b64decode(b64))
+
+def _norm(t: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (t or "").lower())
+
+async def inspect_image(client: httpx.AsyncClient, path: Path) -> dict:
+    """Vision QA via the gateway's multimodal model: what text is readable, is there a close-up face."""
+    b64 = base64.b64encode(path.read_bytes()).decode()
+    r = await _post(client, "/chat/completions", timeout=300, json={
+        "model": config.CHAT_MODEL, "preset": "no-think-json", "temperature": 0, "max_tokens": 200,
+        "response_format": {"type": "json_object"},
+        "messages": [{"role": "user", "content": [
+            {"type": "text", "text": 'Look at this illustration. Reply ONLY with JSON: {"text": "<all readable text exactly '
+                                     'as written, letter by letter, or empty string>", "closeup_face": true or false '
+                                     '(true only if a human face fills a large part of the image)}'},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64," + b64}}]}]})
+    try:
+        return content.extract_json(r.json()["choices"][0]["message"]["content"])
+    except Exception:
+        return {}
+
+# ── job persistence (jobs survive server restarts / auto-deploys) ──────────────
+
+def _save_meta(job_id: str) -> None:
+    job = _jobs[job_id]
+    keep = {k: job.get(k) for k in ("status", "created_at", "topic", "title", "description", "output", "stats", "camera", "character_bible")}
+    (JOBS_DIR / job_id).mkdir(exist_ok=True)
+    (JOBS_DIR / job_id / "meta.json").write_text(json.dumps(keep, ensure_ascii=False), encoding="utf-8")
+
+def _load_jobs() -> None:
+    for d in sorted(JOBS_DIR.iterdir()):
+        mf = d / "meta.json"
+        if not d.is_dir() or not mf.exists():
+            continue
+        try:
+            m = json.loads(mf.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if m.get("status") in ("queued", "running"):
+            m["status"] = "error"           # server restarted mid-job
+        m["log"] = [json.dumps({"type": "info", "message": f"Job {d.name} restored from disk ({m['status']})"})]
+        _jobs[d.name] = m
+
+# ── main pipeline ──────────────────────────────────────────────────────────────
+
+async def run_pipeline(job_id: str, topic: str, n_segments: int,
+                       style: str, voice: str, camera: str, url: str = ""):
+    job = _jobs[job_id]
+    job_dir = JOBS_DIR / job_id
+    job_dir.mkdir(exist_ok=True)
+    log: list[str] = job["log"]
+
+    def emit(msg: str, type_: str = "info", **extra):
+        entry = {"type": type_, "message": _clean(msg)}
+        entry.update(extra)
+        log.append(json.dumps(entry, ensure_ascii=False))
+
+    try:
+        job["status"] = "running"
+        _save_meta(job_id)
+        async with httpx.AsyncClient() as client:
+            async def chat(messages, **kw):
+                return await _chat(client, messages, **kw)
+
+            async def chat_prompt(prompt: str):
+                return await chat([{"role": "user", "content": prompt}], max_tokens=4000, temperature=0.2)
+
+            def _check_cancelled():
+                if job.get("status") == "cancelled":
+                    raise RuntimeError("Job cancelled by user")
+
+            # 1) source content: article URL or live RSS headlines
+            if url:
+                emit(f"🔗 Fetching article: {url}")
+                art_title, art_text = await asyncio.to_thread(content.parse_url, url)
+                if not topic:
+                    topic = art_title
+                emit(f"✓ Article parsed: \"{art_title}\" ({len(art_text.split())} words)", "success")
+                notes = art_text
+                headlines: list[dict] = []
+            else:
+                emit("📡 Fetching latest headlines from Google News RSS...")
+                candidates = await asyncio.to_thread(content.fetch_headlines, topic)
+                emit(f"✓ {len(candidates)} candidates fetched", "success")
+
+                emit("🗞 Curating top stories (trusted sources first)...")
+                headlines = await content.curate_headlines(chat, candidates, topic)
+                emit(f"✓ {len(headlines)} stories selected", "research_result",
+                     topic=topic or "today's news",
+                     headlines=[{"title": h["title"], "source": h["source"],
+                                  "age_h": h["age_h"], "trusted": h["trusted"]}
+                                 for h in headlines])
+
+                _check_cancelled()
+                emit("📝 Synthesising research notes...")
+                notes = await content.research(chat, topic, headlines or None)
+                emit("✓ Research notes ready", "success")
+
+            _check_cancelled()
+            # 3) angles + uber story
+            emit("🧐 Finding contrarian angles and brain-work questions...")
+            angles = await content.find_angles(chat, notes)
+            n_qs = len(angles.get("questions", []))
+            if n_qs < 3:
+                emit(f"⚠ find_angles returned only {n_qs} questions — model likely misread the schema", "error")
+            uber_story = await content.find_uber_story(chat, headlines)
+            if not uber_story:
+                emit("⚠ Uber story empty — model returned blank, continuing without spine", "error")
+            else:
+                emit(f"✓ Uber story: {uber_story[:160]}", "success")
+            emit("Angles ready", "research_result",
+                 topic=topic or "today's news",
+                 core_claim=angles.get("core_claim", ""),
+                 contrarian_take=angles.get("contrarian_take", ""),
+                 uber_story=uber_story,
+                 questions=angles.get("questions", [])[:4])
+            _check_cancelled()
+            deep = await content.deep_research(chat, topic, angles)
+            emit(f"✓ Deep research done ({len(angles.get('questions', []))} questions answered)", "success")
+
+            _check_cancelled()
+            # 2) persona script (first person, Hinglish)
+            emit(f"✍️ Writing first-person Hinglish script ({n_segments} segments)...")
+            script = await content.make_script(chat, notes, angles, deep, n_segments, topic, uber_story)
+            segs = script["segments"]
+            n = len(segs)
+
+            # Extract [pause:Xs] markers before purge_english so they aren't mangled
+            for sg in segs:
+                raw_parts = _PAUSE_RE.split(sg["narration"])
+                texts = [raw_parts[k].strip() for k in range(0, len(raw_parts), 2) if raw_parts[k].strip()]
+                pdurs = []
+                for k in range(1, len(raw_parts), 2):
+                    try:
+                        pdurs.append(float(raw_parts[k]))
+                    except ValueError:
+                        pdurs.append(0.8)
+                sg["narration_parts"] = texts or [sg["narration"]]
+                sg["pause_durs"] = pdurs[:max(0, len(sg["narration_parts"]) - 1)]
+
+            # Clean each part: no full English sentences (Hindi voice mangles them)
+            for sg in segs:
+                cleaned = []
+                for part in sg["narration_parts"]:
+                    cleaned.append(await content.purge_english(chat, part))
+                sg["narration_parts"] = cleaned
+                sg["narration"] = " ".join(cleaned)
+
+            emit(f"✓ Script: \"{script.get('title', '')}\" ({n} segments)", "success")
+            emit("Script ready", "script_result",
+                 title=script.get("title", ""),
+                 description=script.get("description", ""),
+                 segments=[{"role": sg.get("role", ""), "preview": sg["narration"][:120]}
+                           for sg in segs])
+
+            # 2b) Character bible — protagonist + environments + tone arc
+            emit("🎭 Building character bible...")
+            bible = await content.make_character_bible(chat, script, topic)
+            emit(f"✓ Protagonist: {bible['protagonist']['description'][:80]}...", "success")
+            job["character_bible"] = bible
+            _save_meta(job_id)
+
+            # 2b2) Visual arc — 4 locked locations + 3-act emotional journey for the episode
+            emit("🗺 Planning visual story arc...")
+            visual_arc = await content.make_visual_arc(chat, script, topic, bible)
+            if visual_arc.get("locations"):
+                emit(f"✓ Visual arc: {', '.join(visual_arc['locations'][:3])}…", "success")
+            else:
+                emit("⚠ Visual arc empty — scenes will plan freely", "error")
+
+            sem = asyncio.Semaphore(config.MAX_CONCURRENCY)
+
+            # 2c) Character reference images (3 poses, white background)
+            if style == "cinematic":
+                ref_prompts = art.character_reference_prompts(bible)
+                emit(f"📸 Generating {len(ref_prompts)} character reference images...")
+                char_refs: list[Path] = []
+                for ri, rp in enumerate(ref_prompts):
+                    rpath = job_dir / f"char_ref_{ri:02d}.png"
+                    try:
+                        await image_segment(client, rp, rpath, sem)
+                        char_refs.append(rpath)
+                    except Exception as e:
+                        emit(f"⚠ Char ref {ri+1} failed: {e}", "error")
+                emit(f"✓ {len(char_refs)} character reference images saved", "success")
+
+            _check_cancelled()
+            # 3) + 4) Pronunciation prep (per-part) + voice generation with inline pauses
+            emit("🔤 Preparing pronunciation + generating voice...")
+            audio_parts: list[list[Path]] = [[] for _ in range(n)]
+            durations = [0.0] * n
+
+            async def narrate(i: int, seg: dict):
+                parts = seg.get("narration_parts", [seg["narration"]])
+                label = f"Segment {i+1}/{n}"
+
+                if voice.startswith("anchor_"):
+                    # Podcast async endpoint: convert all sentences → Devanagari, submit once
+                    emit(f"🎙 {label}: TTS (podcast, cfg={config.TTS_CFG_WEIGHT})...")
+                    devanagari = []
+                    for part_text in parts:
+                        for sent in (_split_sentences(part_text) or [part_text]):
+                            devanagari.append(await speech.to_speech(chat_prompt, sent))
+                    p = job_dir / f"audio_{i:03d}_000.mp3"
+                    dur = await tts_podcast_segment(client, devanagari, voice, p, sem)
+                    audio_parts[i] = [p]
+                    durations[i] = dur
+                    emit(f"✓ {label} voice ready ({dur:.1f}s)", "success")
+                    return
+
+                # Kokoro path: per-sentence speech endpoint with explicit silence files
+                pdurs = seg.get("pause_durs", [])
+                emit(f"🎙 {label}: TTS ({len(parts)} part{'s' if len(parts)>1 else ''})...")
+                files, total = [], 0.0
+                clip_idx = 0
+                for k, part_text in enumerate(parts):
+                    sentences = _split_sentences(part_text) or [part_text]
+                    for si, sent in enumerate(sentences):
+                        spoken = await speech.to_speech(chat_prompt, sent)
+                        p = job_dir / f"audio_{i:03d}_{clip_idx:03d}.mp3"
+                        dur = await tts_segment(client, spoken, voice, p, sem)
+                        files.append(p)
+                        total += dur
+                        clip_idx += 1
+                        if si < len(sentences) - 1:
+                            sil = job_dir / f"silence_{i:03d}_{clip_idx:03d}.mp3"
+                            try:
+                                await asyncio.to_thread(_make_silence, sil, _SENT_PAUSE)
+                                files.append(sil)
+                                total += _SENT_PAUSE
+                                clip_idx += 1
+                            except Exception:
+                                pass
+                    if k < len(pdurs) and pdurs[k] > 0:
+                        sil = job_dir / f"silence_{i:03d}_{clip_idx:03d}.mp3"
+                        try:
+                            await asyncio.to_thread(_make_silence, sil, pdurs[k])
+                            files.append(sil)
+                            total += pdurs[k]
+                            clip_idx += 1
+                        except Exception:
+                            pass
+                audio_parts[i] = files
+                durations[i] = max(total, 1.0)
+                emit(f"✓ {label} voice ready ({total:.1f}s, {len(files)} clips)", "success")
+
+            for i, seg in enumerate(segs):
+                await narrate(i, seg)
+            audio_paths_flat = [p for parts in audio_parts for p in parts]
+
+            # 5) scene plan: split each segment into beats (2-5s), design one explanatory visual per beat
+            rng = random.Random(job_id)
+            style = style if style in art.STYLES else art.DEFAULT_STYLE
+            palettes = art.segment_palettes([str(sg.get("emotion", "")) for sg in segs], rng)
+            mem = scenes_mod.Memory()
+            shot_plan: list[dict] = []
+            for i, seg in enumerate(segs):
+                k = content.choose_shot_count(durations[i])
+                beats = content.split_beats(seg["narration"], k)
+                bdur = content.beat_durations(beats, durations[i])
+                emotion = seg.get("emotion", "neutral")
+                emit(f"🎞 Segment {i+1}/{n}: planning {len(beats)} scenes ({emotion})...")
+                scenes = await scenes_mod.plan_scenes(
+                    chat, topic or script.get("title", ""), seg.get("role", ""),
+                    beats, mem, emotion=emotion, geo="india",
+                    character_bible=bible, style=style,
+                    visual_arc=visual_arc, seg_idx=i)
+                seg["palette"] = palettes[i]
+                seg["scenes"] = [{"beat": b, "dur": round(d, 2), **sc} for b, d, sc in zip(beats, bdur, scenes)]
+                shot_plan += [{"scene": sc, "dur": d, "seg": i, "palette": palettes[i], "emotion": emotion}
+                              for sc, d in zip(scenes, bdur)]
+            script["total_seconds"] = round(sum(durations), 1)
+            with open(job_dir / "script.json", "w", encoding="utf-8") as _f:
+                json.dump(script, _f, ensure_ascii=False, indent=2)
+
+            # Build prompts now so they can be reviewed before image generation starts
+            for s in shot_plan:
+                s["prompt"] = art.compose(s["scene"], style, s["palette"], rng, s.get("emotion", "neutral"))
+
+            draft = [{"shot": j, "seg": s["seg"], "dur": s["dur"],
+                      "beat": s["scene"].get("beat", ""),
+                      "emotion": s.get("emotion", ""),
+                      "scene": s["scene"],
+                      "prompt": s["prompt"]}
+                     for j, s in enumerate(shot_plan)]
+            (job_dir / "prompt_draft.json").write_text(
+                json.dumps(draft, ensure_ascii=False, indent=2), encoding="utf-8")
+            emit(f"✓ Scene plan: {len(shot_plan)} scenes, "
+                 f"{sum(1 for s in shot_plan if s['scene'].get('text'))} with on-screen text — "
+                 f"prompt_draft.json written", "success")
+
+            _check_cancelled()
+            # 6) images, one per scene
+            total = len(shot_plan)
+            char_ref = char_refs[0] if (style == "cinematic" and char_refs) else None
+            emit(f"🖼 Generating {total} images ({style}"
+                 f"{', with character reference' if char_ref else ''})...")
+            for j, s in enumerate(shot_plan):
+                s["image"] = job_dir / f"shot_{j:03d}.png"
+                # prompt already built during draft phase; reuse it
+                try:
+                    await image_segment(client, s["prompt"], s["image"], sem, ref_image=char_ref)
+                except Exception as e:
+                    if j == 0:
+                        raise
+                    emit(f"⚠ Scene {j+1} image failed ({type(e).__name__}); reusing previous", "error")
+                    s["image"] = shot_plan[j - 1]["image"]
+                if (j + 1) % 4 == 0 or j + 1 == total:
+                    emit(f"⟳ Images {j+1}/{total}")
+
+            # 6b) vision QA: misspelled on-image text and close-up faces get regenerated with a new seed
+            emit("🔎 Checking images (text spelling, faces)...")
+            fixed = 0
+            for j, s in enumerate(shot_plan):
+                if j and s["image"] == shot_plan[j - 1]["image"]:
+                    continue
+                want = s["scene"].get("text", "")
+                for attempt in range(3):
+                    try:
+                        info = await inspect_image(client, s["image"])
+                    except Exception:
+                        break                                   # QA unavailable: keep the image
+                    bad_text = _norm(info.get("text", "")) != _norm(want) and (want or len(_norm(info.get("text", ""))) > 3)
+                    bad_face = bool(info.get("closeup_face"))
+                    if not (bad_text or bad_face):
+                        break
+                    if attempt == 2:
+                        if bad_text and want:                   # give up on the text: redraw without it
+                            s["scene"]["text"] = ""
+                            s["prompt"] = art.compose(s["scene"], style, s["palette"], rng,
+                                                      s.get("emotion", "neutral"))
+                            await image_segment(client, s["prompt"], s["image"], sem,
+                                                rng.randrange(2**31), ref_image=char_ref)
+                        break
+                    fixed += 1
+                    await image_segment(client, s["prompt"], s["image"], sem,
+                                        rng.randrange(2**31), ref_image=char_ref)
+            emit(f"✓ Image check done ({fixed} regenerated)", "success")
+
+            (job_dir / "image_prompts.json").write_text(
+                json.dumps([{"shot": j, "palette": s["palette"], "prompt": s["prompt"]} for j, s in enumerate(shot_plan)],
+                           ensure_ascii=False, indent=2), encoding="utf-8")
+            # Save everything needed to resume assembly if it fails
+            (job_dir / "shot_plan.json").write_text(
+                json.dumps([{"dur": s["dur"], "image": str(s["image"]), "seg": s["seg"],
+                             "palette": s["palette"], "scene": s["scene"]} for s in shot_plan],
+                           ensure_ascii=False, indent=2), encoding="utf-8")
+            (job_dir / "audio_list_flat.json").write_text(
+                json.dumps([str(p) for p in audio_paths_flat], ensure_ascii=False), encoding="utf-8")
+            job["camera"] = camera
+            _save_meta(job_id)
+            emit(f"🎬 Assembling {total} scenes (camera: {camera}, crossfades) with FFmpeg...")
+            output = job_dir / "output.mp4"
+            stats = await asyncio.to_thread(video.assemble, job_dir, audio_paths_flat, shot_plan,
+                                            output, camera, job_id)
+
+            size_mb = output.stat().st_size // 1024 // 1024
+            job.update(status="done", output=str(output), title=script["title"],
+                       description=script.get("description", ""), stats=stats)
+            _save_meta(job_id)
+            emit(f"✅ Done! {size_mb}MB, {stats['seconds']}s, {stats['shots']} scenes — ready to download", "done")
+
+    except UnicodeEncodeError as ue:
+        job["status"] = "error"
+        ctx = ascii(ue.object[max(0, ue.start - 5):ue.end + 5])
+        emit(f"❌ UnicodeEncodeError: codec={ue.encoding!r} pos={ue.start}-{ue.end} context={ctx}", "error")
+        for line in traceback.format_exc().splitlines():
+            emit(f"  {line}", "error")
+    except RuntimeError as e:
+        if "cancelled" in str(e).lower():
+            job["status"] = "cancelled"
+        else:
+            job["status"] = "error"
+            emit(f"❌ {type(e).__name__}: {e}", "error")
+            for line in traceback.format_exc().splitlines():
+                emit(f"  {line}", "error")
+    except Exception as e:
+        job["status"] = "error"
+        emit(f"❌ {type(e).__name__}: {e}", "error")
+        for line in traceback.format_exc().splitlines():
+            emit(f"  {line}", "error")
+    finally:
+        _save_meta(job_id)
+
+# ── routes ─────────────────────────────────────────────────────────────────────
+
+class GenerateRequest(BaseModel):
+    topic: str = ""
+    url: str = ""
+    segments: int = config.DEFAULT_SEGMENTS
+    style: str = config.DEFAULT_STYLE
+    voice: str = config.DEFAULT_VOICE
+    camera: str = config.DEFAULT_CAMERA
+
+@app.on_event("startup")
+async def startup():
+    _load_jobs()
+    try:
+        subprocess.run([config.FFMPEG, "-version"], capture_output=True, check=True)
+        print(f"FFmpeg OK: {config.FFMPEG}")
+    except FileNotFoundError:
+        print(f"WARNING: ffmpeg not found at {config.FFMPEG} — video assembly will fail")
+    if not config.API_KEY:
+        print("WARNING: TRIPFICK_API_KEY not set")
+    print(f"Login: user '{config.APP_USER}', password in .env (APP_PASSWORD)")
+
+@app.get("/")
+async def root():
+    return FileResponse(Path(__file__).with_name("static") / "index.html")
+
+@app.post("/generate")
+async def generate(req: GenerateRequest, bg: BackgroundTasks):
+    job_id = uuid.uuid4().hex[:8]
+    label = req.topic or (req.url and f"article: {req.url[:60]}") or "today's news"
+    _jobs[job_id] = {
+        "status": "queued",
+        "log": [json.dumps({"type": "info", "message": f"⟳ Job {job_id} queued — {label}"})],
+        "created_at": datetime.now().isoformat(),
+        "topic": label,
+    }
+    bg.add_task(run_pipeline, job_id, req.topic, req.segments, req.style, req.voice, req.camera, req.url)
+    return {"job_id": job_id}
+
+@app.get("/status/{job_id}")
+async def status_stream(job_id: str):
+    if job_id not in _jobs:
+        raise HTTPException(404, "Job not found")
+
+    async def gen():
+        log = _jobs[job_id]["log"]
+        idx = 0
+        while True:
+            while idx < len(log):
+                yield f"data: {log[idx]}\n\n"
+                idx += 1
+            status = _jobs[job_id]["status"]
+            if status in ("done", "error") and idx >= len(log):
+                yield f"data: {json.dumps({'type': 'done', 'status': status, 'job_id': job_id})}\n\n"
+                break
+            await asyncio.sleep(0.3)
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache",
+                                      "X-Accel-Buffering": "no"})
+
+@app.get("/video/{job_id}")
+async def video_stream(job_id: str):
+    job = _jobs.get(job_id)
+    if not job or job["status"] != "done":
+        raise HTTPException(404)
+    return FileResponse(Path(job["output"]), media_type="video/mp4")
+
+@app.get("/download/{job_id}")
+async def download(job_id: str):
+    job = _jobs.get(job_id)
+    if not job or job["status"] != "done":
+        raise HTTPException(404)
+    path = Path(job["output"])
+    safe = re.sub(r'[^\w\s-]', '', job.get("title", "podcast"))[:50].strip() or "podcast"
+    return FileResponse(path, media_type="video/mp4", filename=f"{safe}.mp4")
+
+def _reconstruct_from_script(job_dir: Path) -> tuple[list[dict], list[Path]]:
+    """Rebuild shot_plan + audio_paths_flat from script.json + files on disk (legacy jobs)."""
+    script = json.loads((job_dir / "script.json").read_text(encoding="utf-8"))
+    shot_plan = []
+    for i, seg in enumerate(script.get("segments", [])):
+        for sc in seg.get("scenes", []):
+            idx = len(shot_plan)
+            img = job_dir / f"shot_{idx:03d}.png"
+            shot_plan.append({
+                "dur": sc["dur"],
+                "image": img,
+                "seg": i,
+                "palette": seg.get("palette", ""),
+                "scene": {k: v for k, v in sc.items() if k not in ("dur", "beat")},
+            })
+    # Reconstruct ordered audio flat list: for each segment/part, audio then optional silence
+    n_segs = len(script.get("segments", []))
+    audio_paths_flat: list[Path] = []
+    for i in range(n_segs):
+        k = 0
+        while True:
+            a = job_dir / f"audio_{i:03d}_{k:02d}.mp3"
+            if not a.exists():
+                break
+            audio_paths_flat.append(a)
+            sil = job_dir / f"silence_{i:03d}_{k:02d}.mp3"
+            if sil.exists():
+                audio_paths_flat.append(sil)
+            k += 1
+    return shot_plan, audio_paths_flat
+
+
+@app.post("/resume/{job_id}")
+async def resume_job(job_id: str, bg: BackgroundTasks):
+    """Re-run only the FFmpeg assembly step; reconstructs state from saved files if needed."""
+    job_dir = JOBS_DIR / job_id
+    if not job_dir.exists():
+        raise HTTPException(404, "Job directory not found")
+    # Need at least script.json or shot_plan.json to proceed
+    sp_file = job_dir / "shot_plan.json"
+    al_file = job_dir / "audio_list_flat.json"
+    script_file = job_dir / "script.json"
+    if not sp_file.exists() and not script_file.exists():
+        raise HTTPException(400, "No saved assembly data for this job — run full pipeline first")
+    job = _jobs.get(job_id)
+    if job and job["status"] == "running":
+        raise HTTPException(409, "Job already running")
+    if job_id not in _jobs:
+        _jobs[job_id] = {"status": "queued", "created_at": datetime.now().isoformat(),
+                         "topic": "", "log": []}
+    job = _jobs[job_id]
+    job["status"] = "running"
+    job["log"] = [json.dumps({"type": "info", "message": f"⟳ Resuming assembly for job {job_id}"})]
+    _save_meta(job_id)
+
+    async def _do_resume():
+        log = job["log"]
+        def emit(msg, type_="info", **extra):
+            entry = {"type": type_, "message": _clean(msg)}
+            entry.update(extra)
+            log.append(json.dumps(entry, ensure_ascii=False))
+        try:
+            if sp_file.exists() and al_file.exists():
+                raw_plan = json.loads(sp_file.read_text(encoding="utf-8"))
+                shot_plan = [{"dur": s["dur"], "image": Path(s["image"]),
+                              "seg": s["seg"], "palette": s["palette"], "scene": s["scene"]}
+                             for s in raw_plan]
+                audio_paths_flat = [Path(p) for p in json.loads(al_file.read_text(encoding="utf-8"))]
+                emit("✓ Loaded saved shot plan", "success")
+            else:
+                emit("⟳ Reconstructing shot plan from script.json + files on disk…")
+                shot_plan, audio_paths_flat = await asyncio.to_thread(_reconstruct_from_script, job_dir)
+                emit(f"✓ Reconstructed: {len(shot_plan)} shots, {len(audio_paths_flat)} audio clips", "success")
+            camera = job.get("camera") or config.DEFAULT_CAMERA
+            output = job_dir / "output.mp4"
+            total = len(shot_plan)
+            emit(f"🎬 Assembling {total} scenes (camera: {camera}, crossfades) with FFmpeg...")
+            stats = await asyncio.to_thread(video.assemble, job_dir, audio_paths_flat, shot_plan,
+                                            output, camera, job_id)
+            size_mb = output.stat().st_size // 1024 // 1024
+            job.update(status="done", output=str(output), stats=stats)
+            _save_meta(job_id)
+            emit(f"✅ Done! {size_mb}MB, {stats['seconds']}s, {stats['shots']} scenes — ready to download", "done")
+        except Exception as e:
+            job["status"] = "error"
+            emit(f"❌ {type(e).__name__}: {e}", "error")
+            for line in traceback.format_exc().splitlines():
+                emit(f"  {line}", "error")
+            _save_meta(job_id)
+
+    bg.add_task(_do_resume)
+    return {"job_id": job_id, "status": "resuming"}
+
+
+@app.get("/jobs")
+async def list_jobs():
+    return [{"id": k, "status": v["status"], "topic": v.get("topic"),
+             "title": v.get("title"), "created_at": v["created_at"]}
+            for k, v in _jobs.items()]
+
+
+@app.post("/cancel/{job_id}")
+async def cancel_job(job_id: str):
+    """Mark a running/queued job as cancelled. The background task will notice and stop at next checkpoint."""
+    job = _jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if job["status"] not in ("running", "queued"):
+        raise HTTPException(400, f"Job is {job['status']}, not running")
+    job["status"] = "cancelled"
+    job["log"].append(json.dumps({"type": "error", "message": "⛔ Job cancelled by user"}))
+    _save_meta(job_id)
+    return {"ok": True}
+
+
+@app.delete("/jobs/{job_id}")
+async def delete_job(job_id: str):
+    """Delete a job from memory and its files from disk."""
+    job = _jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if job["status"] in ("running", "queued"):
+        job["status"] = "cancelled"
+    _jobs.pop(job_id, None)
+    job_dir = JOBS_DIR / job_id
+    if job_dir.exists():
+        import shutil as _shutil
+        _shutil.rmtree(job_dir, ignore_errors=True)
+    return {"ok": True}
+
+class PreviewRequest(BaseModel):
+    voice: str
+    text: str
+
+@app.post("/preview-voice")
+async def preview_voice(req: PreviewRequest):
+    """Transliterate Hinglish text → Devanagari, then TTS with the given voice. Returns MP3."""
+    async with httpx.AsyncClient() as client:
+        async def _cp(prompt: str) -> str:
+            return await _chat(client, [{"role": "user", "content": prompt}], max_tokens=4000, temperature=0.2)
+        spoken = await speech.to_speech(_cp, req.text)
+        if req.voice.startswith("anchor_"):
+            out = Path(f"/tmp/preview_{req.voice}.mp3")
+            await tts_podcast_segment(client, [spoken], req.voice, out,
+                                      asyncio.Semaphore(1))
+            return Response(content=out.read_bytes(), media_type="audio/mpeg")
+        r = await _post(client, "/audio/speech",
+                        json=_tts_payload(spoken, req.voice), timeout=60)
+        return Response(content=r.content, media_type="audio/mpeg")
+
+
+@app.get("/sample-text")
+async def sample_text():
+    """Return first 2-3 sentences from the most recent completed job's script."""
+    fallback = ("Kya aapko lagta hai AI sirf ek hype hai? Aaj ye reality ban raha hai. "
+                "Barclays ne five thousand jobs cut kar diye hain sirf AI efficiency ke liye.")
+    for d in sorted(JOBS_DIR.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+        sf = d / "script.json"
+        if not sf.exists():
+            continue
+        try:
+            segs = json.loads(sf.read_text(encoding="utf-8")).get("segments", [])
+            narr = segs[0]["narration"] if segs else ""
+            # first 2-3 sentences
+            import re as _re
+            sents = [s.strip() for s in _re.findall(r"[^।.?!]+[।.?!]*", narr) if s.strip()]
+            return {"text": " ".join(sents[:3])}
+        except Exception:
+            continue
+    return {"text": fallback}
+
+
+@app.get("/health")
+async def health():
+    return {
+        "started_at": _STARTED_AT.isoformat(),
+        "uptime_s": (datetime.now() - _STARTED_AT).total_seconds(),
+        "commit": _GIT["commit"],
+        "subject": _GIT["subject"],
+    }
+
+
+@app.get("/internal/busy")
+async def internal_busy():
+    """For watch.py (auto-deploy): true while a job is queued or running."""
+    return {"busy": any(j["status"] in ("queued", "running") for j in _jobs.values())}
+
+@app.get("/options")
+async def options():
+    return {"cameras": ["auto", *video.MOVES], "transitions": video.TRANSITIONS,
+            "styles": list(art.STYLES), "palettes": list(art.PALETTES)}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host=config.HOST, port=config.PORT)

@@ -2,4 +2,11 @@ fastapi
 uvicorn[standard]
 httpx
 python-multipart
-Pillow
+pydantic>=2
+pypdf>=4
+# optional OCR for scanned PDFs (also needs the Tesseract program installed):
+# pytesseract
+# pypdfium2
+# development / tests:
+# pytest
+# reportlab

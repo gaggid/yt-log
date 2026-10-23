@@ -1,662 +1,470 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Podcast Video Generator</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Source to Story</title>
 <style>
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body {
-  background: #0c0c0c; color: #ddd;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  min-height: 100vh;
-}
-header {
-  padding: 18px 28px; border-bottom: 1px solid #1e1e1e;
-  display: flex; align-items: baseline; gap: 12px;
-}
-header h1 { font-size: 1.25rem; font-weight: 600; color: #fff; }
-header span { font-size: 0.8rem; color: #555; }
-main { max-width: 780px; margin: 28px auto; padding: 0 16px 60px; }
-.card {
-  background: #141414; border: 1px solid #222;
-  border-radius: 10px; padding: 22px; margin-bottom: 18px;
-}
-.card-title {
-  font-size: 0.7rem; font-weight: 600; color: #555;
-  text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 14px;
-}
-label {
-  display: block; font-size: 0.72rem; color: #666;
-  margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.05em;
-}
-input[type=text], input[type=number], select, textarea {
-  width: 100%; background: #0c0c0c; border: 1px solid #2a2a2a;
-  color: #ddd; border-radius: 6px; padding: 9px 11px; font-size: 0.9rem;
-  font-family: inherit; outline: none; transition: border-color 0.15s;
-}
-input:focus, select:focus, textarea:focus { border-color: #444; }
-textarea { resize: vertical; min-height: 68px; }
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
-.grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-top: 14px; }
-.topic-row { margin-bottom: 14px; }
-.topic-input-wrap { display: flex; gap: 8px; }
-.topic-input-wrap input { flex: 1; }
-button {
-  background: #2563eb; color: #fff; border: none; border-radius: 6px;
-  padding: 9px 18px; font-size: 0.88rem; font-weight: 600; cursor: pointer;
-  white-space: nowrap; transition: background 0.15s;
-}
-button:hover { background: #1d4ed8; }
-button:disabled { background: #1e1e1e; color: #444; cursor: not-allowed; }
-.btn-secondary {
-  background: #1e1e1e; color: #888; border: 1px solid #2a2a2a;
-}
-.btn-secondary:hover { background: #252525; color: #aaa; }
-.btn-green { background: #15803d; }
-.btn-green:hover { background: #166534; }
-.generate-row {
-  margin-top: 18px; display: flex; align-items: center; gap: 12px;
-  padding-top: 18px; border-top: 1px solid #1e1e1e;
-}
-.job-label { font-size: 0.78rem; color: #555; font-family: monospace; }
-
-/* Progress log */
-#log-card { display: none; }
-#log {
-  background: #080808; border: 1px solid #1a1a1a; border-radius: 6px;
-  padding: 12px 14px; max-height: 300px; overflow-y: auto;
-  font-family: 'Menlo', 'Consolas', monospace; font-size: 0.78rem; line-height: 1.8;
-}
-.l-info  { color: #888; }
-.l-success { color: #4ade80; }
-.l-error { color: #f87171; }
-.l-done  { color: #60a5fa; font-weight: 700; }
-
-/* Video output */
-#output-card { display: none; }
-video { width: 100%; border-radius: 7px; background: #000; margin-bottom: 12px; }
-.output-actions { display: flex; gap: 10px; align-items: center; }
-.output-title { font-size: 0.85rem; color: #aaa; flex: 1; }
-
-/* Jobs history */
-#history-card { display: none; }
-.job-row {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 9px 12px; border: 1px solid #1a1a1a; border-radius: 6px;
-  margin-bottom: 7px; font-size: 0.82rem;
-}
-.job-meta { color: #666; font-size: 0.75rem; margin-top: 2px; }
-.badge {
-  padding: 2px 8px; border-radius: 4px;
-  font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
-}
-.b-done    { background: #14532d; color: #4ade80; }
-.b-running { background: #1e3a5f; color: #60a5fa; }
-.b-error   { background: #3b0000; color: #f87171; }
-.b-queued  { background: #2a1f00; color: #fbbf24; }
-
-/* Inline preview cards (research + script) */
-.preview-card {
-  background: #0f1419; border-radius: 6px; padding: 10px 12px; margin: 5px 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-}
-.research-card { border: 1px solid #1e3a5f; }
-.script-card   { border: 1px solid #1a3a1a; }
-.preview-title { font-size: 0.72rem; font-weight: 700; margin-bottom: 7px; }
-.research-card .preview-title { color: #60a5fa; }
-.script-card   .preview-title { color: #4ade80; }
-.preview-claim { font-size: 0.75rem; color: #bbb; margin-bottom: 4px; }
-.preview-take  { font-size: 0.75rem; color: #a78bfa; margin-bottom: 5px; }
-.preview-q     { font-size: 0.72rem; color: #666; padding-left: 8px; line-height: 1.6; }
-.seg-row       { display: flex; gap: 8px; margin-bottom: 4px; align-items: flex-start; }
-.seg-role      { font-size: 0.6rem; font-weight: 700; text-transform: uppercase; color: #555;
-                 background: #111; padding: 2px 5px; border-radius: 3px; white-space: nowrap; flex-shrink: 0; }
-.seg-preview   { font-size: 0.72rem; color: #777; }
-
-/* Voice picker */
-.voice-grid {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px;
-}
-.voice-btn {
-  background: #0c0c0c; border: 1px solid #2a2a2a; color: #888;
-  border-radius: 5px; padding: 7px 6px; font-size: 0.72rem; cursor: pointer;
-  text-align: center; transition: all 0.1s;
-}
-.voice-btn:hover { border-color: #444; color: #ccc; }
-.voice-btn.active { border-color: #3b82f6; color: #60a5fa; background: #0f1a2e; }
-.voice-name { font-weight: 600; display: block; }
-.voice-lang { color: #555; font-size: 0.68rem; }
-.voice-test-btn {
-  display: block; width: 100%; margin-top: 5px; padding: 2px 0;
-  background: #1a2a1a; border: 1px solid #2a3a2a; color: #4ade80;
-  border-radius: 3px; font-size: 0.7rem; cursor: pointer;
-}
-.voice-test-btn:hover { background: #22332a; }
-.voice-test-btn:disabled { opacity: 0.4; cursor: default; }
-
-/* Deploy / uptime status bar */
-#status-bar {
-  padding: 5px 28px; background: #0a0a0a; border-bottom: 1px solid #1a1a1a;
-  display: flex; align-items: center; gap: 18px; font-size: 0.7rem; color: #555;
-  font-family: 'Menlo', 'Consolas', monospace;
-}
-#status-bar .sb-commit { color: #444; }
-#status-bar .sb-uptime { color: #4a4a4a; }
-#status-bar .sb-deploy-flash {
-  color: #4ade80; font-weight: 700; animation: fadeout 4s forwards;
-}
-@keyframes fadeout { 0%{opacity:1} 70%{opacity:1} 100%{opacity:0} }
+:root{--bg:#f6f7f9;--panel:#fff;--ink:#1c2230;--mute:#667085;--line:#e3e6ec;--accent:#3157d5;--accent-ink:#fff;
+--ok:#17803d;--okbg:#e4f6ea;--bad:#b42318;--badbg:#fde9e7;--warn:#9a6700;--warnbg:#fff3d6;--info:#175cd3;--infobg:#e6eefc;--shadow:0 1px 2px rgba(16,24,40,.06)}
+@media (prefers-color-scheme:dark){:root{--bg:#12151c;--panel:#1a1f29;--ink:#e8ebf2;--mute:#9aa3b5;--line:#2a3140;--accent:#7b97ff;--accent-ink:#0d1220;
+--ok:#5fd18a;--okbg:#14301f;--bad:#ff8b7f;--badbg:#3a1a17;--warn:#f1c25b;--warnbg:#3a2d10;--info:#8fb2ff;--infobg:#1a2745;--shadow:none}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+header.top{display:flex;align-items:center;gap:16px;padding:12px 24px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+header.top h1{font-size:16px;margin:0;font-weight:650}header.top .sp{flex:1}
+main{max-width:1180px;margin:0 auto;padding:20px 24px 80px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow)}
+.pad{padding:16px}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.sp{flex:1}.mt{margin-top:16px}.mt-s{margin-top:8px}
+button,.btn{font:inherit;border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:6px 12px;border-radius:7px;cursor:pointer}
+button:hover{border-color:var(--accent)}button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+button.danger{color:var(--bad)}button:disabled{opacity:.45;cursor:default}button.small{padding:2px 8px;font-size:12px}
+input,select,textarea{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:6px 9px;min-width:0}
+textarea{width:100%;min-height:70px;resize:vertical}input[type=number]{width:110px}
+label.f{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--mute)}label.f input,label.f select,label.f textarea{font-size:14px}
+table{width:100%;border-collapse:collapse}th{text-align:left;font-size:12px;color:var(--mute);font-weight:550;padding:8px 12px;border-bottom:1px solid var(--line)}
+td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}tr:last-child td{border-bottom:0}
+tr.click{cursor:pointer}tr.click:hover td{background:color-mix(in srgb,var(--accent) 6%,transparent)}
+.badge{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;background:var(--line);color:var(--ink);white-space:nowrap}
+.b-done,.b-approved{background:var(--okbg);color:var(--ok)}.b-error,.b-rejected,.b-failed{background:var(--badbg);color:var(--bad)}
+.b-running,.b-queued{background:var(--infobg);color:var(--info)}.b-paused,.b-cancelled,.b-warn,.b-research{background:var(--warnbg);color:var(--warn)}
+.mute{color:var(--mute)}.small{font-size:12px}.err{color:var(--bad)}.ok{color:var(--ok)}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:18px 0 16px}
+.tabs button{border:0;border-bottom:2px solid transparent;border-radius:0;background:none;padding:8px 14px;color:var(--mute)}
+.tabs button.on{color:var(--ink);border-color:var(--accent);font-weight:600}
+.bar{height:8px;background:var(--line);border-radius:99px;overflow:hidden;min-width:90px}.bar>i{display:block;height:100%;background:var(--accent)}
+.bar.ev>i{background:var(--ok)}.bar.fail>i{background:var(--bad)}
+.grid{display:grid;gap:12px}.g2{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}.g3{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+.story{display:grid;grid-template-columns:auto 1fr auto;gap:12px;padding:14px 16px;border-bottom:1px solid var(--line);cursor:pointer}
+.story:last-child{border-bottom:0}.story:hover{background:color-mix(in srgb,var(--accent) 5%,transparent)}
+.story h3{margin:0 0 2px;font-size:15px}.score{text-align:center;min-width:64px}.score b{font-size:22px;display:block;line-height:1.1}
+.drawer{position:fixed;inset:0 0 0 auto;width:min(760px,100%);background:var(--panel);border-left:1px solid var(--line);box-shadow:-8px 0 30px rgba(0,0,0,.18);overflow:auto;z-index:20;padding:20px}
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:15}
+.modal{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:30;padding:16px}
+.modal>.card{width:min(560px,100%);max-height:92vh;overflow:auto;padding:20px}
+.passage{border-left:3px solid var(--line);padding:6px 12px;margin:8px 0;background:var(--bg);border-radius:0 7px 7px 0;white-space:pre-wrap}
+.passage mark{background:var(--warnbg);color:inherit}
+h2{font-size:17px;margin:0 0 10px}h4{margin:16px 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mute)}
+ul.tight{margin:4px 0;padding-left:20px}.kv{display:grid;grid-template-columns:150px 1fr;gap:4px 12px}
+.warnbox{background:var(--warnbg);color:var(--warn);padding:8px 12px;border-radius:8px;margin:8px 0}
+.errbox{background:var(--badbg);color:var(--bad);padding:8px 12px;border-radius:8px;margin:8px 0}
+pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:8px;border-radius:7px;max-height:220px;overflow:auto;font-size:12px}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 16px;border-radius:8px;z-index:50}
+@media (max-width:640px){main{padding:12px}.story{grid-template-columns:auto 1fr}.story .score{grid-column:2;text-align:left}.kv{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
-<div id="status-bar">
-  <span id="sb-commit" class="sb-commit">● loading…</span>
-  <span id="sb-uptime" class="sb-uptime">⏱ —</span>
-  <span id="sb-flash" style="display:none"></span>
-</div>
-<header>
-  <h1>🎙 Podcast Video Generator</h1>
-  <span style="flex:1">Hinglish script → TTS audio → AI illustrations → 2560×1440 (2K) video with camera moves</span>
-  <button class="btn-secondary" onclick="logout()">Sign out</button>
+<header class="top">
+  <h1><a href="#/" style="color:inherit">Source to Story</a></h1>
+  <span class="mute small">turn books and articles into evidence-linked story candidates</span>
+  <span class="sp"></span>
+  <a href="#/settings">Settings</a>
+  <button class="small" onclick="logout()">Sign out</button>
 </header>
-<main>
-
-  <!-- Form -->
-  <div class="card">
-    <div class="card-title">Episode Setup</div>
-
-    <div class="topic-row">
-      <label>Topic (leave blank for auto today's news)</label>
-      <div class="topic-input-wrap">
-        <input type="text" id="topic" placeholder="e.g. India economy, AI, cricket, space..." />
-        <button class="btn-secondary" onclick="setTodaysNewsAndGenerate()" title="Research today's top news and generate">
-          📰 Generate Today's News
-        </button>
-      </div>
-    </div>
-
-    <div class="topic-row">
-      <label>Article URL <span style="font-weight:normal;opacity:.6">(optional — paste a news article link to use it as source instead of RSS)</span></label>
-      <input type="text" id="article-url" placeholder="https://..." style="width:100%" />
-    </div>
-
-    <div class="grid3">
-      <div>
-        <label>Segments</label>
-        <input type="number" id="segments" value="4" min="2" max="20" />
-      </div>
-      <div>
-        <label>Image Style</label>
-        <select id="style">
-          <option value="cinematic" selected>Cinematic (photorealistic, character-driven)</option>
-          <option value="graphic-novel">Graphic Novel (ink + halftone)</option>
-          <option value="flat-vector">Flat Vector Editorial</option>
-          <option value="ink-wash">Ink &amp; Watercolour Wash</option>
-          <option value="retro-poster">Retro Screen-print Poster</option>
-          <option value="paper-cut">Paper-cut Collage</option>
-        </select>
-      </div>
-      <div>
-        <label>Camera Movement</label>
-        <select id="camera">
-          <option value="auto" selected>Auto (slow zoom + gentle pans)</option>
-          <option value="zoom_in">Slow zoom in</option>
-          <option value="zoom_out">Slow zoom out</option>
-          <option value="pan_left">Slow pan left</option>
-          <option value="pan_right">Slow pan right</option>
-          <option value="tilt_up">Slow tilt up</option>
-          <option value="tilt_down">Slow tilt down</option>
-        </select>
-      </div>
-    </div>
-    <div style="margin-top:14px">
-      <label>Custom Prompt Additions</label>
-      <input type="text" id="extra-prompt" placeholder="Focus on..." />
-    </div>
-
-    <div style="margin-top:16px">
-      <label>Voice</label>
-      <div style="font-size:0.65rem;color:#555;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.06em">Hindi Podcast model</div>
-      <div class="voice-grid" style="grid-template-columns:1fr 1fr;margin-bottom:10px">
-        <div class="voice-btn active" data-voice="anchor_m" onclick="selectVoice(this)">
-          <span class="voice-name">Anchor M</span>
-          <span class="voice-lang">Hindi ♂</span>
-          <button class="voice-test-btn" onclick="event.stopPropagation();previewVoice('anchor_m',this)">▶</button>
-        </div>
-        <div class="voice-btn" data-voice="anchor_f" onclick="selectVoice(this)">
-          <span class="voice-name">Anchor F</span>
-          <span class="voice-lang">Hindi ♀</span>
-          <button class="voice-test-btn" onclick="event.stopPropagation();previewVoice('anchor_f',this)">▶</button>
-        </div>
-      </div>
-      <div style="font-size:0.65rem;color:#555;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.06em">Kokoro model</div>
-      <div class="voice-grid">
-        <div class="voice-btn" data-voice="hm_omega" onclick="selectVoice(this)">
-          <span class="voice-name">Omega</span>
-          <span class="voice-lang">Hindi ♂</span>
-          <button class="voice-test-btn" onclick="event.stopPropagation();previewVoice('hm_omega',this)">▶</button>
-        </div>
-        <div class="voice-btn" data-voice="hm_psi" onclick="selectVoice(this)">
-          <span class="voice-name">Psi</span>
-          <span class="voice-lang">Hindi ♂</span>
-          <button class="voice-test-btn" onclick="event.stopPropagation();previewVoice('hm_psi',this)">▶</button>
-        </div>
-        <div class="voice-btn" data-voice="hf_alpha" onclick="selectVoice(this)">
-          <span class="voice-name">Alpha</span>
-          <span class="voice-lang">Hindi ♀</span>
-          <button class="voice-test-btn" onclick="event.stopPropagation();previewVoice('hf_alpha',this)">▶</button>
-        </div>
-        <div class="voice-btn" data-voice="hf_beta" onclick="selectVoice(this)">
-          <span class="voice-name">Beta</span>
-          <span class="voice-lang">Hindi ♀</span>
-          <button class="voice-test-btn" onclick="event.stopPropagation();previewVoice('hf_beta',this)">▶</button>
-        </div>
-      </div>
-      <div style="margin-top:10px;display:flex;gap:8px;align-items:flex-start">
-        <textarea id="voice-sample" rows="2"
-          style="flex:1;font-size:0.82rem;resize:vertical"
-          placeholder="Type Hinglish text to preview…"></textarea>
-      </div>
-      <audio id="voice-preview-player" style="width:100%;margin-top:8px;display:none" controls></audio>
-    </div>
-
-    <div class="generate-row">
-      <button id="gen-btn" onclick="generate()">▶ Generate Video</button>
-      <button id="cancel-btn" style="display:none;background:#7f1d1d" onclick="cancelCurrent()">⛔ Cancel</button>
-      <span class="job-label" id="job-label"></span>
-    </div>
-  </div>
-
-  <!-- Progress -->
-  <div class="card" id="log-card">
-    <div class="card-title">Pipeline Progress</div>
-    <div id="log"></div>
-  </div>
-
-  <!-- Output -->
-  <div class="card" id="output-card">
-    <div class="card-title">Output</div>
-    <video id="player" controls playsinline></video>
-    <div class="output-actions">
-      <span class="output-title" id="output-title"></span>
-      <button class="btn-green" id="dl-btn" onclick="downloadVideo()">⬇ Download MP4</button>
-    </div>
-  </div>
-
-  <!-- History -->
-  <div class="card" id="history-card">
-    <div class="card-title">Previous Jobs</div>
-    <div id="history-list"></div>
-  </div>
-
-</main>
-
+<main id="app"></main>
+<div id="overlay"></div>
 <script>
-let selectedVoice = 'anchor_m';
-let currentJobId = null;
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtDate = t => t ? new Date(t * 1000).toLocaleString([], {dateStyle:'medium', timeStyle:'short'}) : '';
+const num = n => (n ?? 0).toLocaleString();
+const dur = s => s >= 3600 ? (s/3600).toFixed(1)+' h' : s >= 60 ? Math.round(s/60)+' min' : Math.round(s)+' s';
+let poll = null;
 
-function selectVoice(el) {
-  document.querySelectorAll('.voice-btn').forEach(b => b.classList.remove('active'));
-  el.classList.add('active');
-  selectedVoice = el.dataset.voice;
+async function api(path, opts = {}) {
+  const o = {method: opts.method || 'GET', headers: {}};
+  if (opts.json !== undefined) { o.headers['Content-Type'] = 'application/json'; o.body = JSON.stringify(opts.json); }
+  if (opts.form) o.body = opts.form;
+  const r = await fetch('/api' + path, o);
+  if (r.status === 401) { location = '/login'; throw new Error('login required'); }
+  const text = await r.text();
+  let data; try { data = JSON.parse(text); } catch { data = text; }
+  if (!r.ok) throw new Error((data && data.detail) || r.statusText);
+  return data;
 }
+function toast(msg, bad) { const t = document.createElement('div'); t.className = 'toast'; if (bad) t.style.background = 'var(--bad)'; t.textContent = msg; document.body.append(t); setTimeout(() => t.remove(), bad ? 6000 : 2500); }
+const guard = fn => async (...a) => { try { return await fn(...a); } catch (e) { toast(e.message, true); } };
+async function logout() { await fetch('/logout', {method:'POST'}); location = '/login'; }
+function badge(s, label) { return `<span class="badge b-${esc(s)}">${esc(label ?? s)}</span>`; }
+function bar(p, cls = '') { return `<div class="bar ${cls}"><i style="width:${Math.max(0, Math.min(100, p))}%"></i></div>`; }
+function closeOverlay() { $('#overlay').innerHTML = ''; }
 
-async function previewVoice(voice, btn) {
-  const text = document.getElementById('voice-sample').value.trim();
-  if (!text) { alert('Add some text in the sample box first.'); return; }
-  btn.disabled = true;
-  btn.textContent = '…';
-  try {
-    const res = await fetch('/preview-voice', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ voice, text })
-    });
-    if (res.status === 401) { location.href = '/login'; return; }
-    if (!res.ok) { alert(`Preview failed: ${res.status}`); return; }
-    const blob = await res.blob();
-    const player = document.getElementById('voice-preview-player');
-    player.src = URL.createObjectURL(blob);
-    player.style.display = 'block';
-    player.play();
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '▶';
-  }
+/* ───────── router ───────── */
+function route() {
+  clearInterval(poll); poll = null; closeOverlay();
+  const h = location.hash.slice(1) || '/';
+  let m;
+  if (h === '/settings') return viewSettings();
+  if ((m = h.match(/^\/p\/([0-9a-f]+)(?:\/(\w+))?$/))) return viewProject(m[1], m[2] || 'progress');
+  return viewDashboard();
 }
+addEventListener('hashchange', route);
 
-async function loadSampleText() {
-  try {
-    const res = await fetch('/sample-text');
-    if (!res.ok) return;
-    const { text } = await res.json();
-    const el = document.getElementById('voice-sample');
-    if (el && !el.value) el.value = text;
-  } catch (_) {}
-}
-
-function setTodaysNewsAndGenerate() {
-  document.getElementById('topic').value = '';
-  generate();
-}
-
-async function generate() {
-  const btn = document.getElementById('gen-btn');
-  btn.disabled = true;
-  btn.textContent = '⟳ Starting...';
-
-  const topic = document.getElementById('topic').value.trim();
-  const articleUrl = document.getElementById('article-url').value.trim();
-  const extra = document.getElementById('extra-prompt').value.trim();
-  const fullTopic = extra ? `${topic} — ${extra}` : topic;
-
-  // Show log immediately with a local entry
-  const log = document.getElementById('log');
-  log.innerHTML = '';
-  document.getElementById('log-card').style.display = 'block';
-  document.getElementById('output-card').style.display = 'none';
-  document.getElementById('job-label').textContent = 'Connecting...';
-  const logLabel = articleUrl ? `article: ${articleUrl}` : (fullTopic || "today's news");
-  appendLog(`Submitting job — ${logLabel}`, 'info');
-
-  let res;
-  try {
-    res = await fetch('/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        topic: fullTopic,
-        url: articleUrl,
-        segments: parseInt(document.getElementById('segments').value),
-        style: document.getElementById('style').value,
-        camera: document.getElementById('camera').value,
-        voice: selectedVoice,
-      })
-    });
-  } catch (err) {
-    appendLog(`Failed to reach server: ${err.message}`, 'error');
-    btn.disabled = false;
-    btn.textContent = '▶ Generate Video';
-    return;
-  }
-
-  if (res.status === 401) { location.href = '/login'; return; }
-  if (!res.ok) {
-    appendLog(`Server error ${res.status}`, 'error');
-    btn.disabled = false;
-    btn.textContent = '▶ Generate Video';
-    return;
-  }
-
-  const { job_id } = await res.json();
-  currentJobId = job_id;
-  btn.textContent = '⟳ Running...';
-  document.getElementById('cancel-btn').style.display = '';
-  document.getElementById('job-label').textContent = `job ${job_id}`;
-  appendLog(`Job ${job_id} accepted — streaming progress...`, 'success');
-  streamProgress(job_id);
-}
-
-function streamProgress(jobId) {
-  const log = document.getElementById('log');
-  const es = new EventSource(`/status/${jobId}`);
-
-  es.onmessage = (e) => {
-    const data = JSON.parse(e.data);
-
-    if (data.type === 'done') {
-      es.close();
-      const btn = document.getElementById('gen-btn');
-      btn.disabled = false;
-      btn.textContent = '▶ Generate Video';
-      document.getElementById('cancel-btn').style.display = 'none';
-      document.getElementById('job-label').textContent =
-        data.status === 'done' ? `✓ job ${jobId}` : `✗ job ${jobId} failed`;
-      if (data.status === 'done') showOutput(jobId);
-      else showResumeButton(jobId);
-      refreshHistory();
-      return;
-    }
-
-    if (data.type === 'research_result') { renderResearchCard(data); return; }
-    if (data.type === 'script_result')   { renderScriptCard(data);   return; }
-
-    const div = document.createElement('div');
-    div.className = `l-${data.type || 'info'}`;
-    const ts = new Date().toLocaleTimeString('en-IN', { hour12: false });
-    div.textContent = `[${ts}] ${data.message}`;
-    log.appendChild(div);
-    log.scrollTop = log.scrollHeight;
-  };
-
-  es.onerror = () => {
-    es.close();
-    const btn = document.getElementById('gen-btn');
-    btn.disabled = false;
-    btn.textContent = '▶ Generate Video';
-    document.getElementById('cancel-btn').style.display = 'none';
-    appendLog('SSE connection lost. Check server console.', 'error');
-  };
-}
-
-function appendLog(msg, type = 'info') {
-  const log = document.getElementById('log');
-  const div = document.createElement('div');
-  div.className = `l-${type}`;
-  div.textContent = msg;
-  log.appendChild(div);
-  log.scrollTop = log.scrollHeight;
-}
-
-function showOutput(jobId) {
-  const sec = document.getElementById('output-card');
-  const player = document.getElementById('player');
-  player.src = `/video/${jobId}`;
-  sec.style.display = 'block';
-  sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-
-function downloadVideo() {
-  if (currentJobId) {
-    const a = document.createElement('a');
-    a.href = `/download/${currentJobId}`;
-    a.click();
-  }
-}
-
-async function refreshHistory() {
-  const res = await fetch('/jobs');
-  if (res.status === 401) { location.href = '/login'; return; }
-  const jobs = await res.json();
-  if (!jobs.length) return;
-
-  document.getElementById('history-card').style.display = 'block';
-  const list = document.getElementById('history-list');
-  list.innerHTML = [...jobs].reverse().map(j => `
-    <div class="job-row">
-      <div>
-        <div>${j.title || j.topic || '—'}</div>
-        <div class="job-meta">${j.id} · ${(j.created_at || '').slice(0,16).replace('T',' ')}</div>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px">
-        ${j.status === 'done'
-          ? `<a href="/download/${j.id}" style="color:#60a5fa;font-size:0.78rem;text-decoration:none">⬇ MP4</a>
-             <a onclick="playJob('${j.id}')" style="color:#888;font-size:0.78rem;cursor:pointer">▶ Play</a>`
-          : j.status === 'error'
-          ? `<a onclick="resumeJob('${j.id}')" style="color:#fbbf24;font-size:0.78rem;cursor:pointer">🔄 Resume</a>`
-          : (j.status === 'running' || j.status === 'queued')
-          ? `<a onclick="cancelJob('${j.id}')" style="color:#f87171;font-size:0.78rem;cursor:pointer">⛔ Cancel</a>`
-          : ''}
-        <a onclick="deleteJob('${j.id}')" style="color:#555;font-size:0.78rem;cursor:pointer" title="Delete job and files">🗑</a>
-        <span class="badge b-${j.status}">${j.status}</span>
-      </div>
+/* ───────── dashboard ───────── */
+const dash = {q: '', status: '', format: '', sort: 'created', desc: true};
+async function viewDashboard() {
+  $('#app').innerHTML = `
+    <div class="row"><h2 style="margin:0">Projects</h2><span class="sp"></span><button class="primary" onclick="importDialog()">+ Import source</button></div>
+    <div class="row mt-s">
+      <input id="dq" placeholder="Search title, author, URL" value="${esc(dash.q)}" style="flex:1;min-width:200px">
+      <select id="ds"><option value="">Any status</option>${['imported','queued','running','paused','cancelled','error','done'].map(s => `<option ${dash.status===s?'selected':''}>${s}</option>`).join('')}</select>
+      <select id="df"><option value="">Any format</option>${['pdf','article','text'].map(s => `<option ${dash.format===s?'selected':''}>${s}</option>`).join('')}</select>
+      <select id="dso">${[['created','Import date'],['updated','Last activity'],['title','Title'],['status','Status'],['candidates','Stories'],['tokens','Size']].map(([v,l]) => `<option value="${v}" ${dash.sort===v?'selected':''}>Sort: ${l}</option>`).join('')}</select>
+      <button id="dd" title="Reverse order">${dash.desc ? '↓' : '↑'}</button>
     </div>
-  `).join('');
+    <div class="card mt" id="plist"><div class="pad mute">Loading…</div></div>`;
+  const reload = guard(loadProjects);
+  $('#dq').oninput = e => { dash.q = e.target.value; clearTimeout(dash.t); dash.t = setTimeout(reload, 250); };
+  $('#ds').onchange = e => { dash.status = e.target.value; reload(); };
+  $('#df').onchange = e => { dash.format = e.target.value; reload(); };
+  $('#dso').onchange = e => { dash.sort = e.target.value; reload(); };
+  $('#dd').onclick = e => { dash.desc = !dash.desc; e.target.textContent = dash.desc ? '↓' : '↑'; reload(); };
+  await reload();
+  poll = setInterval(() => { if (location.hash.slice(1) in {'':1,'/':1}) loadProjects().catch(() => {}); }, 4000);
+}
+async function loadProjects() {
+  const qs = new URLSearchParams({q: dash.q, status: dash.status, format: dash.format, sort: dash.sort, desc: dash.desc});
+  const ps = await api('/projects?' + qs);
+  const el = $('#plist'); if (!el) return;
+  if (!ps.length) { el.innerHTML = `<div class="pad mute">No projects${dash.q || dash.status || dash.format ? ' match these filters' : ' yet. Import a PDF book, an article URL, or paste text to begin'}.</div>`; return; }
+  el.innerHTML = `<table><thead><tr><th>Source</th><th>Format</th><th>Imported</th><th>Size</th><th>Status</th><th>Stories</th></tr></thead><tbody>${ps.map(p => `
+    <tr class="click" onclick="location.hash='#/p/${p.id}'">
+      <td><b>${esc(p.title)}</b><div class="mute small">${esc(p.author || p.source_url || '')}</div>${p.warnings.length ? `<div class="small" style="color:var(--warn)">⚠ ${p.warnings.length} extraction warning${p.warnings.length>1?'s':''}</div>` : ''}</td>
+      <td>${badge('info', p.format)}</td>
+      <td class="small">${fmtDate(p.created_at)}</td>
+      <td class="small">${p.page_count ? p.page_count + ' pages<br>' : ''}~${num(p.est_tokens)} tokens<br>${p.chapter_count} chapter${p.chapter_count===1?'':'s'}</td>
+      <td>${badge(p.status, p.status === 'imported' ? 'ready' : p.status)}${p.stage && p.status !== 'done' ? `<div class="mute small">${esc(p.stage)}</div>` : ''}${p.error ? `<div class="err small">${esc(p.error.slice(0,90))}</div>` : ''}</td>
+      <td class="small"><b>${p.cand_total}</b> found<br><span class="ok">${p.cand_approved} approved</span> · <span class="err">${p.cand_rejected} rejected</span> · ${p.cand_pending} to review</td>
+    </tr>`).join('')}</tbody></table>`;
 }
 
-function playJob(jobId) {
-  currentJobId = jobId;
-  showOutput(jobId);
+/* ───────── import ───────── */
+function importDialog() {
+  $('#overlay').innerHTML = `<div class="scrim" onclick="closeOverlay()"></div><div class="modal"><div class="card">
+    <h2>Import a source</h2>
+    <div class="tabs" style="margin-top:0"><button class="on" data-t="file">File</button><button data-t="url">Article URL</button><button data-t="text">Paste text</button></div>
+    <div id="imp-body"></div>
+    <div class="grid g2 mt-s"><label class="f">Title (optional)<input id="i-title"></label><label class="f">Author / source (optional)<input id="i-author"></label></div>
+    <p class="mute small">Only use material you are allowed to use: public-domain, openly licensed, or your own. Paywalls and DRM are not bypassed.</p>
+    <div id="imp-err" class="errbox" hidden></div>
+    <div class="row mt-s"><span class="sp"></span><button onclick="closeOverlay()">Cancel</button><button class="primary" id="imp-go">Import</button></div>
+  </div></div>`;
+  let mode = 'file';
+  const body = () => {
+    $('#imp-body').innerHTML = mode === 'file' ? `<label class="f">PDF, TXT, MD or HTML file<input type="file" id="i-file" accept=".pdf,.txt,.md,.html,.htm"></label>`
+      : mode === 'url' ? `<label class="f">Public article or PDF URL<input id="i-url" placeholder="https://…"></label>`
+      : `<label class="f">Text<textarea id="i-text" style="min-height:150px" placeholder="Paste the article or chapter text"></textarea></label>`;
+  };
+  body();
+  document.querySelectorAll('.modal .tabs button').forEach(b => b.onclick = () => { mode = b.dataset.t; document.querySelectorAll('.modal .tabs button').forEach(x => x.classList.toggle('on', x === b)); body(); });
+  $('#imp-go').onclick = async () => {
+    const btn = $('#imp-go'); btn.disabled = true; btn.textContent = 'Importing…'; $('#imp-err').hidden = true;
+    try {
+      const title = $('#i-title').value, author = $('#i-author').value; let p;
+      if (mode === 'file') {
+        const f = $('#i-file').files[0]; if (!f) throw new Error('Choose a file first.');
+        const fd = new FormData(); fd.append('file', f); fd.append('title', title); fd.append('author', author);
+        p = await api('/projects/upload', {method: 'POST', form: fd});
+      } else if (mode === 'url') p = await api('/projects/url', {method: 'POST', json: {url: $('#i-url').value, title, author}});
+      else p = await api('/projects/text', {method: 'POST', json: {text: $('#i-text').value, title, author}});
+      closeOverlay(); location.hash = '#/p/' + p.id;
+    } catch (e) { $('#imp-err').textContent = e.message; $('#imp-err').hidden = false; btn.disabled = false; btn.textContent = 'Import'; }
+  };
 }
 
-function showResumeButton(jobId) {
-  const log = document.getElementById('log');
-  const div = document.createElement('div');
-  div.style.marginTop = '10px';
-  div.innerHTML = `<button class="btn-secondary" onclick="resumeJob('${jobId}')">🔄 Resume Assembly (reuse saved images + audio)</button>`;
-  log.appendChild(div);
+/* ───────── project ───────── */
+let P = null;
+async function viewProject(id, tab) {
+  try { P = await api('/projects/' + id); } catch (e) { $('#app').innerHTML = `<div class="errbox">${esc(e.message)}</div><a href="#/">Back</a>`; return; }
+  const tabs = [['progress','Progress'],['stories',`Stories (${P.cand_total})`],['source','Source'],['structure','Structure']];
+  $('#app').innerHTML = `
+    <div class="mute small"><a href="#/">Projects</a> /</div>
+    <div class="row"><h2 style="margin:0">${esc(P.title)}</h2><button class="small" onclick="editMeta()">Edit</button><span class="sp"></span><span id="pstatus"></span></div>
+    <div class="mute">${esc(P.author || '')}${P.source_url ? ` · <a href="${esc(P.source_url)}" target="_blank" rel="noopener">${esc(P.source_url.slice(0,70))}</a>` : ''}</div>
+    <div class="mute small">${badge('info', P.format)} imported ${fmtDate(P.created_at)} · ${P.page_count ? P.page_count + ' pages · ' : ''}~${num(P.est_tokens)} tokens · ${P.chapter_count} chapters · <a href="/api/projects/${id}/original">original file</a></div>
+    ${P.warnings.map(w => `<div class="warnbox">⚠ ${esc(w)}</div>`).join('')}
+    <div class="tabs">${tabs.map(([k,l]) => `<button class="${k===tab?'on':''}" onclick="location.hash='#/p/${id}/${k}'">${l}</button>`).join('')}</div>
+    <div id="tab"></div>`;
+  ({progress: tabProgress, stories: tabStories, source: tabSource, structure: tabStructure}[tab] || tabProgress)(id);
+}
+const editMeta = guard(async () => {
+  const t = prompt('Title', P.title); if (t === null) return;
+  const a = prompt('Author / source', P.author || ''); if (a === null) return;
+  await api('/projects/' + P.id, {method: 'PATCH', json: {title: t, author: a}}); route();
+});
+
+/* progress tab */
+async function tabProgress(id) {
+  $('#tab').innerHTML = '<div class="card pad mute">Loading…</div>';
+  const draw = async () => {
+    const pr = await api(`/projects/${id}/progress`); if (!$('#tab') || !location.hash.startsWith('#/p/' + id)) return;
+    const run = pr.running, busy = run || ['queued','running'].includes(pr.status);
+    $('#pstatus').innerHTML = badge(pr.status, pr.status === 'imported' ? 'ready' : pr.status);
+    const act = busy ? `<button onclick="ctl('pause')">Pause</button><button class="danger" onclick="ctl('cancel')">Cancel</button>`
+      : `<button class="primary" onclick="ctl('process')">${pr.status === 'imported' ? 'Start processing' : pr.status === 'done' ? 'Run again (no-op if complete)' : 'Resume'}</button>
+         ${pr.errors.length ? `<button onclick="ctl('process',{retry_failed:true})">Retry failed</button>` : ''}`;
+    const stuck = !busy && pr.status !== 'imported';
+    $('#tab').innerHTML = `
+      <div class="card pad">
+        <div class="row">${act}<span class="sp"></span><span class="mute small">${pr.tokens_in || pr.tokens_out ? `tokens in ${num(pr.tokens_in)} · out ${num(pr.tokens_out)} · model time ${dur(pr.seconds)}` : 'not started'}</span></div>
+        ${pr.error ? `<div class="errbox">${esc(pr.error)}</div>` : ''}
+        <table class="mt-s"><thead><tr><th>Stage</th><th style="width:30%">Progress</th><th>Tasks</th><th>Tokens in/out</th><th>Time</th></tr></thead><tbody>
+        ${pr.stages.map(s => `<tr><td>${esc(s.label)}${pr.stage === s.stage && busy ? ' <span class="badge b-running">now</span>' : ''}</td>
+          <td>${bar(s.total ? 100 * s.done / s.total : 0, s.failed ? 'fail' : '')}</td>
+          <td class="small">${s.total ? `${s.done}/${s.total}${s.failed ? ` · <span class="err">${s.failed} failed</span>` : ''}` : '<span class="mute">—</span>'}</td>
+          <td class="small">${s.total ? num(s.tokens_in) + ' / ' + num(s.tokens_out) : ''}</td><td class="small">${s.seconds ? dur(s.seconds) : ''}</td></tr>`).join('')}
+        </tbody></table>
+        ${pr.leads_remaining ? `<div class="row mt-s"><span class="mute small">${pr.leads_remaining} more story leads were found but not drafted (limit in Settings).</span><button class="small" ${busy?'disabled':''} onclick="expandLeads()">Draft 10 more</button></div>` : ''}
+        ${stuck ? `<div class="row mt-s"><label class="f" style="flex-direction:row;align-items:center;gap:8px">Reprocess from stage
+          <select id="rs">${pr.stages.map(s => `<option value="${s.stage}">${esc(s.label)}</option>`).join('')}</select></label>
+          <button class="small" onclick="reprocess()">Reprocess</button>
+          <span class="mute small">Stories you already reviewed or edited are kept.</span></div>` : ''}
+      </div>
+      ${pr.errors.length ? `<div class="card pad mt"><h2>Errors</h2>${pr.errors.map(e => `<div class="mt-s"><b>${esc(e.stage)}</b> <span class="mute">${esc(e.key)}</span> · ${e.attempts} attempt${e.attempts>1?'s':''}
+        <div class="err">${esc(e.error)}</div>
+        <div class="row"><button class="small" ${busy?'disabled':''} onclick="retryTask(${e.id})">Retry this task</button>
+        ${e.raw_failed.length ? `<button class="small" onclick="showRaw(${e.id})">View failed replies (${e.raw_failed.length})</button>` : ''}</div></div>`).join('')}</div>` : ''}`;
+    return busy;
+  };
+  guard(async () => { await draw(); })();
+  poll = setInterval(guard(async () => { await draw(); }), 2500);
+}
+const ctl = guard(async (what, body) => { await api(`/projects/${P.id}/${what}`, {method: 'POST', json: body || {}}); toast(what === 'process' ? 'Processing started' : what + ' requested'); P = await api('/projects/' + P.id); });
+const retryTask = guard(async tid => { await api(`/projects/${P.id}/tasks/${tid}/retry`, {method: 'POST'}); await ctl('process'); });
+const expandLeads = guard(async () => { const r = await api(`/projects/${P.id}/expand`, {method: 'POST', json: {count: 10}}); toast(`Queued ${r.queued} more`); });
+const reprocess = guard(async () => { const st = $('#rs').value; if (!confirm(`Reprocess from "${st}"? Later stages are rebuilt; unreviewed stories are replaced.`)) return; await ctl('process', {from_stage: st}); });
+const showRaw = guard(async tid => {
+  const t = await api(`/projects/${P.id}/tasks/${tid}`);
+  $('#overlay').innerHTML = `<div class="scrim" onclick="closeOverlay()"></div><div class="modal"><div class="card"><h2>Failed replies: ${esc(t.stage)} ${esc(t.key)}</h2>
+    ${t.raw_failed.map((r, i) => `<h4>Attempt ${i + 1}: ${esc(r.error)}</h4><pre>${esc(r.response)}</pre>`).join('')}<div class="row"><span class="sp"></span><button onclick="closeOverlay()">Close</button></div></div></div>`;
+});
+
+/* stories tab */
+const sf = {status: '', q: '', min: '', research: false, sort: 'priority'};
+let selected = new Set();
+async function tabStories(id) {
+  selected = new Set();
+  $('#tab').innerHTML = `
+    <div class="row">
+      <input id="sq" placeholder="Search stories" value="${esc(sf.q)}" style="flex:1;min-width:180px">
+      <select id="sst"><option value="">All (excl. merged)</option>${['pending','approved','rejected'].map(s => `<option value="${s}" ${sf.status===s?'selected':''}>${s === 'pending' ? 'to review' : s}</option>`).join('')}</select>
+      <select id="ssort">${[['priority','Priority'],['story','Story score'],['evidence','Evidence'],['title','Title'],['created','Order found']].map(([v,l]) => `<option value="${v}" ${sf.sort===v?'selected':''}>Sort: ${l}</option>`).join('')}</select>
+      <label class="small"><input type="checkbox" id="sres" ${sf.research?'checked':''}> needs research</label>
+      <input id="smin" type="number" min="0" max="100" placeholder="min priority" value="${esc(sf.min)}" style="width:110px">
+    </div>
+    <div class="row mt-s"><button id="merge-btn" disabled onclick="mergeSelected()">Merge selected</button>
+      <button class="small" onclick="rescore()">Re-score with current weights</button><span class="sp"></span>
+      <span class="mute small">Export:</span><button class="small" onclick="exportDlg()">JSON / CSV…</button></div>
+    <div class="card mt" id="slist"><div class="pad mute">Loading…</div></div>`;
+  const reload = guard(loadStories);
+  $('#sq').oninput = e => { sf.q = e.target.value; clearTimeout(sf.t); sf.t = setTimeout(reload, 250); };
+  $('#sst').onchange = e => { sf.status = e.target.value; reload(); };
+  $('#ssort').onchange = e => { sf.sort = e.target.value; reload(); };
+  $('#sres').onchange = e => { sf.research = e.target.checked; reload(); };
+  $('#smin').oninput = e => { sf.min = e.target.value; clearTimeout(sf.t); sf.t = setTimeout(reload, 250); };
+  await reload();
+}
+async function loadStories() {
+  const qs = new URLSearchParams({q: sf.q, status: sf.status, sort: sf.sort, desc: sf.sort !== 'title'});
+  if (sf.min !== '') qs.set('min_priority', sf.min); if (sf.research) qs.set('research', true);
+  const list = await api(`/projects/${P.id}/stories?` + qs); const el = $('#slist'); if (!el) return;
+  if (!list.length) { el.innerHTML = `<div class="pad mute">No stories${P.cand_total ? ' match these filters' : ' yet. Process the source to find them'}.</div>`; return; }
+  el.innerHTML = list.map(s => `<div class="story" onclick="openStory('${s.id}')">
+    <input type="checkbox" onclick="event.stopPropagation();pick('${s.id}',this.checked)" ${selected.has(s.id)?'checked':''}>
+    <div><h3>${esc(s.title)}</h3><div class="mute">${esc(s.premise)}</div>
+      <div class="row small mt-s" style="gap:6px">${badge(s.status, s.status === 'pending' ? 'to review' : s.status)}${s.research ? badge('research', 'needs research') : ''}${s.edited ? badge('info', 'edited') : ''}
+        <span class="mute">${esc(s.id)} · ${s.n_refs} passage${s.n_refs===1?'':'s'}${s.pages ? ' · p. ' + esc(s.pages) : ''}${s.kind ? ' · ' + esc(s.kind.replace(/_/g,' ')) : ''}</span>
+        ${s.warnings ? `<span style="color:var(--warn)">⚠ ${s.warnings}</span>` : ''}${s.duplicates ? `<span style="color:var(--warn)">possible duplicate</span>` : ''}</div></div>
+    <div class="score"><b>${Math.round(s.eff_priority)}</b><span class="mute small">priority</span>
+      <div class="mt-s small" title="Story appeal">story ${Math.round(s.eff_story)}</div>${bar(s.eff_story)}
+      <div class="small" title="Evidence quality">evidence ${Math.round(s.evidence_score)}</div>${bar(s.evidence_score, 'ev')}</div></div>`).join('');
+}
+function pick(id, on) { on ? selected.add(id) : selected.delete(id); const b = $('#merge-btn'); b.disabled = selected.size < 2; b.textContent = selected.size > 1 ? `Merge ${selected.size} selected` : 'Merge selected'; }
+const mergeSelected = guard(async () => {
+  const title = prompt('Title for the merged story (leave blank to keep the strongest story title)', ''); if (title === null) return;
+  const s = await api('/stories/merge', {method: 'POST', json: {ids: [...selected], title}}); toast('Merged into ' + s.id); await refreshProject(); openStory(s.id);
+});
+const rescore = guard(async () => { const r = await api(`/projects/${P.id}/rescore`, {method: 'POST'}); toast(`Re-scored ${r.rescored} stories`); loadStories(); });
+async function refreshProject() { P = await api('/projects/' + P.id); await tabStories(P.id); }
+
+function exportDlg() {
+  $('#overlay').innerHTML = `<div class="scrim" onclick="closeOverlay()"></div><div class="modal"><div class="card"><h2>Export stories</h2>
+    <p class="mute small">JSON is the canonical, versioned format for the next module. Merged or split-away originals are never included.</p>
+    <div class="row"><label><input type="checkbox" class="xs" value="approved" checked> approved</label><label><input type="checkbox" class="xs" value="pending" checked> to review</label><label><input type="checkbox" class="xs" value="rejected"> rejected</label></div>
+    <label class="small mt-s"><input type="checkbox" id="xt" checked> include full passage text in references</label>
+    <div class="row mt"><span class="sp"></span><button onclick="closeOverlay()">Close</button><button onclick="doExport('csv')">Download CSV</button><button class="primary" onclick="doExport('json')">Download JSON</button></div></div></div>`;
+}
+function doExport(fmt) {
+  const st = [...document.querySelectorAll('.xs:checked')].map(x => x.value).join(',');
+  if (!st) return toast('Pick at least one status', true);
+  location = `/api/projects/${P.id}/export?format=${fmt}&statuses=${st}&text=${$('#xt').checked}`;
 }
 
-async function resumeJob(jobId) {
-  const log = document.getElementById('log');
-  document.getElementById('log-card').style.display = 'block';
-  document.getElementById('output-card').style.display = 'none';
-  currentJobId = jobId;
-  document.getElementById('job-label').textContent = `resuming ${jobId}`;
-
-  const res = await fetch(`/resume/${jobId}`, { method: 'POST' });
-  if (res.status === 401) { location.href = '/login'; return; }
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({detail: res.statusText}));
-    appendLog(`Resume failed: ${err.detail || res.status}`, 'error');
-    return;
-  }
-  appendLog(`Resuming assembly for job ${jobId}…`, 'success');
-  streamProgress(jobId);
+/* story drawer */
+let S = null;
+const openStory = guard(async sid => {
+  S = await api('/stories/' + sid); const d = S.data;
+  const f = (k, label, rows = 2) => `<label class="f mt-s">${label}<textarea data-f="${k}" style="min-height:${rows*28}px">${esc(d[k] || '')}</textarea></label>`;
+  const factors = Object.entries(d.scores || {});
+  const refs = S.refs;
+  $('#overlay').innerHTML = `<div class="scrim" onclick="closeOverlay()"></div><div class="drawer">
+    <div class="row"><span class="mute small">${esc(S.id)} ${S.origin !== 'pipeline' ? '· ' + esc(S.origin) : ''}</span><span class="sp"></span><button class="small" onclick="closeOverlay();loadStories&&loadStories().catch(()=>{})">Close ✕</button></div>
+    ${S.status === 'superseded' ? `<div class="warnbox">This story was merged or split into: ${esc(S.superseded_by || '')}. It is read-only.</div>` : ''}
+    <label class="f mt-s">Title<input id="e-title" value="${esc(S.title)}"></label>
+    <label class="f mt-s">Premise<textarea id="e-premise">${esc(S.premise)}</textarea></label>
+    <div class="row mt-s">${badge(S.status, S.status === 'pending' ? 'to review' : S.status)}${S.research ? badge('research', 'needs research') : ''}<span class="sp"></span>
+      <button class="small" onclick="setStatus('approved')">✓ Approve</button><button class="small danger" onclick="setStatus('rejected')">✗ Reject</button><button class="small" onclick="setStatus('pending')">↺ Reset</button>
+      <button class="small" onclick="toggleResearch()">${S.research ? 'Clear' : 'Mark'} research</button></div>
+    ${(d.warnings || []).map(w => `<div class="warnbox">⚠ ${esc(w)}</div>`).join('')}
+    ${(d.duplicate_warnings || []).length ? `<div class="warnbox">Possible duplicate of: ${d.duplicate_warnings.map(x => `<a href="#" onclick="openStory('${x.id}');return false">${esc(x.title)}</a> (${Math.round(x.overlap*100)}% shared passages)`).join(', ')}</div>` : ''}
+    <h4>Scores</h4>
+    <div class="grid g3"><div class="card pad"><div class="mute small">Priority</div><b style="font-size:24px">${Math.round(S.eff_priority)}</b>${S.priority_override != null ? `<div class="small mute">override (computed ${Math.round(S.priority)})</div>` : ''}</div>
+      <div class="card pad"><div class="mute small">Story appeal</div><b style="font-size:24px">${Math.round(S.eff_story)}</b>${S.score_override != null ? `<div class="small mute">override (computed ${Math.round(S.story_score)})</div>` : ''}</div>
+      <div class="card pad"><div class="mute small">Evidence quality</div><b style="font-size:24px">${Math.round(S.evidence_score)}</b>${bar(S.evidence_score, 'ev')}</div></div>
+    <table class="mt-s"><tbody>${factors.map(([k, v]) => `<tr><td style="width:150px">${esc(k)}</td><td style="width:60px"><b>${v.score}</b>/10</td><td class="small">${esc(v.reason)}</td></tr>`).join('')}
+      <tr><td>evidence (model)</td><td><b>${d.evidence?.score ?? ''}</b>/10</td><td class="small">${esc(d.evidence?.reason || '')}<div class="mute">${d.evidence?.breakdown ? `${d.evidence.breakdown.quotes_verified}/${d.evidence.breakdown.quotes_checked} quotes verified in the source · ${d.evidence.breakdown.supporting_passages} supporting passage(s)` : ''}</div></td></tr></tbody></table>
+    <div class="row mt-s"><label class="f">Override story score<input type="number" id="e-sov" min="0" max="100" value="${S.score_override ?? ''}"></label>
+      <label class="f">Override priority<input type="number" id="e-pov" min="0" max="100" value="${S.priority_override ?? ''}"></label><span class="mute small">blank = use computed</span></div>
+    <h4>Editorial record</h4>
+    ${f('curiosity_question', 'Central curiosity question')}${f('opening_hook', 'Potential opening hook')}${f('overview', 'Overview', 4)}
+    ${f('conflict', 'Conflict')}${f('stakes', 'Stakes')}${f('turning_point', 'Turning point')}${f('outcome', 'Outcome')}${f('audience_interest', 'Why an audience may care')}
+    <label class="f mt-s">Review notes<textarea id="e-notes">${esc(S.notes)}</textarea></label>
+    <div class="row mt-s"><button class="primary" onclick="saveStory()">Save changes</button><span class="mute small">${S.edited ? 'edited by you' : ''}</span></div>
+    <h4>People</h4>${(d.people || []).length ? `<ul class="tight">${d.people.map(p => `<li><b>${esc(p.name)}</b> ${esc(p.role)}</li>`).join('')}</ul>` : '<span class="mute">none</span>'}
+    <h4>Chronology</h4>${(d.chronology || []).length ? `<ul class="tight">${d.chronology.map(c => `<li>${c.when ? `<b>${esc(c.when)}</b> ` : ''}${esc(c.what)}</li>`).join('')}</ul>` : '<span class="mute">none</span>'}
+    <h4>Context needed</h4>${list(d.context_needed)}
+    <h4>Key claims &amp; evidence</h4>${(d.claims || []).map(c => `<div class="mt-s"><b>${esc(c.claim)}</b> ${badge(c.support === 'strong' ? 'approved' : c.support === 'weak' ? 'warn' : 'info', c.support)}
+      ${c.quote ? `<div class="passage small">“${esc(c.quote)}” ${c.quote_verified ? '<span class="ok">✓ found in source</span>' : '<span class="err">✗ not found verbatim</span>'}</div>` : '<div class="mute small">no direct quote</div>'}
+      <div class="small mute">passages: ${(c.para_ids || []).map(i => 'P' + i).join(', ') || '—'}</div></div>`).join('')}
+    <h4>Uncertainties &amp; conflicting accounts</h4>${list(d.uncertainties)}
+    <h4>Suggested research questions</h4>${list(d.research_questions)}
+    ${(d.related || []).length ? `<h4>Related stories</h4><ul class="tight">${d.related.map(x => `<li><a href="#" onclick="openStory('${x.id}');return false">${esc(x.title)}</a> <span class="mute small">${Math.round(x.overlap*100)}% shared passages</span></li>`).join('')}</ul>` : ''}
+    <h4>Why it was identified</h4><div>${esc(d.why || '—')}</div>
+    <h4>Supporting source passages (${refs.length})</h4>
+    <div class="row small"><span class="mute">To split this story, assign passages to groups:</span><button class="small" onclick="splitDlg()">Split…</button></div>
+    ${refs.map(r => `<div class="passage"><div class="small mute"><b>${esc(r.locator)}</b>${r.chapter_title ? ' · ' + esc(r.chapter_title) : ''} · P${r.idx}</div>${esc(r.text)}</div>`).join('')}
+    <div style="height:40px"></div></div>`;
+});
+function list(a) { return (a || []).length ? `<ul class="tight">${a.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '<span class="mute">none</span>'; }
+const saveStory = guard(async () => {
+  const patch = {title: $('#e-title').value, premise: $('#e-premise').value, notes: $('#e-notes').value,
+    score_override: $('#e-sov').value === '' ? null : +$('#e-sov').value, priority_override: $('#e-pov').value === '' ? null : +$('#e-pov').value};
+  document.querySelectorAll('.drawer textarea[data-f]').forEach(t => { if (t.value !== (S.data[t.dataset.f] || '')) patch[t.dataset.f] = t.value; });
+  S = await api('/stories/' + S.id, {method: 'PATCH', json: patch}); toast('Saved'); openStory(S.id);
+});
+const setStatus = guard(async st => { await saveStory(); await api('/stories/' + S.id, {method: 'PATCH', json: {status: st}}); toast('Marked ' + st); openStory(S.id); P = await api('/projects/' + P.id); });
+const toggleResearch = guard(async () => { await api('/stories/' + S.id, {method: 'PATCH', json: {research: !S.research}}); openStory(S.id); });
+function splitDlg() {
+  const m = document.createElement('div'); m.className = 'modal'; m.style.zIndex = 40;
+  m.innerHTML = `<div class="card"><h2>Split story</h2><p class="mute small">Give each new story a title and choose which passages belong to it. Claims follow their passages; people, chronology and scores are copied for you to adjust.</p>
+    <div class="grid g2"><label class="f">Group 1 title<input id="sp-t1"></label><label class="f">Group 2 title<input id="sp-t2"></label></div>
+    ${S.refs.map(r => `<div class="passage small"><select data-p="${r.idx}"><option value="">skip</option><option value="1">Group 1</option><option value="2">Group 2</option></select> <b>${esc(r.locator)}</b> P${r.idx}: ${esc(r.text.slice(0, 160))}…</div>`).join('')}
+    <div id="sp-err" class="errbox" hidden></div><div class="row"><span class="sp"></span><button onclick="this.closest('.modal').remove()">Cancel</button><button class="primary" id="sp-go">Split</button></div></div>`;
+  document.body.append(m);
+  $('#sp-go').onclick = async () => {
+    const g = {1: [], 2: []}; m.querySelectorAll('select[data-p]').forEach(s => s.value && g[s.value].push(+s.dataset.p));
+    try {
+      const r = await api(`/stories/${S.id}/split`, {method: 'POST', json: {groups: [{title: $('#sp-t1').value, para_idxs: g[1]}, {title: $('#sp-t2').value, para_idxs: g[2]}]}});
+      m.remove(); toast('Split into ' + r.map(x => x.id).join(', ')); P = await api('/projects/' + P.id); openStory(r[0].id);
+    } catch (e) { $('#sp-err').textContent = e.message; $('#sp-err').hidden = false; }
+  };
 }
 
-async function cancelCurrent() {
-  if (currentJobId) cancelJob(currentJobId);
+/* source tab */
+const src = {chapter: 0, q: '', offset: 0};
+async function tabSource(id) {
+  src.offset = 0;
+  $('#tab').innerHTML = `<div class="row"><select id="sc"><option value="0">All chapters</option>${P.chapters.map(c => `<option value="${c.idx}" ${src.chapter===c.idx?'selected':''}>${c.idx}. ${esc(c.title)}${c.page_start ? ` (p. ${c.page_start}–${c.page_end})` : ''}</option>`).join('')}</select>
+    <input id="spq" placeholder="Search text" value="${esc(src.q)}" style="flex:1"><span class="mute small">Every paragraph keeps its page or section; stories link back to these.</span></div>
+    <div class="card mt pad" id="paras"></div><div class="row mt"><button id="more" hidden>Load more</button></div>`;
+  $('#sc').onchange = e => { src.chapter = +e.target.value; src.offset = 0; loadParas(true); };
+  $('#spq').oninput = e => { src.q = e.target.value; src.offset = 0; clearTimeout(src.t); src.t = setTimeout(() => loadParas(true), 250); };
+  $('#more').onclick = () => loadParas(false);
+  loadParas(true);
 }
+const loadParas = guard(async fresh => {
+  const qs = new URLSearchParams({offset: src.offset, limit: 80, q: src.q}); if (src.chapter) qs.set('chapter', src.chapter);
+  const r = await api(`/projects/${P.id}/paras?` + qs); const el = $('#paras'); if (!el) return;
+  const html = r.paras.map(p => `<div class="passage" id="para-${p.idx}" ${p.kind === 'h' ? 'style="font-weight:600"' : ''}><div class="small mute"><b>${p.page ? 'p. ' + p.page : esc(p.section || '')}</b> · P${p.idx}${p.edited ? ' · edited' : ''} <a href="#" onclick="editPara(${p.idx});return false">edit</a></div><span>${esc(p.text)}</span></div>`).join('');
+  el.innerHTML = fresh ? (html || '<span class="mute">Nothing to show.</span>') : el.innerHTML + html;
+  src.offset += r.paras.length; $('#more').hidden = src.offset >= r.total;
+});
+const editPara = guard(async idx => {
+  const cur = $(`#para-${idx} span`).textContent; const t = prompt(`Correct paragraph P${idx}`, cur); if (t === null || t === cur) return;
+  const r = await api(`/projects/${P.id}/paras/${idx}`, {method: 'PUT', json: {text: t}}); toast(r.note); $(`#para-${idx} span`).textContent = t;
+});
 
-async function cancelJob(jobId) {
-  const res = await fetch(`/cancel/${jobId}`, { method: 'POST' });
-  if (res.status === 401) { location.href = '/login'; return; }
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({detail: res.statusText}));
-    appendLog(`Cancel failed: ${err.detail || res.status}`, 'error');
-    return;
-  }
-  appendLog(`Job ${jobId} cancellation requested…`, 'info');
-  refreshHistory();
+/* structure tab */
+async function tabStructure(id) {
+  const a = await api(`/projects/${id}/analysis`); const idx = a.index;
+  $('#tab').innerHTML = `
+    ${idx ? `<div class="card pad"><h2>Source index</h2><p>${esc(idx.overview)}</p>
+      ${idx.themes?.length ? `<div class="small"><b>Themes:</b> ${idx.themes.map(esc).join(' · ')}</div>` : ''}
+      ${idx.threads?.length ? `<h4>Threads across the source</h4><ul class="tight">${idx.threads.map(t => `<li><b>${esc(t.title)}</b> ${esc(t.description)} <span class="mute small">${t.chapter_idxs.length ? 'chapters ' + t.chapter_idxs.join(', ') : ''}</span></li>`).join('')}</ul>` : ''}
+      <div class="small mute mt-s">${idx.events} events · ${idx.facts} facts · ${idx.entities.length} people/places/things tracked${idx.timeline.length ? ` · ${idx.timeline.length} dated events` : ''}</div>
+      ${idx.entities.length ? `<h4>Most mentioned</h4><div class="small">${idx.entities.slice(0, 25).map(e => `<span class="badge" title="${esc((e.roles || []).join('; '))}">${esc(e.name)}</span>`).join(' ')}</div>` : ''}</div>` : `<div class="card pad mute">The source index appears once processing reaches that stage.</div>`}
+    <div class="card pad mt"><div class="row"><h2 style="margin:0">Chapters</h2><span class="sp"></span><button class="small" onclick="saveChapters()">Save chapter edits</button></div>
+      <p class="mute small">Edit titles or move a chapter's first paragraph. After changing structure, reprocess from <i>Analyzing chunks</i>.</p>
+      <table><thead><tr><th>#</th><th>Title</th><th>Starts at paragraph</th><th>Pages</th><th>Tokens</th><th>Detected by</th></tr></thead><tbody id="chap-rows">${P.chapters.map(c => `<tr>
+        <td>${c.idx}</td><td><input class="ct" value="${esc(c.title)}" style="width:100%"></td><td><input class="cs" type="number" min="1" value="${c.start_para}" ${c.idx === 1 ? 'disabled' : ''}></td>
+        <td class="small">${c.page_start ? c.page_start + '–' + c.page_end : ''}</td><td class="small">${num(c.tokens)}</td><td class="small mute">${esc(c.source)}</td></tr>`).join('')}</tbody></table></div>
+    ${a.chapters.length ? `<div class="card pad mt"><h2>Chapter records</h2>${a.chapters.map(c => `<details class="mt-s"><summary><b>${c.idx}. ${esc(c.title)}</b> <span class="mute small">${c.events} events · ${c.facts} facts</span></summary>
+      <p>${esc(c.summary)}</p>${c.themes.length ? `<div class="small mute">Themes: ${c.themes.map(esc).join(' · ')}</div>` : ''}
+      ${c.open_questions.length ? `<div class="small mute">Open questions: ${c.open_questions.map(esc).join(' · ')}</div>` : ''}</details>`).join('')}</div>` : ''}`;
 }
+const saveChapters = guard(async () => {
+  const rows = [...document.querySelectorAll('#chap-rows tr')];
+  const chapters = rows.map((r, i) => ({title: r.querySelector('.ct').value, start_para: i === 0 ? 1 : +r.querySelector('.cs').value}));
+  await api(`/projects/${P.id}/chapters`, {method: 'PUT', json: {chapters}}); toast('Chapters saved. Reprocess from "Analyzing chunks" to apply.'); P = await api('/projects/' + P.id); tabStructure(P.id);
+});
 
-async function deleteJob(jobId) {
-  if (!confirm(`Delete job ${jobId} and all its files?`)) return;
-  const res = await fetch(`/jobs/${jobId}`, { method: 'DELETE' });
-  if (res.status === 401) { location.href = '/login'; return; }
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({detail: res.statusText}));
-    appendLog(`Delete failed: ${err.detail || res.status}`, 'error');
-    return;
-  }
-  if (currentJobId === jobId) {
-    currentJobId = null;
-    document.getElementById('output-card').style.display = 'none';
-    document.getElementById('job-label').textContent = '';
-  }
-  refreshHistory();
+/* ───────── settings ───────── */
+async function viewSettings() {
+  const s = await api('/settings');
+  const n = (k, label, step = 1, hint = '') => `<label class="f">${label}<input type="number" step="${step}" data-s="${k}" value="${esc(s[k])}">${hint ? `<span>${hint}</span>` : ''}</label>`;
+  $('#app').innerHTML = `
+    <h2>Model &amp; processing settings</h2>
+    <div class="card pad"><h4 style="margin-top:0">Model endpoint</h4>
+      <div class="grid g2"><label class="f">Base URL (OpenAI-compatible)<input data-s="base_url" value="${esc(s.base_url)}"></label>
+      <label class="f">Model identifier<input data-s="model" id="s-model" list="models" value="${esc(s.model)}"><datalist id="models"></datalist></label>
+      <label class="f">API key ${s.api_key_set ? '(set; leave blank to keep)' : '(not set)'}<input type="password" id="s-key" autocomplete="new-password"></label>
+      <label class="f">JSON mode<select data-s="json_mode"><option ${s.json_mode==='off'?'selected':''}>off</option><option ${s.json_mode==='on'?'selected':''}>on</option></select><span>Sends response_format=json_object. Turn on only if the connection test says it is supported.</span></label></div>
+      <div class="row mt-s"><button onclick="testConn()">Test connection</button><span class="mute small">Checks the model list, a tiny completion, and JSON-mode support.</span></div><div id="conn" class="mt-s"></div></div>
+    <div class="card pad mt"><h4 style="margin-top:0">Context &amp; chunking</h4>
+      <div class="grid g3">${n('context_limit', 'Context limit (tokens)', 1024, 'Configured window of the model. Start modest and raise after testing.')}
+      ${n('output_reserve', 'Output reserve (tokens)', 500, 'Held back for the reply and sent as max_tokens.')}
+      ${n('safety_margin', 'Safety margin (fraction)', 0.01, 'Share of the window never filled; covers estimation error.')}
+      ${n('chunk_tokens', 'Chunk size (source tokens)', 500)}${n('chunk_overlap', 'Chunk overlap (tokens)', 50, 'Read-only context from the previous chunk.')}
+      ${n('chars_per_token', 'Characters per token (estimate)', 0.1)}</div>
+      <div id="derived" class="mt-s small mute"></div></div>
+    <div class="card pad mt"><h4 style="margin-top:0">Reliability</h4>
+      <div class="grid g3">${n('concurrency', 'Concurrency', 1, 'Parallel model requests. The gateway serves one at a time.')}${n('retries', 'Invalid-reply retries')}${n('transport_retries', 'Connection retries')}
+      ${n('retry_backoff_s', 'Retry backoff (s)', 1)}${n('timeout_s', 'Request timeout (s)', 10)}${n('temperature', 'Temperature', 0.05)}</div></div>
+    <div class="card pad mt"><h4 style="margin-top:0">Stories &amp; scoring</h4>
+      <div class="grid g3">${n('max_candidates', 'Stories to draft per source', 1, 'More leads stay listed and can be drafted later.')}${n('evidence_influence', 'Evidence influence on priority (0-1)', 0.05, '0 ignores evidence; 1 scales priority by it.')}</div>
+      <div class="grid g3 mt-s">${Object.entries(s.weights).map(([k, v]) => `<label class="f">Weight: ${esc(k)}<input type="number" data-w="${k}" value="${v}"></label>`).join('')}</div>
+      <label class="small mt-s" style="display:block"><input type="checkbox" data-s="ocr" ${s.ocr ? 'checked' : ''}> Try OCR on scanned PDF pages (needs pytesseract, pypdfium2 and Tesseract installed)</label></div>
+    <div class="row mt"><button class="primary" onclick="saveSettings()">Save settings</button><span class="mute small">Use "Re-score" on a project after changing weights.</span></div>`;
+  showDerived(s);
 }
+function showDerived(s) { const d = s.derived; $('#derived').innerHTML = `Usable window: <b>${num(d.usable_tokens)}</b> tokens · input room per request before instructions: <b>${num(d.input_limit)}</b> · effective chunk size: <b>${num(d.effective_chunk_tokens)}</b>${d.warnings.map(w => `<div style="color:var(--warn)">⚠ ${esc(w)}</div>`).join('')}`; }
+const saveSettings = guard(async () => {
+  const patch = {};
+  document.querySelectorAll('[data-s]').forEach(el => { patch[el.dataset.s] = el.type === 'checkbox' ? el.checked : el.value; });
+  patch.weights = {}; document.querySelectorAll('[data-w]').forEach(el => patch.weights[el.dataset.w] = +el.value);
+  const k = $('#s-key').value; if (k) patch.api_key = k;
+  const s = await api('/settings', {method: 'PUT', json: patch}); showDerived(s); toast('Settings saved');
+});
+const testConn = guard(async () => {
+  await saveSettings(); $('#conn').innerHTML = '<span class="mute">Testing…</span>';
+  const r = await api('/llm/test', {method: 'POST'});
+  $('#conn').innerHTML = r.ok ? `<div class="ok">✓ Connected to ${esc(r.model)} (${r.latency_s}s). ${r.model_listed === false ? '<span style="color:var(--warn)">Model id not in the server model list.</span>' : ''}
+    ${r.note ? `<div class="small mute">${esc(r.note)}</div>` : ''}${r.json_mode_supported ? '<div class="small">JSON mode supported — you can switch it on above.</div>' : ''}</div>` : `<div class="errbox">${esc(r.error || 'Connection failed')}</div>`;
+  if (r.models) $('#models').innerHTML = r.models.filter(m => m.type === 'text' || !m.type).map(m => `<option value="${esc(m.id)}">${esc(m.state)}</option>`).join('');
+});
 
-async function logout() {
-  await fetch('/logout', { method: 'POST' });
-  location.href = '/login';
-}
-
-function esc(s) {
-  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
-function renderResearchCard(d) {
-  const log = document.getElementById('log');
-  const el = document.createElement('div');
-  el.className = 'preview-card research-card';
-  // Headlines list (first emit) or angles (second emit)
-  let body = '';
-  if (d.headlines && d.headlines.length) {
-    body = d.headlines.map(h =>
-      `<div class="preview-q">${h.trusted ? '✓' : '~'} <strong>${esc(h.title)}</strong> <span style="color:#555">${esc(h.source)} · ${h.age_h}h</span></div>`
-    ).join('');
-    el.innerHTML = `<div class="preview-title">🗞 Headlines — ${esc(d.topic)}</div>${body}`;
-  } else {
-    const qs = (d.questions || []).map(q => `<div class="preview-q">❓ ${esc(q)}</div>`).join('');
-    el.innerHTML = `
-      <div class="preview-title">🔍 Analysis — ${esc(d.topic)}</div>
-      ${d.uber_story ? `<div class="preview-take" style="margin-bottom:6px"><strong>Spine:</strong> ${esc(d.uber_story)}</div>` : ''}
-      ${d.core_claim ? `<div class="preview-claim"><strong>Story:</strong> ${esc(d.core_claim)}</div>` : ''}
-      ${d.contrarian_take ? `<div class="preview-take"><strong>Angle:</strong> ${esc(d.contrarian_take)}</div>` : ''}
-      ${qs}`;
-  }
-  log.appendChild(el);
-  log.scrollTop = log.scrollHeight;
-}
-
-function renderScriptCard(d) {
-  const log = document.getElementById('log');
-  const el = document.createElement('div');
-  el.className = 'preview-card script-card';
-  const rows = (d.segments || []).map(s =>
-    `<div class="seg-row"><span class="seg-role">${esc(s.role)}</span><span class="seg-preview">${esc(s.preview)}</span></div>`
-  ).join('');
-  el.innerHTML = `
-    <div class="preview-title">✍️ Script — ${esc(d.title)}</div>
-    ${d.description ? `<div class="preview-claim" style="margin-bottom:6px">${esc(d.description)}</div>` : ''}
-    ${rows}`;
-  log.appendChild(el);
-  log.scrollTop = log.scrollHeight;
-}
-
-// ── Deploy / uptime status bar ──────────────────────────────────────────────
-let _serverStartedAt = null;
-let _uptimeBase = 0;  // seconds at last health fetch
-
-function fmtUptime(s) {
-  s = Math.floor(s);
-  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600),
-        m = Math.floor((s % 3600) / 60), sec = s % 60;
-  if (d > 0) return `${d}d ${h}h ${m}m`;
-  if (h > 0) return `${h}h ${m}m ${sec}s`;
-  return `${m}m ${sec}s`;
-}
-
-let _uptimeFetchedAt = null;
-
-async function fetchHealth() {
-  try {
-    const r = await fetch('/health');
-    if (!r.ok) return;
-    const d = await r.json();
-    _uptimeBase = d.uptime_s;
-    _uptimeFetchedAt = Date.now();
-    const commit = d.commit || '?';
-    const subject = d.subject ? ` — ${d.subject}` : '';
-    document.getElementById('sb-commit').textContent = `● ${commit}${subject}`;
-
-    if (_serverStartedAt && _serverStartedAt !== d.started_at) {
-      const flash = document.getElementById('sb-flash');
-      flash.className = 'sb-deploy-flash';
-      flash.textContent = '🔄 Redeployed!';
-      flash.style.display = '';
-      setTimeout(() => { flash.style.display = 'none'; }, 5000);
-    }
-    _serverStartedAt = d.started_at;
-  } catch (_) {}
-}
-
-function tickUptime() {
-  if (_uptimeFetchedAt === null) return;
-  const elapsed = (Date.now() - _uptimeFetchedAt) / 1000;
-  document.getElementById('sb-uptime').textContent = '⏱ ' + fmtUptime(_uptimeBase + elapsed);
-}
-
-fetchHealth();
-setInterval(fetchHealth, 30000);
-setInterval(tickUptime, 1000);
-
-// Load history on page load
-refreshHistory();
-loadSampleText();
+route();
 </script>
 </body>
 </html>

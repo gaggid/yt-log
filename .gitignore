@@ -9,3 +9,6 @@ jobs/
 *.png
 .env
 logs/
+data/
+.pytest_cache/
+data_dev/
