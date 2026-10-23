@@ -5,7 +5,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
-from . import db, export, llm, pipeline, projects, review, settings as settings_mod
+from . import db, eta, export, guide, llm, pipeline, projects, review, settings as settings_mod
 from .pipeline import manager
 from .tokens import Budget
 
@@ -167,7 +167,14 @@ async def put_chapters(pid: str, body: ChaptersIn):
 @router.get("/projects/{pid}/scope")
 async def get_scope(pid: str):
     _project_or_404(pid)
-    return _guard(projects.scope_preview, pid)
+    return _with_eta(pid, _guard(projects.scope_preview, pid))
+
+
+def _with_eta(pid: str, prev: dict) -> dict:
+    e = eta.estimate(pid)
+    prev["eta_seconds"], prev["eta_low"], prev["eta_high"] = e["remaining"]["seconds"], e["remaining"]["low"], e["remaining"]["high"]
+    prev["eta_confidence"], prev["eta_basis"] = e["confidence"], e["basis"]
+    return prev
 
 
 class ScopeIn(BaseModel):
@@ -191,7 +198,7 @@ async def put_scope(pid: str, body: ScopeIn):
         pipeline.reset(pid, stage="analyze")
     prev["reset"] = bool(started)
     prev["previous"] = old
-    return prev
+    return _with_eta(pid, prev)
 
 
 @router.get("/projects/{pid}/analysis")
@@ -213,7 +220,17 @@ async def progress(pid: str):
     _project_or_404(pid)
     p = pipeline.progress(pid)
     p["running"] = manager.is_running(pid)
+    p.update(guide.live(pid))
+    p["next"] = guide.next_step(pid)
+    p["steps"] = [{"key": k, "label": l} for k, l in guide.STEPS]
+    p["step_index"] = guide.step_index(p["next"])
     return p
+
+
+@router.get("/performance")
+async def performance():
+    """Speed history the estimates are learned from."""
+    return eta.performance()
 
 
 class ProcessIn(BaseModel):

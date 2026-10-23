@@ -280,7 +280,8 @@ def extract_pdf(path: Path, title_hint: str = "", ocr: bool = False) -> Extracte
         if done:
             ex.warnings.append(f"OCR was applied to {done} page(s); expect recognition errors.")
         empty = [i + 1 for i, t in enumerate(raw) if len(t.strip()) < 30]
-    if empty:
+    ex.meta["blank_pages"] = empty
+    if empty and len(empty) > max(2, int(0.02 * n)):            # a few blank/divider pages are normal in a book
         share = len(empty) / n
         ex.warnings.append(
             f"{len(empty)} of {n} pages have no extractable text"

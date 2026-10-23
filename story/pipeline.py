@@ -16,7 +16,7 @@ import re
 import time
 import traceback
 
-from . import db, projects, scoring, settings as settings_mod
+from . import db, eta, projects, scoring, settings as settings_mod
 from . import prompts as P
 from .chunker import build_chunks
 from .llm import ChatBackend, JsonCaller, LLMError, ValidationFailed
@@ -213,6 +213,8 @@ class Pipeline:
         t0 = time.time()
         try:
             result, usage = await handler(t)
+            eta.record(self.pid, t["stage"], self.s["model"], usage.get("in", 0), usage.get("out", 0),
+                       int((time.time() - t0) * 1000), int(self.s["context_limit"]))
             db.ex("UPDATE tasks SET status='done', result=?, tokens_in=?, tokens_out=?, duration_ms=?, error='', updated_at=? WHERE id=?",
                   (db.jdump(result), usage.get("in", 0), usage.get("out", 0), int((time.time() - t0) * 1000), db.now(), tid))
         except asyncio.CancelledError:
