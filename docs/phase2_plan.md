@@ -88,3 +88,19 @@ After each batch: run the tests, report files changed, results and limits, and s
 - The gateway serves one request at a time, and image and text models take turns on the GPU. A full plan with previews will take a while; previews stay opt-in.
 - Svara emotion strength differs by voice and is unverified until sampled; defaults are chosen after listening tests, not before.
 - Hindi narration quality from the local 12B model is untested. A short Hindi sample test is the first task of Batch A.
+
+## Svara listening-test findings (2026-10-23)
+
+Tested on real hi_male audio of the finished Knight Capital plan.
+
+- **Script: Hinglish, mixed script (owner decision).** Hindi grammar in Devanagari, English words in Latin script, numbers spelled as English words
+  beside English terms. Beat pure Devanagari and all-Latin Hinglish. Narration prompt, validator (`svara.foreign_chars` now allows Latin and rejects
+  digits and other scripts; `svara.mixed_words` rejects words that glue both scripts) and the plan check were changed to match.
+- **Pace: 148 wpm**, not 125 (measured 138-165 on seven parts; one 198 outlier to re-listen). `planner.WPM`, `svara.spoken_seconds`.
+- **Gateway limits.** `serve_models.yaml` svara-tts had no `timeout_s`, so the gateway killed any speech request after 120 s (`gateway.py` `timeout_s or 120`) with
+  `502 tts_failed`. Generation runs about 3.7x slower than real time, so a part over ~32 s of audio failed. `timeout_s: 600` was added (needs a gateway restart).
+  `max_tokens` (default 2048, about 25 s of audio) is per internal text chunk, and the gateway splits long input at sentence ends (`chunk_size` 200) and crossfades.
+- **Consistency.** Splitting a part into separate requests with different emotions made pace and voice audibly shift between chunks. Send a part as one
+  request, one steady emotion per segment, fixed `seed`, `temperature` about 0.6. A repeated word appeared in one part: raise `repetition_penalty` (1.1 default) to 1.25.
+- **Voices.** Svara has exactly one male voice per language, no style notes, and `speed` preserves pitch, so no deeper "documentary" voice exists in it. Male voice
+  samples for the Devanagari languages are in `data/tts_test/voices/`. For a heavy voice: Svara reference-clip cloning (experimental) or the `hindi-podcast` cloning model.

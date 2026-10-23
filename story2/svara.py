@@ -65,16 +65,23 @@ def validate(annotated: str) -> list[str]:
     return problems
 
 
-_ALLOWED = re.compile(r"[ऀ-ॿ\s.,!?;:'\"\-–—…()]")
+_ALLOWED = re.compile(r"[ऀ-ॿA-Za-z\s.,!?;:'\"\-–—…()]")
+_DEV, _LAT = re.compile(r"[ऀ-ॿ]"), re.compile(r"[A-Za-z]")
 
 
 def foreign_chars(text: str) -> list[str]:
-    """Characters that a Hindi voice should not be given: Latin or other scripts and ASCII digits. They get mispronounced or
+    """Characters the voice should not be given. Narration is Hinglish: Hindi in Devanagari with English words in Latin script
+    (story, stock, EMA support), so Latin letters are fine. ASCII digits and any other script are not: they get mispronounced or
     skipped (a stray Cyrillic fragment inside a word is a typical small-model slip)."""
     return sorted({c for c in plain_text(text) if not _ALLOWED.match(c)})
 
 
-def spoken_seconds(plain: str, wpm: float = 125.0, pause_s: float = 0.0) -> float:
-    """Rough duration of Hindi speech: words / pace plus pauses. Corrected later from real previews."""
+def mixed_words(text: str) -> list[str]:
+    """Words that mix Devanagari and Latin letters ("stockको"); the voice reads these badly. English words stand alone."""
+    return sorted({w for w in re.findall(r"\S+", plain_text(text)) if _DEV.search(w) and _LAT.search(w)})
+
+
+def spoken_seconds(plain: str, wpm: float = 148.0, pause_s: float = 0.0) -> float:
+    """Rough duration of Hindi speech: words / pace plus pauses. 148 wpm is the pace measured from real Svara hi_male samples."""
     words = len(re.findall(r"\S+", plain))
     return round(words / (wpm / 60.0) + pause_s, 1)

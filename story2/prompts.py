@@ -26,7 +26,7 @@ Rules:
 - Everything is our own telling. Never mention a book, an author, a chapter, a page, a source or "the text"."""
 
 NARRATE = """[TASK:p2_narrate]
-You write the spoken narration (in Hindi, Devanagari script) for a long-form video, from a story blueprint and its facts.
+You write the spoken narration (in Hinglish: Hindi with English words, the way urban India talks) for a long-form video, from a story blueprint and its facts.
 The narrator speaks in FIRST PERSON, a guide the viewer follows: "मैं" and "हम". The narrator name is {narrator}.
 
 First-person rules:
@@ -35,11 +35,15 @@ First-person rules:
 - The narrator was NOT there. Never say "मैंने देखा", "मैं वहाँ था" or invent personal experience. Events are told as things that happened.
 
 Language rules:
-- Natural, conversational Indian Hindi in Devanagari, the way a good storyteller speaks. Short sentences. No stiff textbook Hindi.
-  Common English words (market, stock, trader, gap) may be written in Devanagari (मार्केट, स्टॉक) as people say them.
-- Company and person names are written in Devanagari as they are pronounced (नाइट कैपिटल). List unusual ones under "pronounce".
-- Write numbers in words when they are spoken (साढ़े सात करोड़ डॉलर, पैंतालीस मिनट).
-- Use only Devanagari letters. No Latin letters, no digits, no letters from any other script, not even inside a word.
+- Natural, conversational Hinglish, the way a good storyteller speaks. Short sentences. No stiff textbook Hindi.
+- Hindi grammar and Hindi words are written in Devanagari. English words and terms are written in Latin script, exactly as spelled in English:
+  story, stock, perfect, earnings release, trend, technical analysis, EMA support. Prefer the English word wherever a person would say it in English
+  (market, stock, trader, profit, loss, chart, deal). Do not invent stiff Hindi for them and do not write them in Devanagari.
+- Company and person names are written in Latin script as normally spelled (Knight Capital Group). List unusual ones under "pronounce".
+- Always put a space between an English word and the Hindi word next to it: "stock को", never "stockको". One word never mixes the two scripts.
+- Write numbers and years as words, never digits. Use English number words beside English terms ("January two thousand seven में", "seventeen percent",
+  "fifty day EMA support") and Hindi number words otherwise (साढ़े सात करोड़ रुपये).
+- Use only Devanagari and Latin letters. No digits, no symbols such as % or $, no letters from any other script.
 - Do not use quotation marks, brackets, stage directions, scene descriptions, citations or speaker labels in the spoken text.
 
 Originality rules (very important):
@@ -51,15 +55,16 @@ Originality rules (very important):
 Emotion: every sentence has one emotion from: neutral, happy, sad, anger, fear, clear.
 - "clear" is for precise, technical or numeric sentences and unfamiliar names. "neutral" is the default.
 - Choose the emotion the MOMENT needs, not the loudest one. Quiet and neutral moments are normal; do not make everything intense.
+- Keep ONE emotion through a segment. Switching mid-segment changes the voice and pace audibly. Change it at most once, and only at a real turn.
 - A moment of uncertainty or explanation is usually neutral or clear, not fear.
 - pause_after_s: 0 for most sentences; 0.4 to 1.2 after a reveal or before a turn; never more than 2.
 
 Return ONLY this JSON object:
 {"segments": [{
   "beat": "the beat id this segment tells",
-  "sentences": [{"text": "one spoken sentence in Devanagari", "emotion": "neutral", "pause_after_s": 0}],
+  "sentences": [{"text": "one spoken sentence in Hinglish (Devanagari + Latin words)", "emotion": "neutral", "pause_after_s": 0}],
   "emphasis": ["words to stress"],
-  "pronounce": [{"word": "नाइट कैपिटल", "say": "Knight Capital", "note": "company name"}],
+  "pronounce": [{"word": "Knight Capital Group", "say": "नाइट कैपिटल ग्रुप", "note": "company name"}],
   "facts_used": ["which facts this segment uses, in plain words"]
 }]}
 One segment per beat (a long beat may use two). Target about {minutes} minutes of speech: roughly {words} words in total, so

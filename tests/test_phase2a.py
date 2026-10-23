@@ -65,6 +65,10 @@ def test_svara_tags_are_valid_separate_and_checked():
     assert len(svara.validate("नमस्ते <excited> [beep:1s] [pause:12s]")) == 3
     assert svara.norm_emotion("unknown") == "neutral" and svara.pause_tag(99) == "[pause:10s]"
     assert svara.foreign_chars("सात दशमलव पाँच") == [] and svara.foreign_chars("सातдесят 5 stock")
+    assert svara.foreign_chars("यह एक stock और earnings release है।") == []                  # Hinglish: English words in Latin script are fine
+    assert svara.foreign_chars("seventeen percent गिरा 17%") == ["%", "1", "7"]               # digits and symbols are not
+    assert svara.mixed_words("यह stockको तोड़ दिया") == ["stockको"] and svara.mixed_words("यह stock को तोड़ दिया") == []
+    assert svara.spoken_seconds(" ".join(["w"] * 148)) == 60.0
 
 
 def test_leak_validator_catches_every_kind_of_trace():

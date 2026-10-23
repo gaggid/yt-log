@@ -9,7 +9,7 @@ from story import db, llm, settings as settings_mod
 from . import intake, leak, prompts as P, store, svara
 from .schemas import Blueprint, NarrationOut
 
-WPM = 125                                    # spoken Hindi words per minute used until real previews correct it
+WPM = 148                                    # spoken Hinglish words per minute, measured on real Svara hi_male audio (125 was a guess)
 DEFAULT_MINUTES = 8.0
 UNSET_NAME = "(not set yet: do not say a name)"
 
@@ -157,10 +157,15 @@ async def make_narration(plan_id: str, backend, s: dict | None = None, beat_ids:
 
     def check(out: NarrationOut) -> None:
         for n, seg in enumerate(out.segments, 1):
-            bad = svara.foreign_chars(" ".join(x.text for x in seg.sentences))
+            text = " ".join(x.text for x in seg.sentences)
+            bad = svara.foreign_chars(text)
             if bad:
-                raise ValueError(f"segment {n} contains characters that are not Devanagari: {' '.join(bad)}. "
-                                 "Rewrite those words in Devanagari only (no Latin letters, digits or other scripts).")
+                raise ValueError(f"segment {n} contains characters that cannot be spoken: {' '.join(bad)}. "
+                                 "Use Devanagari for Hindi and Latin letters for English words only; write numbers as words, never digits; no other script.")
+            mixed = svara.mixed_words(text)
+            if mixed:
+                raise ValueError(f"segment {n} glues English letters to Hindi letters in one word: {' '.join(mixed)}. "
+                                 "Write the English word on its own, with a space before the Hindi particle (stock को, not stockको).")
 
     system = (P.NARRATE.replace("{narrator}", plan["narrator"].get("name") or UNSET_NAME)
               .replace("{minutes}", f"{minutes / n_beats:.1f}").replace("{words}", str(per_beat))
@@ -259,7 +264,10 @@ def validate_plan(plan_id: str) -> dict:
         found += leak.check_many([(s["id"], s["plain"])], prof)
         bad = svara.foreign_chars(s["plain"])
         if bad:
-            found.append({"where": s["id"], "kind": "script", "text": "non-Devanagari characters: " + " ".join(bad), "detail": "the voice may skip or mispronounce them"})
+            found.append({"where": s["id"], "kind": "script", "text": "characters the voice cannot read: " + " ".join(bad), "detail": "digits and non-Latin, non-Devanagari scripts are skipped or mispronounced; write numbers as words"})
+        mixed = svara.mixed_words(s["plain"])
+        if mixed:
+            found.append({"where": s["id"], "kind": "script", "text": "English and Hindi letters joined in one word: " + " ".join(mixed), "detail": "write the English word on its own, then the Hindi particle"})
         if svara.plain_text(s["annotated"]) != s["plain"]:
             found.append({"where": s["id"], "kind": "svara", "text": "spoken text and annotated text differ", "detail": ""})
         per_seg[s["id"]] = found
