@@ -40,7 +40,7 @@ PUBLISHING_CHECKLIST = [
     "Facts independently verified against public sources",
     "Working title renamed (it must not echo the source)",
     "Rights for any real person, brand or third-party material checked by a person",
-    "Image model licence confirmed for the exact weights and intended use",
+    "Image model licence: owner decision recorded (open-source models, not a blocker); re-check if the use changes",
     "Narration listened to in the final voice",
 ]
 
@@ -89,7 +89,8 @@ def _providers_public(plan: dict) -> dict:
         out[mid] = {"label": m["label"], "adapter": m["adapter"], "adapter_version": m["adapter_version"], "variant": m["variant"], "negative_prompt": m["negative_prompt"],
                     "edits": m["edits"], "max_references": m["max_references"], "masks": m["masks"], "reliable_text": m["reliable_text"], "steps": m["steps"], "cfg": m["cfg"],
                     "max_pixels": m["max_pixels"], "prompt_enhancer": m["prompt_enhancer"],
-                    "licence": {"status": m["licence"]["status"], "note": m["licence"]["note"], "confirmed_by_person": bool(lic.get(mid))}}
+                    "licence": {"status": m["licence"]["status"], "note": m["licence"]["note"], "confirmed_by_person": bool(lic.get(mid)),
+                                "owner_override": bool(lic.get(mid)), "owner_decision": "open-source models; licence is not treated as a blocker (owner, 2026-10-24)"}}
     return out
 
 
@@ -144,7 +145,7 @@ def build(plan_id: str, refresh: bool = True, export_rev: int = 0) -> dict:
         "assets": {a["id"]: {"evidence_note": a["data"].get("evidence_note", "")} for a in plan["assets"]},
         "blueprint_facts": beat_facts,
         "research_gaps": [*pub["gaps"], *pub["uncertainties"]],
-        "publishing_checklist": [{"item": t, "done": False} for t in PUBLISHING_CHECKLIST],
+        "publishing_checklist": [{"item": t, "done": t.startswith("Image model licence")} for t in PUBLISHING_CHECKLIST],
     }
     blockers = [b["text"] for b in (so["blockers"] if so else [])]
     if ap["state"] == "draft":

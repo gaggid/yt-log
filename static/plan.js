@@ -244,7 +244,8 @@ window.viewPlan = async function (id) {
 
   function render() {
     const p = P;
-    const imSet = {default: 'qwen-image-2.1', by_type: {}, previews_enabled: false, licence_checks: {}, ...(p.settings.image_models || {})};
+    const imSet = {default: 'qwen-image-2.1', by_type: {}, previews_enabled: false, ...(p.settings.image_models || {})};
+    imSet.licence_checks = {'qwen-image-2.1': true, 'flux2-klein-9b': true, ...(imSet.licence_checks || {})};
     const modelFor = d => d.model || (imSet.by_type || {})[d.visual_type] || imSet.default;
     const a = analyse(), {sc, so, reviewed, ap, approved, lastExp, exported, compiled, promptStale, j, running, v, vs, issues, missingBeats, segNoScene, errors, nRepeat, checked, blocks, warns} = a;
     const dis = running ? 'disabled' : '';
@@ -340,7 +341,7 @@ window.viewPlan = async function (id) {
         <details class="mt-s"><summary class="small">Different model for some scene types</summary><div class="row mt-s" style="gap:6px 16px">${[...new Set(p.scenes.map(s => s.data.visual_type))].map(t => `<label class="f small" style="width:210px">${VT_LABEL[t]}<select onchange="_plan.byType('${t}',this.value)"><option value="">plan default</option>${(PV.providers || []).map(m => `<option value="${m.id}" ${(imSet.by_type || {})[t] === m.id ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}</select></label>`).join('')}</div></details>
         <div class="mt-s">${(PV.providers || []).map(m => `<div class="small mt-s"><b>${esc(m.label)}</b> · ${m.negative_prompt ? 'honours a negative prompt' : 'ignores a negative prompt (exclusions go in the prompt)'} · edits with up to ${m.max_references} reference images, no masks · text in images unreliable · steps ${m.steps}, cfg ${m.cfg}
           <div class="mute">${esc(m.variant)}</div>
-          <label style="display:flex;gap:8px;align-items:flex-start;margin-top:3px"><input type="checkbox" ${(imSet.licence_checks || {})[m.id] ? 'checked' : ''} onchange="_plan.licence('${m.id}',this.checked)"> <span><b>Licence: ${esc(m.licence.status)}.</b> ${esc(m.licence.note)} <i>Tick only after a person has checked it.</i></span></label></div>`).join('')}</div></div>` : ''}
+          <label style="display:flex;gap:8px;align-items:flex-start;margin-top:3px"><input type="checkbox" ${(imSet.licence_checks || {})[m.id] ? 'checked' : ''} onchange="_plan.licence('${m.id}',this.checked)"> <span><b>Licence is not treated as a blocker</b> (open-source model; your decision). Untick to bring the reminder back.</span></label></div>`).join('')}</div></div>` : ''}
 
       ${p.scenes.length ? `<div class="mt" id="sec-storyboard"><div class="row"><h3 style="margin:0">Storyboard</h3><span class="mute">${p.scenes.length} scenes · ${mmss(total)}</span></div>
         <div class="strip" title="Each block is a scene; width is how long it is on screen">${ordered.map(s => `<i style="width:${100 * s.duration_s / total}%;background:${vtColor(s.data.visual_type)}" onclick="_plan.jump('${s.id}')" title="${mmss(s.start_s)} ${VT_LABEL[s.data.visual_type]}: ${esc(s.data.subject)}"></i>`).join('')}</div>

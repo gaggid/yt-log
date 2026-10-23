@@ -145,18 +145,18 @@ def test_prompts_go_stale_when_the_scene_changes_but_not_when_only_the_model_is_
         storyboard.edit_scene(sid, {"prompts": {}})                                                   # derived data cannot be hand-edited
 
 
-def test_model_choice_by_scene_type_and_licence_checklist(env):
+def test_model_choice_by_scene_type_and_licence_is_not_a_blocker_by_default(env):
     pid, scenes, _ = compiled(env)
     plan = imgplan.set_image_models(pid, {"default": "qwen-image-2.1", "by_type": {"character": "flux2-klein-9b"}})
     types = {sc["data"]["visual_type"] for sc in scenes}
     for sc in scenes:
         want = "flux2-klein-9b" if sc["data"]["visual_type"] == "character" else "qwen-image-2.1"
         assert providers.model_for(sc["data"], plan["settings"]) == want
-    rep = imgplan.validate_prompts(pid)
-    if "character" in types:
-        assert any(i["kind"] == "licence_checklist" and i["adapter"] == "flux" for i in rep["issues"])
-        plan = imgplan.set_image_models(pid, {"licence_checks": {"flux2-klein-9b": True}})
-        assert not any(i["kind"] == "licence_checklist" and i["adapter"] == "flux" for i in imgplan.validate_prompts(pid)["issues"])
+    assert providers.settings_for(plan["settings"])["licence_checks"] == {"qwen-image-2.1": True, "flux2-klein-9b": True}      # owner decision: not a blocker
+    assert not any(i["kind"].startswith("licence") for i in imgplan.validate_prompts(pid)["issues"])
+    if "character" in types:                                                                                   # a person can still bring the reminder back
+        imgplan.set_image_models(pid, {"licence_checks": {"flux2-klein-9b": False}})
+        assert any(i["kind"] == "licence_checklist" and i["adapter"] == "flux" for i in imgplan.validate_prompts(pid)["issues"])
     with pytest.raises(providers.ProviderError):
         imgplan.set_image_models(pid, {"default": "nope"})
 

@@ -306,7 +306,7 @@ def generation_feasibility(c: Ctx) -> dict:
     stale = c.issues(c.pr, "stale")
     miss_refs = {m["asset_id"] for s in c.scenes for m in ((s["data"].get("prompts") or {}).get("qwen") or {}).get("missing_references", [])}
     used = {providers.model_for(s["data"], c.plan["settings"]) for s in c.scenes}
-    lic = (c.plan["settings"].get("image_models") or {}).get("licence_checks") or {}
+    lic = providers.settings_for(c.plan["settings"])["licence_checks"]
     unlic = [m for m in used if providers.get(m)["licence"]["status"] != "verified" and not lic.get(m)]
     score = 100 - 0.4 * _pct(len(need), n) - 30 * (1 - compiled / n) - 10 * len(perr) - 6 * len(stale) - 3 * len(miss_refs) - 8 * len(unlic)
     fixes = []

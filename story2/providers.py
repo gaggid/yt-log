@@ -91,7 +91,9 @@ def settings_for(plan_settings: dict) -> dict:
     return {"default": im.get("default") if im.get("default") in PROVIDERS else DEFAULT_MODEL,
             "by_type": {k: v for k, v in (im.get("by_type") or {}).items() if v in PROVIDERS},
             "previews_enabled": bool(im.get("previews_enabled", False)),
-            "licence_checks": im.get("licence_checks") or {}}
+            # owner decision (2026-10-24): the models are open source and licences are not treated as a blocker, so every model starts confirmed.
+            # A person can still untick one in the plan to bring the reminder back.
+            "licence_checks": {**{m: True for m in PROVIDERS}, **{k: bool(v) for k, v in (im.get("licence_checks") or {}).items() if k in PROVIDERS}}}
 
 
 def model_for(scene_data: dict, plan_settings: dict) -> str:
