@@ -75,7 +75,7 @@ class FakeBackend:
             quote = " ".join(text.split()[:6])
             f = lambda s: {"score": s, "reason": "because"}  # noqa: E731
             return LLMResult(json.dumps({
-                "title": lead, "premise": "Premise sentence.", "nature": self.nature, "curiosity_question": "What happened?",
+                "title": lead, "premise": "Premise sentence.", "nature": self.nature, "arc": {"actor": "Ada", "decision": "acted", "consequence": "it changed", "form": "event"}, "curiosity_question": "What happened?",
                 "opening_hook": "A hook.", "overview": "A factual overview of the events described.",
                 "people": [{"name": "Ada", "role": "engineer"}], "chronology": [{"when": "1901 [P%d]" % pid, "what": "It began [P%d]" % pid, "para_ids": [pid]}],
                 "conflict": "", "stakes": "high", "turning_point": "", "outcome": "",

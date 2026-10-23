@@ -100,6 +100,7 @@ Return ONLY this JSON object:
   "title": "working title",
   "premise": "one sentence",
   "nature": "story | anecdote | explainer | hypothetical (judge from the passages: does a documented event with a turning point and an outcome actually appear?)",
+  "arc": {"actor": "the specific person, company or group whose actions drive it, or empty", "decision": "what that actor chose or did, or empty", "consequence": "what happened because of it, beyond the mere price move, or empty", "form": "event = something that happened once to specific actors at a specific time; setup_example = a worked example of a repeatable pattern or trade setup; concept = teaches a rule"},
   "curiosity_question": "the central question that makes a reader want the answer",
   "opening_hook": "a possible opening line or situation (an idea, not narration)",
   "overview": "short factual overview, 5-9 sentences",
@@ -113,8 +114,8 @@ Return ONLY this JSON object:
   "context_needed": ["background someone must know to follow the story"],
   "claims": [{"claim": "key factual claim", "basis": "quoted | summarised | inferred", "quote": "short EXACT quote (under 30 words) from a RAW passage that supports it, or empty", "para_ids": [12], "support": "strong | moderate | weak"}],
   "uncertainties": ["conflicting accounts, missing information, unverified claims"],
-  "gaps": ["things a viewer would expect but the passages do not say, e.g. the outcome, the year, who the people were"],
-  "title_flags": ["only if the title or key names could be confused with a famous, different event or person from outside the source; say which"],
+  "gaps": ["at most 3 important things a viewer would expect but the passages do not say: the outcome, the year, who the people were, why it happened. Skip exact prices and minor figures"],
+  "title_flags": ["rare. Only when the title or key name is the same as a FAMOUS, different event or person a viewer would likely think of; write: <name> = <the famous thing>. Leave empty for ordinary company or product names"],
   "research_questions": ["what to check or find out next"],
   "scores": {
     "hook":       {"score": 0-10, "reason": "curiosity and hook potential"},

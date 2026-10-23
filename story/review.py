@@ -282,7 +282,7 @@ def _reclassify(pid: str, cid: str, d: dict) -> str:
     chron = d.get("chronology", [])
     stated = sum(1 for c in chron if c.get("when_basis") == "stated")
     nature, notes = scoring.final_nature(d.get("model_nature") or d.get("nature") or "story", texts, len(chron),
-                                         bool(d.get("outcome")), stated)
+                                         bool(d.get("outcome")), stated, d.get("arc") or None)
     rank = ["story", "anecdote", "hypothetical", "explainer"]
     old = d.get("nature", "")
     if old in ("explainer", "hypothetical") or (old == "anecdote" and nature == "story"):

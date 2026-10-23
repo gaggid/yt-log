@@ -135,3 +135,30 @@ def test_story_needs_a_stated_date_and_rescore_reclassifies_without_the_model(en
     review.rescore_project(pid, {"hook": 25, "narrative": 20, "payoff": 20, "emotion": 15, "standalone": 20}, 0.4, 0.4)
     c = review.get_candidate(cid)
     assert c["nature"] == "anecdote" and c["completeness"] <= 60 and any(f["code"] == "nature" for f in c["data"]["flags"])
+
+
+def test_arc_check_demotes_setup_examples_and_concepts():
+    ev = {"actor": "Knight Capital", "decision": "deployed new code", "consequence": "lost money in 45 minutes", "form": "event"}
+    assert scoring.final_nature("story", ["x"], 4, True, 2, ev)[0] == "story"
+    assert scoring.final_nature("story", ["x"], 4, True, 2, {**ev, "form": "setup_example"})[0] == "anecdote"
+    assert scoring.final_nature("story", ["x"], 4, True, 2, {**ev, "form": "concept"})[0] == "explainer"
+    assert scoring.final_nature("story", ["x"], 4, True, 2, {**ev, "decision": ""})[0] == "anecdote"
+    assert scoring.final_nature("story", ["x"], 4, True, 2, None)[0] == "story"          # old records without an arc keep their label
+
+
+def test_flag_noise_is_trimmed():
+    gaps = ["The exact value of the three-point spike", "The specific price of the moving averages", "The year it happened",
+            "Who the traders were", "Why it ended", "The outcome for the firm"]
+    kept = scoring.important_gaps(gaps, has_outcome=True)
+    assert len(kept) == 3 and kept[0] == "The year it happened" and not any("price" in g for g in kept)
+    assert scoring.important_gaps([], has_outcome=False) == ["the outcome"]
+    clash = ["Sears = Sears Roebuck, but the text is about a stock", "Knight Capital = the 2012 trading disaster"]
+    assert scoring.real_title_flags(clash) == ["Knight Capital = the 2012 trading disaster"]
+
+
+def test_pipeline_gap_flag_is_one_short_line(env):
+    pid = projects.import_text(make_book(3, 8))
+    run(pid, FakeBackend())
+    d = review.get_candidate(review.list_candidates(pid)[0]["id"])["data"]
+    gaps = [f for f in d["flags"] if f["code"] == "gap"]
+    assert len(gaps) == 1 and gaps[0]["text"].startswith("Not in the source:") and d["arc"]["form"] == "event"

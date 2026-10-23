@@ -120,12 +120,39 @@ def completeness(d: dict, nature: str, page_span: int | None) -> tuple[float, di
     return float(min(raw, cap)), {"parts": parts, "raw": raw, "cap": cap, "nature": nature, "page_span": page_span}
 
 
+_GAP_KEEP = re.compile(r"\b(outcome|result|year|date|when|who|name|identity|cause|why|reason|how many|consequence|ended|what happened)\b", re.I)
+_HEDGE = re.compile(r"\b(unlikely|not likely|however|but the|probably not|although|may be confused|could be confused)\b", re.I)
+
+
+def important_gaps(gaps: list[str], has_outcome: bool, limit: int = 3) -> list[str]:
+    """Keep the few gaps that matter (outcome, date, who, why); drop price-level nitpicks the model tends to list."""
+    out = [g.rstrip(". ") for g in gaps if _GAP_KEEP.search(g) and not re.search(r"\b(exact|specific)\b.*\b(price|value|figure|level)\b", g, re.I)]
+    if not has_outcome and not any(re.search(r"outcome|result|ended", g, re.I) for g in out):
+        out.insert(0, "the outcome")
+    return list(dict.fromkeys(out))[:limit]
+
+
+def real_title_flags(flags: list[str]) -> list[str]:
+    """A name-clash note must name a famous different thing; hedged or self-cancelling notes are noise."""
+    return [f for f in flags if "=" in f and not _HEDGE.search(f)]
+
+
 def final_nature(model_nature: str, raw_texts: list[str], chronology_n: int, has_outcome: bool,
-                 stated_dates: int | None = None) -> tuple[str, list[str]]:
+                 stated_dates: int | None = None, arc: dict | None = None) -> tuple[str, list[str]]:
     """Reconcile the model's label with evidence. Only ever downgrades (story -> anecdote/hypothetical).
     A real story is anchored in time: at least one date or period must be stated in the cited passages."""
     notes: list[str] = []
     nat = model_nature or "story"
+    if nat == "story" and arc:
+        if arc.get("form") == "concept":
+            notes.append("It teaches a rule or concept; the example is an illustration, not the subject.")
+            nat = "explainer"
+        elif arc.get("form") == "setup_example":
+            notes.append("A worked example of a repeatable pattern or trade setup, not a one-off event: treated as an anecdote.")
+            nat = "anecdote"
+        elif not (arc.get("actor") and arc.get("decision") and arc.get("consequence")):
+            notes.append("No clear actor, decision and consequence: treated as an anecdote, not a story with an arc.")
+            nat = "anecdote"
     if nat == "story" and stated_dates == 0:
         notes.append("No date or period for these events is stated in the cited passages: treated as an anecdote, not a documented story.")
         nat = "anecdote"

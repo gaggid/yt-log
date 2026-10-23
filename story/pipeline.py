@@ -752,15 +752,17 @@ def save_candidate(pid: str, task_id: int | None, d: DraftOut, stub: dict, raw_t
         flags.append({"code": "date_inferred", "text": "Some dates are not stated in the cited passages (marked inferred)."})
 
     stated = sum(1 for c in chronology if c["when_basis"] == "stated")
-    nature, notes = scoring.final_nature(d.nature or stub.get("nature", ""), cited_text, len(chronology), bool(d.outcome), stated)
+    nature, notes = scoring.final_nature(d.nature or stub.get("nature", ""), cited_text, len(chronology), bool(d.outcome), stated,
+                                         d.arc.model_dump())
     for n in notes:
         flags.append({"code": "nature", "text": n})
     if span is not None and span > 40:
         flags.append({"code": "stitched", "text": f"Cited passages are {span} pages apart ({min(pages)}-{max(pages)}); "
                                                   "the sequence may be assembled from separate sections."})
-    for g in d.gaps + ([] if d.outcome else ["The outcome is not stated in the cited passages."]):
-        flags.append({"code": "gap", "text": g})
-    for t in d.title_flags:
+    gaps = scoring.important_gaps(d.gaps, bool(d.outcome))
+    if gaps:
+        flags.append({"code": "gap", "text": "Not in the source: " + "; ".join(gaps)})
+    for t in scoring.real_title_flags(d.title_flags)[:1]:
         flags.append({"code": "title", "text": f"Possible name clash (from model knowledge, unverified): {t}"})
 
     ev100, breakdown = scoring.evidence_score(d.evidence.score, claims, len(refs))
@@ -774,7 +776,7 @@ def save_candidate(pid: str, task_id: int | None, d: DraftOut, stub: dict, raw_t
     if unverified:
         warnings = warnings + [f"{unverified} supporting quote(s) could not be found verbatim in the cited passages."]
     data = {
-        "nature": nature, "model_nature": d.nature or stub.get("nature", ""), "curiosity_question": d.curiosity_question, "opening_hook": d.opening_hook, "overview": d.overview,
+        "nature": nature, "model_nature": d.nature or stub.get("nature", ""), "arc": d.arc.model_dump(), "curiosity_question": d.curiosity_question, "opening_hook": d.opening_hook, "overview": d.overview,
         "people": [p.model_dump() for p in d.people], "chronology": chronology,
         "conflict": d.conflict, "stakes": d.stakes, "turning_point": d.turning_point, "outcome": d.outcome,
         "audience_interest": d.audience_interest, "context_needed": d.context_needed, "claims": claims,

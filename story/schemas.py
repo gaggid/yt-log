@@ -259,10 +259,26 @@ class TimelineEntry(M):
     para_ids: ParaIds = []
 
 
+def _form(v):
+    v = _str(v).lower().replace(" ", "_").replace("-", "_")
+    alias = {"one_off": "event", "incident": "event", "case": "event", "setup": "setup_example", "trade_setup": "setup_example",
+             "pattern": "setup_example", "example": "setup_example", "market_pattern": "setup_example", "principle": "concept", "rule": "concept"}
+    v = alias.get(v, v)
+    return v if v in ("event", "setup_example", "concept") else ""
+
+
+class Arc(M):
+    actor: Str = ""
+    decision: Str = ""
+    consequence: Str = ""
+    form: Annotated[str, BeforeValidator(_form)] = ""
+
+
 class DraftOut(M):
     title: Str
     premise: Str
     nature: Nature = ""
+    arc: Arc = Arc()
     curiosity_question: Str = ""
     opening_hook: Str = ""
     overview: Str
