@@ -15,7 +15,8 @@ def env(tmp_path, monkeypatch):
     """Fresh data dir + DB per test; fast retries."""
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     db.init(tmp_path / "test.db")
-    settings_mod.update({"retry_backoff_s": 0, "retries": 2})
+    settings_mod.update({"retry_backoff_s": 0, "retries": 2, "context_limit": 32768, "output_reserve": 6000,
+                         "chunk_tokens": 9000, "chunk_overlap": 600})
     return tmp_path
 
 

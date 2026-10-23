@@ -33,7 +33,7 @@ Open the app, **Settings**, press **Test connection**, then **Import source**.
 
 ## Context budget
 
-Nothing assumes the whole model window is usable. Settings hold the context limit (default **32768**; raise after testing),
+Nothing assumes the whole model window is usable. Settings hold the context limit (default **65536**; the model supports more, raise after testing),
 output reserve, safety margin, chunk size, overlap, concurrency, retries and timeout. Every request is checked as
 `instructions + input + output reserve <= context x (1 - safety)`; a request that would not fit is refused, never silently
 truncated. If a reply is cut off at the output limit, the chunk is automatically split in two and analysed in two turns.

@@ -84,7 +84,7 @@ def test_upload_rejects_bad_files(client):
 
 def test_settings_roundtrip_and_validation(client):
     s = client.get("/api/settings").json()
-    assert s["context_limit"] == 32768 and s["derived"]["usable_tokens"] == 29491 and "api_key" not in s
+    assert s["context_limit"] == 65536 and s["derived"]["usable_tokens"] == int(65536 * 0.9) and "api_key" not in s
     assert client.put("/api/settings", json={"context_limit": 65536}).json()["context_limit"] == 65536
     assert client.put("/api/settings", json={"context_limit": 10}).status_code == 400
 

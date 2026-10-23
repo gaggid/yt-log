@@ -343,3 +343,29 @@ def test_short_article_runs_with_minimal_calls(env):
     assert run(pid, fake) == "done"
     assert fake.count("analyze_chunk") == 1 and fake.count("chapter_rollup") == 0 and fake.count("book_index") == 0
     assert fake.count("discover_global") == 0 and review.list_candidates(pid)
+
+
+def test_front_and_back_matter_is_skipped(env):
+    body = lambda tag: "\n\n".join(f"{tag} paragraph {i} about the harbour surveys and tides of the coast." * 3 for i in range(8))  # noqa: E731
+    text = "\n\n".join(["Contents", "Chapter 1 ..... 5\nChapter 2 ..... 9", "Chapter 1: First", body("one"), "Chapter 2: Second",
+                       body("two"), "Glossary", "tide: the rise and fall of the sea level in the harbour", "Index", "harbour, 4, 9"])
+    pid = projects.import_text(text)
+    chs = {c["title"]: c["skip"] for c in projects.get_chapters(pid)}
+    assert chs["Contents"] == 1 and chs["Glossary"] == 1 and chs["Index"] == 1
+    assert chs["Chapter 1: First"] == 0 and chs["Chapter 2: Second"] == 0
+    fake = FakeBackend()
+    assert run(pid, fake) == "done"
+    skipped_paras = {p["idx"] for p in db.q("SELECT idx,chapter_idx FROM paras WHERE project_id=?", (pid,))
+                     if p["chapter_idx"] in {c["idx"] for c in projects.get_chapters(pid) if c["skip"]}}
+    analysed = {i for t in pipeline.stage_tasks(pid, "analyze") for i, _, _ in t["input"]["items"]}
+    assert skipped_paras and not (skipped_paras & analysed)                  # skipped text never reaches the model
+    assert not any("harbour, 4, 9" in c["user"] for c in fake.calls)
+    # user can override: un-skip and re-run from analyze
+    chs_list = [{"title": c["title"], "start_para": c["start_para"], "skip": False} for c in projects.get_chapters(pid)]
+    projects.set_chapters(pid, chs_list)
+    pipeline.reset(pid, stage="analyze")
+    assert run(pid, FakeBackend()) == "done"
+    analysed2 = {i for t in pipeline.stage_tasks(pid, "analyze") for i, _, _ in t["input"]["items"]}
+    assert skipped_paras <= analysed2
+    with pytest.raises(projects.ProjectError):
+        projects.set_chapters(pid, [{"title": "x", "start_para": 1, "skip": True}])

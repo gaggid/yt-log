@@ -117,11 +117,22 @@ def paras_from_text(text: str) -> list[str]:
 _NUMWORDS = r"one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty"
 HEAD_RE = re.compile(
     rf"^(?:(?:chapter|part|book|section)\s+(?:\d+|[ivxlcdm]+|{_NUMWORDS})\b.{{0,80}}"
-    r"|(?:prologue|epilogue|introduction|preface|foreword|afterword|conclusion|appendix(?:\s+\w+)?|acknowledg(?:e)?ments)\s*)$",
+    r"|(?:prologue|epilogue|introduction|preface|foreword|afterword|conclusion|appendix(?:\s+\w+)?|acknowledg(?:e)?ments|(?:table of )?contents|glossary|bibliography|index|about the authors?)\s*)$",
     re.IGNORECASE)
 
 
 _HEAD_NUM = re.compile(rf"^(?:chapter|part|book|section)\s+(?:\d+|[ivxlcdm]+|{_NUMWORDS})(?=\W|$)(.*)$", re.IGNORECASE)
+
+
+SKIP_TITLE_RE = re.compile(
+    r"^(?:(?:table of )?contents?|index|glossary(?: of .*)?|bibliography|references|further reading|acknowledg(?:e)?ments?|"
+    r"about the authors?|copyright(?: page)?|dedication|front matter|title page|also by .*|notes|endnotes|credits|permissions|"
+    r"list of (?:figures|tables|illustrations)|half title|colophon)$", re.IGNORECASE)
+
+
+def is_skippable_title(title: str) -> bool:
+    """Front/back matter that holds no stories (contents, index, glossary, bibliography, ...)."""
+    return bool(SKIP_TITLE_RE.match(re.sub(r"[\s.:\-]+$", "", title.strip())))
 
 
 def is_heading(text: str) -> bool:

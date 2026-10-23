@@ -49,10 +49,13 @@ def _store(pid: str, ex: ingest.Extracted, *, title: str, author: str, fmt: str,
             c.execute("INSERT INTO paras(project_id,idx,page,section,chapter_idx,kind,text,orig_text,tokens) "
                       "VALUES(?,?,?,?,?,?,?,?,?)",
                       (pid, i + 1, p.page, p.section, chap_of[i], p.kind, p.text, p.text, tok))
+        skips = [ingest.is_skippable_title(ch.title) for ch in ex.chapters]
+        if all(skips):
+            skips = [False] * len(skips)                   # never skip the whole source
         for k, ch in enumerate(ex.chapters, 1):
-            c.execute("INSERT INTO chapters(project_id,idx,title,start_para,end_para,page_start,page_end,source) "
-                      "VALUES(?,?,?,?,?,?,?,?)",
-                      (pid, k, ch.title, ch.start + 1, ch.end + 1, ch.page_start, ch.page_end, ch.source))
+            c.execute("INSERT INTO chapters(project_id,idx,title,start_para,end_para,page_start,page_end,source,skip) "
+                      "VALUES(?,?,?,?,?,?,?,?,?)",
+                      (pid, k, ch.title, ch.start + 1, ch.end + 1, ch.page_start, ch.page_end, ch.source, int(skips[k - 1])))
         c.execute(
             "INSERT INTO projects(id,title,author,format,source_url,created_at,updated_at,status,orig_path,sha256,"
             "page_count,est_tokens,char_count,warnings,meta) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -224,7 +227,7 @@ def get_paras(pid: str, offset: int = 0, limit: int = 200, chapter: int | None =
 
 
 def get_chapters(pid: str) -> list[dict]:
-    return db.q("SELECT c.idx,c.title,c.start_para,c.end_para,c.page_start,c.page_end,c.source,"
+    return db.q("SELECT c.idx,c.title,c.start_para,c.end_para,c.page_start,c.page_end,c.source,c.skip,"
                 "(SELECT COALESCE(SUM(tokens),0) FROM paras p WHERE p.project_id=c.project_id AND p.idx BETWEEN c.start_para AND c.end_para) AS tokens "
                 "FROM chapters c WHERE c.project_id=? ORDER BY c.idx", (pid,))
 
@@ -244,10 +247,12 @@ def edit_para(pid: str, idx: int, text: str) -> dict:
 
 
 def set_chapters(pid: str, chapters: list[dict]) -> list[dict]:
-    """Replace chapter boundaries. chapters: [{title, start_para}] covering the source from its first paragraph."""
+    """Replace chapter boundaries. chapters: [{title, start_para, skip?}]; skipped chapters are not analysed."""
     if not chapters:
         raise ProjectError("at least one chapter is required")
     n = db.one("SELECT COUNT(*) n FROM paras WHERE project_id=?", (pid,))["n"]
+    if all(c.get("skip") for c in chapters):
+        raise ProjectError("at least one chapter must be left in")
     chapters = sorted(chapters, key=lambda c: int(c["start_para"]))
     if int(chapters[0]["start_para"]) != 1:
         raise ProjectError("the first chapter must start at paragraph 1")
@@ -260,9 +265,10 @@ def set_chapters(pid: str, chapters: list[dict]) -> list[dict]:
             end = starts[k] - 1 if k < len(starts) else n
             pg = c.execute("SELECT MIN(page) a, MAX(page) b FROM paras WHERE project_id=? AND idx BETWEEN ? AND ?",
                            (pid, starts[k - 1], end)).fetchone()
-            c.execute("INSERT INTO chapters(project_id,idx,title,start_para,end_para,page_start,page_end,source) "
-                      "VALUES(?,?,?,?,?,?,?,'manual')",
-                      (pid, k, str(ch.get("title") or f"Chapter {k}")[:200], starts[k - 1], end, pg["a"], pg["b"]))
+            c.execute("INSERT INTO chapters(project_id,idx,title,start_para,end_para,page_start,page_end,source,skip) "
+                      "VALUES(?,?,?,?,?,?,?,'manual',?)",
+                      (pid, k, str(ch.get("title") or f"Chapter {k}")[:200], starts[k - 1], end, pg["a"], pg["b"],
+                       int(bool(ch.get("skip")))))
             c.execute("UPDATE paras SET chapter_idx=? WHERE project_id=? AND idx BETWEEN ? AND ?",
                       (k, pid, starts[k - 1], end))
     return get_chapters(pid)

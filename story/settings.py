@@ -5,9 +5,9 @@ from . import db
 DEFAULTS: dict = {
     "base_url": config.BASE_URL,
     "model": config.CHAT_MODEL,
-    "context_limit": 32768,       # tokens the model is configured for; start modest, raise after testing
-    "output_reserve": 6000,       # tokens held back for the reply (also sent as max_tokens)
-    "chunk_tokens": 9000,         # source tokens per analysis chunk
+    "context_limit": 65536,       # tokens the model is configured for (model supports more; raise after testing)
+    "output_reserve": 10000,      # tokens held back for the reply (also sent as max_tokens)
+    "chunk_tokens": 8000,         # source tokens per analysis chunk
     "chunk_overlap": 600,         # tokens of preceding text repeated as read-only context
     "safety_margin": 0.10,        # fraction of the window never filled
     "chars_per_token": 3.5,

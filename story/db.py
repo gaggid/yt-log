@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS paras(
 );
 CREATE TABLE IF NOT EXISTS chapters(
   project_id TEXT, idx INTEGER, title TEXT, start_para INTEGER, end_para INTEGER,
-  page_start INTEGER, page_end INTEGER, source TEXT DEFAULT 'auto',
+  page_start INTEGER, page_end INTEGER, source TEXT DEFAULT 'auto', skip INTEGER DEFAULT 0,
   PRIMARY KEY(project_id, idx)
 );
 CREATE TABLE IF NOT EXISTS tasks(
@@ -62,6 +62,8 @@ def init(path: Path | str | None = None) -> None:
     _path.parent.mkdir(parents=True, exist_ok=True)
     with tx() as c:
         c.executescript(SCHEMA)
+        if "skip" not in {r[1] for r in c.execute("PRAGMA table_info(chapters)")}:
+            c.execute("ALTER TABLE chapters ADD COLUMN skip INTEGER DEFAULT 0")
 
 
 def db_path() -> Path:

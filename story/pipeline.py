@@ -242,7 +242,11 @@ class Pipeline:
     def _plan_analyze(self) -> None:
         instr = self.est(P.ANALYZE) + 400
         target = self.budget.chunk_target(int(self.s["chunk_tokens"]), instr)
-        rows = [{"idx": p["idx"], "chapter_idx": p["chapter_idx"], "text": p["text"]} for p in self.paras.values()]
+        skipped = {r["idx"] for r in db.q("SELECT idx FROM chapters WHERE project_id=? AND skip=1", (self.pid,))}
+        rows = [{"idx": p["idx"], "chapter_idx": p["chapter_idx"], "text": p["text"]}
+                for p in self.paras.values() if p["chapter_idx"] not in skipped]
+        if not rows:
+            raise ValueError("every chapter is marked as skipped; leave at least one in")
         chunks = build_chunks(rows, target, int(self.s["chunk_overlap"]), self.est)
         for n, c in enumerate(chunks):
             add_task(self.pid, "analyze", f"c{n:04d}", n,

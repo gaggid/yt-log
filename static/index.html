@@ -182,7 +182,7 @@ async function viewProject(id, tab) {
     <div class="mute small"><a href="#/">Projects</a> /</div>
     <div class="row"><h2 style="margin:0">${esc(P.title)}</h2><button class="small" onclick="editMeta()">Edit</button><span class="sp"></span><span id="pstatus"></span></div>
     <div class="mute">${esc(P.author || '')}${P.source_url ? ` · <a href="${esc(P.source_url)}" target="_blank" rel="noopener">${esc(P.source_url.slice(0,70))}</a>` : ''}</div>
-    <div class="mute small">${badge('info', P.format)} imported ${fmtDate(P.created_at)} · ${P.page_count ? P.page_count + ' pages · ' : ''}~${num(P.est_tokens)} tokens · ${P.chapter_count} chapters · <a href="/api/projects/${id}/original">original file</a></div>
+    <div class="mute small">${badge('info', P.format)} imported ${fmtDate(P.created_at)} · ${P.page_count ? P.page_count + ' pages · ' : ''}~${num(P.est_tokens)} tokens · ${P.chapter_count} chapters${P.chapters.some(c => c.skip) ? ` (${P.chapters.filter(c => c.skip).length} skipped: ${esc(P.chapters.filter(c => c.skip).map(c => c.title).join(', '))})` : ''} · <a href="/api/projects/${id}/original">original file</a></div>
     ${P.warnings.map(w => `<div class="warnbox">⚠ ${esc(w)}</div>`).join('')}
     <div class="tabs">${tabs.map(([k,l]) => `<button class="${k===tab?'on':''}" onclick="location.hash='#/p/${id}/${k}'">${l}</button>`).join('')}</div>
     <div id="tab"></div>`;
@@ -375,7 +375,7 @@ function splitDlg() {
 const src = {chapter: 0, q: '', offset: 0};
 async function tabSource(id) {
   src.offset = 0;
-  $('#tab').innerHTML = `<div class="row"><select id="sc"><option value="0">All chapters</option>${P.chapters.map(c => `<option value="${c.idx}" ${src.chapter===c.idx?'selected':''}>${c.idx}. ${esc(c.title)}${c.page_start ? ` (p. ${c.page_start}–${c.page_end})` : ''}</option>`).join('')}</select>
+  $('#tab').innerHTML = `<div class="row"><select id="sc"><option value="0">All chapters</option>${P.chapters.map(c => `<option value="${c.idx}" ${src.chapter===c.idx?'selected':''}>${c.idx}. ${esc(c.title)}${c.page_start ? ` (p. ${c.page_start}–${c.page_end})` : ''}${c.skip ? ' [skipped]' : ''}</option>`).join('')}</select>
     <input id="spq" placeholder="Search text" value="${esc(src.q)}" style="flex:1"><span class="mute small">Every paragraph keeps its page or section; stories link back to these.</span></div>
     <div class="card mt pad" id="paras"></div><div class="row mt"><button id="more" hidden>Load more</button></div>`;
   $('#sc').onchange = e => { src.chapter = +e.target.value; src.offset = 0; loadParas(true); };
@@ -405,9 +405,10 @@ async function tabStructure(id) {
       <div class="small mute mt-s">${idx.events} events · ${idx.facts} facts · ${idx.entities.length} people/places/things tracked${idx.timeline.length ? ` · ${idx.timeline.length} dated events` : ''}</div>
       ${idx.entities.length ? `<h4>Most mentioned</h4><div class="small">${idx.entities.slice(0, 25).map(e => `<span class="badge" title="${esc((e.roles || []).join('; '))}">${esc(e.name)}</span>`).join(' ')}</div>` : ''}</div>` : `<div class="card pad mute">The source index appears once processing reaches that stage.</div>`}
     <div class="card pad mt"><div class="row"><h2 style="margin:0">Chapters</h2><span class="sp"></span><button class="small" onclick="saveChapters()">Save chapter edits</button></div>
-      <p class="mute small">Edit titles or move a chapter's first paragraph. After changing structure, reprocess from <i>Analyzing chunks</i>.</p>
-      <table><thead><tr><th>#</th><th>Title</th><th>Starts at paragraph</th><th>Pages</th><th>Tokens</th><th>Detected by</th></tr></thead><tbody id="chap-rows">${P.chapters.map(c => `<tr>
+      <p class="mute small">Edit titles, move a chapter's first paragraph, or tick <b>Skip</b> for front/back matter (contents, index, glossary, bibliography; detected automatically). Skipped chapters are not analysed. After changing structure, reprocess from <i>Analyzing chunks</i>.</p>
+      <table><thead><tr><th>#</th><th>Title</th><th>Starts at paragraph</th><th>Skip</th><th>Pages</th><th>Tokens</th><th>Detected by</th></tr></thead><tbody id="chap-rows">${P.chapters.map(c => `<tr>
         <td>${c.idx}</td><td><input class="ct" value="${esc(c.title)}" style="width:100%"></td><td><input class="cs" type="number" min="1" value="${c.start_para}" ${c.idx === 1 ? 'disabled' : ''}></td>
+        <td><input class="ck" type="checkbox" ${c.skip ? 'checked' : ''} title="Skip: not analysed (contents, index, glossary...)"></td>
         <td class="small">${c.page_start ? c.page_start + '–' + c.page_end : ''}</td><td class="small">${num(c.tokens)}</td><td class="small mute">${esc(c.source)}</td></tr>`).join('')}</tbody></table></div>
     ${a.chapters.length ? `<div class="card pad mt"><h2>Chapter records</h2>${a.chapters.map(c => `<details class="mt-s"><summary><b>${c.idx}. ${esc(c.title)}</b> <span class="mute small">${c.events} events · ${c.facts} facts</span></summary>
       <p>${esc(c.summary)}</p>${c.themes.length ? `<div class="small mute">Themes: ${c.themes.map(esc).join(' · ')}</div>` : ''}
@@ -415,7 +416,7 @@ async function tabStructure(id) {
 }
 const saveChapters = guard(async () => {
   const rows = [...document.querySelectorAll('#chap-rows tr')];
-  const chapters = rows.map((r, i) => ({title: r.querySelector('.ct').value, start_para: i === 0 ? 1 : +r.querySelector('.cs').value}));
+  const chapters = rows.map((r, i) => ({title: r.querySelector('.ct').value, start_para: i === 0 ? 1 : +r.querySelector('.cs').value, skip: r.querySelector('.ck').checked}));
   await api(`/projects/${P.id}/chapters`, {method: 'PUT', json: {chapters}}); toast('Chapters saved. Reprocess from "Analyzing chunks" to apply.'); P = await api('/projects/' + P.id); tabStructure(P.id);
 });
 
