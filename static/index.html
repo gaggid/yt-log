@@ -196,7 +196,8 @@ const editMeta = guard(async () => {
 
 /* progress tab */
 async function tabProgress(id) {
-  $('#tab').innerHTML = '<div class="card pad mute">Loading…</div>';
+  $('#tab').innerHTML = '<div id="scopebox"></div><div id="progbox"><div class="card pad mute">Loading…</div></div>';
+  guard(renderScope)();
   const draw = async () => {
     const pr = await api(`/projects/${id}/progress`); if (!$('#tab') || !location.hash.startsWith('#/p/' + id)) return;
     const run = pr.running, busy = run || ['queued','running'].includes(pr.status);
@@ -205,7 +206,7 @@ async function tabProgress(id) {
       : `<button class="primary" onclick="ctl('process')">${pr.status === 'imported' ? 'Start processing' : pr.status === 'done' ? 'Run again (no-op if complete)' : 'Resume'}</button>
          ${pr.errors.length ? `<button onclick="ctl('process',{retry_failed:true})">Retry failed</button>` : ''}`;
     const stuck = !busy && pr.status !== 'imported';
-    $('#tab').innerHTML = `
+    $('#progbox').innerHTML = `
       <div class="card pad">
         <div class="row">${act}<span class="sp"></span><span class="mute small">${pr.tokens_in || pr.tokens_out ? `tokens in ${num(pr.tokens_in)} · out ${num(pr.tokens_out)} · model time ${dur(pr.seconds)}` : 'not started'}</span></div>
         ${pr.error ? `<div class="errbox">${esc(pr.error)}</div>` : ''}
@@ -230,6 +231,36 @@ async function tabProgress(id) {
   guard(async () => { await draw(); })();
   poll = setInterval(guard(async () => { await draw(); }), 2500);
 }
+async function renderScope() {
+  const el = $('#scopebox'); if (!el) return;
+  const pv = await api(`/projects/${P.id}/scope`), sc = pv.scope, hasPages = !!P.page_count;
+  const mode2 = hasPages ? 'pages' : 'paras';
+  const chosen = new Set(sc.chapters || []);
+  el.innerHTML = `<div class="card pad" style="margin-bottom:16px"><h2>What to process</h2>
+    <div class="grid" style="gap:8px">
+      <label><input type="radio" name="sm" value="all" ${sc.mode === 'all' ? 'checked' : ''}> Whole source <span class="mute small">(chapters marked Skip are left out)</span></label>
+      <label><input type="radio" name="sm" value="chapters" ${sc.mode === 'chapters' ? 'checked' : ''}> Selected chapters</label>
+      <div id="sc-ch" style="margin-left:24px;max-height:190px;overflow:auto;${sc.mode === 'chapters' ? '' : 'opacity:.55'}">${P.chapters.map(c => `<label class="small" style="display:block"><input type="checkbox" class="sch" value="${c.idx}" ${chosen.has(c.idx) ? 'checked' : ''}> ${c.idx}. ${esc(c.title)} <span class="mute">${c.page_start ? `pp. ${c.page_start}–${c.page_end}, ` : ''}~${num(c.tokens)} tokens${c.skip ? ', skip flag' : ''}</span></label>`).join('')}</div>
+      <label><input type="radio" name="sm" value="${mode2}" ${sc.mode === mode2 ? 'checked' : ''}> ${hasPages ? 'Page range' : 'Paragraph range'}
+        <input id="sc-a" type="number" min="1" style="width:90px" value="${sc.page_from ?? sc.para_from ?? ''}"> to <input id="sc-b" type="number" min="1" style="width:90px" value="${sc.page_to ?? sc.para_to ?? ''}">
+        <span class="mute small">${hasPages ? `(book pages 1–${P.page_count}, as numbered in the PDF)` : '(see paragraph numbers in the Source tab)'}</span></label>
+    </div>
+    <div class="row mt-s"><span class="small">Will process: <b>${num(pv.paragraphs)}</b> paragraphs · ~<b>${num(pv.tokens)}</b> tokens · about <b>${pv.chunks}</b> chunk${pv.chunks === 1 ? '' : 's'}${pv.page_min ? ` · pages ${pv.page_min}–${pv.page_max}` : ''}</span><span class="sp"></span>
+      <button class="primary small" onclick="saveScope()">Save scope</button></div></div>`;
+  el.querySelectorAll('input[name=sm]').forEach(r => r.onchange = () => { $('#sc-ch').style.opacity = r.value === 'chapters' ? 1 : .55; });
+}
+const saveScope = guard(async () => {
+  const mode = document.querySelector('input[name=sm]:checked').value; const scope = {mode};
+  if (mode === 'chapters') scope.chapters = [...document.querySelectorAll('.sch:checked')].map(x => +x.value);
+  if (mode === 'pages') { scope.page_from = +$('#sc-a').value; scope.page_to = +$('#sc-b').value; }
+  if (mode === 'paras') { scope.para_from = +$('#sc-a').value; scope.para_to = +$('#sc-b').value; }
+  const put = async reset => { const r = await fetch(`/api/projects/${P.id}/scope`, {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({scope, reset})}); return [r.status, await r.json()]; };
+  let [st, d] = await put(false);
+  if (st === 409 && /already processed/.test(d.detail || '')) { if (!confirm(d.detail)) return; [st, d] = await put(true); }
+  if (st >= 400) throw new Error(d.detail || 'could not save scope');
+  toast(`Scope saved: ${num(d.tokens)} tokens in ${d.chunks} chunk(s)${d.reset ? '. Previous results cleared; press Start.' : ''}`);
+  P = await api('/projects/' + P.id); renderScope();
+});
 const ctl = guard(async (what, body) => { await api(`/projects/${P.id}/${what}`, {method: 'POST', json: body || {}}); toast(what === 'process' ? 'Processing started' : what + ' requested'); P = await api('/projects/' + P.id); });
 const retryTask = guard(async tid => { await api(`/projects/${P.id}/tasks/${tid}/retry`, {method: 'POST'}); await ctl('process'); });
 const expandLeads = guard(async () => { const r = await api(`/projects/${P.id}/expand`, {method: 'POST', json: {count: 10}}); toast(`Queued ${r.queued} more`); });

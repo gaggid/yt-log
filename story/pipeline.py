@@ -16,7 +16,7 @@ import re
 import time
 import traceback
 
-from . import db, scoring, settings as settings_mod
+from . import db, projects, scoring, settings as settings_mod
 from . import prompts as P
 from .chunker import build_chunks
 from .llm import ChatBackend, JsonCaller, LLMError, ValidationFailed
@@ -242,11 +242,11 @@ class Pipeline:
     def _plan_analyze(self) -> None:
         instr = self.est(P.ANALYZE) + 400
         target = self.budget.chunk_target(int(self.s["chunk_tokens"]), instr)
-        skipped = {r["idx"] for r in db.q("SELECT idx FROM chapters WHERE project_id=? AND skip=1", (self.pid,))}
+        include = projects.resolve_scope(self.pid)
         rows = [{"idx": p["idx"], "chapter_idx": p["chapter_idx"], "text": p["text"]}
-                for p in self.paras.values() if p["chapter_idx"] not in skipped]
+                for p in self.paras.values() if p["idx"] in include]
         if not rows:
-            raise ValueError("every chapter is marked as skipped; leave at least one in")
+            raise ValueError("nothing to process: the selected scope (or skip flags) leaves no text")
         chunks = build_chunks(rows, target, int(self.s["chunk_overlap"]), self.est)
         for n, c in enumerate(chunks):
             add_task(self.pid, "analyze", f"c{n:04d}", n,

@@ -164,6 +164,36 @@ async def put_chapters(pid: str, body: ChaptersIn):
     return _guard(projects.set_chapters, pid, body.chapters)
 
 
+@router.get("/projects/{pid}/scope")
+async def get_scope(pid: str):
+    _project_or_404(pid)
+    return _guard(projects.scope_preview, pid)
+
+
+class ScopeIn(BaseModel):
+    scope: dict
+    reset: bool = False
+
+
+@router.put("/projects/{pid}/scope")
+async def put_scope(pid: str, body: ScopeIn):
+    """Choose what to process: the whole source, selected chapters, a page range or a paragraph range."""
+    _project_or_404(pid)
+    if manager.is_running(pid):
+        raise HTTPException(409, "pause or cancel processing before changing the scope")
+    started = db.one("SELECT 1 x FROM tasks WHERE project_id=? AND stage='analyze' LIMIT 1", (pid,))
+    if started and not body.reset:
+        raise HTTPException(409, "this source was already processed; changing the scope means reprocessing from the "
+                                 "start (stories you reviewed or edited are kept). Confirm to continue.")
+    old = projects.get_scope(pid)
+    prev = _guard(projects.set_scope, pid, body.scope)
+    if started:
+        pipeline.reset(pid, stage="analyze")
+    prev["reset"] = bool(started)
+    prev["previous"] = old
+    return prev
+
+
 @router.get("/projects/{pid}/analysis")
 async def analysis(pid: str):
     """Intermediate structure: source index and chapter records."""

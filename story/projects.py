@@ -277,3 +277,85 @@ def set_chapters(pid: str, chapters: list[dict]) -> list[dict]:
 def _refresh_totals(pid: str) -> None:
     r = db.one("SELECT COALESCE(SUM(tokens),0) t, COALESCE(SUM(LENGTH(text)),0) c FROM paras WHERE project_id=?", (pid,))
     db.ex("UPDATE projects SET est_tokens=?, char_count=?, updated_at=? WHERE id=?", (r["t"], r["c"], db.now(), pid))
+
+
+# ── processing scope: whole source, chosen chapters, or a page / paragraph range ────────────────
+
+def get_scope(pid: str) -> dict:
+    r = db.one("SELECT meta FROM projects WHERE id=?", (pid,))
+    if not r:
+        raise ProjectError("project not found")
+    return (db.jload(r["meta"], {}) or {}).get("scope") or {"mode": "all"}
+
+
+def resolve_scope(pid: str) -> set[int]:
+    """Paragraph numbers that processing will cover. 'all' leaves out chapters marked as skipped; an explicit
+    chapter, page or paragraph selection is taken literally."""
+    sc = get_scope(pid)
+    rows = db.q("SELECT p.idx, p.page, p.chapter_idx, COALESCE(c.skip,0) AS skip FROM paras p "
+                "LEFT JOIN chapters c ON c.project_id=p.project_id AND c.idx=p.chapter_idx WHERE p.project_id=?", (pid,))
+    mode = sc.get("mode", "all")
+    if mode == "chapters":
+        want = {int(x) for x in sc.get("chapters", [])}
+        return {r["idx"] for r in rows if r["chapter_idx"] in want}
+    if mode == "pages":
+        a, b = int(sc["page_from"]), int(sc["page_to"])
+        return {r["idx"] for r in rows if r["page"] is not None and a <= r["page"] <= b}
+    if mode == "paras":
+        a, b = int(sc["para_from"]), int(sc["para_to"])
+        return {r["idx"] for r in rows if a <= r["idx"] <= b}
+    return {r["idx"] for r in rows if not r["skip"]}
+
+
+def scope_preview(pid: str, chunk_tokens: int | None = None) -> dict:
+    ids = resolve_scope(pid)
+    s = settings_mod.get()
+    rows = db.q("SELECT idx, page, chapter_idx, tokens FROM paras WHERE project_id=?", (pid,))
+    sel = [r for r in rows if r["idx"] in ids]
+    tokens = sum(r["tokens"] for r in sel)
+    target = chunk_tokens or s["chunk_tokens"]
+    pages = sorted({r["page"] for r in sel if r["page"] is not None})
+    return {"scope": get_scope(pid), "paragraphs": len(sel), "tokens": tokens,
+            "chunks": max(1, -(-tokens // max(1, target))) if sel else 0,
+            "chapters": sorted({r["chapter_idx"] for r in sel}),
+            "page_min": pages[0] if pages else None, "page_max": pages[-1] if pages else None}
+
+
+def set_scope(pid: str, scope: dict) -> dict:
+    """scope: {mode: all} | {mode: chapters, chapters: [idx...]} | {mode: pages, page_from, page_to} |
+    {mode: paras, para_from, para_to}. Returns the preview of what will be processed."""
+    get(pid)
+    mode = scope.get("mode", "all")
+    clean: dict = {"mode": mode}
+    try:
+        if mode == "chapters":
+            have = {c["idx"] for c in get_chapters(pid)}
+            ch = sorted({int(x) for x in scope.get("chapters", [])})
+            if not ch or not set(ch) <= have:
+                raise ProjectError("choose at least one existing chapter")
+            clean["chapters"] = ch
+        elif mode == "pages":
+            a, b = int(scope["page_from"]), int(scope["page_to"])
+            if a < 1 or b < a:
+                raise ProjectError("page range must be from a page to a later or equal page")
+            clean.update(page_from=a, page_to=b)
+        elif mode == "paras":
+            a, b = int(scope["para_from"]), int(scope["para_to"])
+            if a < 1 or b < a:
+                raise ProjectError("paragraph range must be from a number to a later or equal number")
+            clean.update(para_from=a, para_to=b)
+        elif mode != "all":
+            raise ProjectError("scope mode must be all, chapters, pages or paras")
+    except (KeyError, TypeError, ValueError) as e:
+        raise ProjectError("incomplete or invalid scope") from e
+    meta = (db.jload(db.one("SELECT meta FROM projects WHERE id=?", (pid,))["meta"], {}) or {})
+    previous = meta.get("scope") or {"mode": "all"}
+    meta["scope"] = clean
+    db.ex("UPDATE projects SET meta=?, updated_at=? WHERE id=?", (db.jdump(meta), db.now(), pid))
+    prev = scope_preview(pid)
+    if not prev["paragraphs"]:
+        meta["scope"] = previous                                         # roll back: nothing would be processed
+        db.ex("UPDATE projects SET meta=? WHERE id=?", (db.jdump(meta), pid))
+        raise ProjectError("that selection contains no text" + (" (this source has no page numbers; use paragraphs)"
+                           if mode == "pages" and not db.one("SELECT 1 x FROM paras WHERE project_id=? AND page IS NOT NULL", (pid,)) else ""))
+    return prev

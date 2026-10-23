@@ -3,6 +3,8 @@ import json
 
 import pytest
 
+import config
+
 from fakellm import FakeBackend
 from story import db, export, pipeline, projects, review, scoring, settings as settings_mod
 from story.contract import ExportDoc
@@ -369,3 +371,64 @@ def test_front_and_back_matter_is_skipped(env):
     assert skipped_paras <= analysed2
     with pytest.raises(projects.ProjectError):
         projects.set_chapters(pid, [{"title": "x", "start_para": 1, "skip": True}])
+
+
+def analysed_paras(pid):
+    return {i for t in pipeline.stage_tasks(pid, "analyze") for i, _, _ in t["input"]["items"]}
+
+
+def test_scope_selected_chapters(book):
+    chs = projects.get_chapters(book)
+    prev = projects.set_scope(book, {"mode": "chapters", "chapters": [2, 5]})
+    assert prev["chapters"] == [2, 5] and prev["tokens"] > 0
+    assert run(book, FakeBackend()) == "done"
+    wanted = {r["idx"] for r in db.q("SELECT idx FROM paras WHERE project_id=? AND chapter_idx IN (2,5)", (book,))}
+    assert analysed_paras(book) == wanted                                    # exactly those chapters, nothing else
+    assert {r["idx"] for r in pipeline.done_results(book, "rollup")} == {2, 5}
+    assert len(chs) == 8
+
+
+def test_scope_page_range_and_validation(env, tmp_path):
+    from test_ingest import make_pdf
+    pid = projects.import_file("b.pdf", make_pdf(tmp_path / "b.pdf").read_bytes())
+    prev = projects.set_scope(pid, {"mode": "pages", "page_from": 5, "page_to": 7})
+    assert (prev["page_min"], prev["page_max"]) == (5, 7)
+    assert run(pid, FakeBackend()) == "done"
+    pages = {r["page"] for r in db.q("SELECT page FROM paras WHERE project_id=? AND idx IN (%s)" %
+                                     ",".join(map(str, analysed_paras(pid))), (pid,))}
+    assert pages == {5, 6, 7}
+    for bad in ({"mode": "pages", "page_from": 7, "page_to": 5}, {"mode": "pages", "page_from": 90, "page_to": 99},
+                {"mode": "chapters", "chapters": []}, {"mode": "chapters", "chapters": [99]}, {"mode": "nope"},
+                {"mode": "pages"}):
+        with pytest.raises(projects.ProjectError):
+            projects.set_scope(pid, bad)
+    assert projects.get_scope(pid)["page_from"] == 5                         # a rejected scope leaves the old one intact
+
+
+def test_scope_paragraph_range_for_articles_and_all_resets(env):
+    pid = projects.import_text(make_book(2, 20))
+    with pytest.raises(projects.ProjectError):
+        projects.set_scope(pid, {"mode": "pages", "page_from": 1, "page_to": 3})     # text has no page numbers
+    projects.set_scope(pid, {"mode": "paras", "para_from": 5, "para_to": 14})
+    assert run(pid, FakeBackend()) == "done"
+    assert analysed_paras(pid) == set(range(5, 15))
+    projects.set_scope(pid, {"mode": "all"})
+    pipeline.reset(pid, stage="analyze")
+    assert run(pid, FakeBackend()) == "done"
+    assert len(analysed_paras(pid)) == projects.get_paras(pid)["total"]
+
+
+def test_scope_api_requires_confirmation_to_reprocess(env):
+    from fastapi.testclient import TestClient
+    import main
+    with TestClient(main.app) as c:                          # lifespan re-points the DB at DATA_DIR/story.db
+        pid = projects.import_text(make_book(2, 10))
+        c.post("/login", data={"username": config.APP_USER, "password": config.APP_PASSWORD})
+        r = c.put(f"/api/projects/{pid}/scope", json={"scope": {"mode": "chapters", "chapters": [1]}})
+        assert r.status_code == 200 and r.json()["chapters"] == [1] and not r.json()["reset"]
+        run(pid, FakeBackend())
+        r = c.put(f"/api/projects/{pid}/scope", json={"scope": {"mode": "chapters", "chapters": [2]}})
+        assert r.status_code == 409 and "reprocessing" in r.json()["detail"]
+        r = c.put(f"/api/projects/{pid}/scope", json={"scope": {"mode": "chapters", "chapters": [2]}, "reset": True})
+        assert r.status_code == 200 and r.json()["reset"] and not pipeline.stage_tasks(pid, "analyze")
+        assert c.get(f"/api/projects/{pid}/scope").json()["chapters"] == [2]
