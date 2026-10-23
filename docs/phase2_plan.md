@@ -78,11 +78,11 @@ New package `story2/` (keeps Phase 1 untouched; shares `db`, `llm`, `tokens`, `s
 
 After each batch: run the tests, report files changed, results and limits, and stop if acceptance criteria fail.
 
-## 4. Decisions needed from the owner
-1. Quotes: keep the default of none in narration?
-2. Independent verification: should a story that only the book supports be blocked from Phase 2, or allowed with an "unverified" mark? Recommended: blocked until verified.
-3. Name and voice: is the channel persona a narrator with no named character, or an on-screen host? This changes how "I/we" phrasing is written.
-4. First formats: long-form 16:9 only to start, or Shorts as well?
+## 4. Decisions (owner, confirmed)
+1. **Quotes:** none by default. Narration is written in our own words; no sentence is copied from the source. A spoken quotation from a person in the story (on the public record) is allowed only as an explicit per-line choice with a recorded rights note.
+2. **Independent verification:** stories that only the source supports are **not blocked**. They proceed with an "unverified" mark on the plan, and the research questions stay attached so they can be checked later.
+3. **Narrator:** first person, voiced by a generated avatar whose name will be set later. The name is a plan-level setting (placeholder `{narrator}`), so it can be filled in without touching the narration. Rules for first person: "I" guides and reacts ("let me show you", "here is what surprised me"); it never claims to have been present at, or personally involved in, events from the story, and never invents personal experience. The avatar is registered as a continuity asset (appearance, wardrobe, setting) with status "to be designed"; creating the avatar itself is outside this module.
+4. **Format:** long-form 16:9 only for the first build. The 9:16 plan type stays in the schema but is not built until long-form is accepted.
 
 ## 5. Risks
 - The gateway serves one request at a time, and image and text models take turns on the GPU. A full plan with previews will take a while; previews stay opt-in.
