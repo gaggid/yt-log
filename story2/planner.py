@@ -48,10 +48,28 @@ def list_segments(plan_id: str) -> list[dict]:
     return out
 
 
-def list_plans(candidate_id: str = "") -> list[dict]:
+def list_plans(candidate_id: str = "", project_id: str = "") -> list[dict]:
+    """Plans with a one-line progress summary, for the project's Video plans tab."""
     store.ensure()
-    rows = db.q("SELECT id, candidate_id, project_id, format, status, rev, updated_at FROM plans " +
-                ("WHERE candidate_id=? " if candidate_id else "") + "ORDER BY updated_at DESC", (candidate_id,) if candidate_id else ())
+    where, args = [], []
+    if candidate_id:
+        where.append("candidate_id=?")
+        args.append(candidate_id)
+    if project_id:
+        where.append("project_id=?")
+        args.append(project_id)
+    rows = db.q("SELECT id, candidate_id, project_id, format, status, rev, updated_at, blueprint, settings FROM plans "
+                + ("WHERE " + " AND ".join(where) + " " if where else "") + "ORDER BY updated_at DESC", args)
+    for r in rows:
+        bp = db.jload(r.pop("blueprint"), None)
+        r["minutes"] = (db.jload(r.pop("settings"), {}) or {}).get("minutes")
+        beats = [b["id"] for b in bp["beats"]] if bp else []
+        segs = db.q("SELECT beat, duration_s FROM segments WHERE plan_id=?", (r["id"],))
+        r["blueprint"] = bool(bp)
+        r["beats"] = len(beats)
+        r["beats_written"] = len({s["beat"] for s in segs if s["beat"] in beats})
+        r["spoken_s"] = round(sum(s["duration_s"] for s in segs), 1)
+        r["scenes"] = db.one("SELECT COUNT(*) n FROM scenes WHERE plan_id=?", (r["id"],))["n"]
     return rows
 
 

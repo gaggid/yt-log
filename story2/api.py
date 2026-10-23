@@ -43,8 +43,8 @@ class NewPlan(BaseModel):
 
 
 @router.get("")
-async def plans(candidate_id: str = ""):
-    return planner.list_plans(candidate_id)
+async def plans(candidate_id: str = "", project_id: str = ""):
+    return planner.list_plans(candidate_id, project_id)
 
 
 @router.post("")

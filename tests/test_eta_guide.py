@@ -88,7 +88,7 @@ def test_next_step_follows_the_project_state(env):
     for c in review.list_candidates(pid):
         review.update_candidate(c["id"], {"status": "approved"})
     n = guide.next_step(pid)
-    assert n["step"] == "export" and n["primary"]["action"] == "export" and guide.step_index(n) == 4
+    assert n["step"] == "export" and n["primary"]["action"] == "plans" and n["secondary"]["action"] == "export" and guide.step_index(n) == 4
     for c in review.list_candidates(pid):
         review.update_candidate(c["id"], {"status": "rejected"})
     assert "rejected" in guide.next_step(pid)["title"].lower()

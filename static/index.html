@@ -275,7 +275,7 @@ async function viewProject(id, tab) {
   try { [P, PR] = await Promise.all([api('/projects/' + id), api(`/projects/${id}/progress`)]); }
   catch (e) { $('#app').innerHTML = `<div class="errbox">${esc(e.message)}</div><a href="#/">Back to projects</a>`; return; }
   if (my !== route_id) return;
-  const tabs = [['progress', 'Progress'], ['stories', 'Stories'], ['source', 'Source'], ['structure', 'Structure']];
+  const tabs = [['progress', 'Progress'], ['stories', 'Stories'], ['plans', 'Video plans'], ['source', 'Source'], ['structure', 'Structure']];
   $('#app').innerHTML = `
     <div class="mute small"><a href="#/">Projects</a> /</div>
     <div class="row"><h2 style="margin:0">${esc(P.title)}</h2><button class="small" onclick="editMeta()">Rename</button><span class="sp"></span><span id="pstatus"></span></div>
@@ -283,10 +283,10 @@ async function viewProject(id, tab) {
     <div class="mute small">${badge('info', P.format)} imported ${fmtDate(P.created_at)} · ${P.page_count ? P.page_count + ' pages · ' : ''}~${num(P.est_tokens)} tokens · ${P.chapter_count} chapters${P.chapters.some(c => c.skip) ? ` (${P.chapters.filter(c => c.skip).length} skipped as front/back matter)` : ''} · <a href="/api/projects/${id}/original">original file</a></div>
     ${P.warnings.map(w => `<div class="warnbox">⚠ ${esc(w)}</div>`).join('')}
     <ol class="steps" id="stepper"></ol><div id="nextcard"></div>
-    <div class="tabs">${tabs.map(([k, l]) => `<button data-tab="${k}" class="${k === tab ? 'on' : ''}" onclick="location.hash='#/p/${id}/${k}'">${l}${k === 'stories' ? ` <span class="badge" id="tabcount"></span>` : ''}</button>`).join('')}</div>
+    <div class="tabs">${tabs.map(([k, l]) => `<button data-tab="${k}" class="${k === tab ? 'on' : ''}" onclick="location.hash='#/p/${id}/${k}'">${l}${k === 'stories' ? ` <span class="badge" id="tabcount"></span>` : k === 'plans' ? ` <span class="badge" id="plancount"></span>` : ''}</button>`).join('')}</div>
     <div id="tab"></div>`;
   paintShell();
-  ({progress: tabProgress, stories: tabStories, source: tabSource, structure: tabStructure}[tab] || tabProgress)(id);
+  ({progress: tabProgress, stories: tabStories, plans: window.tabPlans, source: tabSource, structure: tabStructure}[tab] || tabProgress)(id);
   const loop = async () => {
     if (my !== route_id) return;
     try { PR = await api(`/projects/${id}/progress`); P = {...P, ...(await api('/projects/' + id))}; paintShell(); if (TAB === 'progress') paintLive(); else if (TAB === 'stories') storiesFreshness(); } catch (e) { /* transient */ }
@@ -307,6 +307,7 @@ function paintShell() {
   const html = `<div class="next ${n.tone}"><div><div class="nt">${esc(n.title)}</div><div class="nd mute">${esc(n.detail)}</div></div><div class="row">${btn(n.secondary, '')}${btn(n.primary, 'primary')}</div></div>`;
   if ($('#nextcard').dataset.h !== html) { $('#nextcard').innerHTML = html; $('#nextcard').dataset.h = html; }
   $('#pstatus').innerHTML = badge(PR.status, PR.status === 'imported' ? 'ready' : PR.status);
+  const pc = $('#plancount'); if (pc) { pc.textContent = PR.next.counts.approved ? PR.next.counts.approved + ' approved' : ''; pc.hidden = !pc.textContent; }
   const tc = $('#tabcount'); if (tc) { tc.textContent = PR.next.counts.pending ? PR.next.counts.pending + ' to review' : PR.next.counts.found || ''; tc.hidden = !tc.textContent; }
 }
 async function nextAction(a, btn) {
@@ -317,6 +318,7 @@ async function nextAction(a, btn) {
   if (a === 'pause') return go('pause', {}, 'Pausing once the current step finishes (can take up to a minute).');
   if (a === 'review') { LS.set('open-first-' + id, 1); if (TAB === 'stories') { openFirstPending(); } else location.hash = `#/p/${id}/stories`; return; }
   if (a === 'export') return exportDlg();
+  if (a === 'plans') { location.hash = `#/p/${id}/plans`; return; }
   if (a === 'settings') { location.hash = '#/settings'; return; }
   if (a === 'scroll_scope') { if (TAB !== 'progress') location.hash = `#/p/${id}/progress`; setTimeout(() => $('#scopebox')?.scrollIntoView({behavior: 'smooth', block: 'center'}), 300); }
 }
@@ -554,7 +556,7 @@ async function decide(status, btn) {
   const prev = S.status, id = S.id, title = S.title, ids = storyRows.map(r => r.id), i = ids.indexOf(id);
   const ok = await act(btn, () => api('/stories/' + id, {method: 'PATCH', json: {status}}));
   if (!ok) return;
-  toast(`${status === 'approved' ? 'Approved' : 'Rejected'} “${title.slice(0, 50)}”.`, {undo: async () => { await api('/stories/' + id, {method: 'PATCH', json: {status: prev}}); await refreshAll(); await loadStories(); if (storyOpen === id) openStory(id); }});
+  toast(`${status === 'approved' ? 'Approved' : 'Rejected'} “${title.slice(0, 50)}”.${status === 'approved' ? ' Next: Video plans tab.' : ''}`, {undo: async () => { await api('/stories/' + id, {method: 'PATCH', json: {status: prev}}); await refreshAll(); await loadStories(); if (storyOpen === id) openStory(id); }});
   await refreshAll(); await loadStories();
   const pend = r => r.status === 'pending' && r.id !== id;
   const after = storyRows.slice(Math.max(0, i)).find(pend) || storyRows.find(pend);

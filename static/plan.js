@@ -37,6 +37,24 @@ window.planLinks = async function (cid, status) {            // used by the stor
   return `<h4>Video plans</h4>${ps.length ? `<ul class="tight">${ps.map(p => `<li><a href="#/plan/${p.id}">Open plan ${esc(p.id)}</a> <span class="mute small">${esc(p.status)} · ${fmtDate(p.updated_at)}</span></li>`).join('')}</ul>` : '<div class="mute small">No video plan yet.</div>'}
     <div class="row mt-s"><button class="small" onclick="newPlan('${cid}', '${status}')">+ Make a video plan from this story</button></div>`;
 };
+window.tabPlans = async function (id) {
+  const el = $('#tab');
+  el.innerHTML = '<div class="pad"><div class="skel"></div><div class="skel"></div></div>';
+  const [stories, plans] = await Promise.all([api(`/projects/${id}/stories?status=approved&sort=priority`), api('/plans?project_id=' + id)]);
+  const pend = PR && PR.next ? PR.next.counts.pending : 0;
+  const stepChip = (ok, label) => `<span class="${ok ? 'ok' : 'mute'}">${ok ? '✓' : '○'} ${label}</span>`;
+  const planCard = p => `<div class="row small" style="gap:14px;padding:6px 0;border-top:1px solid var(--line)"><a href="#/plan/${esc(p.id)}"><b>Open plan</b></a>
+      ${stepChip(p.blueprint, 'blueprint')}${stepChip(p.beats && p.beats_written >= p.beats, `narration ${p.beats_written}/${p.beats || '?'} parts`)}${stepChip(p.scenes > 0, `${p.scenes} scenes`)}
+      <span class="mute">${p.spoken_s ? Math.round(p.spoken_s / 60 * 10) / 10 + ' min spoken · ' : ''}${esc(p.format)} · ${fmtDate(p.updated_at)}</span></div>`;
+  el.innerHTML = `<div class="card pad"><b>From story to video</b>
+      <div class="mute">For each approved story you can make a video plan: how to tell it, Hindi narration for a first-person narrator, and a storyboard with timing. Nothing in it refers to the source or quotes it. Image prompts come next.</div></div>
+    ${stories.length ? stories.map(s => { const ps = plans.filter(p => p.candidate_id === s.id); return `<div class="card pad mt"><div class="row"><div style="flex:1;min-width:240px"><b>${esc(s.title)}</b> ${natBadge(s.nature)}<div class="mute">${esc(s.premise)}</div>
+        <div class="mute small">${esc(s.id)} · priority ${Math.round(s.eff_priority)} · completeness ${Math.round(s.completeness)}</div></div>
+        <button class="${ps.length ? '' : 'primary'}" onclick="newPlan('${s.id}','approved')">${ps.length ? '+ Another plan' : 'Make a video plan'}</button></div>${ps.map(planCard).join('')}</div>`; }).join('')
+      : `<div class="big-empty mute">No approved stories yet. Open the Stories tab, approve the ones you want to turn into videos, then come back here.</div>`}
+    ${pend && stories.length ? `<div class="mute small mt">${pend} more stor${pend === 1 ? 'y is' : 'ies are'} still waiting for review in the Stories tab.</div>` : ''}
+    ${plans.filter(p => !stories.some(s => s.id === p.candidate_id)).length ? `<h4>Plans for stories that are no longer approved</h4>${plans.filter(p => !stories.some(s => s.id === p.candidate_id)).map(planCard).join('')}` : ''}`;
+};
 window.newPlan = async function (cid, status) {
   let allow = false;
   if (status !== 'approved') {

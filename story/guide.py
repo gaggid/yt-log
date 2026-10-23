@@ -51,11 +51,13 @@ def next_step(pid: str) -> dict:
                 "detail": f"{found} found: {approved} approved, {rejected} rejected. Open the best-ranked story first; approve or "
                           "reject it, edit what's wrong, and use Next to keep going.",
                 "primary": {"action": "review", "label": "Start reviewing"},
-                "secondary": {"action": "export", "label": "Export what's approved"} if approved else None}
+                "secondary": {"action": "plans", "label": "Plan a video from the approved ones"} if approved else None}
     if approved:
         return {**base, "step": "export", "tone": "good", "title": "All stories reviewed",
-                "detail": f"{approved} approved, {rejected} rejected. Export the approved stories for the next module.",
-                "primary": {"action": "export", "label": f"Export {approved} approved"}, "secondary": None}
+                "detail": f"{approved} approved, {rejected} rejected. Next: plan a video for an approved story (Video plans tab): "
+                          "narration, storyboard and image prompts. Or export the approved stories.",
+                "primary": {"action": "plans", "label": "Plan videos"},
+                "secondary": {"action": "export", "label": f"Export {approved} approved"}}
     return {**base, "step": "export", "tone": "problem", "title": "Everything was rejected",
             "detail": "No stories are approved. Change a decision in the Stories tab, or reprocess a different scope.",
             "primary": {"action": "review", "label": "Open stories"}, "secondary": None}
