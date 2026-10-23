@@ -252,3 +252,25 @@ def test_api_round_trip(tmp_path, monkeypatch):
         assert c.patch(f"/api/plans/{plan['id']}/image-models", json={"default": "nope"}).status_code == 400
         assert c.patch(f"/api/plans/{plan['id']}/image-models", json={"previews_enabled": True}).status_code == 200
         assert c.get("/api/plans/previews/x/..%2Fsecret").status_code == 404
+
+
+def test_plates_never_describe_the_chart_and_keep_an_overlay_spec(env):
+    over = {**FACTS_CHART, "subject": "a stock chart", "action": "the green line rises at a steep 45-degree angle", "exclusions": ["No logos"],
+            "text_on_screen": [{"text": "seventeen percent drop", "placement": "top"}]}
+    pid, scenes, rep = compiled(env, scene_over=over)
+    for a in ("qwen", "flux"):
+        c = scenes[0]["data"]["prompts"][a]
+        assert "green line" not in c["prompt"] and "stock chart" not in c["prompt"]                    # the image model is never asked to draw the data
+        assert c["overlay"]["shows"].startswith("the green line") and c["overlay"]["text"][0]["text"] == "seventeen percent drop"
+    assert "must not appear: logos" in scenes[0]["data"]["prompts"]["qwen"]["prompt"].lower()           # "No logos" is not doubled into "must not appear: No logos"
+    assert not [i for i in rep["issues"] if i["level"] == "error"], rep["issues"]
+
+
+def test_only_factual_looking_numbers_are_checked(env):
+    pid, scenes, _ = compiled(env)
+    sc, assets = scenes[0], storyboard.get_assets(pid)
+    base = sc["data"]["prompts"]["qwen"]
+    ok = dict(base, prompt=base["prompt"] + " A 45-degree angle, 3D depth, 2D graphics.")
+    assert not any(i["kind"] == "number" for i in imgprompts.validate_prompt(ok, sc, assets, "", None))
+    bad = dict(base, prompt=base["prompt"] + " The stock fell 17% and 4321 shares traded.")
+    assert sum(i["kind"] == "number" for i in imgprompts.validate_prompt(bad, sc, assets, "", None)) == 2

@@ -19,10 +19,35 @@ VAGUE = ("dramatic", "epic", "stunning", "viral", "intense", "tense", "tension",
          "breathtaking", "gripping", "haunting")
 FLUX_STANDARD_NEGATIVE = "blurry, low quality, misspelled text, duplicated words, extra text, watermark, distorted letters"
 ADAPTERS = ("qwen", "flux")
+# numbers that read as a factual claim: a percentage, a currency amount, a year or large figure, or a count of days, years, shares, dollars.
+# Descriptive geometry ("45-degree angle", "3D", "2D") is not a claim.
+_CLAIM_NUM = re.compile(r"(?:[$\u20b9\u00a3\u20ac]\s?(\d[\d,.]*)|\b(\d[\d,.]*)\s?%|\b(\d{4,})\b|\b(\d[\d,.]*)\s?-?\s?(?:percent|million|billion|crore|lakh|thousand|days?|weeks?|months?|years?|shares|dollars|rupees|points)\b)")
 _STOP = set("a an the of and or to in on at with for from by is are was were be as it its this that his her their over under into out up down".split())
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────
+
+_UNKNOWN = {"unknown", "n/a", "na", "none", "not specified", "unspecified", "tbd", "-", "not applicable"}
+
+
+def _val(x) -> str:
+    """A scene field as text, or "" when it only says it is unknown."""
+    t = _s(x)
+    return "" if t.lower() in _UNKNOWN else t
+
+
+def _run(x, single: bool = False) -> str:
+    """Lower-case the first letter of a sentence-case phrase ("Abstract void") so it reads inside a sentence, but keep names ("Knight Capital")."""
+    t = _s(x)
+    words = t.split()
+    if (len(words) > 1 or single) and t[0].isupper() and words[0][1:].islower() and not any(w[0].isupper() for w in words[1:] if w):
+        return t[0].lower() + t[1:]
+    return t
+
+
+def strip_negation(x: str) -> str:
+    return re.sub(r"^(no|avoid|without|never show)\s+", "", _s(x), flags=re.I)
+
 
 def _g(d: dict, *path, default=""):
     for k in path:
@@ -160,8 +185,27 @@ def _exact_text(d: dict, notes: list[str]) -> tuple[str, list[dict]]:
 def _constraints(d: dict) -> tuple[list[str], list[str]]:
     must = [_s(x) for x in _g(d, "facts", "fixed", default=[]) if _s(x)]
     must += [f"{_s(p)}" for p in _g(d, "setting", "props", default=[]) if _s(p)]
-    avoid = [_s(x) for x in (d.get("exclusions") or []) if _s(x)]
+    avoid = [_run(strip_negation(x)) for x in (d.get("exclusions") or []) if _s(x)]
+    if _plate(d):
+        must = []                                   # facts about the chart or document belong to the later overlay, not to the picture
     return list(dict.fromkeys(must)), list(dict.fromkeys(avoid))
+
+
+_LEAD = {"the", "a", "an", "his", "her", "their", "its", "this", "these", "those", "one", "two", "three", "four", "five", "some", "each"}
+
+
+def _lead_lower(t: str) -> str:
+    """"The line rises" after "The single moment shown is": lower-case a leading function word, leave names alone."""
+    t = _s(t)
+    first = t.split(" ", 1)[0].lower()
+    return t[0].lower() + t[1:] if first in _LEAD else t
+
+
+def overlay_spec(d: dict) -> dict:
+    """What a chart, document, map or screen must show, kept for the later deterministic build. Never sent to the image model."""
+    return {"visual_type": d.get("visual_type"), "needs": _s(_g(d, "feasibility", "needs_asset")), "subject": _s(d.get("subject")), "shows": _s(d.get("action")),
+            "text": [{"text": _s(t.get("text")), "placement": _s(t.get("placement"))} for t in d.get("text_on_screen") or [] if _s(t.get("text"))],
+            "facts": [_s(x) for x in _g(d, "facts", "fixed", default=[]) if _s(x)]}
 
 
 def _plate(d: dict) -> bool:
@@ -189,17 +233,21 @@ def compile_qwen(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
         sec["objective"] = _sent(f"Create a {_aspect(fmt)} {_s(d.get('style')) or 'documentary'} image for a documentary video. Its role in the story: {_s(nar.get('purpose'))}",
                                  f"The viewer should come away with this: {_s(nar.get('new_information') or nar.get('takeaway'))}" if _s(nar.get("new_information") or nar.get("takeaway")) else "")
     sec["objective"] = "Image objective: " + sec["objective"]
-    sec["subject"] = "Main subject: " + _sent(_subject_text(d, people))
-    sec["action"] = "Action and moment: " + _sent(f"The single moment shown is {_s(d.get('action'))}" if _s(d.get("action")) else "A still, held moment with no competing action")
-    sec["environment"] = "Environment: " + _sent(_s(_g(d, "setting", "location")), f"Period: {_s(_g(d, 'setting', 'period'))}" if _s(_g(d, "setting", "period")) else "",
-                                                 f"Atmosphere: {_s(d.get('atmosphere'))}" if _s(d.get("atmosphere")) else "") + " " + _layers(d)
+    if plate:
+        sec["subject"] = "Main subject: " + _sent("The empty backdrop only, with nothing drawn on it that looks like data, a chart, a document or a screen")
+        sec["action"] = "Action and moment: " + _sent("None: a still backdrop")
+    else:
+        sec["subject"] = "Main subject: " + _sent(_subject_text(d, people))
+        sec["action"] = "Action and moment: " + _sent(f"The single moment shown is {_lead_lower(d.get('action'))}" if _s(d.get("action")) else "A still, held moment with no competing action")
+    sec["environment"] = "Environment: " + _sent(_val(_g(d, "setting", "location")), f"Period: {_val(_g(d, 'setting', 'period'))}" if _val(_g(d, "setting", "period")) else "",
+                                                 f"Atmosphere: {_s(d.get('atmosphere'))}" if _s(d.get("atmosphere")) else "") + ("" if plate else " " + _layers(d))
     comp = d.get("composition") or {}
     sec["composition"] = "Composition: " + _sent(f"The subject sits {_s(comp.get('position'))}" if _s(comp.get("position")) else "", _positions(comp), f"Camera: {_camera(comp)}" if _camera(comp) else "")
     sec["lighting"] = "Lighting: " + _sent(_s(d.get("lighting")) or "soft even light from a single clear direction")
     style_asset = next((a for a in assets_used if a["kind"] == "style"), None)
     sec["treatment"] = "Visual treatment: " + _sent(_s(d.get("style")) or "documentary photograph", _s(style_asset["data"].get("description")) if style_asset else "")
     sec["colour"] = "Colour and mood: " + _sent(f"Palette: {_s(d.get('palette'))}" if _s(d.get("palette")) else "", f"Mood shown through: {_s(d.get('atmosphere'))}" if _s(d.get("atmosphere")) else "")
-    fixed_lines = [f"{a['name']}: {'; '.join(_s(x) for x in a['data'].get('fixed', []))}" for a in assets_used if a["data"].get("fixed") and a["kind"] != "style"]
+    fixed_lines = [f"{a['name']}: {'; '.join(_s(x) for x in a['data'].get('fixed', []))}" for a in assets_used if a["data"].get("fixed") and a["kind"] != "style" and not plate]
     ref_lines = [f"Image {i}: {r['role']} ({r['name']})" for i, r in enumerate(refs["references"], 1)]
     sec["continuity"] = "Continuity: " + _sent(*(["Keep these exactly the same as in the other pictures: " + "; ".join(fixed_lines)] if fixed_lines else ["No recurring people or objects in this picture"]),
                                                *(["Reference images: " + "; ".join(ref_lines)] if ref_lines else []))
@@ -235,21 +283,21 @@ def compile_flux(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
     if plate:
         notes.append("this visual needs a verified chart, document, screen, map or diagram: the image model makes only the setting plate")
     subject = _subject_text(d, people)
-    sec["subject"] = _sent(subject)
-    sec["action"] = _sent(f"{_s(d.get('action'))}" if _s(d.get("action")) else "The moment is still and held")
-    where = _sent(f"The scene is set in {_s(_g(d, 'setting', 'location'))}" if _s(_g(d, "setting", "location")) else "",
-                  f"The period is {_s(_g(d, 'setting', 'period'))}" if _s(_g(d, "setting", "period")) else "")
-    sec["setting"] = where + " " + _layers(d)
+    sec["subject"] = _sent("An empty backdrop only, with nothing drawn on it that looks like data, a chart, a document or a screen") if plate else _sent(subject)
+    sec["action"] = "" if plate else _sent(f"{_s(d.get('action'))}" if _s(d.get("action")) else "The moment is still and held")
+    where = _sent(f"The scene is set in {_run(_val(_g(d, 'setting', 'location')))}" if _val(_g(d, "setting", "location")) else "",
+                  f"The period is {_run(_val(_g(d, 'setting', 'period')))}" if _val(_g(d, "setting", "period")) else "")
+    sec["setting"] = where + ("" if plate else " " + _layers(d))
     pos = _positions(comp)
-    sec["composition"] = _sent(f"The subject is placed {_s(comp.get('position'))}" if _s(comp.get("position")) else "") + " " + pos
-    sec["lighting"] = _sent(f"{_s(d.get('lighting'))}" if _s(d.get("lighting")) else "Soft even light", f"The atmosphere is {_s(d.get('atmosphere'))}" if _s(d.get("atmosphere")) else "",
-                            f"The palette is {_s(d.get('palette'))}" if _s(d.get("palette")) else "")
-    mats = [_s(p) for p in _g(d, "setting", "props", default=[]) if _s(p)]
+    sec["composition"] = _sent(f"The subject is placed {_run(comp.get('position'))}" if _s(comp.get("position")) and not plate else "") + " " + ("" if plate else pos)
+    sec["lighting"] = _sent(f"{_s(d.get('lighting'))}" if _s(d.get("lighting")) else "Soft even light", f"The atmosphere is {_run(d.get('atmosphere'), True)}" if _s(d.get("atmosphere")) else "",
+                            f"The palette is {_run(d.get('palette'), True)}" if _s(d.get("palette")) else "")
+    mats = [] if plate else [_s(p) for p in _g(d, "setting", "props", default=[]) if _s(p)]
     sec["materials"] = _sent("Physical detail: " + ", ".join(mats)) if mats else ""
     style_asset = next((a for a in assets_used if a["kind"] == "style"), None)
     sec["style"] = _sent(f"Rendered as {_s(d.get('style')) or 'a documentary photograph'}", _s(style_asset["data"].get("description")) if style_asset else "")
     sec["camera"] = _sent(f"Camera: {_camera(comp)}" if _camera(comp) else "")
-    fixed_lines = [f"{a['name']} ({'; '.join(_s(x) for x in a['data'].get('fixed', []))})" for a in assets_used if a["data"].get("fixed") and a["kind"] != "style"]
+    fixed_lines = [f"{a['name']} ({'; '.join(_s(x) for x in a['data'].get('fixed', []))})" for a in assets_used if a["data"].get("fixed") and a["kind"] != "style" and not plate]
     sec["continuity"] = _sent("Consistent with the rest of the film: " + "; ".join(fixed_lines)) if fixed_lines else ""
     if refs["references"]:
         sec["references"] = _sent("; ".join(f"Image {i}: {r['role']} ({r['name']})" for i, r in enumerate(refs["references"], 1)))
@@ -289,6 +337,8 @@ def _finish(adapter: str, model: str, cfg: dict, scene: dict, prompt: str, negat
                       "note": "the gateway's own defaults are used; steps and cfg are shown, not overridden"},
            "sections": {k: v.strip() for k, v in sections.items() if v.strip()}, "notes": notes,
            "enhancer": {"used": False, "available": cfg["prompt_enhancer"]["available"], "original_prompt_kept": True}}
+    if plate:
+        out["overlay"] = overlay_spec(d)
     if corr.get("change"):
         out["edit_instruction"] = edit_instruction(corr["change"], list(corr.get("keep") or []), refs_ok)
     return out
@@ -329,25 +379,28 @@ def validate_prompt(c: dict, scene: dict, assets: list[dict], facts: str, prof: 
         issues.append({"adapter": c["adapter"], "kind": kind, "text": text, "level": level})
 
     comp = d.get("composition") or {}
-    checks = [("subject", d.get("subject")), ("action", d.get("action")), ("location", _g(d, "setting", "location")), ("lighting", d.get("lighting")),
+    plate = c["mode"] == "overlay_plate" or d.get("visual_type") in NEEDS_ASSET
+    checks = [("location", _g(d, "setting", "location")), ("lighting", d.get("lighting")),
               ("camera distance", comp.get("distance")), ("camera angle", comp.get("camera_angle"))]
+    if not plate:
+        checks = [("subject", d.get("subject")), ("action", d.get("action"))] + checks
     for label, val in checks:
         if _s(val) and not covers(p, str(val)):
             add("missing", f"the {label} (“{_s(val)}”) is not in the prompt")
     if not _s(d.get("subject")):
         add("missing", "the scene has no subject")
-    for f in _g(d, "facts", "fixed", default=[]):
+    for f in ([] if plate else _g(d, "facts", "fixed", default=[])):
         if _s(f) and not covers(p, f):
             add("fact", f"fixed detail not in the prompt: {_s(f)}")
     used = assets_for(scene, assets)
     for a in used:
-        if a["kind"] == "style":
+        if a["kind"] == "style" or plate:
             continue
         for fx in a["data"].get("fixed", []):
             if _s(fx) and not covers(p, fx):
                 add("continuity", f"{a['name']}: “{_s(fx)}” must stay the same but is not in the prompt")
     for ex in d.get("exclusions") or []:
-        if _s(ex) and not covers(both, ex):
+        if _s(ex) and not covers(both, strip_negation(ex)):
             add("exclusion", f"exclusion not carried into the prompt: {_s(ex)}")
     for t in d.get("text_on_screen") or []:
         txt = _s(t.get("text"))
@@ -358,8 +411,8 @@ def validate_prompt(c: dict, scene: dict, assets: list[dict], facts: str, prof: 
     if d.get("visual_type") in NEEDS_ASSET and c["mode"] not in ("overlay_plate", "edit"):
         add("asset", "a chart, document or screen cannot be generated; the mode must be a background plate")
     known = fact_numbers(facts.lower()) | {str(c["size"]["width"]), str(c["size"]["height"]), "16", "9", "12", "20", "80", "90"}
-    for num in re.findall(r"\d[\d,.]*", p):
-        n = num.strip(",.")
+    for m in _CLAIM_NUM.finditer(p):
+        n = next(g for g in m.groups() if g).strip(",.")
         if n and n not in known and n not in facts:
             add("number", f"the prompt states {n}, which is not in the story's facts")
     if len(p) > MAX_PROMPT_CHARS:
@@ -367,7 +420,7 @@ def validate_prompt(c: dict, scene: dict, assets: list[dict], facts: str, prof: 
     for w in VAGUE:
         if re.search(rf"\b{w}\b", p, re.I):
             add("vague", f"“{w}” asks for an effect without saying what is visible: describe the visible details instead", "warn")
-    if not any(_s(comp.get(k)) for k in ("left", "centre", "right")) and d.get("visual_type") not in ("minimalist", "transition"):
+    if not any(_s(comp.get(k)) for k in ("left", "centre", "right")) and d.get("visual_type") not in ("minimalist", "transition") and not plate:
         add("composition", "no left/centre/right description: the model decides the layout", "warn")
     if c["adapter"] == "qwen" and c.get("negative_prompt"):
         add("negative", "the Qwen endpoint ignores a negative prompt; none should be sent")

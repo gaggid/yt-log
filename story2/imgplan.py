@@ -53,8 +53,8 @@ def validate_prompts(plan_id: str) -> dict:
         compiled += 1
         for adapter, c in prompts.items():
             for i in imgprompts.validate_prompt(c, sc, assets, facts, prof):
-                # licence and style notes matter only for the model that will be used; the other adapter is there for comparison
-                if adapter != chosen and i["kind"] in ("licence", "vague", "composition"):
+                # licence is reported once for the plan, not per scene; style notes matter only for the model that will be used
+                if i["kind"] == "licence" or (adapter != chosen and i["kind"] in ("vague", "composition")):
                     continue
                 issues.append({"where": sc["id"], **i})
     for mid in sorted(used_models):
