@@ -26,6 +26,7 @@ css.textContent = `
 .banner{border-radius:10px;padding:10px 16px;margin:12px 0}.banner ul{margin:6px 0 0}
 .banner.block{background:var(--badbg);color:var(--bad);border-left:4px solid var(--bad)}.banner.warn{background:var(--warnbg);color:var(--warn);border-left:4px solid var(--warn)}
 .banner.good{background:var(--okbg);color:var(--ok);border-left:4px solid var(--ok)}
+.dlg .box:has(.wide-dlg){max-width:min(980px,94vw);width:94vw;max-height:92vh;overflow:auto}
 @media (max-width:980px){.plan-grid{grid-template-columns:1fr}.plan-side{position:static;max-height:none;order:-1}}
 @media (max-width:760px){.scn{grid-template-columns:1fr}.sent{grid-template-columns:1fr 100px}.beatrow{grid-template-columns:36px 1fr}}
 `;
@@ -76,7 +77,7 @@ window.newPlan = async function (cid, status) {
 
 window.viewPlan = async function (id) {
   const my = route_id;
-  let P = null, sig = '', seenRun = false;
+  let P = null, PV = {}, sig = '', seenRun = false;
   const app = $('#app');
   const busyJob = () => P && P.job && P.job.state === 'running';
   const editing = () => { const a = document.activeElement; return a && a.closest && a.closest('#plan') && ['TEXTAREA', 'INPUT', 'SELECT'].includes(a.tagName); };
@@ -100,6 +101,34 @@ window.viewPlan = async function (id) {
     async storyboard(b, redo) { if (redo && !await confirmDlg('Design all scenes again?', 'Every scene that is not locked or approved is replaced. Parts with a locked or approved scene are skipped.', 'Design again')) return; await run(b, `/plans/${id}/storyboard`); },
     async cancel(b) { await act(b, () => api(`/plans/${id}/cancel`, {method: 'POST'}), 'Stopping after this step…'); },
     async fixRepeats(b) { if (!await confirmDlg('Redraw scenes that repeat the camera?', 'Each flagged scene is redrawn with a different camera distance and angle, keeping the same idea. Locked and approved scenes are skipped. About 30 seconds per scene.', 'Redraw them')) return; await run(b, `/plans/${id}/fix-repeats`); },
+    async compile(b) { const r = await act(b, () => api(`/plans/${id}/compile-prompts`, {method: 'POST'})); if (r) { await load(true); toast(r.issues.some(i => i.level === 'error') ? 'Prompts written; some need fixing' : 'Image prompts written for ' + r.compiled + ' scenes'); } },
+    async imageModels(f) { await act(null, () => api(`/plans/${id}/image-models`, {method: 'PATCH', json: f}), 'Saved'); await load(true); },
+    async byType(t, m) { const bt = {...(P.settings.image_models || {}).by_type}; if (m) bt[t] = m; else delete bt[t]; await window._plan.imageModels({by_type: bt}); },
+    async licence(m, on) { await window._plan.imageModels({licence_checks: {...(P.settings.image_models || {}).licence_checks, [m]: on}}); },
+    async sceneModel(sid, m) { await act(null, () => api(`/plans/scenes/${sid}`, {method: 'PATCH', json: {model: m}}), 'Image model set'); await load(true); },
+    async prompts(sid) {
+      const r = await api(`/plans/scenes/${sid}/prompts`);
+      if (!r.prompts.qwen) return toast('Write the image prompts first (side panel, step 4).', {bad: true});
+      const sc = P.scenes.find(x => x.id === sid);
+      const ad = {qwen: 'Qwen Image 2.1', flux: 'FLUX.2 Klein'};
+      const box = a => { const c = r.prompts[a];
+        return `<div class="mt-s"><div class="row"><b>${ad[a]}</b><span class="mute small">adapter ${esc(c.adapter_version)} · ${esc(c.mode.replace(/_/g, ' '))} · ${c.size.width}x${c.size.height} · steps ${c.params.steps}, cfg ${c.params.cfg} (gateway defaults)</span><span class="sp"></span><button class="small" onclick="navigator.clipboard.writeText(document.getElementById('pp-${a}').value);toast('Copied')">Copy</button>${r.previews_enabled ? `<button class="small" onclick="_plan.preview('${sid}','${a}')">Make one preview image</button>` : ''}</div>
+          <textarea id="pp-${a}" readonly style="width:100%;min-height:120px;font-size:12px;field-sizing:content">${esc(c.prompt)}</textarea>
+          ${c.negative_prompt ? `<div class="small mt-s"><b>Negative prompt</b> (this model honours one): ${esc(c.negative_prompt)}</div>` : `<div class="small mute mt-s">No negative prompt: this endpoint ignores one, so exclusions are written into the prompt.</div>`}
+          ${c.references.length ? `<div class="small mt-s"><b>Reference images (${c.references.length} of 3 allowed):</b> ${c.references.map((x, i) => `${i + 1}. ${esc(x.name)} (${esc(x.role)})`).join('; ')}</div>` : ''}
+          ${c.missing_references.length ? `<div class="small mute mt-s">No approved reference image yet: ${c.missing_references.map(x => esc(x.name) + (x.action === 'create_reference' ? ' (this scene creates it)' : ' (needed before this scene)')).join(', ')}</div>` : ''}
+          ${c.notes.map(n => `<div class="small mt-s">ℹ ${esc(n)}</div>`).join('')}</div>`; };
+      const cov = r.comparison.coverage;
+      const html = `<div class="wide-dlg"></div><div class="small mute">The prompt is built from the scene; edit the scene, not the prompt. Both models get the same facts, continuity and exclusions.</div>
+        ${r.issues.length ? `<div class="mt-s">${r.issues.map(i => `<div class="iss ${i.level}">${i.level === 'error' ? '✗' : '⚠'} ${esc(i.adapter)} · ${esc(i.kind.replace(/_/g, ' '))}: ${esc(i.text)}</div>`).join('')}</div>` : '<div class="ok mt-s">✓ Both prompts pass the checks.</div>'}
+        ${box('qwen')}${box('flux')}
+        <details class="mt"><summary><b>Does each prompt carry the scene?</b> <span class="mute small">${cov.filter(x => x.qwen && x.flux).length} of ${cov.length} on both</span></summary>
+          <table class="mt-s small"><tr><th align="left">Scene detail</th><th>Qwen</th><th>FLUX</th></tr>${cov.map(x => `<tr><td>${esc(x.element)}: ${esc(x.value)}</td><td align="center">${x.qwen ? '✓' : '✗'}</td><td align="center">${x.flux ? '✓' : '✗'}</td></tr>`).join('')}</table></details>
+        <details class="mt"><summary><b>Licence and judging</b></summary><div class="small mt-s">${Object.entries(r.comparison.licence).map(([a, l]) => `<div><b>${esc(ad[a])}:</b> ${esc(l.status)}. ${esc(l.note)}</div>`).join('')}<div class="mt-s mute">After a preview, judge: ${r.comparison.evaluate_after_preview.join(', ')}.</div></div></details>
+        ${r.previews.length ? `<div class="mt"><b>Previews</b><div class="row mt-s" style="align-items:flex-start;gap:10px">${r.previews.map(pv => `<div style="width:260px"><img src="/api/plans/previews/${esc(P.id)}/${esc(pv.file)}" style="width:100%;border-radius:6px"><div class="small">${esc(pv.model)} · ${pv.seconds}s · seed ${pv.seed}</div><div class="small mute">${pv.source_hash === (r.prompts[pv.adapter] || {}).source_hash ? 'matches the current prompt' : 'older prompt'}</div></div>`).join('')}</div></div>` : ''}`;
+      await dialog({title: 'Image prompts · ' + (sc ? mmss(sc.start_s) : ''), html, wide: true, buttons: [{label: 'Close', value: null}]});
+    },
+    async preview(sid, adapter) { await run(null, `/plans/scenes/${sid}/preview`, {adapter}); toast('Making one preview image. It can take a minute or two; reopen Prompts to see it.'); },
     async validate(b) { const r = await act(b, () => api(`/plans/${id}/validate`, {method: 'POST'})); if (r) { await load(true); toast(r.ok ? 'No blocking problems found' : 'Some problems need attention'); } },
     async narrator(el) { await act(null, () => api(`/plans/${id}/narrator`, {method: 'PATCH', json: {name: el.value}}), 'Narrator name saved'); await load(true); },
     async minutes(el) { await act(null, () => api(`/plans/${id}/settings`, {method: 'PATCH', json: {minutes: +el.value}}), 'Target length saved'); await load(true); },
@@ -160,8 +189,9 @@ window.viewPlan = async function (id) {
 
   function analyse() {
     const p = P, j = p.job, running = j.state === 'running';
-    const v = p.validation || {}, vs = v.storyboard;
-    const issues = [...(v.issues || []).map(i => ({...i, part: 'Narration', level: i.level || 'error'})), ...((vs && vs.issues) || []).map(i => ({...i, part: 'Storyboard'}))];
+    const v = p.validation || {}, vs = v.storyboard, vp = v.prompts;
+    const issues = [...(v.issues || []).map(i => ({...i, part: 'Narration', level: i.level || 'error'})), ...((vs && vs.issues) || []).map(i => ({...i, part: 'Storyboard'})), ...((vp && vp.issues) || []).map(i => ({...i, part: 'Image prompts'}))];
+    const compiled = p.scenes.length > 0 && p.scenes.every(s => s.data.prompts && s.data.prompts.qwen), promptStale = !!(vp && vp.issues.some(i => i.kind === 'stale'));
     const missingBeats = p.blueprint ? p.blueprint.beats.filter(b => !p.segments.some(s => s.beat === b.id)) : [];
     const segNoScene = p.segments.filter(s => !p.scenes.some(c => c.segment_id === s.id));
     const errors = issues.filter(i => i.level === 'error');
@@ -179,11 +209,15 @@ window.viewPlan = async function (id) {
     if (p.scenes.length && !checked) warns.push('Not checked since your last change. Press “Check everything”.');
     if (stale) warns.push(`${stale} scene(s) follow narration you changed: look at them, then approve.`);
     if (nRepeat) warns.push(`${nRepeat} scene(s) repeat the previous camera: use “Fix camera repeats”.`);
-    return {j, running, v, vs, issues, missingBeats, segNoScene, errors, nRepeat, stale, checked, blocks, warns};
+    if (p.scenes.length && !segNoScene.length && (!compiled || promptStale)) warns.push(promptStale ? 'Some scenes changed after their image prompts were written: press “Write image prompts”.' : 'Image prompts are not written yet: press “Write image prompts”.');
+    return {compiled, promptStale, j, running, v, vs, issues, missingBeats, segNoScene, errors, nRepeat, stale, checked, blocks, warns};
   }
 
   function render() {
-    const p = P, a = analyse(), {j, running, v, vs, issues, missingBeats, segNoScene, errors, nRepeat, checked, blocks, warns} = a;
+    const p = P;
+    const imSet = {default: 'qwen-image-2.1', by_type: {}, previews_enabled: false, licence_checks: {}, ...(p.settings.image_models || {})};
+    const modelFor = d => d.model || (imSet.by_type || {})[d.visual_type] || imSet.default;
+    const a = analyse(), {compiled, promptStale, j, running, v, vs, issues, missingBeats, segNoScene, errors, nRepeat, checked, blocks, warns} = a;
     const dis = running ? 'disabled' : '';
     const steps = [['Story', true], ['Blueprint', !!p.blueprint], ['Narration', p.segments.length && p.blueprint && !missingBeats.length], ['Storyboard', p.scenes.length && !segNoScene.length]];
     const firstOpen = steps.findIndex(s => !s[1]);
@@ -198,28 +232,29 @@ window.viewPlan = async function (id) {
     // side panel: one row per action, in the order you do them
     const act_ = (n, label, onclick, {done, ok = true, why = '', next = false, cls = ''}) => `<div class="act ${done ? 'done' : next ? 'next' : ''}">
         <div class="an">${done ? '✓' : n}</div><div style="flex:1;min-width:0"><button class="${next ? 'primary' : cls}" style="width:100%" ${ok && !running ? '' : 'disabled'} onclick="${onclick}">${label}</button>${!ok && why ? `<div class="small mute mt-s">${esc(why)}</div>` : ''}</div></div>`;
-    const nextKey = !p.blueprint ? 'blueprint' : missingBeats.length ? 'narration' : (segNoScene.length || !p.scenes.length) ? 'storyboard' : !checked ? 'check' : nRepeat ? 'repeats' : '';
+    const nextKey = !p.blueprint ? 'blueprint' : missingBeats.length ? 'narration' : (segNoScene.length || !p.scenes.length) ? 'storyboard' : (!compiled || promptStale) ? 'prompts' : !checked ? 'check' : nRepeat ? 'repeats' : '';
     const side = `<aside class="plan-side"><div class="card pad">
         ${running ? `<div class="jobbox"><b>${esc(j.kind)}</b> <span class="mute small">${esc(j.label)}</span>${bar(j.total ? 100 * j.done / j.total : 5)}<div class="small mute">${hd(j.elapsed_s)}${j.eta_s ? ' · about ' + hd(j.eta_s) + ' left' : ''}</div><button class="small mt-s" onclick="_plan.cancel(this)">Stop after this step</button><div class="small mute mt-s">You can leave the page; finished parts are saved.</div></div>` : ''}
         <div class="small mute" style="text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Do these in order</div>
         ${act_(1, p.blueprint ? 'Plan the story again' : 'Plan the story', '_plan.blueprint(this)', {done: !!p.blueprint && nextKey !== 'blueprint', ok: p.readiness.ready, why: 'This story cannot be planned yet.', next: nextKey === 'blueprint', cls: 'small'})}
         ${act_(2, missingBeats.length && p.segments.length ? `Write the ${missingBeats.length} missing part(s)` : p.segments.length ? 'Rewrite all narration' : 'Write the narration', `_plan.narration(this,${!!(missingBeats.length && p.segments.length)})`, {done: p.segments.length && !missingBeats.length, ok: !!p.blueprint, why: 'Plan the story first.', next: nextKey === 'narration'})}
         ${act_(3, p.scenes.length && segNoScene.length ? `Design the ${segNoScene.length} missing part(s)` : p.scenes.length ? 'Design all scenes again' : 'Design the storyboard', '_plan.storyboard(this' + (p.scenes.length && !segNoScene.length ? ',true' : '') + ')', {done: p.scenes.length && !segNoScene.length, ok: p.segments.length && !missingBeats.length, why: 'Write all the narration first.', next: nextKey === 'storyboard'})}
-        ${act_(4, 'Check everything', '_plan.validate(this)', {done: checked && !errors.length, ok: p.segments.length > 0, why: 'Nothing to check yet.', next: nextKey === 'check'})}
-        ${act_(5, nRepeat ? `Fix ${nRepeat} camera repeat(s)` : 'Fix camera repeats', '_plan.fixRepeats(this)', {done: checked && !nRepeat, ok: nRepeat > 0, why: checked ? 'No repeats found.' : 'Run the check first.', next: nextKey === 'repeats'})}
-        ${act_(6, 'Go to the first problem', '_plan.firstProblem()', {done: false, ok: issues.some(i => i.level === 'error') || a.stale > 0, why: 'No errors to fix.', cls: 'small'})}
+        ${act_(4, compiled && !promptStale ? 'Write image prompts again' : 'Write image prompts', '_plan.compile(this)', {done: compiled && !promptStale, ok: p.scenes.length > 0 && !segNoScene.length, why: 'Design the storyboard first.', next: nextKey === 'prompts'})}
+        ${act_(5, 'Check everything', '_plan.validate(this)', {done: checked && !errors.length, ok: p.segments.length > 0, why: 'Nothing to check yet.', next: nextKey === 'check'})}
+        ${act_(6, nRepeat ? `Fix ${nRepeat} camera repeat(s)` : 'Fix camera repeats', '_plan.fixRepeats(this)', {done: checked && !nRepeat, ok: nRepeat > 0, why: checked ? 'No repeats found.' : 'Run the check first.', next: nextKey === 'repeats'})}
+        ${act_(7, 'Go to the first problem', '_plan.firstProblem()', {done: false, ok: issues.some(i => i.level === 'error') || a.stale > 0, why: 'No errors to fix.', cls: 'small'})}
         <div class="small mute" style="text-transform:uppercase;letter-spacing:.04em;margin:12px 0 6px">When you are happy</div>
         <button class="small" style="width:100%" ${p.segments.length && !running ? '' : 'disabled'} onclick="_plan.approveAll(this,'narration')">Approve all narration (${segApproved}/${p.segments.length})</button>
         <button class="small mt-s" style="width:100%" ${p.scenes.length && !running ? '' : 'disabled'} onclick="_plan.approveAll(this,'scenes')">Approve all scenes (${scApproved}/${p.scenes.length})</button>
         <div class="small mute mt-s">Approved and locked parts are never overwritten when something else is regenerated.</div>
         <div class="small mute" style="text-transform:uppercase;letter-spacing:.04em;margin:12px 0 6px">Jump to</div>
-        <div class="row small" style="gap:4px 12px">${[['sec-top', 'Top'], p.blueprint && ['sec-blueprint', 'Blueprint'], p.segments.length && ['sec-narration', 'Narration'], p.segments.length && ['sec-assets', 'Continuity'], p.scenes.length && ['sec-storyboard', 'Storyboard'], (groups.length || v.ok != null) && ['sec-results', 'Check results']].filter(Boolean).map(([id_, l]) => `<a href="#" onclick="_plan.go('${id_}');return false">${l}</a>`).join('')}</div>
+        <div class="row small" style="gap:4px 12px">${[['sec-top', 'Top'], p.blueprint && ['sec-blueprint', 'Blueprint'], p.segments.length && ['sec-narration', 'Narration'], p.segments.length && ['sec-assets', 'Continuity'], p.scenes.length && ['sec-models', 'Image models'], p.scenes.length && ['sec-storyboard', 'Storyboard'], (groups.length || v.ok != null) && ['sec-results', 'Check results']].filter(Boolean).map(([id_, l]) => `<a href="#" onclick="_plan.go('${id_}');return false">${l}</a>`).join('')}</div>
       </div></aside>`;
 
     const banner = blocks.length
       ? `<div class="banner block"><b>Stopping you from moving on</b><ul class="tight">${blocks.map(b => `<li>${esc(b)}</li>`).join('')}</ul>${warns.length ? `<div class="small mt-s">Also: ${warns.map(esc).join(' · ')}</div>` : ''}</div>`
       : warns.length ? `<div class="banner warn"><b>Nothing blocks you, but note:</b><ul class="tight">${warns.map(w => `<li>${esc(w)}</li>`).join('')}</ul></div>`
-      : `<div class="banner good"><b>Nothing is blocking you.</b> Narration and storyboard are consistent and checked. Image prompts (the next phase) are not built yet.</div>`;
+      : `<div class="banner good"><b>Nothing is blocking you.</b> Narration and storyboard are consistent and checked. Image prompts are written and checked; the review and export step comes next.</div>`;
 
     app.innerHTML = `<div id="plan"><span id="sec-top"></span>
       <div class="row"><a href="#/p/${esc(p.project_id)}/plans">← Video plans</a><span class="mute">·</span><a href="#/p/${esc(p.project_id)}/stories?s=${esc(p.candidate_id)}">the story</a><span class="sp"></span><button class="small" onclick="_plan.delPlan()">Delete plan</button></div>
@@ -254,6 +289,14 @@ window.viewPlan = async function (id) {
         <div class="card pad mt-s">${p.assets.length ? p.assets.map(x => `<div class="assetrow"><span>${badge('info', x.kind)}</span><div><b>${esc(x.name)}</b> ${x.data.fictionalisation ? `<span class="mute small">${esc(x.data.fictionalisation.replace(/_/g, ' '))}</span>` : ''}<div>${esc(x.data.description || (x.kind === 'narrator' ? 'Avatar to be designed (outside this module).' : ''))}</div>${(x.data.fixed || []).length ? `<div class="mute small">always: ${esc(x.data.fixed.join('; '))}</div>` : ''}</div>
           <div class="row"><button class="small" onclick="_plan.assetEdit('${x.id}')">Edit</button><button class="small" onclick="_plan.assetLock('${x.id}',${!x.locked})">${x.locked ? 'Unlock' : 'Lock'}</button></div></div>`).join('') : '<span class="mute">Not listed yet. It happens automatically when you design the storyboard.</span>'}</div></div>` : ''}
 
+      ${p.scenes.length ? `<div class="card pad mt" id="sec-models"><div class="row"><h3 style="margin:0">Image models</h3><span class="mute small">Qwen Image 2.1 is the default. Nothing is picked by ranking; judge by previews.</span></div>
+        <div class="row mt-s"><label class="f" style="width:240px">Default model<select onchange="_plan.imageModels({default:this.value})">${(PV.providers || []).map(m => `<option value="${m.id}" ${m.id === imSet.default ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}</select></label>
+          <label class="f" style="flex:1;min-width:260px;flex-direction:row;align-items:center;gap:8px"><input type="checkbox" ${imSet.previews_enabled ? 'checked' : ''} onchange="_plan.imageModels({previews_enabled:this.checked})"> Allow one-image previews (uses the image model; off by default)</label></div>
+        <details class="mt-s"><summary class="small">Different model for some scene types</summary><div class="row mt-s" style="gap:6px 16px">${[...new Set(p.scenes.map(s => s.data.visual_type))].map(t => `<label class="f small" style="width:210px">${VT_LABEL[t]}<select onchange="_plan.byType('${t}',this.value)"><option value="">plan default</option>${(PV.providers || []).map(m => `<option value="${m.id}" ${(imSet.by_type || {})[t] === m.id ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}</select></label>`).join('')}</div></details>
+        <div class="mt-s">${(PV.providers || []).map(m => `<div class="small mt-s"><b>${esc(m.label)}</b> · ${m.negative_prompt ? 'honours a negative prompt' : 'ignores a negative prompt (exclusions go in the prompt)'} · edits with up to ${m.max_references} reference images, no masks · text in images unreliable · steps ${m.steps}, cfg ${m.cfg}
+          <div class="mute">${esc(m.variant)}</div>
+          <label style="display:flex;gap:8px;align-items:flex-start;margin-top:3px"><input type="checkbox" ${(imSet.licence_checks || {})[m.id] ? 'checked' : ''} onchange="_plan.licence('${m.id}',this.checked)"> <span><b>Licence: ${esc(m.licence.status)}.</b> ${esc(m.licence.note)} <i>Tick only after a person has checked it.</i></span></label></div>`).join('')}</div></div>` : ''}
+
       ${p.scenes.length ? `<div class="mt" id="sec-storyboard"><div class="row"><h3 style="margin:0">Storyboard</h3><span class="mute">${p.scenes.length} scenes · ${mmss(total)}</span></div>
         <div class="strip" title="Each block is a scene; width is how long it is on screen">${ordered.map(s => `<i style="width:${100 * s.duration_s / total}%;background:${vtColor(s.data.visual_type)}" onclick="_plan.jump('${s.id}')" title="${mmss(s.start_s)} ${VT_LABEL[s.data.visual_type]}: ${esc(s.data.subject)}"></i>`).join('')}</div>
         <div class="small mute">${[...new Set(ordered.map(s => s.data.visual_type))].map(t => `<span style="color:${vtColor(t)}">■</span> ${VT_LABEL[t]}`).join(' &nbsp; ')}</div>
@@ -261,7 +304,7 @@ window.viewPlan = async function (id) {
           <div class="tm"><b>${mmss(s.start_s)}–${mmss(s.end_s)}</b><div class="mute">${s.duration_s.toFixed(1)}s</div><div class="mute small">${esc(segName(s.segment_id))} · s${s.s_from}${s.s_to > s.s_from ? '–' + s.s_to : ''}</div></div>
           <div><div class="row"><span class="vt" style="background:${vtColor(d.visual_type)}">${VT_LABEL[d.visual_type]}</span>${s.stale ? badge('warn', 'narration changed: check') : ''}${s.status === 'approved' ? badge('approved', 'approved') : ''}${s.locked ? badge('info', 'locked') : ''}${d.feasibility.level === 'needs_asset' ? badge('info', 'needs a real asset') : ''}<span class="sp"></span>
               <button class="small" onclick="_plan.sceneSet('${s.id}',{status:'${s.status === 'approved' ? 'draft' : 'approved'}'})">${s.status === 'approved' ? 'Unapprove' : 'Approve'}</button><button class="small" onclick="_plan.sceneSet('${s.id}',{locked:${!s.locked}})">${s.locked ? 'Unlock' : 'Lock'}</button>
-              <button class="small" ${s.locked ? 'disabled' : ''} onclick="_plan.sceneEdit('${s.id}')">Edit</button><button class="small" ${s.locked || running ? 'disabled' : ''} onclick="_plan.sceneRedraw(this,'${s.id}')">Redraw</button></div>
+              <select class="small" title="Image model for this scene" onchange="_plan.sceneModel('${s.id}',this.value)"><option value="" ${d.model ? '' : 'selected'}>model: ${esc(modelFor(d).split('-')[0])} (plan)</option>${(PV.providers || []).map(m => `<option value="${m.id}" ${d.model === m.id ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}</select><button class="small" onclick="_plan.prompts('${s.id}')">Prompts</button><button class="small" ${s.locked ? 'disabled' : ''} onclick="_plan.sceneEdit('${s.id}')">Edit</button><button class="small" ${s.locked || running ? 'disabled' : ''} onclick="_plan.sceneRedraw(this,'${s.id}')">Redraw</button></div>
             <div class="mt-s"><b>${esc(d.subject)}</b> — ${esc(d.action)}</div>
             <div class="mute small mt-s">Why: ${esc(d.narrative.purpose)} · New: ${esc(d.narrative.new_information)}</div>
             <div class="small mt-s">${[d.setting.location, c.position && 'subject ' + c.position, c.distance, c.camera_angle, d.lighting, d.palette].filter(Boolean).map(esc).join(' · ')}</div>
@@ -278,6 +321,7 @@ window.viewPlan = async function (id) {
   }
 
   app.innerHTML = '<div class="pad"><div class="skel"></div><div class="skel"></div></div>';
+  try { PV = await api('/plans/providers'); } catch (e) { PV = {providers: []}; }
   try { await load(true); } catch (e) { app.innerHTML = `<div class="errbox">${esc(e.message)}</div><a href="#/">Back</a>`; return; }
   timer = setTimeout(tick, 2500);
 };

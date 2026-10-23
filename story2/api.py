@@ -7,7 +7,9 @@ from pydantic import BaseModel
 
 from story import db, llm, settings as settings_mod
 from story.pipeline import manager
-from . import intake, jobs, planner, storyboard
+from fastapi.responses import FileResponse
+
+from . import imgplan, imgprompts, intake, jobs, planner, providers, storyboard
 
 router = APIRouter(prefix="/api/plans")
 
@@ -50,6 +52,24 @@ async def plans(candidate_id: str = "", project_id: str = ""):
 @router.post("")
 async def new_plan(body: NewPlan):
     return _guard(planner.create_plan, body.candidate_id, body.narrator_name, body.minutes, body.allow_unapproved)
+
+
+@router.get("/providers")
+async def image_providers():
+    return {"providers": [providers.public(m) for m in providers.IMAGE_MODELS], "source": providers.CONFIG_SOURCE, "default": providers.DEFAULT_MODEL}
+
+
+@router.get("/providers/probe")
+async def probe_providers():
+    return await asyncio.to_thread(providers.probe, settings_mod.get(), settings_mod.api_key())
+
+
+@router.get("/previews/{plan_id}/{name}")
+async def preview_file(plan_id: str, name: str):
+    f = imgplan.preview_dir(plan_id) / name
+    if "/" in name or "\\" in name or ".." in name or not f.is_file():
+        raise HTTPException(404, "preview not found")
+    return FileResponse(f)
 
 
 @router.get("/{plan_id}")
@@ -213,9 +233,67 @@ async def patch_asset(asset_id: str, patch: dict):
     for k in ("description", "fixed", "flexible", "period", "fictionalisation", "evidence_note"):
         if k in patch:
             data[k] = patch[k]
+    if "reference_images" in patch:                                  # approved images later scenes can be conditioned on (the gateway takes up to 3)
+        data["reference_images"] = [{"id": str(r.get("id") or "")[:60], "file": str(r.get("file") or "")[:200], "approved": bool(r.get("approved")),
+                                     "note": str(r.get("note") or "")[:200]} for r in (patch["reference_images"] or []) if r.get("id")]
     locked = a["locked"] if "locked" not in patch else (1 if patch["locked"] else 0)
     db.ex("UPDATE assets SET data=?, locked=?, rev=rev+1, updated_at=? WHERE id=?", (db.jdump(data), locked, db.now(), asset_id))
     return planner.get_plan(a["plan_id"])
+
+
+class ImageModels(BaseModel):
+    default: str | None = None
+    by_type: dict | None = None
+    previews_enabled: bool | None = None
+    licence_checks: dict | None = None
+
+
+@router.patch("/{plan_id}/image-models")
+async def image_models(plan_id: str, body: ImageModels):
+    try:
+        return _guard(imgplan.set_image_models, plan_id, {k: v for k, v in body.model_dump().items() if v is not None})
+    except providers.ProviderError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/{plan_id}/compile-prompts")
+async def compile_prompts(plan_id: str):
+    return await asyncio.to_thread(_guard, imgplan.compile_plan, plan_id)
+
+
+@router.get("/scenes/{scene_id}/prompts")
+async def scene_prompts(scene_id: str):
+    sc = _guard(storyboard.get_scene, scene_id)
+    plan = _guard(planner.get_plan, sc["plan_id"])
+    prompts = sc["data"].get("prompts") or {}
+    rep = (plan["validation"] or {}).get("prompts") or {}
+    return {"prompts": prompts, "model": providers.model_for(sc["data"], plan["settings"]),
+            "comparison": imgprompts.comparison(sc, storyboard.get_assets(sc["plan_id"]), prompts) if prompts else None,
+            "issues": [i for i in rep.get("issues", []) if i.get("where") == scene_id], "previews": sc["data"].get("previews", []),
+            "previews_enabled": providers.settings_for(plan["settings"])["previews_enabled"]}
+
+
+class PreviewReq(BaseModel):
+    adapter: str = "qwen"
+    seed: int | None = None
+
+
+@router.post("/scenes/{scene_id}/preview")
+async def scene_preview(scene_id: str, body: PreviewReq):
+    sc = _guard(storyboard.get_scene, scene_id)
+    if body.adapter not in imgprompts.ADAPTERS:
+        raise HTTPException(400, "adapter must be qwen or flux")
+
+    async def step(be, s, progress):
+        progress(0, 1, f"making one {body.adapter} preview image")
+        await imgplan.preview(scene_id, body.adapter, body.seed, s, settings_mod.api_key())
+        progress(1, 1, "done")
+    return _start(sc["plan_id"], "preview", step)
+
+
+@router.patch("/scenes/{scene_id}/previews/{preview_id}")
+async def rate_preview(scene_id: str, preview_id: str, rating: dict):
+    return _guard(imgplan.rate_preview, scene_id, preview_id, rating)
 
 
 @router.post("/{plan_id}/validate")
@@ -223,5 +301,9 @@ async def validate(plan_id: str):
     def both():
         n = planner.validate_plan(plan_id)
         b = storyboard.validate_storyboard(plan_id)
-        return {"narration": n, "storyboard": b, "ok": n["ok"] and b["ok"]}
+        out = {"narration": n, "storyboard": b, "ok": n["ok"] and b["ok"]}
+        if any((sc["data"].get("prompts")) for sc in storyboard.get_scenes(plan_id)):
+            out["prompts"] = imgplan.validate_prompts(plan_id)
+            out["ok"] = out["ok"] and out["prompts"]["ok"]
+        return out
     return await asyncio.to_thread(_guard, both)

@@ -10,7 +10,7 @@ import re
 import uuid
 
 from story import db, llm, settings as settings_mod
-from . import intake, leak, planner, prompts as P, store, svara
+from . import intake, leak, planner, prompts as P, providers, store, svara
 from .scene_schemas import ASPECTS, NEEDS_ASSET, RegistryOut, SceneOut, ScenesOut
 
 MIN_SCENE_S, MAX_SCENE_S = 2.0, 20.0
@@ -371,10 +371,10 @@ def _deep_set(d: dict, path: str, value) -> None:
 def edit_scene(scene_id: str, patch: dict) -> dict:
     """patch keys: dotted paths into the scene record (e.g. "composition.distance", "subject"), plus status, locked."""
     sc = get_scene(scene_id)
-    if sc["locked"] and patch.keys() - {"locked"}:
+    if sc["locked"] and patch.keys() - {"locked", "model"}:
         raise planner.PlanError("this scene is locked; unlock it first")
     data, sets, args = sc["data"], [], []
-    protected = {"prompts", "adapters", "output", "evidence_ids", "continuity"}
+    protected = {"prompts", "adapters", "previews", "output", "evidence_ids", "continuity"}
     for k, v in patch.items():
         if k == "status":
             if v not in ("draft", "edited", "approved", "rejected"):
@@ -386,11 +386,18 @@ def edit_scene(scene_id: str, patch: dict) -> dict:
         elif k == "locked":
             sets.append("locked=?")
             args.append(1 if v else 0)
+        elif k == "model":
+            if v and v not in providers.IMAGE_MODELS:
+                raise planner.PlanError(f"unknown image model '{v}' (use one of: {', '.join(providers.IMAGE_MODELS)})")
+            data["model"] = v or ""
         elif k.split(".")[0] in protected:
             raise planner.PlanError(f"{k} is managed by the planner and cannot be edited here")
         else:
             _deep_set(data, k, v)
-    if set(patch) - {"status", "locked"}:
+    if set(patch) == {"model"}:
+        sets += ["data=?"]                                          # choosing the image model is a production setting, not an edit of the scene
+        args.append(db.jdump(data))
+    elif set(patch) - {"status", "locked"}:
         data["generation_intent"] = _compose_intent(data)
         if data["visual_type"] in NEEDS_ASSET:
             data["feasibility"]["level"] = "needs_asset"
