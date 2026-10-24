@@ -401,3 +401,17 @@ def test_score_later_fills_in_pictures_made_without_scoring(env, monkeypatch, fa
     out = asyncio.run(refs.score_items(plan_id, s=SETTINGS, key="k"))
     assert out["scored"] == len(refs.targets(plan_id)) and refs.state(plan_id)["unscored"] == 0
 
+
+
+def test_recreating_the_characters_after_scenes_exist_reopens_references_and_flags_the_scenes(env):
+    from story2 import api as plans_api
+    plan_id = planned(env)
+    assert refs.targets(plan_id) and not plans_api.orphaned_scenes(planner.get_plan(plan_id) | {"assets": storyboard.get_assets(plan_id), "scenes": storyboard.get_scenes(plan_id)})
+    db.ex("DELETE FROM assets WHERE plan_id=? AND kind!='style'", (plan_id,))                      # the registry is made again: new ids, the scenes still hold the old ones
+    for n, (kind, name) in enumerate([("person", "the analyst"), ("place", "the floor")]):
+        db.ex("INSERT INTO assets(id,plan_id,kind,name,data,updated_at) VALUES(?,?,?,?,?,?)",
+              (f"as-new{n}", plan_id, kind, name, db.jdump({"name": name, "kind": kind, "description": "x", "fixed": [], "fictionalisation": "fictional"}), db.now()))
+    t = refs.targets(plan_id)
+    assert {x["asset"]["id"] for x in t} == {"as-new0", "as-new1"}                                 # references can be made before the scenes are redone
+    full = planner.get_plan(plan_id) | {"assets": storyboard.get_assets(plan_id), "scenes": storyboard.get_scenes(plan_id)}
+    assert plans_api.orphaned_scenes(full) and plans_api.style_info(full)["storyboard_stale"]

@@ -111,7 +111,15 @@ def style_info(p: dict) -> dict:
     asset = next((a for a in p["assets"] if a["kind"] == "style"), None)
     return {**{k: v for k, v in styles.get(sid).items() if k in ("id", "label", "description", "short")},
             "registry_stale": bool(p["assets"]) and (st.get("registry_direction") != styles.DIRECTION or st.get("registry_style") != sid or not asset),
-            "storyboard_stale": bool(p["scenes"]) and (st.get("storyboard_direction") != styles.DIRECTION or st.get("storyboard_style") != sid)}
+            "storyboard_stale": bool(p["scenes"]) and (st.get("storyboard_direction") != styles.DIRECTION or st.get("storyboard_style") != sid or orphaned_scenes(p)),
+            "scenes_orphaned": orphaned_scenes(p)}
+
+
+def orphaned_scenes(p: dict) -> bool:
+    """The characters were created again after the scenes were designed: the scenes point at assets that no longer exist, so they must be redesigned."""
+    ids = {a["id"] for a in p["assets"] if a["kind"] != "style"}
+    used = {x for sc in p["scenes"] for x in (sc["data"].get("continuity") or {}).get("assets", [])}
+    return bool(p["scenes"] and p["assets"] and used and not (used & ids))
 
 
 class VisualStyle(BaseModel):

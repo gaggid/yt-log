@@ -40,6 +40,9 @@ def _s(x) -> str:
 def targets(plan_id: str) -> list[dict]:
     """Assets that need a reference: person, place or prop shown in at least MIN_SCENES scenes, with how often and where they first appear."""
     scenes = storyboard.get_scenes(plan_id)
+    ids = {a["id"] for a in storyboard.get_assets(plan_id) if a["kind"] != "style"}
+    if scenes and not any(x in ids for sc in scenes for x in sc["data"].get("continuity", {}).get("assets", [])):
+        scenes = []                                                 # the characters were made again after these scenes: they point at assets that are gone, so the scenes will be redone
     if not scenes:                                                  # before the storyboard: every recurring-kind asset in the registry
         return [{"asset": a, "scenes": []} for a in storyboard.get_assets(plan_id) if a["kind"] in KINDS]
     use: dict[str, list[dict]] = {}
