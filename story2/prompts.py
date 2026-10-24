@@ -79,7 +79,7 @@ props, and one overall visual style. Do not write scenes.
 
 Return ONLY this JSON object:
 {"assets": [{
-  "name": "short unique name for a role, place or object that is in the story's world, plus 'style'",
+  "name": "short unique name for a role, place or object in the story's world (the single style asset is named exactly 'style')",
   "kind": "person | place | prop | style",
   "appearance": {"one key per slot, every slot filled, see SLOTS below": "a concrete value"},
   "description": "one sentence summary (it is rebuilt from appearance)",

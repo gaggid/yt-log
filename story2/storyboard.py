@@ -134,6 +134,7 @@ async def make_registry(plan_id: str, backend, s: dict | None = None) -> dict:
             if a.kind in ("prop", "person", "place") and (not a.literal or not_drawable(a.kind, a.name, a.appearance, a.evidence_note)):
                 continue                                            # charts, ideas and groups are never listed as one drawable thing
             data = a.model_dump()
+            data["name"] = a.name = re.sub(r"\s+style$", "", a.name.strip(), flags=re.I) or a.name           # the model sometimes tacks the word "style" onto every name
             ap = describe.clean(data.get("appearance"))
             if ap:                                                  # the description the image model reads is composed from the slots, so no slot is dropped
                 data["appearance"] = ap

@@ -80,3 +80,22 @@ def test_a_place_must_say_what_makes_it_recognisable():
     assert not describe.missing("place", ap)
     assert "recognisable by rows of desks with four monitors each" in describe.describe("place", ap).lower()
     assert any(x.startswith("signature: rows of desks") for x in describe.fixed_from("place", ap))
+
+
+def test_the_word_style_the_model_tacks_onto_names_is_removed_and_the_step_times_are_listed(env):
+    from story2 import api as plans_api
+    pid, cid = approved_story(env)
+
+    class Tacky(SlotFake):
+        async def complete(self, messages, max_tokens):
+            if "[TASK:p2_registry]" in messages[0]["content"]:
+                return LLMResult(json.dumps({"assets": [{"name": "the trader style", "kind": "person", "appearance": FULL, "fictionalisation": "generic_reconstruction"},
+                                                        {"name": "the desk style", "kind": "prop", "appearance": {"type": "desk", "colour": "oak"}},
+                                                        {"name": "style", "kind": "style", "description": "x"}]}))
+            return await super().complete(messages, max_tokens)
+    p = written_plan(cid, Tacky())
+    asyncio.run(storyboard.make_registry(p["id"], Tacky()))
+    names = {a["name"] for a in storyboard.get_assets(p["id"])}
+    assert {"the trader", "the desk", "style"} <= names and not any(n.endswith(" style") for n in names)
+    got = asyncio.run(plans_api.plan(p["id"]))
+    assert got["steps_done"]["registry"] > 0 and got["steps_done"]["blueprint"] <= got["steps_done"]["registry"] and "voice" not in got["steps_done"]

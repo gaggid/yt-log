@@ -99,10 +99,20 @@ async def plan(plan_id: str):
     p["content_hash"] = editorial.content_hash(p)
     p["exports"] = export.list_exports(plan_id)
     p["style"] = style_info(p)
+    p["steps_done"] = step_times(plan_id)
     p["cast_gaps"] = [{"id": a["id"], "name": a["name"], "kind": a["kind"], "missing": describe.missing(a["kind"], a["data"].get("appearance")),
                        "hints": describe.hints(a["kind"])} for a in p["assets"] if a["kind"] in ("person", "place", "prop")
                       and describe.missing(a["kind"], a["data"].get("appearance"))]
     return p
+
+
+STEP_EVENTS = ("blueprint", "narration", "registry", "references", "storyboard", "compile_prompts", "fix_repeats", "approved", "export", "voice", "scene_pictures", "graphics", "video", "auto_run")
+
+
+def step_times(plan_id: str) -> dict:
+    """When each step of the screen last finished, from the plan's own log (it survives restarts): {event: seconds since 1970}."""
+    rows = db.q(f"SELECT what, MAX(ts) AS ts FROM plan_revisions WHERE plan_id=? AND what IN ({','.join('?' * len(STEP_EVENTS))}) GROUP BY what", [plan_id, *STEP_EVENTS])
+    return {r["what"]: r["ts"] for r in rows}
 
 
 def style_info(p: dict) -> dict:
