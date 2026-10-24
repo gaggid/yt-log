@@ -8,7 +8,7 @@ from story import llm, settings as settings_mod
 from story.pipeline import manager
 from story2 import jobs, planner
 
-from . import refs, scenes, store, voice
+from . import graphics, refs, scenes, store, voice
 
 router = APIRouter(prefix="/api/media")
 
@@ -42,7 +42,7 @@ async def media_file(plan_id: str, name: str):
 @router.get("/{plan_id}")
 async def media_state(plan_id: str):
     _guard(planner.get_plan, plan_id)
-    return {"voice": voice.state(plan_id), "refs": refs.state(plan_id), "scenes": scenes.state(plan_id)}
+    return {"voice": voice.state(plan_id), "refs": refs.state(plan_id), "scenes": scenes.state(plan_id), "graphics": graphics.state(plan_id)}
 
 
 class VoiceReq(BaseModel):
@@ -196,6 +196,27 @@ async def correct_scene(plan_id: str, scene_id: str, body: CorrectReq):
     return _start(plan_id, "scene picture", work)
 
 
+class GraphicsReq(BaseModel):
+    scene_ids: list[str] | None = None
+    force: bool = False
+
+
+@router.post("/{plan_id}/graphics")
+async def build_graphics(plan_id: str, body: GraphicsReq | None = None):
+    body = body or GraphicsReq()
+    _guard(planner.get_plan, plan_id)
+    return _guard(graphics.build, plan_id, body.scene_ids, body.force)
+
+
+class GraphicsApprove(BaseModel):
+    include_fallbacks: bool = False
+
+
+@router.post("/{plan_id}/graphics/approve-all")
+async def approve_all_graphics(plan_id: str, body: GraphicsApprove | None = None):
+    return _guard(graphics.approve_all, plan_id, (body or GraphicsApprove()).include_fallbacks)
+
+
 class ItemPatch(BaseModel):
     approved: bool | None = None
 
@@ -212,10 +233,13 @@ async def patch_item(item_id: str, body: ItemPatch):
             _guard(refs.approve, item_id, body.approved)
         elif it["kind"] == "scene_image":
             _guard(scenes.approve, item_id, body.approved)
+        elif it["kind"] == "graphic":
+            _guard(graphics.approve, item_id, body.approved)
         else:
             store.approve(item_id, body.approved)
         if it["kind"] == "voice":
             voice.apply_timing(it["plan_id"])
     return {"item": store.get(item_id), "voice": voice.state(it["plan_id"]) if it["kind"] == "voice" else None,
             "refs": refs.state(it["plan_id"]) if it["kind"] == "reference" else None,
-            "scenes": scenes.state(it["plan_id"]) if it["kind"] == "scene_image" else None}
+            "scenes": scenes.state(it["plan_id"]) if it["kind"] == "scene_image" else None,
+            "graphics": graphics.state(it["plan_id"]) if it["kind"] == "graphic" else None}

@@ -138,6 +138,7 @@ The plan page has a **journey bar** (Story, Blueprint, Narration, Characters, Re
 | 10 Approve the plan | Sign off the exact reviewed version (tied to the content hash) | none |
 | 11 Export | Versioned JSON file, schema-checked and leak-checked | none |
 | 12 Make the voice | Svara, one request per part; scenes retimed to real audio; "Approve all voice" | voice |
+| 14 Graphics | Cards for chart, document, screen, map and diagram scenes, built by code from the story's facts (stat, comparison, bar or line chart, timeline, title card); approve per scene | none |
 | 13 Scene pictures | Three-scene trial on both models (plain and from the reference sheets), choose the way, then one picture per scene (16:9, 1344x768); Draw again, Correct this, scores, "Approve the best"; resume after a stop | image + chat (vision) |
 | 13 Go to the first problem | Jumps to the first thing that needs attention | none |
 
