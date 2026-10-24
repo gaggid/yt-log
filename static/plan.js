@@ -82,15 +82,15 @@ window.newPlan = async function (cid, status) {
 
 window.viewPlan = async function (id) {
   const my = route_id;
-  let P = null, PV = {}, MS = null, RS = null, sig = '', seenRun = false;
+  let P = null, PV = {}, MS = null, RS = null, SS = null, PF = 'open', sig = '', seenRun = false;
   const app = $('#app');
   const busyJob = () => P && P.job && P.job.state === 'running';
   const editing = () => { const a = document.activeElement; return a && a.closest && a.closest('#plan') && ['TEXTAREA', 'INPUT', 'SELECT'].includes(a.tagName); };
 
   async function load(force) {
     const [p, m] = await Promise.all([api('/plans/' + id), api('/media/' + id).catch(() => null)]);
-    MS = m && m.voice; RS = m && m.refs;
-    const s = JSON.stringify([RS && [RS.approved, RS.skipped, RS.without_pictures, RS.assets.map(r => r.candidates.map(a => a.id + a.status + a.approved + a.current + (a.score ? a.score.total : '')))], MS && [MS.have, MS.approved, MS.export.current, MS.segments.map(r => r.attempts.map(a => a.id + a.status + a.approved + a.current))], p.cast_gaps && p.cast_gaps.map(g => g.id + g.missing.join()), p.settings.visual_style, p.style && [p.style.registry_stale, p.style.storyboard_stale], p.rev, p.job.state, p.job.done, p.job.label, p.segments.map(x => x.rev), p.scenes.map(x => [x.rev, x.stale, x.start_s, x.status, x.locked]), p.assets.map(x => x.rev), p.validation ? 1 : 0, p.narrator.name, p.content_hash, p.approval && p.approval.state, p.exports.length, ((p.validation || {}).scores || {}).computed_at]);
+    MS = m && m.voice; RS = m && m.refs; SS = m && m.scenes;
+    const s = JSON.stringify([SS && [SS.approved, SS.needs_choice, SS.needs_picture, SS.settings, SS.trial, SS.scenes.map(r => r.candidates.map(a => a.id + a.status + a.approved + a.current + (a.score ? a.score.total : '')))], RS && [RS.approved, RS.skipped, RS.without_pictures, RS.assets.map(r => r.candidates.map(a => a.id + a.status + a.approved + a.current + (a.score ? a.score.total : '')))], MS && [MS.have, MS.approved, MS.export.current, MS.segments.map(r => r.attempts.map(a => a.id + a.status + a.approved + a.current))], p.cast_gaps && p.cast_gaps.map(g => g.id + g.missing.join()), p.settings.visual_style, p.style && [p.style.registry_stale, p.style.storyboard_stale], p.rev, p.job.state, p.job.done, p.job.label, p.segments.map(x => x.rev), p.scenes.map(x => [x.rev, x.stale, x.start_s, x.status, x.locked]), p.assets.map(x => x.rev), p.validation ? 1 : 0, p.narrator.name, p.content_hash, p.approval && p.approval.state, p.exports.length, ((p.validation || {}).scores || {}).computed_at]);
     const changed = s !== sig; P = p;
     if (changed || force) { sig = s; if (!editing() || force) render(); }
     if (p.job.state === 'running') seenRun = true;
@@ -200,6 +200,30 @@ Be concrete: colours, materials, numbers. Leave empty to skip.`); if (v === null
       if (r) { await load(true); toast(`Approved ${r.approved}.` + (r.left.length ? ` ${r.left.length} left for you: ${r.left.map(x => x.asset + ' (' + x.why + ')').join('; ')}` : '')); }
     },
     async refsOne(b, aid) { await run(b, `/media/${id}/references`, {asset_ids: [aid], only_missing: false, candidates: RS.default_candidates}); toast('Drawing new pictures for this one.'); },
+    async picsTrial(b) {
+      if (!await confirmDlg('Run the three-scene trial?', `Three scenes are each drawn on Qwen and on FLUX, plain and (where the scene has approved reference sheets) from the sheets: up to 12 pictures, about ${hd(3 * 2 * (SS.seconds_per_picture['qwen-image-2.1'] + SS.seconds_per_picture['flux2-klein-9b']))}. The model server handles one job at a time, so other steps wait. Nothing from this trial is approved for you.`, 'Start')) return;
+      await run(b, `/media/${id}/scenes/trial`, {});
+    },
+    async picsAll(b) {
+      if (!await confirmDlg('Draw the scene pictures?', `${SS.needs_picture} scene(s) without a current picture, ${SS.settings.candidates} picture(s) each, about ${hd(SS.eta_missing_s)}, ${SS.settings.mode === 'generate' ? 'plain' : SS.settings.mode === 'edit' ? 'from the reference sheets' : 'from the sheets where a scene has them'}. Approved scenes are never redrawn. Finished pictures are saved even if you stop, and pressing the button again continues.`, 'Start')) return;
+      await run(b, `/media/${id}/scenes`, {only_missing: true});
+    },
+    async picsOne(b, sid) { await run(b, `/media/${id}/scenes`, {scene_ids: [sid], only_missing: false, candidates: 1}); toast('Drawing another picture of this scene.'); },
+    async picsCorrect(b, sid, iid) {
+      const change = prompt('What should change in this picture? (one clear change)'); if (!change || !change.trim()) return;
+      const keep = prompt('What must stay exactly the same? (separate with semicolons)', 'the people, the setting, the composition and the style'); if (keep === null) return;
+      await run(b, `/media/${id}/scenes/${sid}/correct`, {change, keep: keep.split(';').map(x => x.trim()).filter(Boolean), item_id: iid}); toast('Correcting the picture.');
+    },
+    async picsScore(b) { await run(b, `/media/${id}/scenes/score`, {}); toast('Checking the pictures.'); },
+    async picsApproveBest(b) {
+      if (!await confirmDlg('Approve the best scene pictures?', `For each of the ${SS.bulk_ready} open scene(s) whose best picture scores ${SS.min_score}+ with no hard problem, that picture is approved. The others are left for you. You can unapprove any of them afterwards.`, 'Approve')) return;
+      const r = await act(b, () => api(`/media/${id}/scenes/approve-best`, {method: 'POST', json: {min_score: SS.min_score}}));
+      if (r) { await load(true); toast(`Approved ${r.approved}.` + (r.left.length ? ` ${r.left.length} left for you.` : '')); }
+    },
+    async picsApprove(iid, on) { await act(null, () => api(`/media/item/${iid}`, {method: 'PATCH', json: {approved: on}}), on ? 'Picture approved' : 'Approval removed'); await load(true); },
+    async picsSet(patch) { await act(null, () => api(`/media/${id}/scenes/settings`, {method: 'POST', json: patch}), 'Saved'); await load(true); },
+    async picsChoose(model, mode) { await act(null, () => api(`/media/${id}/scenes/choose`, {method: 'POST', json: {model, mode}}), 'Chosen: used for the full run'); await load(true); },
+    picsFilter(v) { PF = v; render(); },
     async refsApprove(iid, on) { await act(null, () => api(`/media/item/${iid}`, {method: 'PATCH', json: {approved: on}}), on ? 'Reference approved; scene prompts updated' : 'Approval removed; scene prompts updated'); await load(true); },
     async refsSkip(aid, on) { await act(null, () => api(`/media/${id}/references/skip`, {method: 'POST', json: {asset_id: aid, skip: on}}), on ? 'Skipped: no reference for this one' : 'Back on the list'); await load(true); },
     async voiceApprove(iid, on) { await act(null, () => api(`/media/item/${iid}`, {method: 'PATCH', json: {approved: on}}), on ? 'Recording approved' : 'Approval removed'); await load(true); },
@@ -269,6 +293,7 @@ Be concrete: colours, materials, numbers. Leave empty to skip.`); if (v === null
     const sc = v.scores || null, so = v.signoff || null, reviewed = !!(sc && sc.content_hash === p.content_hash);
     const voiceDone = !!(MS && MS.total && MS.have === MS.total), exportReady = !!(MS && MS.export.exists && MS.export.current);
     const refsDone = !!(RS && (RS.done || RS.total === 0)), refsOn = !!(RS && RS.total);
+    const picsOn = !!(SS && SS.ready && SS.total), picsDone = !!(SS && SS.done);
     const sty = p.style || {}, charsDone = p.assets.length > 0 && !sty.registry_stale, sbStale = !!(p.scenes.length && sty.storyboard_stale);
     const voiceToApprove = MS ? MS.segments.map(r => r.attempts.find(a => a.id === r.chosen)).filter(a => a && !a.approved && !(a.flags || []).length) : [];
     const ap = p.approval || {state: 'draft'}, approved = ap.state === 'approved', lastExp = (p.exports || [])[0], exported = !!(lastExp && lastExp.content_hash === p.content_hash);
@@ -290,7 +315,7 @@ Be concrete: colours, materials, numbers. Leave empty to skip.`); if (v === null
     if (stale) warns.push(`${stale} scene(s) follow narration you changed: look at them, then approve.`);
     if (nRepeat) warns.push(`${nRepeat} scene(s) repeat the previous camera: use “Fix camera repeats”.`);
     if (p.scenes.length && !segNoScene.length && (!compiled || promptStale)) warns.push(promptStale ? 'Some scenes changed after their image prompts were written: press “Write image prompts”.' : 'Image prompts are not written yet: press “Write image prompts”.');
-    return {sty, charsDone, sbStale, refsDone, refsOn, voiceToApprove, voiceDone, exportReady, sc, so, reviewed, ap, approved, lastExp, exported, compiled, promptStale, j, running, v, vs, issues, missingBeats, segNoScene, errors, nRepeat, stale, checked, blocks, warns};
+    return {picsOn, picsDone, sty, charsDone, sbStale, refsDone, refsOn, voiceToApprove, voiceDone, exportReady, sc, so, reviewed, ap, approved, lastExp, exported, compiled, promptStale, j, running, v, vs, issues, missingBeats, segNoScene, errors, nRepeat, stale, checked, blocks, warns};
   }
 
   function render() {
@@ -298,10 +323,10 @@ Be concrete: colours, materials, numbers. Leave empty to skip.`); if (v === null
     const imSet = {default: 'qwen-image-2.1', by_type: {}, previews_enabled: false, ...(p.settings.image_models || {})};
     imSet.licence_checks = {'qwen-image-2.1': true, 'flux2-klein-9b': true, ...(imSet.licence_checks || {})};
     const modelFor = d => d.model || (imSet.by_type || {})[d.visual_type] || imSet.default;
-    const a = analyse(), {sty, charsDone, sbStale, refsDone, refsOn, voiceToApprove, voiceDone, exportReady, sc, so, reviewed, ap, approved, lastExp, exported, compiled, promptStale, j, running, v, vs, issues, missingBeats, segNoScene, errors, nRepeat, checked, blocks, warns} = a;
+    const a = analyse(), {picsOn, picsDone, sty, charsDone, sbStale, refsDone, refsOn, voiceToApprove, voiceDone, exportReady, sc, so, reviewed, ap, approved, lastExp, exported, compiled, promptStale, j, running, v, vs, issues, missingBeats, segNoScene, errors, nRepeat, checked, blocks, warns} = a;
     const dis = running ? 'disabled' : '';
     const steps = [['Story', true], ['Blueprint', !!p.blueprint], ['Narration', p.segments.length && p.blueprint && !missingBeats.length], ['Characters', charsDone], ['References', refsDone], ['Storyboard', p.scenes.length && !segNoScene.length && !sbStale], ['Image prompts', compiled && !promptStale],
-      ['Checked', checked && !errors.length], ['Reviewed', reviewed], ['Approved', approved], ['Exported', exported], ['Voice', voiceDone]];
+      ['Checked', checked && !errors.length], ['Reviewed', reviewed], ['Approved', approved], ['Exported', exported], ['Voice', voiceDone], ...(picsOn ? [['Scene pictures', picsDone]] : [])];
     const firstOpen = steps.findIndex(s => !s[1]);
     const sceneAt = wid => p.scenes.find(x => x.id === wid) || null;
     const groups = []; for (const i of issues) { const k = i.part + '|' + i.kind + '|' + (i.kind === 'repeat' ? '' : i.text); let g = groups.find(x => x.k === k); if (!g) groups.push(g = {k, i, where: []}); g.where.push(i.where); }
@@ -314,7 +339,7 @@ Be concrete: colours, materials, numbers. Leave empty to skip.`); if (v === null
     // side panel: one row per action, in the order you do them
     const act_ = (n, label, onclick, {done, ok = true, why = '', next = false, cls = ''}) => `<div class="act ${done ? 'done' : next ? 'next' : ''}">
         <div class="an">${done ? '✓' : n}</div><div style="flex:1;min-width:0"><button class="${next ? 'primary' : cls}" style="width:100%" ${ok && !running ? '' : 'disabled'} onclick="${onclick}">${label}</button>${!ok && why ? `<div class="small mute mt-s">${esc(why)}</div>` : ''}</div></div>`;
-    const nextKey = !p.blueprint ? 'blueprint' : missingBeats.length ? 'narration' : !charsDone ? 'characters' : (refsOn && !refsDone) ? 'refs' : (segNoScene.length || !p.scenes.length || sbStale) ? 'storyboard' : (!compiled || promptStale) ? 'prompts' : !checked ? 'check' : nRepeat ? 'repeats' : !reviewed ? 'review' : !approved ? (so && so.blockers.length ? 'blocked' : 'approve') : !exported ? 'export' : !voiceDone ? 'voice' : 'done';
+    const nextKey = !p.blueprint ? 'blueprint' : missingBeats.length ? 'narration' : !charsDone ? 'characters' : (refsOn && !refsDone) ? 'refs' : (segNoScene.length || !p.scenes.length || sbStale) ? 'storyboard' : (!compiled || promptStale) ? 'prompts' : !checked ? 'check' : nRepeat ? 'repeats' : !reviewed ? 'review' : !approved ? (so && so.blockers.length ? 'blocked' : 'approve') : !exported ? 'export' : !voiceDone ? 'voice' : (picsOn && !picsDone) ? 'pictures' : 'done';
     const side = `<aside class="plan-side"><div class="card pad">
         ${running ? `<div class="jobbox"><b>${esc(j.kind)}</b> <span class="mute small">${esc(j.label)}</span>${bar(j.total ? 100 * j.done / j.total : 5)}<div class="small mute">${hd(j.elapsed_s)}${j.eta_s ? ' · about ' + hd(j.eta_s) + ' left' : ''}</div><button class="small mt-s" onclick="_plan.cancel(this)">Stop after this step</button><div class="small mute mt-s">You can leave the page; finished parts are saved.</div></div>` : ''}
         <div class="small mute" style="text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Do these in order</div>
@@ -330,19 +355,20 @@ Be concrete: colours, materials, numbers. Leave empty to skip.`); if (v === null
         ${act_(10, approved ? 'Approved' : ap.state === 'changed' ? 'Approve the changed plan' : 'Approve the plan', '_plan.approve(this)', {done: approved, ok: reviewed, why: 'Review and score first.', next: nextKey === 'approve'})}
         ${act_(11, exported ? 'Export again' : 'Export for the next modules', '_plan.export(this)', {done: exported, ok: p.scenes.length > 0 && compiled, why: 'Write the image prompts first.', next: nextKey === 'export'})}
         ${act_(12, voiceDone ? 'Make the voice again' : MS && MS.have ? 'Make the missing voice' : 'Make the voice', '_plan.voiceAll(this)', {done: voiceDone, ok: exportReady, why: exported ? 'Export again first.' : 'Export first.', next: nextKey === 'voice'})}
-        ${act_(13, 'Go to the first problem', '_plan.firstProblem()', {done: false, ok: issues.some(i => i.level === 'error') || a.stale > 0, why: 'No errors to fix.', cls: 'small'})}
+        ${act_(13, picsDone ? 'Scene pictures: all approved' : SS && SS.settings.chosen ? (SS.needs_choice && !SS.needs_picture ? 'Approve the best scene pictures' : 'Draw the scene pictures') : 'Run the three-scene picture trial', SS && SS.settings.chosen ? (SS.needs_choice && !SS.needs_picture ? '_plan.picsApproveBest(this)' : '_plan.picsAll(this)') : '_plan.picsTrial(this)', {done: picsDone, ok: picsOn, why: 'Write the image prompts first.', next: nextKey === 'pictures'})}
+        ${act_(14, 'Go to the first problem', '_plan.firstProblem()', {done: false, ok: issues.some(i => i.level === 'error') || a.stale > 0, why: 'No errors to fix.', cls: 'small'})}
         <div class="small mute" style="text-transform:uppercase;letter-spacing:.04em;margin:12px 0 6px">When you are happy</div>
         <button class="small" style="width:100%" ${p.segments.length && !running ? '' : 'disabled'} onclick="_plan.approveAll(this,'narration')">Approve all narration (${segApproved}/${p.segments.length})</button>
         <button class="small mt-s" style="width:100%" ${p.scenes.length && !running ? '' : 'disabled'} onclick="_plan.approveAll(this,'scenes')">Approve all scenes (${scApproved}/${p.scenes.length})</button>
         <div class="small mute mt-s">Approved and locked parts are never overwritten when something else is regenerated.</div>
         <div class="small mute" style="text-transform:uppercase;letter-spacing:.04em;margin:12px 0 6px">Jump to</div>
-        <div class="row small" style="gap:4px 12px">${[['sec-top', 'Top'], p.blueprint && ['sec-blueprint', 'Blueprint'], p.segments.length && ['sec-narration', 'Narration'], p.segments.length && ['sec-style', 'Visual style'], p.segments.length && ['sec-assets', 'Characters and places'], refsOn && ['sec-refs', 'Reference pictures'], p.scenes.length && ['sec-models', 'Image models'], p.scenes.length && ['sec-storyboard', 'Storyboard'], p.scenes.length && ['sec-review', 'Review and export'], MS && ['sec-voice', 'Voice'], (groups.length || v.ok != null) && ['sec-results', 'Check results']].filter(Boolean).map(([id_, l]) => `<a href="#" onclick="_plan.go('${id_}');return false">${l}</a>`).join('')}</div>
+        <div class="row small" style="gap:4px 12px">${[['sec-top', 'Top'], p.blueprint && ['sec-blueprint', 'Blueprint'], p.segments.length && ['sec-narration', 'Narration'], p.segments.length && ['sec-style', 'Visual style'], p.segments.length && ['sec-assets', 'Characters and places'], refsOn && ['sec-refs', 'Reference pictures'], p.scenes.length && ['sec-models', 'Image models'], p.scenes.length && ['sec-storyboard', 'Storyboard'], p.scenes.length && ['sec-review', 'Review and export'], MS && ['sec-voice', 'Voice'], picsOn && ['sec-pictures', 'Scene pictures'], (groups.length || v.ok != null) && ['sec-results', 'Check results']].filter(Boolean).map(([id_, l]) => `<a href="#" onclick="_plan.go('${id_}');return false">${l}</a>`).join('')}</div>
       </div></aside>`;
 
     const banner = blocks.length
       ? `<div class="banner block"><b>Stopping you from moving on</b><ul class="tight">${blocks.map(b => `<li>${esc(b)}</li>`).join('')}</ul>${warns.length ? `<div class="small mt-s">Also: ${warns.map(esc).join(' · ')}</div>` : ''}</div>`
       : warns.length ? `<div class="banner warn"><b>Nothing blocks you, but note:</b><ul class="tight">${warns.map(w => `<li>${esc(w)}</li>`).join('')}</ul></div>`
-      : nextKey === 'done' ? `<div class="banner good"><b>Done so far.</b> Export v${lastExp.rev} is saved and the voice is made (${mmss(MS.real_s)} of real speech). Reference pictures are approved (${RS && RS.total ? RS.approved + ' approved, ' + RS.skipped + ' skipped' : 'none needed'}). Scene pictures and the video are the next batches; export again later to include the references in the file. <a href="/api/plans/exports/${esc(p.id)}/${esc(lastExp.file)}" download>Download the export</a>. Listen and look below and approve what you like.</div>`
+      : nextKey === 'done' ? `<div class="banner good"><b>Done so far.</b> Export v${lastExp.rev} is saved and the voice is made (${mmss(MS.real_s)} of real speech). Reference pictures are approved (${RS && RS.total ? RS.approved + ' approved, ' + RS.skipped + ' skipped' : 'none needed'}). ${picsOn ? 'Scene pictures are approved (' + SS.approved + ' of ' + SS.total + '). ' : ''}Built graphics and the draft video are the next batches; export again later to include the references in the file. <a href="/api/plans/exports/${esc(p.id)}/${esc(lastExp.file)}" download>Download the export</a>. Listen and look below and approve what you like.</div>`
       : `<div class="banner good"><b>Nothing is blocking you.</b> Narration, storyboard and image prompts are consistent and checked.</div>`;
     const NEXT = {blueprint: ['Plan the story', 'Decide how this story is told.', '_plan.blueprint(this)'], narration: ['Write the narration', 'Write the spoken narration for each part.', '_plan.narration(this,' + !!(missingBeats.length && p.segments.length) + ')'],
       characters: ['Create characters and places', `List the people, places and objects the story needs, drawn to fit the chosen style (${sty.label || 'style'}). Then draw each one once so they look the same in every scene.`, '_plan.registry(this)'],
@@ -352,6 +378,10 @@ Be concrete: colours, materials, numbers. Leave empty to skip.`); if (v === null
       review: ['Review and score', 'See twelve scores with reasons, and what stands between this plan and approval.', '_plan.review(this)'], approve: ['Approve the plan', 'Sign off the exact version you reviewed.', '_plan.approve(this)'],
       export: ['Export', 'Save the file the image, voice and video modules will read.', '_plan.export(this)'],
       voice: ['Make the voice', 'Svara reads each narration part; scenes are re-timed to the real audio. About ' + (MS ? hd(MS.eta_missing_s) : 'a while') + '.', '_plan.voiceAll(this)'],
+      pictures: !SS ? ['Scene pictures', '', "_plan.go('sec-pictures')"] : !SS.settings.chosen && !SS.trial_done ? ['Run the three-scene picture trial', `Draw an opening, a character scene and a scene with quoted text on both models, plain and from the reference sheets (up to 12 pictures, about ${hd(3 * 2 * (SS.seconds_per_picture['qwen-image-2.1'] + SS.seconds_per_picture['flux2-klein-9b']))}). You pick the way that keeps the people the same.`, '_plan.picsTrial(this)']
+        : !SS.settings.chosen ? ['Choose how to draw', 'Look at the trial pictures, then press the “Use ... for all scenes” button for the way that looks best.', "_plan.go('sec-pictures')"]
+        : SS.needs_picture ? ['Draw the scene pictures', `${SS.needs_picture} scene(s) have no picture yet (about ${hd(SS.eta_missing_s)} with ${SS.models[SS.settings.model] || 'the plan model'}). Finished pictures are saved even if you stop.`, '_plan.picsAll(this)']
+        : ['Approve the scene pictures', `${SS.needs_choice} scene(s) have pictures waiting for your choice. “Approve the best” takes the best one of each that scores ${SS.min_score}+ without a hard problem.`, '_plan.picsApproveBest(this)'],
       blocked: ['See what blocks approval', `${so ? so.blockers.length : 0} thing(s) stand between this plan and approval: ${so ? so.blockers.map(b => b.text).join(' ') : ''}`, "_plan.go('sec-review')"]};
     const nx = NEXT[nextKey];
     const nextBar = nx ? `<div class="nextbar"><span><b>Next:</b> ${esc(nx[1])}</span><button class="primary" ${running ? 'disabled' : ''} onclick="${nx[2]}">${esc(nx[0])}</button></div>` : '';
@@ -421,6 +451,40 @@ Be concrete: colours, materials, numbers. Leave empty to skip.`); if (v === null
             ${c.score ? `<div class="small mute mt-s" title="measured ${c.score.measured}${c.score.looked_at != null ? ', looked at ' + c.score.looked_at : ''}">${c.score.flags.length ? c.score.flags.slice(0, 3).map(f => '⚠ ' + esc(f)).join('<br>') : 'No problems found.'}${c.score.note ? `<br>${esc(c.score.note)}` : ''}</div>` : ''}</div>`).join('')}</div>`}
           <details class="mt-s"><summary class="small mute">The prompt sent to the model</summary><div class="small">${esc(r.prompt)}${r.negative_prompt ? `<div class="mute mt-s">Negative: ${esc(r.negative_prompt)}</div>` : ''}</div></details></div>`; }).join('')}
         <div class="mute small mt-s">Look at each picture at full size (click it). Approve the one whose look you want to see throughout the video; if none is right, press “Draw more” (new seeds). Approving updates the scene prompts at once; your approved plan stays approved.</div></div>` : ''}
+
+      ${picsOn ? (() => {
+        const st = SS.settings, M = SS.models, modeName = m => m === 'edit' ? 'from the reference sheets' : m === 'correct' ? 'corrected' : 'plain';
+        const rows = SS.scenes.filter(r => PF === 'all' || (PF === 'open' ? r.status !== 'approved' : PF === 'choice' ? r.status === 'needs_choice' : PF === 'none' ? r.status === 'needs_picture' : r.status === 'approved'));
+        const thumb = (c, r, w) => `<div style="width:${w}px"><a href="${esc(c.url)}" target="_blank"><img src="${esc(c.url)}" loading="lazy" style="width:${w}px;border-radius:6px;border:${c.approved ? '3px solid var(--good,#2a9d5c)' : '1px solid var(--line,#ccc)'};${c.current ? '' : 'opacity:.5'}"></a>
+            <div class="row small mt-s"><span class="mute">#${c.attempt} · ${esc(M[c.model] || c.model)} · ${esc(modeName(c.mode))}${c.current ? '' : ' · old'}</span>${c.score ? badge(c.score.hard ? 'error' : c.score.total >= SS.min_score ? 'good' : 'queued', (r.best === c.id ? '★ ' : '') + c.score.total) : ''}<span class="sp"></span><button class="small" ${dis} onclick="_plan.picsApprove('${c.id}',${!c.approved})">${c.approved ? 'Unapprove' : 'Approve'}</button><button class="small" ${dis} title="Change one thing and keep the rest" onclick="_plan.picsCorrect(this,'${r.id}','${c.id}')">Correct this</button></div>
+            ${c.change ? `<div class="small mute mt-s">Correction: ${esc(c.change)}</div>` : ''}
+            ${c.score ? `<div class="small mute mt-s" title="measured ${c.score.measured}${c.score.looked_at != null ? ', looked at ' + c.score.looked_at : ''}">${c.score.flags.length ? c.score.flags.slice(0, 3).map(f => '⚠ ' + esc(f)).join('<br>') : 'No problems found.'}${c.score.note ? `<br>${esc(c.score.note)}` : ''}</div>` : ''}</div>`;
+        const trialRows = SS.scenes.filter(r => SS.trial.includes(r.id));
+        const ways = [['qwen-image-2.1', 'generate'], ['qwen-image-2.1', 'edit'], ['flux2-klein-9b', 'generate'], ['flux2-klein-9b', 'edit']];
+        return `<div class="card pad mt" id="sec-pictures"><div class="row"><h3 style="margin:0">Scene pictures</h3>${picsDone ? badge('good', 'all approved') : badge('queued', SS.approved + ' of ' + SS.total + ' approved')}<span class="sp"></span>
+          ${SS.unscored ? `<button class="small" ${dis} onclick="_plan.picsScore(this)">Score ${SS.unscored} picture(s)</button>` : ''}
+          <button class="small" ${dis || !SS.bulk_ready ? 'disabled' : ''} title="Approves the best picture of every open scene that scores ${SS.min_score} or more and has no hard problem" onclick="_plan.picsApproveBest(this)">Approve the best (${SS.bulk_ready})</button>
+          <button class="small primary" ${dis || !st.chosen || !SS.needs_picture ? 'disabled' : ''} title="${st.chosen ? '' : 'Run the trial and choose how to draw first'}" onclick="_plan.picsAll(this)">${SS.needs_picture ? `Draw the ${SS.needs_picture} missing picture(s)` : 'Nothing missing'}</button></div>
+        <div class="mute small mt-s">One picture per scene, 16:9, drawn from the scene's image prompt. First run the <b>three-scene trial</b>: an opening, a character scene and a scene with quoted text, drawn on both models, plain and (where the scene has approved reference sheets) <b>from the sheets</b>. Look at them side by side and choose the way that keeps the people the same and the look right; that choice is used for every scene. Each picture is measured and looked at by the chat model (extra people or objects, text that differs from the quoted text, wrong hands, a character that does not match). Nothing is approved without your say, except “Approve the best”, which skips anything with a hard problem. Your approved plan stays approved.</div>
+        <div class="row mt-s" style="gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <label class="f">Model<select ${dis} onchange="_plan.picsSet({model: this.value || null})"><option value="" ${st.model ? '' : 'selected'}>Each scene's own (plan default)</option>${Object.entries(M).map(([k, v]) => `<option value="${k}" ${st.model === k ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select></label>
+          <label class="f">How<select ${dis} onchange="_plan.picsSet({mode: this.value})">${[['generate', 'Plain: the full prompt only'], ['edit', 'From the reference sheets'], ['auto', 'Sheets where a scene has them']].map(([k, v]) => `<option value="${k}" ${st.mode === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+          <label class="f">Pictures per scene<select ${dis} onchange="_plan.picsSet({candidates: +this.value})">${[1, 2, 3, 4].map(n => `<option ${st.candidates === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+          <button class="small" ${dis} onclick="_plan.picsTrial(this)">${SS.trial.length ? 'Run the trial again' : 'Run the three-scene trial'}</button>
+          <span class="small mute">${st.chosen ? `<b>Chosen:</b> ${esc(M[st.model] || 'plan model')}, ${esc(modeName(st.mode))}.` : 'No way chosen yet.'} About ${hd(SS.seconds_per_picture['qwen-image-2.1'])} per picture on Qwen, ${hd(SS.seconds_per_picture['flux2-klein-9b'])} on FLUX.</span></div>
+        ${trialRows.length ? `<div class="mt"><b>Trial</b> <span class="mute small">${SS.trial_done ? 'finished' : 'waiting for pictures'}</span>
+          <div class="row mt-s" style="gap:6px;flex-wrap:wrap">${ways.map(([m, mo]) => `<button class="small ${st.chosen && st.model === m && st.mode === mo ? 'primary' : ''}" ${dis || !SS.trial_done ? 'disabled' : ''} onclick="_plan.picsChoose('${m}','${mo}')">Use ${esc(M[m])}, ${esc(modeName(mo))}, for all scenes</button>`).join('')}</div>
+          ${trialRows.map(r => `<div class="seg mt-s" style="padding:10px 14px"><div class="row"><b>${mmss(r.start_s)}</b><span class="small">${esc(r.subject)}</span>${r.references.length ? badge('info', r.references.length + ' reference sheet(s)') : ''}${r.quoted.length ? badge('info', 'text: ' + r.quoted.join(' / ')) : ''}</div>
+            <div class="row mt-s" style="align-items:flex-start;gap:12px;flex-wrap:wrap">${r.candidates.filter(c => c.trial && c.status === 'done').map(c => thumb(c, r, 300)).join('') || '<span class="mute small">no trial pictures yet</span>'}</div></div>`).join('')}</div>` : ''}
+        <div class="row mt" style="gap:10px"><b>Scenes</b><label class="small">Show <select onchange="_plan.picsFilter(this.value)">${[['open', 'not approved yet'], ['none', 'need a picture'], ['choice', 'need a choice'], ['done', 'approved'], ['all', 'all']].map(([k, v]) => `<option value="${k}" ${PF === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label><span class="small mute">${SS.needs_picture} need a picture · ${SS.needs_choice} need a choice · ${SS.approved} approved</span></div>
+        ${rows.map(r => { const shown = r.candidates.filter(c => c.status === 'done'); return `<div class="seg ${r.approved_current ? 'approved' : ''}" style="padding:10px 14px"><div class="row"><b>${mmss(r.start_s)}</b><span class="mute small">${esc(r.visual_type || '')} · ${Math.round(r.duration_s)}s · ${esc(M[r.model] || r.model)} · ${esc(modeName(r.mode))}</span>${r.status === 'approved' ? badge('approved', 'approved') : r.status === 'needs_choice' ? badge('info', 'choose one') : badge('queued', 'no picture yet')}${r.references.length ? badge('info', r.references.length + ' sheet(s)') : ''}${r.quoted.length ? badge('info', 'text: ' + r.quoted.join(' / ')) : ''}<span class="sp"></span>
+            <button class="small" ${dis} onclick="_plan.picsOne(this,'${r.id}')">${shown.length ? 'Draw again' : 'Draw'}</button></div>
+          <div class="small mt-s">${esc(r.subject)}</div>
+          ${r.candidates.filter(c => c.status === 'failed').slice(-1).map(c => `<div class="iss error">✗ Last try failed: ${esc(c.error)}</div>`).join('')}
+          ${shown.some(c => !c.current) ? `<div class="iss warn">⚠ ${shown.filter(c => !c.current).length} picture(s) were made before this scene or a reference changed and are marked old.</div>` : ''}
+          ${shown.length ? `<div class="row mt-s" style="align-items:flex-start;gap:12px;flex-wrap:wrap">${shown.map(c => thumb(c, r, 300)).join('')}</div>` : ''}
+          <details class="mt-s"><summary class="small mute">The prompt sent to the model</summary><div class="small">${esc(r.prompt)}</div></details></div>`; }).join('') || '<div class="mute small mt-s">Nothing in this view.</div>'}
+        <div class="mute small mt-s">Click a picture to see it at full size. “Draw again” makes one more picture with a new seed and keeps the others. “Correct this” edits the picture: say what to change and what must stay. An approved picture is never replaced by “Draw the missing pictures”.</div></div>`; })() : ''}
 
       ${p.scenes.length ? `<div class="mt" id="sec-storyboard"><div class="row"><h3 style="margin:0">Storyboard</h3><span class="mute">${p.scenes.length} scenes · ${mmss(total)}</span></div>
         <div class="strip" title="Each block is a scene; width is how long it is on screen">${ordered.map(s => `<i style="width:${100 * s.duration_s / total}%;background:${vtColor(s.data.visual_type)}" onclick="_plan.jump('${s.id}')" title="${mmss(s.start_s)} ${VT_LABEL[s.data.visual_type]}: ${esc(s.data.subject)}"></i>`).join('')}</div>

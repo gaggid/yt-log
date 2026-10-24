@@ -21,7 +21,11 @@ DIMS = [("subject_matches", "shows what the brief describes"), ("whole_subject_v
         ("anatomy_clean", "clean shapes (no extra limbs, melted parts, odd patterns)"), ("style_fit", "matches the style")]
 MINOR = ("slightly", "minor", "a bit", "somewhat", "subtle", "marginal")
 SHEET_DIM = ("consistent_poses", "the same subject shown in at least three clearly different poses or views, identical in look in each")
-HARD = ("blank", "cut by the frame", "text or marks")
+HARD = ("blank", "cut by the frame", "text or marks", "differs from the quoted text", "does not match its description", "does not match its reference")
+SCENE_DIMS = [("subject_matches", "shows the subject and the action described"), ("setting_matches", "setting, period and lighting match the brief"),
+              ("characters_match", "every person looks like the description given (age, build, hair, clothes)"),
+              ("no_extra_things", "no people or objects that the brief does not mention"), ("anatomy_clean", "hands, faces and bodies are correct (no extra limbs or fingers, no melted parts)"),
+              ("composition_ok", "composition as briefed, one clear focal point"), ("style_fit", "matches the style")]
 
 
 def _bg(im: Image.Image) -> tuple[int, int, int]:
@@ -97,23 +101,30 @@ def _brief(row: dict, style: str) -> str:
 
 
 def dims_for(kind: str) -> list[tuple[str, str]]:
+    if kind == "scene":
+        return SCENE_DIMS
     return DIMS + [SHEET_DIM] if kind in ("person", "prop", "narrator") else DIMS
 
 
 def _prompt(brief: str, kind: str = "place") -> str:
     keys = ", ".join(f'"{k}": 0-10' for k, _ in dims_for(kind))
     guide = "; ".join(f"{k} = {d}" for k, d in dims_for(kind))
-    return (f"You are a strict art director checking a reference picture for an animated explainer video.\nBRIEF: {brief}\n\n"
+    extra = ""
+    if kind == "scene":
+        extra = ', "text_read": "all readable text exactly as written in the picture, or an empty string", "extras": ["people or objects visible that the brief does not mention"]'
+    what = "finished scene picture" if kind == "scene" else "reference picture"
+    return (f"You are a strict art director checking a {what} for an illustrated story video.\nBRIEF: {brief}\n\n"
             f"Score each point from 0 to 10 ({guide}). Be harsh: 10 means flawless, a good usable picture is 7, and anything you would ask an artist to redo is 5 or lower. "
             "List every concrete defect you can see (for example an odd colour on a hand, extra fingers, a melted shape, a pattern that makes no sense, something missing from the brief). "
-            f'Reply with JSON only: {{{keys}, "text_visible": true or false, "defects": ["short, concrete"]}}')
+            f'Reply with JSON only: {{{keys}, "text_visible": true or false{extra}, "defects": ["short, concrete"]}}')
 
 
 async def look(path: Path | str, row: dict, style: str, s: dict | None = None, key: str = "") -> dict:
     """The chat model with vision reads the picture against the brief. Raises on a transport problem so the caller can say so."""
     s = s or settings_mod.get()
     b64 = base64.b64encode(Path(path).read_bytes()).decode()
-    msg = [{"role": "user", "content": [{"type": "text", "text": _prompt(_brief(row, style), row["kind"])},
+    brief = row["brief"] if row["kind"] == "scene" else _brief(row, style)
+    msg = [{"role": "user", "content": [{"type": "text", "text": _prompt(brief, row["kind"])},
                                        {"type": "image_url", "image_url": {"url": "data:image/png;base64," + b64}}]}]
     async with httpx.AsyncClient(timeout=300) as c:
         r = await c.post(s["base_url"].rstrip("/") + "/chat/completions", headers={"Authorization": f"Bearer {key or settings_mod.api_key()}"},
@@ -125,7 +136,11 @@ async def look(path: Path | str, row: dict, style: str, s: dict | None = None, k
     defects = [str(x).strip() for x in (j.get("defects") or []) if str(x).strip() and str(x).strip().lower() not in ("none", "n/a")][:5]
     major = [d for d in defects if not any(w in d.lower() for w in MINOR)]                 # "slightly blocky" is shown but not penalised
     score = round(sum(dims.values()) / len(dims) * 10 - 6 * min(len(major), 3))
-    return {"dims": dims, "defects": defects, "text_visible": bool(j.get("text_visible")), "score": max(0, min(100, score))}
+    out = {"dims": dims, "defects": defects, "text_visible": bool(j.get("text_visible")), "score": max(0, min(100, score))}
+    if row["kind"] == "scene":
+        out["text_read"] = str(j.get("text_read") or "")
+        out["extras"] = [str(x).strip() for x in (j.get("extras") or []) if str(x).strip() and str(x).strip().lower() not in ("none", "n/a")][:4]
+    return out
 
 
 def combine(auto: dict, seen: dict | None) -> dict:
@@ -142,4 +157,36 @@ def combine(auto: dict, seen: dict | None) -> dict:
         total = auto["score"]
     if auto["score"] == 0:
         hard = True
+    return {"total": min(total, 49) if hard else total, "measured": auto["score"], "looked_at": seen["score"] if seen else None, "flags": flags, "hard": hard}
+
+
+def _norm(x: str) -> str:
+    return "".join(ch for ch in x.lower() if ch.isalnum())
+
+
+def combine_scene(auto: dict, seen: dict | None, quoted: list[str], with_reference: bool = False) -> dict:
+    """Ranking score for a scene picture. On top of the reference checks: quoted text must be read back exactly, a picture with no quoted text must
+    carry no writing, and a character that does not look like its description (or sheet) is a hard problem."""
+    flags = list(auto["reasons"])
+    hard = any(any(h in r for h in HARD) for r in flags)
+    if seen:
+        read = _norm(seen.get("text_read", ""))
+        for q in quoted:
+            if _norm(q) and _norm(q) not in read:
+                flags.append(f'text differs from the quoted text "{q}" (read: "{seen.get("text_read", "").strip()[:60]}")')
+                hard = True
+        if not quoted and (seen["text_visible"] or read):
+            flags.append("text or marks in the picture")
+            hard = True
+        flags += [f"looks wrong: {d}" for d in seen["defects"]]
+        flags += [f"not in the brief: {x}" for x in seen.get("extras", [])]
+        if seen["dims"].get("characters_match", 10) <= 4:
+            flags.append("a character does not match its reference sheet" if with_reference else "a character does not match its description")
+            hard = True
+        total = round(0.5 * auto["score"] + 0.5 * seen["score"] - 4 * min(len(seen.get("extras", [])), 3))
+    else:
+        total = auto["score"]
+    if auto["score"] == 0:
+        hard = True
+    total = max(0, total)
     return {"total": min(total, 49) if hard else total, "measured": auto["score"], "looked_at": seen["score"] if seen else None, "flags": flags, "hard": hard}
