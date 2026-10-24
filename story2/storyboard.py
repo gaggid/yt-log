@@ -80,11 +80,20 @@ def _seq(seg: dict, n: int) -> float:
 
 
 _NOT_AN_OBJECT = re.compile(r"\b(chart|graph|diagram|infographic|report|document|spreadsheet|statement|filing)\b", re.I)
-# Ideas are not things. A chart feature, an indicator or a figure of speech (a "support line", a "bag holder's heavy bag") has no shape to draw: the image model
-# invents one (a glowing beam, a robot). Props must be physical objects that are in the scene, and a crowd is not one person.
-_ABSTRACT_PROP = re.compile(r"\b(support|resistance|trend ?line|indicator|breakout|pattern|cup and handle|moving average|ema|sma|rsi|candlestick|trend|volatility|momentum)\b", re.I)
-_FIGURATIVE_NOTE = re.compile(r"\b(metaphor\w*|symboli[sz]\w*|represent\w*|visuali[sz]\w*|stands? for|figure of speech)\b", re.I)
-_GROUP_PERSON = re.compile(r"\b(crowd|crowds|mob|public|market|audience|everyone|investors|traders|people|group|shareholders)\b", re.I)
+# Ideas are not things. A figure of speech, a chart feature or a theme has no shape to draw: the image model invents one (a glowing beam, a robot). Props must be
+# physical objects that are in the scene, and a crowd is not one person. The registry model says so itself (`literal`); these words catch what it misses, in any
+# subject (finance, crime, science, history).
+_ABSTRACT_PROP = re.compile(r"\b(idea|concept|theme|metaphor|symbol|pattern|indicator|trend|signal|feeling|emotion|mood|atmosphere|rumou?r|theory|principle|strategy)\b", re.I)
+_FIGURATIVE_NOTE = re.compile(r"\b(metaphor\w*|symboli[sz]\w*|represent\w*|visuali[sz]\w*|stands? for|figure of speech|abstract\w*)\b", re.I)
+_GROUP_PERSON = re.compile(r"\b(crowd|crowds|mob|public|audience|everyone|everybody|people|group|team|staff|villagers|citizens|protesters|the masses|the world)\b", re.I)
+
+
+_STOPWORDS = {"that", "this", "with", "from", "have", "their", "there", "which", "about", "into", "over", "under", "while", "where", "when", "scene", "shot", "view", "close",
+              "wide", "frame", "light", "dark", "behind", "front", "background", "foreground", "person", "figure", "looking", "standing", "sitting", "holding", "inside", "outside"}
+
+
+def _content_words(text: str) -> set[str]:
+    return {w[:4] for w in re.findall(r"[a-z]{5,}", text.lower()) if w not in _STOPWORDS}          # four-letter stems: trader, trading and trade are the same thing
 
 
 def not_drawable(kind: str, name: str, appearance: dict, note: str) -> str:
@@ -93,7 +102,7 @@ def not_drawable(kind: str, name: str, appearance: dict, note: str) -> str:
         if _NOT_AN_OBJECT.search(name + " " + appearance.get("type", "")):
             return "a chart, graph or document is built from facts later"
         if _ABSTRACT_PROP.search(name + " " + appearance.get("type", "")):
-            return "a chart feature or indicator has no shape to draw"
+            return "an idea or pattern has no shape to draw"
         if _FIGURATIVE_NOTE.search(note or ""):
             return "it stands for an idea in the narration rather than being an object in the scene"
     if kind == "person" and _GROUP_PERSON.search(name):
@@ -122,7 +131,7 @@ async def make_registry(plan_id: str, backend, s: dict | None = None) -> dict:
                 continue
             if a.kind == "style":
                 continue                                            # the style asset is written from the chosen preset below
-            if a.kind in ("prop", "person") and not_drawable(a.kind, a.name, a.appearance, a.evidence_note):
+            if a.kind in ("prop", "person", "place") and (not a.literal or not_drawable(a.kind, a.name, a.appearance, a.evidence_note)):
                 continue                                            # charts, ideas and groups are never listed as one drawable thing
             data = a.model_dump()
             ap = describe.clean(data.get("appearance"))
@@ -560,6 +569,12 @@ def validate_storyboard(plan_id: str) -> dict:
         run = run + 1 if prev["data"]["visual_type"] == cur["data"]["visual_type"] else 1
         if run == MAX_SAME_TYPE_RUN + 1:
             add(cur, "variety", f"more than {MAX_SAME_TYPE_RUN} scenes in a row of type {cur['data']['visual_type']}", "warn")
+    world = _content_words(intake.facts_text(story["public"]) + " " + " ".join(f"{x['name']} {x['data'].get('description', '')} {x['data'].get('period', '')}" for x in get_assets(plan_id) if x["kind"] != "style"))
+    for sc in ordered:
+        d = sc["data"]
+        mine = _content_words(" ".join([d.get("subject", ""), d.get("action", ""), str((d.get("setting") or {}).get("location", "")), " ".join(map(str, (d.get("setting") or {}).get("props", [])))]))
+        if len(mine) >= 4 and not (mine & world):
+            add(sc, "unrelated", "nothing in this scene appears in the story's facts or among its characters, places and objects: check that it belongs to this story", "warn")
     need = [sc for sc in ordered if sc["data"]["feasibility"]["level"] == "needs_asset"]
     rights = [f for f in story["evidence"]["figures"] if f.get("rights_flag")]
     if need and rights:

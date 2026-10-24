@@ -265,9 +265,24 @@ def test_number_words_count_as_facts_and_repeats_can_be_fixed(env):
 
 def test_ideas_figures_of_speech_and_groups_are_not_listed_as_things_to_draw():
     nd = storyboard.not_drawable
-    assert nd("prop", "support beam", {}, "Visualizes the 50-day EMA support line")
-    assert nd("prop", "cup and handle", {}, "")
-    assert nd("prop", "the heavy bag", {}, "stands for the bag holder in the narration")
-    assert nd("prop", "annual report", {}, "")
-    assert nd("person", "the crowd", {}, "") and nd("person", "investors", {}, "")
-    assert not nd("prop", "desk phone", {"type": "phone"}, "on every desk") and not nd("person", "the analyst", {}, "a trader") and not nd("prop", "wall of monitors", {}, "")
+    assert nd("prop", "recurring pattern", {}, "") and nd("prop", "the theory", {"type": "idea"}, "")
+    assert nd("prop", "the heavy burden", {}, "stands for the guilt the narrator carries") and nd("prop", "annual report", {}, "")
+    assert nd("person", "the crowd", {}, "") and nd("person", "the villagers", {}, "") and nd("person", "everyone", {}, "")
+    # ordinary things from any subject stay
+    for kind, name, note in [("prop", "desk phone", "on every desk"), ("prop", "wall of monitors", ""), ("prop", "rusted key", "found in the cellar"), ("prop", "test tube rack", ""),
+                             ("person", "the detective", "leads the case"), ("person", "the lab technician", ""), ("place", "the cellar", "where it was found")]:
+        assert not nd(kind, name, {"type": name}, note), name
+
+
+def test_a_scene_with_nothing_from_the_story_is_flagged_as_unrelated(env):
+    pid, cid, be, p = boarded(env)
+    sc = storyboard.get_scenes(p["id"])[0]
+    d = sc["data"]
+    d["subject"] = "a medieval knight jousting beside a castle drawbridge"
+    d["action"] = "lance splinters against a painted shield"
+    d["setting"] = {"location": "tournament ground beneath a stone fortress", "period": "", "props": ["banners", "armoured horse"]}
+    db.ex("UPDATE scenes SET data=? WHERE id=?", (db.jdump(d), sc["id"]))
+    rep = storyboard.validate_storyboard(p["id"])
+    assert any(i["kind"] == "unrelated" and i["where"] == sc["id"] and i["level"] == "warn" for i in rep["issues"])
+    others = [i for i in rep["issues"] if i["kind"] == "unrelated" and i["where"] != sc["id"]]
+    assert not others                                               # scenes made from the story itself are not flagged

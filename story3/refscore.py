@@ -21,11 +21,12 @@ DIMS = [("subject_matches", "shows what the brief describes"), ("whole_subject_v
         ("anatomy_clean", "clean shapes (no extra limbs, melted parts, odd patterns)"), ("style_fit", "matches the style")]
 MINOR = ("slightly", "minor", "a bit", "somewhat", "subtle", "marginal")
 SHEET_DIM = ("consistent_poses", "the same subject shown in at least three clearly different poses or views, identical in look in each")
-HARD = ("blank", "cut by the frame", "text or marks", "differs from the quoted text", "does not match its description", "does not match its reference")
+HARD = ("blank", "cut by the frame", "text or marks", "differs from the quoted text", "does not match its description", "does not match its reference", "does not belong to this story")
 SCENE_DIMS = [("subject_matches", "shows the subject and the action described"), ("setting_matches", "setting, period and lighting match the brief"),
               ("characters_match", "every person looks like the description given (age, build, hair, clothes)"),
               ("no_extra_things", "no people or objects that the brief does not mention"), ("anatomy_clean", "hands, faces and bodies are correct (no extra limbs or fingers, no melted parts)"),
-              ("composition_ok", "composition as briefed, one clear focal point"), ("style_fit", "matches the style")]
+              ("composition_ok", "composition as briefed, one clear focal point"), ("style_fit", "matches the style"),
+              ("story_fit", "belongs to this story's own world: period, place, people and subject match the story summary and the narration, with no generic or unrelated imagery")]
 
 
 def _bg(im: Image.Image) -> tuple[int, int, int]:
@@ -180,6 +181,9 @@ def combine_scene(auto: dict, seen: dict | None, quoted: list[str], with_referen
             hard = True
         flags += [f"looks wrong: {d}" for d in seen["defects"]]
         flags += [f"not in the brief: {x}" for x in seen.get("extras", [])]
+        if seen["dims"].get("story_fit", 10) <= 4:
+            flags.append("the picture does not belong to this story (its period, place or subject do not match the story)")
+            hard = True
         if seen["dims"].get("characters_match", 10) <= 4:
             flags.append("a character does not match its reference sheet" if with_reference else "a character does not match its description")
             hard = True

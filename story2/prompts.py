@@ -79,7 +79,7 @@ props, and one overall visual style. Do not write scenes.
 
 Return ONLY this JSON object:
 {"assets": [{
-  "name": "short unique name, e.g. 'the trader', 'trading floor', 'style'",
+  "name": "short unique name for a role, place or object that is in the story's world, plus 'style'",
   "kind": "person | place | prop | style",
   "appearance": {"one key per slot, every slot filled, see SLOTS below": "a concrete value"},
   "description": "one sentence summary (it is rebuilt from appearance)",
@@ -87,13 +87,15 @@ Return ONLY this JSON object:
   "flexible": ["attributes that may change between scenes"],
   "period": "time period if known, otherwise empty",
   "fictionalisation": "generic_reconstruction | source_supported | real_person_no_likeness | fictional",
-  "evidence_note": "what in the story supports this asset, in plain words, or 'creative choice'"
+  "evidence_note": "what in the story supports this asset, in plain words, or 'creative choice'",
+  "literal": "true if this is ONE person, ONE place or ONE physical object that can stand in the scene; false for an idea, a figure of speech, a chart feature, a group or a theme"
 }]}
 SLOTS (fill every one, with concrete values; the picture model draws exactly what is written and invents whatever is missing):
 - person: gender (man, woman, boy, girl) | age (a number of years) | build (height and build) | skin (skin tone) | face (face shape, distinctive features) |
   hair (colour, length, style) | eyes (colour) | top (upper clothing and its colour) | bottom (lower clothing and its colour) | footwear (shoes and colour) |
   accessories (watch, glasses, bag, jewellery, or the word none) | expression (usual expression)
-- place: type | architecture (structure and layout) | materials (main materials and their colours) | light (sources, direction, time of day) |
+- place: type | signature (the 3 to 5 things that make THIS place recognisable as itself at a glance, with counts, specific to the story's world and period; a
+  generic room with furniture is wrong: ask what a visitor would see first that tells them where they are) | architecture (structure and layout) | materials (main materials and their colours) | light (sources, direction, time of day) |
   objects (key furniture and objects, with counts) | size (size and how crowded)
 - prop: type | shape (shape and size) | material | colour (exact colours) | condition (new, worn, damaged) | markings (lettering or marks, or the word none)
 Write colours as colours ("navy blue", "charcoal grey"), materials as materials ("brushed steel", "worn oak"), numbers as numbers. Never write
@@ -109,11 +111,14 @@ Rules:
 - Places are real-feeling settings where the story happens (a trading floor, a small office, a street at dusk): architecture,
   materials, light, typical objects. Props are physical things people use or hold (a desk phone, a wall of monitors, a printed
   report). Never list a chart, graph, diagram or document as an asset.
-- A prop is a physical object that is actually IN the scene. Never list an idea, a figure of speech or a chart feature as a prop (a support line, a
-  moving average, a pattern, a "heavy bag" meant as a metaphor): it has no shape and the picture model will invent one. Say "markings: none" for
-  anything that normally carries writing (paper, tape, a screen, a sign): it must be blank.
-- A crowd, the market, the public or investors are NOT one person. List the individual roles that appear on screen instead (a nervous clerk,
-  a veteran trader); a crowd scene is drawn by the storyboard from those people.
+- Everything in this video must belong to THIS story's own world: its period, its country, its trade or field, its people. Before listing an asset ask
+  "would this exist in that world, in that period?" If not, leave it out. Never fall back on generic stock imagery from another subject.
+- A prop is a physical object that is actually IN the scene. Never list an idea, a figure of speech, a theme or a chart feature as a prop (a phrase from
+  the narration used as a metaphor has no shape: the picture model will invent one). Say "markings: none" for anything that normally carries writing
+  (paper, tape, a screen, a sign, a label): it must be blank.
+- A crowd, a team, the public or "everyone" is NOT one person. List the individual roles that appear on screen instead; a crowd scene is drawn by the
+  storyboard from those people. Set "literal" to false for anything that is not one thing you could point at.
+- Give every asset the "period" of the story's world when the story is set in a particular time.
 - Only describe appearance that the story supports or that you clearly mark as a creative choice. Do not invent facts.
 - Read the whole NARRATION. Every person or role it mentions or clearly implies, every place it is set in and every object that matters
   to the story must be an asset, so no scene ever needs something that is missing from this list. Include secondary people

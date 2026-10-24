@@ -8,7 +8,9 @@ SLOTS: dict[str, list[tuple[str, str]]] = {
                ("face", "face shape and distinctive features"), ("hair", "hair colour, length and style"), ("eyes", "eye colour"),
                ("top", "upper clothing, with colour"), ("bottom", "lower clothing, with colour"), ("footwear", "shoes, with colour"),
                ("accessories", "watch, glasses, bag, jewellery, or the word none"), ("expression", "usual expression")],
-    "place": [("type", "what kind of place it is"), ("architecture", "structure and layout"), ("materials", "main materials and their colours"),
+    "place": [("type", "what kind of place it is"),
+              ("signature", "the 3 to 5 things that make this place recognisable as itself at a glance, with counts, specific to the story's world and period"),
+              ("architecture", "structure and layout"), ("materials", "main materials and their colours"),
               ("light", "light sources, direction and time of day"), ("objects", "key furniture and objects, with counts"), ("size", "size and how crowded it is")],
     "prop": [("type", "what the object is"), ("shape", "shape and size"), ("material", "materials"), ("colour", "exact colours"),
              ("condition", "new, worn, damaged"), ("markings", "markings or lettering, or the word none")],
@@ -56,7 +58,7 @@ def describe(kind: str, ap: dict | None) -> str:
         if g("expression"):
             bits.append(f"usual expression: {g('expression')}")
     elif kind == "place":
-        bits = [g("type"), g("architecture"), g("materials") and f"materials and colours: {g('materials')}", g("light") and f"light: {g('light')}",
+        bits = [g("type"), g("signature") and f"recognisable by {g('signature')}", g("architecture"), g("materials") and f"materials and colours: {g('materials')}", g("light") and f"light: {g('light')}",
                 g("objects") and f"contains {g('objects')}", g("size")]
     else:
         bits = [g("type"), g("shape"), g("material") and f"made of {g('material')}", g("colour") and f"colour: {g('colour')}", g("condition"),
@@ -68,5 +70,5 @@ def fixed_from(kind: str, ap: dict | None) -> list[str]:
     """The details that must be identical in every scene, written out in full (a name of an attribute is not a detail)."""
     ap = clean(ap)
     keys = {"person": ("hair", "face", "top", "bottom", "footwear", "accessories"), "narrator": ("hair", "face", "top", "bottom"),
-            "place": ("materials", "light", "objects"), "prop": ("shape", "material", "colour", "markings")}.get(kind, ())
+            "place": ("signature", "materials", "light", "objects"), "prop": ("shape", "material", "colour", "markings")}.get(kind, ())
     return [f"{k}: {ap[k]}" for k in keys if ap.get(k) and ap[k].lower() != "none"]

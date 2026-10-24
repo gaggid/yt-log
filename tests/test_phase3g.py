@@ -434,3 +434,14 @@ def test_api_round_trip(tmp_path, monkeypatch):
         assert c.post(f"/api/media/{plan['id']}/scenes/settings", json={"mode": "bad"}).status_code == 400
         assert c.post(f"/api/media/{plan['id']}/scenes/choose", json={"model": "nope", "mode": "edit"}).status_code == 400
         assert c.post(f"/api/media/{plan['id']}/scenes/x/correct", json={"change": " "}).status_code == 400
+
+
+def test_the_vision_check_is_told_the_story_and_a_picture_from_another_world_is_a_hard_problem(env, monkeypatch, fast):
+    plan_id = ready(env)
+    gw = Gateway(looks=[{"story_fit": 2, "defects": ["looks like generic office stock imagery"]}])
+    run(plan_id, gw, monkeypatch)
+    ask = gw.count("/chat/completions")[0]["body"]["messages"][0]["content"][0]["text"]
+    assert "STORY:" in ask and "Narration for this moment:" in ask and "story_fit" in ask
+    scores = [r["candidates"][0]["score"] for r in scenes.state(plan_id)["scenes"]]                 # which scene is scored first depends on the item ids
+    flagged = [s_ for s_ in scores if s_["hard"]]
+    assert len(flagged) == 1 and flagged[0]["total"] <= 49 and any("does not belong to this story" in f for f in flagged[0]["flags"])

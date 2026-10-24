@@ -68,6 +68,7 @@ class AssetOut(M):
     period: Str = ""
     fictionalisation: Annotated[str, BeforeValidator(_fict)] = "generic_reconstruction"
     evidence_note: Str = ""                          # what in the story supports it, in our words
+    literal: bool = True                             # false when it is an idea, a figure of speech, a chart feature or a group rather than one thing in the scene
 
 
 class RegistryOut(M):

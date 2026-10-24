@@ -161,6 +161,16 @@ Approval of voice and pictures is optional for the draft (the latest valid take 
 - **Facts are marked "unverified"** (the user's own task); the narrator name is unset.
 - `D:\yt-log-ui` (a leftover git worktree on branch `ui-refresh`) was removed on 2026-10-24, locally and on origin; its commit was already in master.
 
+### Keeping every picture tied to the story (any subject)
+
+The pipeline must work the same for a market crash, a conspiracy, a lab accident or a medieval siege, so nothing in the code or the prompts may depend on one subject. The protections, in order:
+1. **Registry rules** (`story2/prompts.py`): every asset must belong to this story's world and period; the model sets `literal` false for an idea, figure of speech, chart feature or group and those are dropped (`storyboard.not_drawable`, generic word lists only); props that normally carry writing must be blank; a place must name its **signature** (what a visitor sees first that says where they are, with counts).
+2. **Storyboard check** (`validate_storyboard`): a scene that shares no content word with the story's facts, characters, places or objects is flagged "unrelated".
+3. **Picture check** (`refscore.look`, scene mode): the chat model with vision is given the story summary, the period and the narration of that moment, and scores `story_fit` along with subject, setting, characters, extra things, hands and style; a picture that does not belong to the story is a hard problem and is never approved by the bulk button.
+4. **Auto-run** retries a weak picture before approving the best one and lists any it had to approve with a problem.
+5. Existing: the leak check keeps source wording out of prompts, and the storyboard instructions forbid unrelated symbols.
+Limit: the checks are only as good as the chat model's reading of the story, and none has been run on a story outside finance yet. Run a second, very different story through the screen before trusting this.
+
 ## 7. Known gaps and risks
 
 - No full run of scene pictures has been judged yet. Batch G is built; its three-scene trial on the real plan is the first thing to do.

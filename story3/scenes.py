@@ -98,13 +98,29 @@ def seed_for(scene_id: str, attempt: int) -> int:
     return int(hashlib.sha1(scene_id.encode()).hexdigest()[:6], 16) % 90000 + 1013 * (attempt - 1)
 
 
-def brief(scene: dict, assets: list[dict], style: str) -> str:
+def story_context(plan_id: str) -> str:
+    """What the whole video is about, in our own words, so the check can tell a picture that belongs to this story from a generic one."""
+    plan = planner.get_plan(plan_id)
+    pub = planner._story_for(plan)["public"]
+    era = sorted({_s(a["data"].get("period")) for a in storyboard.get_assets(plan_id) if _s(a["data"].get("period"))})
+    return " ".join(x for x in [f"STORY: {_s(pub.get('premise'))}", f"Period: {', '.join(era)}." if era else ""] if x.strip())
+
+
+def narration_for(scene: dict, plan: dict) -> str:
+    seg = next((s_ for s_ in plan["segments"] if s_["id"] == scene["segment_id"]), None)
+    if not seg:
+        return ""
+    sents = [x["text"] for x in seg["sentences"]][max(0, scene["s_from"] - 1):scene["s_to"]]
+    return " ".join(_s(x) for x in sents)
+
+
+def brief(scene: dict, assets: list[dict], style: str, context: str = "", narration: str = "") -> str:
     d = scene["data"]
     people = [a for a in imgprompts.assets_for(scene, assets) if a["kind"] in ("person", "narrator", "place", "prop")]
     who = "; ".join(f"{a['name']}: {_s(a['data'].get('description'))}" for a in people)
     q = quoted_texts(scene)
     return " ".join(x for x in [
-        f"Subject: {_s(d.get('subject'))}.", f"Action: {_s(d.get('action'))}." if _s(d.get("action")) else "",
+        context, f"Narration for this moment: {narration}" if narration else "", f"Subject: {_s(d.get('subject'))}.", f"Action: {_s(d.get('action'))}." if _s(d.get("action")) else "",
         f"Setting: {_val(d, 'setting', 'location')}. Period: {_val(d, 'setting', 'period')}." if _val(d, "setting", "location") else "",
         f"Lighting: {_s(d.get('lighting'))}." if _s(d.get("lighting")) else "", f"People, places and objects that may appear: {who}." if who else "No recurring people or objects.",
         ("The picture must contain exactly these words and no other text: " + "; ".join(f'"{t}"' for t in q) + ".") if q else "The picture must contain no readable text, letters or numbers.",
@@ -327,6 +343,8 @@ async def score_items(plan_id: str, item_ids: list[str] | None = None, progress=
     assets = storyboard.get_assets(plan_id)
     style = next((_s(a["data"].get("description")) for a in assets if a["kind"] == "style"), "")
     by_id = {sc["id"]: sc for sc in storyboard.get_scenes(plan_id)}
+    context = story_context(plan_id)
+    plan_now = planner.get_plan(plan_id)
     todo = [i for i in store.items(plan_id, KIND) if i["status"] == "done" and i["key"] in by_id and (i["id"] in item_ids if item_ids else not i["meta"].get("score"))]
     done, vision_down = 0, False
     for n, it in enumerate(todo):
@@ -338,7 +356,7 @@ async def score_items(plan_id: str, item_ids: list[str] | None = None, progress=
         seen, note = None, ""
         if not vision_down:
             try:
-                seen = await refscore.look(store.path_of(it), {"kind": "scene", "name": "", "brief": brief(sc, assets, style)}, style, s, key)
+                seen = await refscore.look(store.path_of(it), {"kind": "scene", "name": "", "brief": brief(sc, assets, style, context, narration_for(sc, plan_now))}, style, s, key)
             except Exception as e:  # noqa: BLE001 - reported on the picture; scoring continues with measured facts only
                 vision_down, note = True, f"vision check unavailable: {str(e)[:120]}"
         else:
