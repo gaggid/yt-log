@@ -422,6 +422,9 @@ def validate_prompt(c: dict, scene: dict, assets: list[dict], facts: str, prof: 
     if d.get("visual_type") in NEEDS_ASSET and c["mode"] not in ("overlay_plate", "edit"):
         add("asset", "a chart, document or screen cannot be generated; the mode must be a background plate")
     known = fact_numbers(facts.lower()) | {str(c["size"]["width"]), str(c["size"]["height"]), "16", "9", "12", "20", "80", "90"}
+    # an invented character's age or an object's count ("35 years old", "10 desks") is a design choice written in the registry, not a claim about the story
+    for a_ in assets_for(scene, assets):
+        known |= fact_numbers(" ".join([str(a_["data"].get("description") or ""), *map(str, a_["data"].get("fixed") or []), *map(str, (a_["data"].get("appearance") or {}).values())]).lower())
     for m in _CLAIM_NUM.finditer(p):
         n = next(g for g in m.groups() if g).strip(",.")
         if n and n not in known and n not in facts:

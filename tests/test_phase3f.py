@@ -429,3 +429,21 @@ def test_references_can_be_approved_before_the_storyboard_exists(env, monkeypatc
     run(plan_id, Gateway(), monkeypatch, candidates=1)
     st = refs.approve(refs.state(plan_id)["assets"][0]["candidates"][0]["id"])                       # used to fail: "design the storyboard first"
     assert st["approved"] == 1 and refs.approve_best(plan_id, 0)["approved"] == 0
+
+
+def test_a_characters_age_or_a_prop_count_from_the_registry_is_not_a_claim_about_the_story(env):
+    plan_id = planned(env)
+    person = next(a for a in storyboard.get_assets(plan_id) if a["kind"] == "person")
+    d = person["data"]
+    d["description"] = "Man, 37 years old, tall and lean."
+    d["fixed"] = list(d.get("fixed", [])) + ["hair: short grey hair"]
+    db.ex("UPDATE assets SET data=?, rev=rev+1 WHERE id=?", (db.jdump(d), person["id"]))
+    sc = next(s for s in storyboard.get_scenes(plan_id) if person["id"] in s["data"]["continuity"]["assets"])
+    d2 = sc["data"]
+    d2["subject"] = "the trader checks the screen"
+    d2["action"] = "he watches a 73 percent jump"                                         # a number about the story: still has to be in the facts
+    db.ex("UPDATE scenes SET data=? WHERE id=?", (db.jdump(d2), sc["id"]))
+    rep = imgplan.compile_plan(plan_id)
+    msgs = [i["text"] for i in rep["issues"] if i["kind"] == "number" and i["where"] == sc["id"]]
+    assert not any(" 37," in m or "states 37" in m for m in msgs)                           # the age is allowed
+    assert any("73" in m for m in msgs)                                                      # a claimed figure is still checked
