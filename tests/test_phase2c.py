@@ -58,14 +58,14 @@ def test_continuity_attributes_reach_both_prompts(env):
     pid, scenes, _ = compiled(env)
     for a in ("qwen", "flux"):
         assert "dark jacket" in scenes[0]["data"]["prompts"][a]["prompt"]                            # the registry's fixed attribute
-        assert "documentary" in scenes[0]["data"]["prompts"][a]["prompt"].lower()                  # the plan's style asset applies everywhere
+        assert "loading-screen" in scenes[0]["data"]["prompts"][a]["prompt"].lower()               # the plan's chosen style applies everywhere
 
 
 def test_charts_and_documents_become_plates_and_text_is_not_drawn(env):
     pid, scenes, rep = compiled(env, scene_over=FACTS_CHART)
     for a in ("qwen", "flux"):
         c = scenes[0]["data"]["prompts"][a]
-        assert c["mode"] == "overlay_plate" and "plate" in c["prompt"].lower()
+        assert c["mode"] == "overlay_plate" and "abstract glowing" in c["prompt"].lower() and "empty backdrop" not in c["prompt"].lower()   # an illustrated scene, not a blank
         assert '"seventeen percent drop"' not in c["prompt"] and any("overlay" in n for n in c["notes"])
     assert not any(i["kind"] == "text" and i["level"] == "error" for i in rep["issues"])
 

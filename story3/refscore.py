@@ -20,6 +20,7 @@ DIMS = [("subject_matches", "shows what the brief describes"), ("whole_subject_v
         ("plain_background", "plain, uncluttered backdrop"), ("no_text_or_marks", "free of text, letters, logos, marks"),
         ("anatomy_clean", "clean shapes (no extra limbs, melted parts, odd patterns)"), ("style_fit", "matches the style")]
 MINOR = ("slightly", "minor", "a bit", "somewhat", "subtle", "marginal")
+SHEET_DIM = ("consistent_poses", "the same subject shown in at least three clearly different poses or views, identical in look in each")
 HARD = ("blank", "cut by the frame", "text or marks")
 
 
@@ -89,14 +90,19 @@ def measure(path: Path | str, kind: str, want_size: tuple[int, int] | None = Non
 def _brief(row: dict, style: str) -> str:
     return (f"Subject: {row['name']} ({row['kind']}). {row['description']} "
             + (f"Always the same: {'; '.join(row['fixed'])}. " if row["fixed"] else "")
-            + {"person": "One whole figure, neutral pose, plain grey backdrop, anonymous (from behind or in profile, no recognisable face). ",
-               "prop": "One whole object, centred, plain grey backdrop. ", "place": "An empty establishing view with a clear layout. "}[row["kind"]]
+            + {"person": "A character model sheet on a pure white background: the same person in at least three different poses (standing, walking, seated or leaning, a face close-up), whole bodies visible, identical face, hair and clothing in every pose. ",
+               "prop": "An object model sheet on a pure white background: the same object from at least three views, identical in every view, with no people, hands or emblems anywhere. ",
+               "place": "An empty establishing view with a clear layout. "}[row["kind"]]
             + (f"Style: {style} " if style else "") + "No text, letters, numbers, logos or watermarks.")
 
 
-def _prompt(brief: str) -> str:
-    keys = ", ".join(f'"{k}": 0-10' for k, _ in DIMS)
-    guide = "; ".join(f"{k} = {d}" for k, d in DIMS)
+def dims_for(kind: str) -> list[tuple[str, str]]:
+    return DIMS + [SHEET_DIM] if kind in ("person", "prop", "narrator") else DIMS
+
+
+def _prompt(brief: str, kind: str = "place") -> str:
+    keys = ", ".join(f'"{k}": 0-10' for k, _ in dims_for(kind))
+    guide = "; ".join(f"{k} = {d}" for k, d in dims_for(kind))
     return (f"You are a strict art director checking a reference picture for an animated explainer video.\nBRIEF: {brief}\n\n"
             f"Score each point from 0 to 10 ({guide}). Be harsh: 10 means flawless, a good usable picture is 7, and anything you would ask an artist to redo is 5 or lower. "
             "List every concrete defect you can see (for example an odd colour on a hand, extra fingers, a melted shape, a pattern that makes no sense, something missing from the brief). "
@@ -107,7 +113,7 @@ async def look(path: Path | str, row: dict, style: str, s: dict | None = None, k
     """The chat model with vision reads the picture against the brief. Raises on a transport problem so the caller can say so."""
     s = s or settings_mod.get()
     b64 = base64.b64encode(Path(path).read_bytes()).decode()
-    msg = [{"role": "user", "content": [{"type": "text", "text": _prompt(_brief(row, style))},
+    msg = [{"role": "user", "content": [{"type": "text", "text": _prompt(_brief(row, style), row["kind"])},
                                        {"type": "image_url", "image_url": {"url": "data:image/png;base64," + b64}}]}]
     async with httpx.AsyncClient(timeout=300) as c:
         r = await c.post(s["base_url"].rstrip("/") + "/chat/completions", headers={"Authorization": f"Bearer {key or settings_mod.api_key()}"},
@@ -115,7 +121,7 @@ async def look(path: Path | str, row: dict, style: str, s: dict | None = None, k
     if r.status_code != 200:
         raise RuntimeError(f"the vision check was refused ({r.status_code}): {r.text[:160]}")
     j = llm.parse_json(r.json()["choices"][0]["message"].get("content") or "")
-    dims = {k: max(0, min(10, float(j.get(k, 0)))) for k, _ in DIMS}
+    dims = {k: max(0, min(10, float(j.get(k, 0)))) for k, _ in dims_for(row["kind"])}
     defects = [str(x).strip() for x in (j.get("defects") or []) if str(x).strip() and str(x).strip().lower() not in ("none", "n/a")][:5]
     major = [d for d in defects if not any(w in d.lower() for w in MINOR)]                 # "slightly blocky" is shown but not penalised
     score = round(sum(dims.values()) / len(dims) * 10 - 6 * min(len(major), 3))

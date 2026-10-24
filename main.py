@@ -13,7 +13,7 @@ for _s in (sys.stdout, sys.stderr):
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 
 import auth
@@ -65,6 +65,14 @@ async def root():
 @app.get("/plan.js")
 async def plan_js():
     return FileResponse(STATIC / "plan.js", media_type="application/javascript", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/style-samples/{name}")
+async def style_sample(name: str):
+    f = STATIC / "style_samples" / (name + ".jpg")
+    if name not in ("gta", "noir", "concept") or not f.is_file():
+        raise HTTPException(404, "no such sample")
+    return FileResponse(f, headers={"Cache-Control": "max-age=86400"})
 
 
 @app.get("/health")

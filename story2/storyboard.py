@@ -10,7 +10,7 @@ import re
 import uuid
 
 from story import db, llm, settings as settings_mod
-from . import intake, leak, planner, prompts as P, providers, store, svara
+from . import intake, leak, planner, prompts as P, providers, store, styles, svara
 from .scene_schemas import ASPECTS, NEEDS_ASSET, RegistryOut, SceneOut, ScenesOut
 
 MIN_SCENE_S, MAX_SCENE_S = 2.0, 20.0
@@ -88,33 +88,30 @@ async def make_registry(plan_id: str, backend, s: dict | None = None) -> dict:
     bp = plan["blueprint"] or {}
     user = ("STORY FACTS:\n" + intake.facts_text(story["public"]) + "\n\nVIDEO PLAN: "
             + (bp.get("viewer_promise", "") + " Structure: " + bp.get("structure", "")).strip()
-            + "\nNarrator: a first-person guide shown as an animated avatar (do not list the narrator as an asset).")
+            + "\nNARRATION (the picture list must cover everyone and everything in it):\n" + "\n".join(x["plain"] for x in plan["segments"])[:7000]
+            + "\nNarrator: a first-person guide shown as an animated avatar (do not list the narrator as an asset)."
+            + f"\nVISUAL STYLE of the whole video (the style asset is set for you; draw characters and places to fit it): {styles.for_plan(plan['settings'])['look']}")
     res = await llm.JsonCaller(backend, s).call(P.REGISTRY, user, RegistryOut)
     kept = {a["name"].lower(): a for a in get_assets(plan_id) if a["locked"]}
     with db.tx() as c:
         c.execute("DELETE FROM assets WHERE plan_id=? AND locked=0", (plan_id,))
-        styles = 0
         for a in res.value.assets:
             if a.name.lower() in kept:
                 continue
             if a.kind == "style":
-                styles += 1
-                if styles > 1:
-                    continue
+                continue                                            # the style asset is written from the chosen preset below
             c.execute("INSERT INTO assets(id,plan_id,kind,name,data,updated_at) VALUES(?,?,?,?,?,?)",
                       ("as-" + uuid.uuid4().hex[:8], plan_id, a.kind, a.name, db.jdump(a.model_dump()), db.now()))
-        if not styles and not any(a["kind"] == "style" for a in kept.values()):
+        if not any(a["kind"] == "style" for a in kept.values()):
             c.execute("INSERT INTO assets(id,plan_id,kind,name,data,updated_at) VALUES(?,?,?,?,?,?)",
-                      ("as-" + uuid.uuid4().hex[:8], plan_id, "style", "style", db.jdump({
-                          "name": "style", "kind": "style", "description": "restrained documentary look, natural colours, soft contrast, light film grain",
-                          "fixed": ["same colour grade in every scene"], "flexible": [], "fictionalisation": "fictional",
-                          "evidence_note": "default creative choice"}), db.now()))
+                      ("as-" + uuid.uuid4().hex[:8], plan_id, "style", "style", db.jdump(styles.style_asset_data(plan["settings"])), db.now()))
         # the narrator avatar is always registered, as a design placeholder (creating the avatar is outside this module)
         if not any(a["kind"] == "narrator" for a in get_assets(plan_id)):
             c.execute("INSERT INTO assets(id,plan_id,kind,name,data,updated_at) VALUES(?,?,?,?,?,?)",
                       ("as-" + uuid.uuid4().hex[:8], plan_id, "narrator", "narrator", db.jdump({
                           "name": "narrator", "kind": "narrator", "description": "", "fixed": [], "flexible": [],
                           "fictionalisation": "fictional", "evidence_note": "avatar to be designed", "status": "to be designed"}), db.now()))
+    db.ex("UPDATE plans SET settings=?, updated_at=? WHERE id=?", (db.jdump({**planner.get_plan(plan_id)["settings"], "registry_direction": styles.DIRECTION, "registry_style": styles.style_id(plan["settings"])}), db.now(), plan_id))
     store.log(plan_id, "registry", {"assets": len(get_assets(plan_id))})
     return planner.get_plan(plan_id)
 
@@ -193,8 +190,9 @@ def _prev_summary(scenes: list[dict]) -> str:
 
 
 async def make_storyboard(plan_id: str, backend, s: dict | None = None, segment_ids: list[str] | None = None,
-                          progress=None) -> dict:
-    """Scenes for each narration segment. A segment holding a locked or approved scene is left untouched."""
+                          progress=None, replace_approved: bool = False) -> dict:
+    """Scenes for each narration segment. A segment holding a locked or approved scene is left untouched, unless `replace_approved` (a new
+    visual direction): then only locked scenes are kept."""
     s = s or settings_mod.get()
     plan = planner.get_plan(plan_id)
     if not plan["segments"]:
@@ -208,7 +206,8 @@ async def make_storyboard(plan_id: str, backend, s: dict | None = None, segment_
     real = real_audio(plan_id)
     caller = llm.JsonCaller(backend, s)
     todo = [x for x in plan["segments"] if not segment_ids or x["id"] in segment_ids]
-    protected = {sc["segment_id"] for sc in get_scenes(plan_id) if sc["locked"] or sc["status"] == "approved"}
+    protected = {sc["segment_id"] for sc in get_scenes(plan_id) if sc["locked"] or (sc["status"] == "approved" and not replace_approved)}
+    look = styles.for_plan(plan["settings"])
     done = 0
     for seg in todo:
         done += 1
@@ -221,7 +220,8 @@ async def make_storyboard(plan_id: str, backend, s: dict | None = None, segment_
         n = len(secs)
         lines = "\n".join(f"{i}. ({secs[i - 1]:.1f}s) {x['text']}" for i, x in enumerate(seg["sentences"], 1))
         prior = [x for x in get_scenes(plan_id) if x["seq"] < seg["seq"]]
-        user = (f"STORY FACTS:\n{facts}\n\nCONTINUITY ASSETS (use these names in \"assets\"):\n{_asset_lines(assets)}\n\n"
+        user = (f"STORY FACTS:\n{facts}\n\nVISUAL STYLE (every scene is drawn in it): {look['short']}. {look['look']}\n\n"
+                f"CONTINUITY ASSETS (use these names in \"assets\"):\n{_asset_lines(assets)}\n\n"
                 f"PREVIOUS SCENES (do not repeat their composition):\n{_prev_summary(prior)}\n\n"
                 f"THIS SEGMENT (beat {seg['beat']}), {n} sentence(s), {sum(secs):.1f} s:\n{lines}\n\n"
                 "Design the scenes for this segment now.")
@@ -235,14 +235,16 @@ async def make_storyboard(plan_id: str, backend, s: dict | None = None, segment_
 
         res = await caller.call(P.SCENES, user, ScenesOut, fix)
         with db.tx() as c:
-            c.execute("DELETE FROM scenes WHERE segment_id=? AND locked=0 AND status!='approved'", (seg["id"],))
+            c.execute("DELETE FROM scenes WHERE segment_id=? AND locked=0" + ("" if replace_approved else " AND status!='approved'"), (seg["id"],))
             for k, sc in enumerate(res.value.scenes):
                 data, _ = build_scene(sc, assets, plan, ev)
                 _insert_scene(c, plan_id, seg, k, sc.sentences, data)
         retime(plan_id)
     if progress:
         progress(len(todo), len(todo), "done")
-    store.log(plan_id, "storyboard", {"segments": len(todo)})
+    db.ex("UPDATE plans SET settings=?, updated_at=? WHERE id=?",
+          (db.jdump({**planner.get_plan(plan_id)["settings"], "storyboard_direction": styles.DIRECTION, "storyboard_style": look["id"]}), db.now(), plan_id))
+    store.log(plan_id, "storyboard", {"segments": len(todo), "style": look["id"]})
     return planner.get_plan(plan_id)
 
 
@@ -263,7 +265,8 @@ async def regenerate_scene(scene_id: str, backend, s: dict | None = None, note: 
     lines = "\n".join(f"{i}. ({secs[i - 1]:.1f}s) {seg['sentences'][i - 1]['text']}" for i in range(a, b + 1))
     assets = get_assets(plan["id"])
     prev = [x for x in get_scenes(plan["id"]) if x["seq"] < sc0["seq"]]
-    user = (f"STORY FACTS:\n{intake.facts_text(story['public'])}\n\nCONTINUITY ASSETS:\n{_asset_lines(assets)}\n\n"
+    user = (f"STORY FACTS:\n{intake.facts_text(story['public'])}\n\nVISUAL STYLE (every scene is drawn in it): {styles.for_plan(plan['settings'])['look']}\n\n"
+            f"CONTINUITY ASSETS:\n{_asset_lines(assets)}\n\n"
             f"PREVIOUS SCENES (do not repeat their composition):\n{_prev_summary(prev)}\n\n"
             f"Design exactly ONE scene for sentences {a} to {b} of this segment (use \"sentences\": [{a}, {b}]):\n{lines}\n"
             + (f"\nEditor's request: {note}\n" if note else "") + f"\nThe scene being replaced: {sc0['data']['subject']} / {sc0['data']['action']}")

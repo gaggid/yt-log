@@ -9,7 +9,7 @@ import time
 import httpx
 
 from story import db, settings as settings_mod
-from story2 import imgplan, imgprompts, intake, leak, planner, providers, storyboard, store as plan_store
+from story2 import imgplan, imgprompts, intake, leak, planner, providers, storyboard, store as plan_store, styles
 
 from . import refscore, store
 from .voice import MediaError
@@ -17,17 +17,20 @@ from .voice import MediaError
 RETRIES = 1
 DEFAULT_CANDIDATES = 2
 DEFAULT_SECONDS = 60                    # until the first picture has been timed on this machine
-MIN_SCENES = 2                          # an asset shown once needs no reference: its one scene creates it
-SIZES = {"person": (1024, 1344), "narrator": (1024, 1344), "place": (1344, 768), "prop": (1024, 1024)}
+MIN_SCENES = 2                          # once scenes exist, an asset shown only once needs no reference: its one scene creates it
+SIZES = {"person": (1344, 768), "narrator": (1344, 768), "place": (1344, 768), "prop": (1344, 768)}      # people and objects are sheets with several views side by side
 KINDS = ("person", "place", "prop")
 
 KIND_FRAME = {
-    "person": "Character reference picture for an animated explainer. One figure, whole body visible, standing in a relaxed neutral pose, plain soft grey studio backdrop with even lighting.",
-    "place": "Location reference picture for an animated explainer. An establishing view that shows the layout and main materials clearly, empty of people, even readable lighting.",
-    "prop": "Object reference picture for an animated explainer. One object, whole object visible and centred with generous margin, isolated on a plain soft grey studio backdrop, even lighting.",
+    "person": ("Character model sheet for an illustrated story on a plain pure white background. The SAME person is drawn four times, side by side with space between, each whole figure visible: "
+               "standing front view, three-quarter view mid-stride, seated or leaning in a relaxed posture, and a head-and-shoulders close-up with a clear expression. "
+               "Identical face, hair, build and clothing in all four. Face clearly visible in every view."),
+    "place": "Location design reference picture for an illustrated story. An establishing view that shows the layout, materials, light and typical objects of the place clearly, empty of people.",
+    "prop": ("Object model sheet for an illustrated story on a plain pure white background. ONLY the object: no people, no faces, no hands, no characters, no emblems or logos; any screen is dark or shows abstract light only. The SAME object is drawn three times, side by side with space between: front view, "
+             "three-quarter view and a detail close-up of its most distinctive part. Identical shape, materials and markings in every view."),
 }
 NO_TEXT = "No text, letters, numbers, labels, logos or watermarks anywhere in the picture."
-NEGATIVE = "text, letters, numbers, labels, logo, watermark, caption, blurry, low quality, extra limbs, deformed hands, duplicate subject, cropped subject"
+NEGATIVE = styles.NEGATIVE + ", labels, caption, cropped subject"
 
 
 def _s(x) -> str:
@@ -37,6 +40,8 @@ def _s(x) -> str:
 def targets(plan_id: str) -> list[dict]:
     """Assets that need a reference: person, place or prop shown in at least MIN_SCENES scenes, with how often and where they first appear."""
     scenes = storyboard.get_scenes(plan_id)
+    if not scenes:                                                  # before the storyboard: every recurring-kind asset in the registry
+        return [{"asset": a, "scenes": []} for a in storyboard.get_assets(plan_id) if a["kind"] in KINDS]
     use: dict[str, list[dict]] = {}
     for sc in sorted(scenes, key=lambda x: (x["start_s"], x["seq"])):
         for a in sc["data"].get("continuity", {}).get("assets", []):
@@ -54,9 +59,18 @@ def style_text(plan_id: str) -> str:
     return _s(st["data"].get("description")) if st else ""
 
 
+def _style_for(kind: str, style: str) -> str:
+    """Objects and places get the preset's wording without the clause about characters and faces: that clause makes the model put people on
+    screens and signs."""
+    if kind in ("prop", "place"):
+        for p in styles.PRESETS.values():
+            if style.rstrip(". ") == p["look"].rstrip(". ") and p.get("object_look"):
+                return p["object_look"]
+    return style
+
+
 def _anonymous(a: dict) -> bool:
-    d = a["data"]
-    return d.get("fictionalisation") == "real_person_no_likeness" or "anonymous" in _s(d.get("description")).lower()
+    return a["data"].get("fictionalisation") == "real_person_no_likeness"
 
 
 def build_prompt(a: dict, style: str, model: str) -> dict:
@@ -64,22 +78,20 @@ def build_prompt(a: dict, style: str, model: str) -> dict:
     negative field has no effect) and sent as a negative prompt for FLUX."""
     d = a["data"]
     kind = a["kind"]
-    parts = [KIND_FRAME[kind], f"Subject: {_s(a['name'])}. {_s(d.get('description'))}".strip()]
+    parts = [_style_for(kind, style), KIND_FRAME[kind], f"Subject: {_s(a['name'])}. {_s(d.get('description'))}".strip()]
     if _s(d.get("period")):
         parts.append(f"Period: {_s(d['period'])}.")
     fixed = [_s(x) for x in d.get("fixed", []) if _s(x)]
     if fixed:
         parts.append("Always the same, so show clearly: " + "; ".join(fixed) + ".")
     if kind == "person" and _anonymous(a):
-        parts.append("Keep the person anonymous: seen from behind or in profile, no recognisable face.")
-    if style:
-        parts.append(f"Visual style: {style}")
+        parts.append("A real person is never given an invented likeness: draw only a silhouette seen from behind, in deep shadow, with no recognisable face.")
     cfg = providers.get(model)
     if cfg["negative_prompt"]:
         parts.append(NO_TEXT)
         neg = NEGATIVE
     else:
-        parts.append(NO_TEXT + " Sharp, clean, uncluttered, no duplicate subject.")
+        parts.append(NO_TEXT + " " + styles.NOT_PHOTO + " Sharp, clean, uncluttered, no duplicate subject.")
         neg = ""
     w, h = SIZES[kind]
     w, h, _ = providers.snap(w, h, cfg)
@@ -144,8 +156,8 @@ async def generate(plan_id: str, asset_ids: list[str] | None = None, candidates:
     s = s or settings_mod.get()
     key = key or settings_mod.api_key()
     plan = planner.get_plan(plan_id)
-    if not storyboard.get_scenes(plan_id):
-        raise MediaError("design the storyboard first: references are made for the people, places and objects it uses")
+    if not targets(plan_id):
+        raise MediaError("list the characters and places first: references are made for the people, places and objects the story uses")
     model = model or providers.settings_for(plan["settings"])["default"]
     cfg = providers.get(model)
     style = style_text(plan_id)
@@ -183,6 +195,8 @@ async def generate(plan_id: str, asset_ids: list[str] | None = None, candidates:
             body = {"model": model, "prompt": built["prompt"], "size": f"{built['width']}x{built['height']}", "n": 1, "seed": seed, "response_format": "b64_json"}
             if built["negative_prompt"]:
                 body["negative_prompt"] = built["negative_prompt"]
+            if styles.loras_for(model, plan["settings"]):
+                body["lora"] = styles.loras_for(model, plan["settings"])
             t0 = time.time()
             try:
                 img = await _draw(client, s["base_url"], key, body)
@@ -306,7 +320,7 @@ def state(plan_id: str) -> dict:
                 secs.append(i["meta"]["seconds_taken"])
         rows.append({"asset_id": a["id"], "name": a["name"], "kind": a["kind"], "description": _s(a["data"].get("description")),
                      "fixed": a["data"].get("fixed", []), "fictionalisation": a["data"].get("fictionalisation", ""),
-                     "scenes": len(t["scenes"]), "first_scene": t["scenes"][0]["id"], "skipped": a["id"] in skips,
+                     "scenes": len(t["scenes"]), "first_scene": t["scenes"][0]["id"] if t["scenes"] else "", "skipped": a["id"] in skips,
                      "approved": ok[0]["id"] if ok else None, "prompt": built["prompt"], "negative_prompt": built["negative_prompt"],
                      "size": f"{built['width']}x{built['height']}",
                      "candidates": [{"id": i["id"], "attempt": i["attempt"], "status": i["status"], "approved": i["approved"],

@@ -90,11 +90,20 @@ Return ONLY this JSON object:
 }]}
 Rules:
 - Exactly one "style" asset: the visual language of the whole video.
-- People are roles ("the trader", "the analyst"), not real faces. A real, named person is NEVER given an invented face presented
-  as a real likeness: use kind person with fictionalisation real_person_no_likeness (shown from behind, as a silhouette, hands,
-  or an anonymous figure). Invented generic people are generic_reconstruction.
+- The video is a story told through hand-illustrated pictures of things that could really have happened. Assets are what an
+  illustrator needs to draw the same world again and again.
+- People are invented composite characters, named by role ("the trader", "the analyst"). Give each an age range, build, face and
+  hair, clothing right for the period and one distinctive item, so the same person can be drawn in every scene. Invented people are
+  generic_reconstruction. A real, named person is NEVER given an invented likeness: use kind person with fictionalisation
+  real_person_no_likeness (shown as a silhouette, from behind, in shadow or by the hands only).
+- Places are real-feeling settings where the story happens (a trading floor, a small office, a street at dusk): architecture,
+  materials, light, typical objects. Props are physical things people use or hold (a desk phone, a wall of monitors, a printed
+  report). Never list a chart, graph, diagram or document as an asset.
 - Only describe appearance that the story supports or that you clearly mark as a creative choice. Do not invent facts.
-- Keep it small: 3 to 8 assets in total.
+- Read the whole NARRATION. Every person or role it mentions or clearly implies, every place it is set in and every object that matters
+  to the story must be an asset, so no scene ever needs something that is missing from this list. Include secondary people
+  (a colleague, a manager, a customer, a crowd member who appears) when the narration needs them. Merge duplicates.
+- Keep it complete but small: 4 to 12 assets in total.
 - Never mention a book, an author, a chapter, a page or a source."""
 
 SCENES = """[TASK:p2_scenes]
@@ -108,19 +117,34 @@ seconds; a long reveal may hold longer; do not cut faster than the viewer can un
 For every scene answer: what does the viewer learn, notice or feel from this picture that the previous picture did not give?
 Do not repeat a keyword from the narration as a generic picture. Vary the visual type and composition between neighbouring scenes.
 
-Visual types: reconstruction | establishing | character | metaphor | object_process | montage | map_timeline | data_chart |
-document_archival | screen_interface | diagram | comparison | text_led | minimalist | atmospheric | transition.
-Charts, documents, screens, maps and diagrams cannot be drawn reliably by an image model and must never show invented numbers,
-text or quotes: use that visual type, describe in "needs_asset" what verified content it must show (only numbers and events given
-in the facts), and give a "fallback" picture an image model can make instead (for example the setting around the screen).
+TELL THE STORY WITH PICTURES. The video is a graphic novel: every scene is an illustrated moment of the story world, drawn like a
+panel. Show people, places and things happening: who is there, where, doing what, feeling what. Prefer these visual types:
+reconstruction (a moment that happened or could have happened) | character (a person's face, hands or posture) | establishing
+(the place, wide) | atmospheric (the mood of a place) | object_process (a thing being used) | montage | transition.
+Use at least four in five scenes from this list. Use "metaphor" rarely, and only as an image inside the story world (a lit window
+in a dark street, a hand hovering over a phone). Never invent unrelated symbols such as a runner, a train, a pillar, a bridge,
+a mountain or a ship: every object and person in a picture must belong to the places and people of the story.
+Do not turn an idea into a diagram. If the narration talks about momentum, pressure or a drop, show a person living it (a trader
+leaning toward his screens, a hand over a phone, a street in rain) instead of a chart.
+Charts, documents, screens, maps and diagrams (visual types data_chart | document_archival | screen_interface | map_timeline |
+diagram | comparison | text_led) are allowed only when the narration states exact numbers, dates or a document that the viewer must
+read, and then in at most one scene in six. They cannot be drawn reliably by an image model and must never show invented numbers,
+text or quotes: describe in "needs_asset" what verified content it must show (only numbers and events given in the facts), and
+make the "fallback" a full illustrated scene in the story world (for example a trader at a wall of glowing monitors; the screens
+show abstract light only). Elsewhere, a chart may appear only as a glowing, unreadable shape on a screen inside a room.
+Panel language to use: an establishing wide of the place, over-the-shoulder, a close-up on eyes or hands, a low angle that gives
+a person weight, a high angle that makes someone small, a silhouette against a lit window, a foreground object framing the
+subject. Give every scene depth: something in the foreground, the subject, something behind.
 
 Vary the camera. Distances: extreme wide | wide | medium | close | extreme close. Angles: eye level | high | low | overhead | side.
 No two neighbouring scenes may share the same distance AND angle, and do not use "medium, eye level" more than once in three scenes.
 Describe only what is VISIBLE, in concrete words. Say who or what, how many, where in the frame (left, centre, right), what they
 are doing at this exact instant, camera angle and distance, light and its direction, colours. No vague words like "dramatic",
 "tense" or "epic": say which visible details create that effect. One clear focal point per scene.
-People are anonymous figures (role, clothing, posture), seen from behind, in silhouette, or as hands, unless the continuity asset
-says otherwise. No logos, no readable brand text, no invented text. On-screen text only when essential, 8 words at most.
+People are the continuity characters, drawn with faces and clear emotion (what the face and body show), using the same names as the
+assets. A real, named person is shown only as a silhouette, from behind, in shadow or by the hands. Clothing, devices and rooms
+must fit the period. No logos, no readable brand text, no invented text; screens and papers show abstract light or marks only.
+On-screen text only when essential, 8 words at most.
 
 Return ONLY this JSON object:
 {"scenes": [{

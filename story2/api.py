@@ -9,7 +9,7 @@ from story import db, llm, settings as settings_mod
 from story.pipeline import manager
 from fastapi.responses import FileResponse
 
-from . import editorial, export, imgplan, imgprompts, intake, jobs, planner, providers, storyboard
+from . import editorial, export, imgplan, imgprompts, intake, jobs, planner, providers, storyboard, styles
 
 router = APIRouter(prefix="/api/plans")
 
@@ -64,6 +64,11 @@ async def probe_providers():
     return await asyncio.to_thread(providers.probe, settings_mod.get(), settings_mod.api_key())
 
 
+@router.get("/styles")
+async def visual_styles():
+    return {"styles": styles.public(), "default": styles.DEFAULT}
+
+
 @router.get("/schema")
 async def plan_schema():
     from .export_schema import SCHEMA
@@ -93,7 +98,40 @@ async def plan(plan_id: str):
     p["approval"] = editorial.approval_state(p)
     p["content_hash"] = editorial.content_hash(p)
     p["exports"] = export.list_exports(plan_id)
+    p["style"] = style_info(p)
     return p
+
+
+def style_info(p: dict) -> dict:
+    """The chosen look and whether the characters and scenes were made for it. A plan made before this direction (or in another style) is flagged."""
+    st, sid = p["settings"], styles.style_id(p["settings"])
+    asset = next((a for a in p["assets"] if a["kind"] == "style"), None)
+    return {**{k: v for k, v in styles.get(sid).items() if k in ("id", "label", "description", "short")},
+            "registry_stale": bool(p["assets"]) and (st.get("registry_direction") != styles.DIRECTION or st.get("registry_style") != sid or not asset),
+            "storyboard_stale": bool(p["scenes"]) and (st.get("storyboard_direction") != styles.DIRECTION or st.get("storyboard_style") != sid)}
+
+
+class VisualStyle(BaseModel):
+    style: str
+
+
+@router.patch("/{plan_id}/visual-style")
+async def set_visual_style(plan_id: str, body: VisualStyle):
+    """Choose the look. The style asset is rewritten from the preset at once and prompts are recompiled; characters and scenes made for another
+    look are flagged so the screen can lead the editor through redoing them."""
+    p = _guard(planner.get_plan, plan_id)
+    try:
+        styles.get(body.style)
+    except styles.StyleError as e:
+        raise HTTPException(400, str(e))
+    st = {**p["settings"], "visual_style": body.style}
+    db.ex("UPDATE plans SET settings=?, updated_at=? WHERE id=?", (db.jdump(st), db.now(), plan_id))
+    for a in storyboard.get_assets(plan_id):
+        if a["kind"] == "style" and not a["locked"]:
+            db.ex("UPDATE assets SET data=?, rev=rev+1, updated_at=? WHERE id=?", (db.jdump(styles.style_asset_data(st)), db.now(), a["id"]))
+    if storyboard.get_scenes(plan_id):
+        imgplan.compile_plan(plan_id)
+    return await plan(plan_id)
 
 
 @router.delete("/{plan_id}")
@@ -184,6 +222,7 @@ async def registry(plan_id: str):
 
 class StoryboardReq(BaseModel):
     segment_ids: list[str] | None = None
+    replace_approved: bool = False
 
 
 @router.post("/{plan_id}/storyboard")
@@ -193,7 +232,7 @@ async def make_storyboard(plan_id: str, body: StoryboardReq | None = None):
         raise HTTPException(400, "write the narration first")
 
     async def step(be, s, progress):
-        await storyboard.make_storyboard(plan_id, be, s, body.segment_ids if body else None, progress)
+        await storyboard.make_storyboard(plan_id, be, s, body.segment_ids if body else None, progress, bool(body and body.replace_approved))
     return _start(plan_id, "storyboard", step)
 
 
@@ -239,6 +278,30 @@ async def regenerate_scene(scene_id: str, body: Regen | None = None):
         await storyboard.regenerate_scene(scene_id, be, s, body.note if body else "")
         progress(1, 1, "done")
     return _start(sc["plan_id"], "scene", step)
+
+
+class NewAsset(BaseModel):
+    name: str
+    kind: str = "person"
+    description: str = ""
+    fictionalisation: str = "generic_reconstruction"
+
+
+@router.post("/{plan_id}/assets")
+async def add_asset(plan_id: str, body: NewAsset):
+    """Add a person, place or object by hand, for anything the story needs that the list missed."""
+    _guard(planner.get_plan, plan_id)
+    name = body.name.strip()
+    if not name or body.kind not in ("person", "place", "prop"):
+        raise HTTPException(400, "give it a name and say whether it is a person, a place or a prop")
+    if any(a["name"].lower() == name.lower() for a in storyboard.get_assets(plan_id)):
+        raise HTTPException(400, f"there is already an asset called {name}")
+    data = {"name": name, "kind": body.kind, "description": body.description.strip(), "fixed": [], "flexible": [], "period": "",
+            "fictionalisation": body.fictionalisation if body.fictionalisation in ("generic_reconstruction", "source_supported", "real_person_no_likeness", "fictional") else "generic_reconstruction",
+            "evidence_note": "added by the editor"}
+    import uuid
+    db.ex("INSERT INTO assets(id,plan_id,kind,name,data,updated_at) VALUES(?,?,?,?,?,?)", ("as-" + uuid.uuid4().hex[:8], plan_id, body.kind, name, db.jdump(data), db.now()))
+    return _guard(planner.get_plan, plan_id)
 
 
 @router.patch("/assets/{asset_id}")

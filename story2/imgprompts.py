@@ -8,7 +8,7 @@ import hashlib
 import json
 import re
 
-from . import leak, providers
+from . import leak, providers, styles
 from .scene_schemas import NEEDS_ASSET
 from .storyboard import fact_numbers
 
@@ -17,7 +17,7 @@ MAX_TEXT_WORDS = 8
 # wording that asks the model for an effect without saying what is visible (brief: say the visible details instead)
 VAGUE = ("dramatic", "epic", "stunning", "viral", "intense", "tense", "tension", "powerful", "emotional", "masterpiece", "high quality",
          "breathtaking", "gripping", "haunting")
-FLUX_STANDARD_NEGATIVE = "blurry, low quality, misspelled text, duplicated words, extra text, watermark, distorted letters"
+FLUX_STANDARD_NEGATIVE = styles.NEGATIVE
 ADAPTERS = ("qwen", "flux")
 # numbers that read as a factual claim: a percentage, a currency amount, a year or large figure, or a count of days, years, shares, dollars.
 # Descriptive geometry ("45-degree angle", "3D", "2D") is not a claim.
@@ -144,8 +144,8 @@ def _subject_text(d: dict, people: list[dict]) -> str:
         fic = a["data"].get("fictionalisation", "")
         out.append(f"Appearance of {a['name']}: {det}" if det else "")
         out.append(f"Always the same: {fixed}" if fixed else "")
-        if fic in ("real_person_no_likeness", "generic_reconstruction") and a["kind"] == "person":
-            out.append("An anonymous figure; no real person's likeness is implied")
+        if fic == "real_person_no_likeness" and a["kind"] == "person":
+            out.append("Shown only as a silhouette, from behind or in deep shadow, with no recognisable face; no real person's likeness is implied")
     return _sent(*[x for x in out if x])
 
 
@@ -223,30 +223,27 @@ def compile_qwen(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
     must, avoid = _constraints(d)
     people = [a for a in assets_used if a["kind"] in ("person", "narrator")]
     nar = d.get("narrative") or {}
-    sec: dict[str, str] = {}
+    look = styles.for_plan(plan.get("settings"))
+    sec: dict[str, str] = {"style": "Visual style: " + _sent(look["look"])}                    # first: the opening words steer the whole picture
     if plate:
-        notes.append("this visual needs a verified chart, document, screen, map or diagram: the image model makes only the setting plate")
-        sec["objective"] = _sent(f"Create a {_aspect(fmt)} background plate for a documentary video. Its role: {_s(nar.get('purpose'))}",
-                                 f"The plate shows only the setting: {_s(_g(d, 'feasibility', 'fallback')) or 'the surroundings with no readable data'}",
-                                 "Leave a clear empty area where a verified chart, document or graphic will be placed later")
-    else:
-        sec["objective"] = _sent(f"Create a {_aspect(fmt)} {_s(d.get('style')) or 'documentary'} image for a documentary video. Its role in the story: {_s(nar.get('purpose'))}",
-                                 f"The viewer should come away with this: {_s(nar.get('new_information') or nar.get('takeaway'))}" if _s(nar.get("new_information") or nar.get("takeaway")) else "")
-    sec["objective"] = "Image objective: " + sec["objective"]
+        notes.append("this visual needs a verified chart, document, screen, map or diagram: the picture is the illustrated scene around it; the exact content is added later")
+    sec["objective"] = "Image objective: " + _sent(f"Create a {_aspect(fmt)} {look['short']} for a story-driven video. Its role in the story: {_s(nar.get('purpose'))}",
+                                                   f"The viewer should come away with this: {_s(nar.get('new_information') or nar.get('takeaway'))}" if _s(nar.get("new_information") or nar.get("takeaway")) else "")
     if plate:
-        sec["subject"] = "Main subject: " + _sent("The empty backdrop only, with nothing drawn on it that looks like data, a chart, a document or a screen")
-        sec["action"] = "Action and moment: " + _sent("None: a still backdrop")
+        sec["subject"] = "Main subject: " + _sent(_s(_g(d, "feasibility", "fallback")) or _subject_text(d, people),
+                                                 "Any screen, paper or sign in the scene shows only abstract glowing light and shapes, nothing readable")
     else:
         sec["subject"] = "Main subject: " + _sent(_subject_text(d, people))
-        sec["action"] = "Action and moment: " + _sent(f"The single moment shown is {_lead_lower(d.get('action'))}" if _s(d.get("action")) else "A still, held moment with no competing action")
+    sec["action"] = "Action and moment: " + _sent(f"The single moment shown is {_lead_lower(d.get('action'))}" if _s(d.get("action")) and not plate else
+                                                  "A still, held moment with no competing action")
     sec["environment"] = "Environment: " + _sent(_val(_g(d, "setting", "location")), f"Period: {_val(_g(d, 'setting', 'period'))}" if _val(_g(d, "setting", "period")) else "",
                                                  f"Atmosphere: {_s(d.get('atmosphere'))}" if _s(d.get("atmosphere")) else "") + ("" if plate else " " + _layers(d))
     comp = d.get("composition") or {}
     sec["composition"] = "Composition: " + _sent(f"The subject sits {_s(comp.get('position'))}" if _s(comp.get("position")) else "", _positions(comp), f"Camera: {_camera(comp)}" if _camera(comp) else "")
     sec["lighting"] = "Lighting: " + _sent(_s(d.get("lighting")) or "soft even light from a single clear direction")
     style_asset = next((a for a in assets_used if a["kind"] == "style"), None)
-    sec["treatment"] = "Visual treatment: " + _sent(_s(d.get("style")) or "documentary photograph", _s(style_asset["data"].get("description")) if style_asset else "")
-    sec["colour"] = "Colour and mood: " + _sent(f"Palette: {_s(d.get('palette'))}" if _s(d.get("palette")) else "", f"Mood shown through: {_s(d.get('atmosphere'))}" if _s(d.get("atmosphere")) else "")
+    sec["treatment"] = "Visual treatment: " + _sent(f"{look['short']}, {look['linework']}", styles.NOT_PHOTO)
+    sec["colour"] = "Colour and mood: " + _sent(f"Palette: {_s(d.get('palette')) or look['palette']}", f"Mood shown through: {_s(d.get('atmosphere'))}" if _s(d.get("atmosphere")) else "")
     fixed_lines = [f"{a['name']}: {'; '.join(_s(x) for x in a['data'].get('fixed', []))}" for a in assets_used if a["data"].get("fixed") and a["kind"] != "style" and not plate]
     ref_lines = [f"Image {i}: {r['role']} ({r['name']})" for i, r in enumerate(refs["references"], 1)]
     sec["continuity"] = "Continuity: " + _sent(*(["Keep these exactly the same as in the other pictures: " + "; ".join(fixed_lines)] if fixed_lines else ["No recurring people or objects in this picture"]),
@@ -256,7 +253,7 @@ def compile_qwen(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
         sec["text"] = "Exact text: " + _sent("; ".join(f'the words "{_s(t["text"])}"' + (f" placed {_s(t['placement'])}" if _s(t.get("placement")) else "") for t in shown),
                                               "No other text appears anywhere in the image")
     else:
-        sec["text"] = "Text: " + _sent("Screens, papers, signs and labels are blank or out of focus, with no readable letters or numbers")
+        sec["text"] = "Text: " + _sent("Screens show only abstract glowing light and shapes; papers, signs and labels carry no readable letters or numbers")
     cons = []
     if must:
         cons.append("These must be clearly visible: " + "; ".join(must))
@@ -265,7 +262,7 @@ def compile_qwen(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
     cons.append("One clear focal point; no extra people or objects beyond those described")
     sec["constraints"] = "Constraints: " + _sent(*cons)
     prompt = "\n".join(v.strip() for v in sec.values() if v.strip())
-    return _finish("qwen", "qwen-image-2.1", cfg, scene, prompt, "", sec, (w, h), refs, notes, plate)
+    return _finish("qwen", "qwen-image-2.1", cfg, scene, prompt, "", sec, (w, h), refs, notes, plate, plan)
 
 
 # ── FLUX.2 Klein: natural prose, exclusions as positive statements plus the supported negative_prompt ──
@@ -279,11 +276,12 @@ def compile_flux(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
     must, avoid = _constraints(d)
     people = [a for a in assets_used if a["kind"] in ("person", "narrator")]
     comp = d.get("composition") or {}
-    sec: dict[str, str] = {}
+    look = styles.for_plan(plan.get("settings"))
+    sec: dict[str, str] = {"style": _sent(look["look"])}
     if plate:
-        notes.append("this visual needs a verified chart, document, screen, map or diagram: the image model makes only the setting plate")
+        notes.append("this visual needs a verified chart, document, screen, map or diagram: the picture is the illustrated scene around it; the exact content is added later")
     subject = _subject_text(d, people)
-    sec["subject"] = _sent("An empty backdrop only, with nothing drawn on it that looks like data, a chart, a document or a screen") if plate else _sent(subject)
+    sec["subject"] = _sent(_s(_g(d, "feasibility", "fallback")) or subject, "Any screen, paper or sign shows only abstract glowing light and shapes") if plate else _sent(subject)
     sec["action"] = "" if plate else _sent(f"{_s(d.get('action'))}" if _s(d.get("action")) else "The moment is still and held")
     where = _sent(f"The scene is set in {_run(_val(_g(d, 'setting', 'location')))}" if _val(_g(d, "setting", "location")) else "",
                   f"The period is {_run(_val(_g(d, 'setting', 'period')))}" if _val(_g(d, "setting", "period")) else "")
@@ -295,7 +293,7 @@ def compile_flux(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
     mats = [] if plate else [_s(p) for p in _g(d, "setting", "props", default=[]) if _s(p)]
     sec["materials"] = _sent("Physical detail: " + ", ".join(mats)) if mats else ""
     style_asset = next((a for a in assets_used if a["kind"] == "style"), None)
-    sec["style"] = _sent(f"Rendered as {_s(d.get('style')) or 'a documentary photograph'}", _s(style_asset["data"].get("description")) if style_asset else "")
+    sec["treatment"] = _sent(f"Rendered as {look['short']}, {look['linework']}", styles.NOT_PHOTO)
     sec["camera"] = _sent(f"Camera: {_camera(comp)}" if _camera(comp) else "")
     fixed_lines = [f"{a['name']} ({'; '.join(_s(x) for x in a['data'].get('fixed', []))})" for a in assets_used if a["data"].get("fixed") and a["kind"] != "style" and not plate]
     sec["continuity"] = _sent("Consistent with the rest of the film: " + "; ".join(fixed_lines)) if fixed_lines else ""
@@ -305,21 +303,19 @@ def compile_flux(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
         sec["text"] = _sent("The image contains exactly this text: " + "; ".join(f'"{_s(t["text"])}"' + (f" {_s(t['placement'])}" if _s(t.get("placement")) else "") for t in shown),
                             "It contains no other writing")
     else:
-        sec["text"] = _sent("Any screens, papers and signs are blank or softly out of focus")
+        sec["text"] = _sent("Screens show only abstract glowing light and shapes; papers and signs carry no readable letters or numbers")
     if must:
         sec["must"] = _sent("Clearly visible: " + "; ".join(must))
     if avoid:
         sec["avoid"] = _sent("The frame is free of " + ", ".join(avoid))        # positive-form statement; also sent as negative_prompt below
     sec["output"] = _sent(f"{w}x{h} pixels, {_aspect(fmt)} composition", _safe_area(fmt))
-    if plate:
-        sec["plate"] = _sent("This is a background plate: leave a clear empty area where a verified graphic will be placed later")
     prompt = " ".join(v.strip() for v in sec.values() if v.strip())
     negative = ", ".join([*avoid, *FLUX_STANDARD_NEGATIVE.split(", ")]) if cfg["negative_prompt"] else ""
-    return _finish("flux", "flux2-klein-9b", cfg, scene, prompt, negative, sec, (w, h), refs, notes, plate)
+    return _finish("flux", "flux2-klein-9b", cfg, scene, prompt, negative, sec, (w, h), refs, notes, plate, plan)
 
 
 def _finish(adapter: str, model: str, cfg: dict, scene: dict, prompt: str, negative: str, sections: dict, size: tuple[int, int],
-            refs: dict, notes: list[str], plate: bool) -> dict:
+            refs: dict, notes: list[str], plate: bool, plan: dict | None = None) -> dict:
     w, h, changed = providers.snap(size[0], size[1], cfg)
     if changed:
         notes.append(f"size {size[0]}x{size[1]} was snapped to {w}x{h} for this model")
@@ -334,7 +330,8 @@ def _finish(adapter: str, model: str, cfg: dict, scene: dict, prompt: str, negat
            "prompt": re.sub(r"[ \t]{2,}", " ", prompt).strip(), "negative_prompt": negative,
            "size": {"width": w, "height": h}, "references": refs_ok, "missing_references": refs["missing"],
            "params": {"steps": cfg["edit_steps"] if mode == "edit" else cfg["steps"], "cfg": cfg["edit_cfg"] if mode == "edit" else cfg["cfg"],
-                      "note": "the gateway's own defaults are used; steps and cfg are shown, not overridden"},
+                      "note": "the gateway's own defaults are used; steps and cfg are shown, not overridden",
+                      "style": styles.style_id((plan or {}).get("settings")), "lora": styles.loras_for(model, (plan or {}).get("settings"))},
            "sections": {k: v.strip() for k, v in sections.items() if v.strip()}, "notes": notes,
            "enhancer": {"used": False, "available": cfg["prompt_enhancer"]["available"], "original_prompt_kept": True}}
     if plate:
@@ -393,6 +390,9 @@ def validate_prompt(c: dict, scene: dict, assets: list[dict], facts: str, prof: 
         if _s(f) and not covers(p, f):
             add("fact", f"fixed detail not in the prompt: {_s(f)}")
     used = assets_for(scene, assets)
+    st = next((a for a in used if a["kind"] == "style"), None)
+    if st and _s(st["data"].get("description")) and not covers(p, _s(st["data"]["description"]), 0.7):
+        add("style", "the plan's visual style is not in the prompt")
     for a in used:
         if a["kind"] == "style" or plate:
             continue
