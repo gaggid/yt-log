@@ -155,7 +155,7 @@ Approval of voice and pictures is optional for the draft (the latest valid take 
 - **Tried on a copy of the real data (nothing saved):** the new registry gave a concrete trader (35, tan skin, navy sweater, charcoal trousers, brown boots, silver watch), a trading floor and a trading desk; the new storyboard gave story scenes with no charts; three pictures showed one consistent, expressive trader. A trader model sheet scored 100 and showed four consistent poses on white.
 - **Three empty draft plans** from earlier tests (`pl-80117505`, `pl-a1b51833`, `pl-c056df3f`) can be deleted from the plan list.
 - **Facts are marked "unverified"** (the user's own task); the narrator name is unset.
-- **`D:\yt-log-ui`** is a git worktree of this repo on the branch `ui-refresh` (left from the Phase 1 UI work). Its commit is already in master and it has no unsaved changes, so it can be removed with `git worktree remove D:\yt-log-ui` and `git branch -d ui-refresh`. It was not removed because the owner had not said yes.
+- `D:\yt-log-ui` (a leftover git worktree on branch `ui-refresh`) was removed on 2026-10-24, locally and on origin; its commit was already in master.
 
 ## 7. Known gaps and risks
 

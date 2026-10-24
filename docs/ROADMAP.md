@@ -14,7 +14,7 @@ Written 2026-10-24 (updated after the visual-direction change). Read [APP_GUIDE.
 4. Decide whether to **rewrite the narration** into the new Hinglish style with one emotion per part (the plan's emotional-coherence score is 4 until then). It means redoing the voice (about 26 minutes) and the storyboard; best done before the final render.
 5. Choose the visual style on the Visual style card if the default (game-art) is not wanted. Do it before step 2.
 6. Verify the story's facts independently and set the narrator name (both still open).
-7. Optional clean-up: delete the three empty draft plans; remove `D:\yt-log-ui` (a leftover git worktree: `git worktree remove D:\yt-log-ui`, then `git branch -d ui-refresh`).
+7. Optional clean-up: delete the three empty draft plans.
 
 ## Remaining Phase 3 batches
 
