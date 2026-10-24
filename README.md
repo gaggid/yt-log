@@ -4,7 +4,7 @@ Turns a **book (PDF) or article** into a **16:9 long-form video**, in three stag
 
 1. **Story** (Phase 1): evidence-linked story candidates to review and approve.
 2. **Video plan** (Phase 2): narration, storyboard, model-aware image prompts, editorial scores, approval, versioned JSON export.
-3. **Media** (Phase 3, in progress): voice (done), reference pictures (done), scene pictures, built graphics, ffmpeg draft video.
+3. **Media** (Phase 3, in progress): voice (done), characters and reference model sheets (done), scene pictures, built graphics, ffmpeg draft video. The video is told through illustrated story scenes in one chosen style.
 
 **Start here:** [docs/APP_GUIDE.md](docs/APP_GUIDE.md) (what it is, how it is built, how to use and run it) and [docs/ROADMAP.md](docs/ROADMAP.md)
 (what is left, and a paste-ready prompt for a new chat). The sections below describe Phase 1 in detail.
