@@ -15,7 +15,7 @@ from .storyboard import fact_numbers
 MAX_PROMPT_CHARS = 2400            # conservative: the gateway caps prompt length but does not publish the number
 MAX_TEXT_WORDS = 8
 # wording that asks the model for an effect without saying what is visible (brief: say the visible details instead)
-VAGUE = ("dramatic", "epic", "stunning", "viral", "intense", "tense", "tension", "powerful", "emotional", "masterpiece", "high quality",
+VAGUE = ("several", "many", "a few", "various", "etc", "typical", "generic", "dramatic", "epic", "stunning", "viral", "intense", "tense", "tension", "powerful", "emotional", "masterpiece", "high quality",
          "breathtaking", "gripping", "haunting")
 FLUX_STANDARD_NEGATIVE = styles.NEGATIVE
 ADAPTERS = ("qwen", "flux")
@@ -165,20 +165,29 @@ def _camera(c: dict) -> str:
     return ", ".join(b for b in bits if b)
 
 
+def latin_only(txt: str) -> bool:
+    """On-screen text is English: Latin letters, digits and ordinary punctuation only (the models do not draw Devanagari reliably)."""
+    return all(ord(ch) < 128 or ch in "\u2018\u2019\u201c\u201d\u2013\u2014\u2026\u00b0\u20b9\u00a3\u20ac" for ch in txt)
+
+
 def _exact_text(d: dict, notes: list[str]) -> tuple[str, list[dict]]:
-    """Exact on-screen text goes into the image only when it is short and the scene is not a chart, document or screen. Everything else is
-    left to a later deterministic overlay: image models misspell, and a fabricated chart or document would look like evidence."""
+    """Short English text written in quotes is drawn correctly by both image models (tested), on a sign, a headline or a screen, so it goes into the
+    prompt exactly as written. Longer text, or text that is not English, is left to a later deterministic overlay: a long chart or document built by
+    a model would look like evidence it is not."""
     shown, skipped = [], []
     for t in d.get("text_on_screen") or []:
         txt = _s(t.get("text"))
         if not txt:
             continue
-        if d.get("visual_type") in NEEDS_ASSET or len(txt.split()) > MAX_TEXT_WORDS:
+        if len(txt.split()) > MAX_TEXT_WORDS or not latin_only(txt):
             skipped.append(t)
         else:
             shown.append(t)
     for t in skipped:
-        notes.append(f"text \"{_s(t['text'])}\" is not drawn by the image model; add it as an overlay later")
+        why = "is not English" if not latin_only(_s(t["text"])) else "is too long to draw reliably"
+        notes.append(f"text \"{_s(t['text'])}\" {why}; it is not drawn by the image model (add it as an overlay later)")
+    if shown and any(len(x.get("text", "").split()) > 5 for x in shown):
+        notes.append("long quoted text can repeat or drop a word, especially on FLUX; Qwen is the safer model for it")
     return shown, skipped
 
 
@@ -231,7 +240,8 @@ def compile_qwen(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
                                                    f"The viewer should come away with this: {_s(nar.get('new_information') or nar.get('takeaway'))}" if _s(nar.get("new_information") or nar.get("takeaway")) else "")
     if plate:
         sec["subject"] = "Main subject: " + _sent(_s(_g(d, "feasibility", "fallback")) or _subject_text(d, people),
-                                                 "Any screen, paper or sign in the scene shows only abstract glowing light and shapes, nothing readable")
+                                                 ("Apart from the quoted words, any screen, paper or sign shows only abstract glowing light and shapes" if shown else
+                                                  "Any screen, paper or sign in the scene shows only abstract glowing light and shapes, nothing readable"))
     else:
         sec["subject"] = "Main subject: " + _sent(_subject_text(d, people))
     sec["action"] = "Action and moment: " + _sent(f"The single moment shown is {_lead_lower(d.get('action'))}" if _s(d.get("action")) and not plate else
@@ -251,6 +261,7 @@ def compile_qwen(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
     sec["framing"] = "Aspect ratio and framing: " + _sent(f"{w}x{h} pixels, {_aspect(fmt)}", _safe_area(fmt))
     if shown:
         sec["text"] = "Exact text: " + _sent("; ".join(f'the words "{_s(t["text"])}"' + (f" placed {_s(t['placement'])}" if _s(t.get("placement")) else "") for t in shown),
+                                              "Each quoted text is written in clear English letters, spelled exactly as inside the quotes, once only",
                                               "No other text appears anywhere in the image")
     else:
         sec["text"] = "Text: " + _sent("Screens show only abstract glowing light and shapes; papers, signs and labels carry no readable letters or numbers")
@@ -301,7 +312,7 @@ def compile_flux(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
         sec["references"] = _sent("; ".join(f"Image {i}: {r['role']} ({r['name']})" for i, r in enumerate(refs["references"], 1)))
     if shown:
         sec["text"] = _sent("The image contains exactly this text: " + "; ".join(f'"{_s(t["text"])}"' + (f" {_s(t['placement'])}" if _s(t.get("placement")) else "") for t in shown),
-                            "It contains no other writing")
+                            "Each text is written once, in clear English letters, spelled exactly as inside the quotes", "It contains no other writing")
     else:
         sec["text"] = _sent("Screens show only abstract glowing light and shapes; papers and signs carry no readable letters or numbers")
     if must:
@@ -404,9 +415,9 @@ def validate_prompt(c: dict, scene: dict, assets: list[dict], facts: str, prof: 
             add("exclusion", f"exclusion not carried into the prompt: {_s(ex)}")
     for t in d.get("text_on_screen") or []:
         txt = _s(t.get("text"))
-        if txt and f'"{txt}"' in p and d.get("visual_type") in NEEDS_ASSET:
-            add("text", f"“{txt}” must not be drawn by the image model on a chart, document or screen")
-        if txt and len(txt.split()) <= MAX_TEXT_WORDS and d.get("visual_type") not in NEEDS_ASSET and f'"{txt}"' not in p:
+        if txt and not latin_only(txt):
+            add("text", f"“{txt}” is not English; on-screen text must use English letters", "error")
+        if txt and len(txt.split()) <= MAX_TEXT_WORDS and latin_only(txt) and f'"{txt}"' not in p:
             add("text", f"exact text “{txt}” is missing from the prompt")
     if d.get("visual_type") in NEEDS_ASSET and c["mode"] not in ("overlay_plate", "edit"):
         add("asset", "a chart, document or screen cannot be generated; the mode must be a background plate")

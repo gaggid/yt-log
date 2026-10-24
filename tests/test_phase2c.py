@@ -66,8 +66,19 @@ def test_charts_and_documents_become_plates_and_text_is_not_drawn(env):
     for a in ("qwen", "flux"):
         c = scenes[0]["data"]["prompts"][a]
         assert c["mode"] == "overlay_plate" and "abstract glowing" in c["prompt"].lower() and "empty backdrop" not in c["prompt"].lower()   # an illustrated scene, not a blank
-        assert '"seventeen percent drop"' not in c["prompt"] and any("overlay" in n for n in c["notes"])
+        assert '"seventeen percent drop"' in c["prompt"] and "spelled exactly" in c["prompt"]                  # short English text in quotes is drawn by the model
     assert not any(i["kind"] == "text" and i["level"] == "error" for i in rep["issues"])
+
+
+def test_long_or_non_english_text_is_left_to_an_overlay(env):
+    over = {"visual_type": "data_chart", "text_on_screen": [{"text": "one two three four five six seven eight nine ten", "placement": "top"},
+                                                            {"text": "शेयर गिरा", "placement": "bottom"}]}
+    pid, scenes, rep = compiled(env, scene_over=over)
+    for a in ("qwen", "flux"):
+        c = scenes[0]["data"]["prompts"][a]
+        assert "one two three" not in c["prompt"] and "शेयर" not in c["prompt"]
+        assert any("is too long" in n for n in c["notes"]) and any("is not English" in n for n in c["notes"])
+    assert any(i["kind"] == "text" and "not English" in i["text"] for i in rep["issues"])
 
 
 def test_short_exact_text_is_quoted_in_both_prompts(env):

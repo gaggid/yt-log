@@ -9,7 +9,7 @@ from story import db, llm, settings as settings_mod
 from story.pipeline import manager
 from fastapi.responses import FileResponse
 
-from . import editorial, export, imgplan, imgprompts, intake, jobs, planner, providers, storyboard, styles
+from . import describe, editorial, export, imgplan, imgprompts, intake, jobs, planner, providers, storyboard, styles
 
 router = APIRouter(prefix="/api/plans")
 
@@ -99,6 +99,9 @@ async def plan(plan_id: str):
     p["content_hash"] = editorial.content_hash(p)
     p["exports"] = export.list_exports(plan_id)
     p["style"] = style_info(p)
+    p["cast_gaps"] = [{"id": a["id"], "name": a["name"], "kind": a["kind"], "missing": describe.missing(a["kind"], a["data"].get("appearance")),
+                       "hints": describe.hints(a["kind"])} for a in p["assets"] if a["kind"] in ("person", "place", "prop")
+                      and describe.missing(a["kind"], a["data"].get("appearance"))]
     return p
 
 
@@ -313,6 +316,12 @@ async def patch_asset(asset_id: str, patch: dict):
     for k in ("description", "fixed", "flexible", "period", "fictionalisation", "evidence_note"):
         if k in patch:
             data[k] = patch[k]
+    if "appearance" in patch:                                          # slot values: the description and the fixed details are rebuilt from them
+        data["appearance"] = {**describe.clean(data.get("appearance")), **describe.clean(patch["appearance"])}
+        if "description" not in patch:
+            data["description"] = describe.describe(a["kind"], data["appearance"]) or data.get("description", "")
+        if "fixed" not in patch and describe.fixed_from(a["kind"], data["appearance"]):
+            data["fixed"] = describe.fixed_from(a["kind"], data["appearance"])
     if "reference_images" in patch:                                  # approved images later scenes can be conditioned on (the gateway takes up to 3)
         data["reference_images"] = [{"id": str(r.get("id") or "")[:60], "file": str(r.get("file") or "")[:200], "approved": bool(r.get("approved")),
                                      "note": str(r.get("note") or "")[:200]} for r in (patch["reference_images"] or []) if r.get("id")]

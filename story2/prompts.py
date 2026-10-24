@@ -81,13 +81,23 @@ Return ONLY this JSON object:
 {"assets": [{
   "name": "short unique name, e.g. 'the trader', 'trading floor', 'style'",
   "kind": "person | place | prop | style",
-  "description": "approved visual attributes: for a person age range, build, clothing for the period, posture; for a place architecture, materials, light; for a style the look in concrete terms (film stock or illustration technique, palette, contrast, grain)",
+  "appearance": {"one key per slot, every slot filled, see SLOTS below": "a concrete value"},
+  "description": "one sentence summary (it is rebuilt from appearance)",
   "fixed": ["attributes that must stay identical in every scene"],
   "flexible": ["attributes that may change between scenes"],
   "period": "time period if known, otherwise empty",
   "fictionalisation": "generic_reconstruction | source_supported | real_person_no_likeness | fictional",
   "evidence_note": "what in the story supports this asset, in plain words, or 'creative choice'"
 }]}
+SLOTS (fill every one, with concrete values; the picture model draws exactly what is written and invents whatever is missing):
+- person: gender (man, woman, boy, girl) | age (a number of years) | build (height and build) | skin (skin tone) | face (face shape, distinctive features) |
+  hair (colour, length, style) | eyes (colour) | top (upper clothing and its colour) | bottom (lower clothing and its colour) | footwear (shoes and colour) |
+  accessories (watch, glasses, bag, jewellery, or the word none) | expression (usual expression)
+- place: type | architecture (structure and layout) | materials (main materials and their colours) | light (sources, direction, time of day) |
+  objects (key furniture and objects, with counts) | size (size and how crowded)
+- prop: type | shape (shape and size) | material | colour (exact colours) | condition (new, worn, damaged) | markings (lettering or marks, or the word none)
+Write colours as colours ("navy blue", "charcoal grey"), materials as materials ("brushed steel", "worn oak"), numbers as numbers. Never write
+"nice", "typical", "generic", "casual", "business attire", "various", "etc" or "and so on": say which items, which colours, how many.
 Rules:
 - Exactly one "style" asset: the visual language of the whole video.
 - The video is a story told through hand-illustrated pictures of things that could really have happened. Assets are what an
@@ -143,8 +153,10 @@ are doing at this exact instant, camera angle and distance, light and its direct
 "tense" or "epic": say which visible details create that effect. One clear focal point per scene.
 People are the continuity characters, drawn with faces and clear emotion (what the face and body show), using the same names as the
 assets. A real, named person is shown only as a silhouette, from behind, in shadow or by the hands. Clothing, devices and rooms
-must fit the period. No logos, no readable brand text, no invented text; screens and papers show abstract light or marks only.
-On-screen text only when essential, 8 words at most.
+must fit the period. No logos and no brand text. On-screen text is allowed and the picture models draw it correctly when it is short and
+quoted: a headline, a sign, a label, a big number on a screen (for example "STOCK FALLS 17%"). Rules for it: English letters only (never
+Hindi on screen), 8 words at most per text, only words and numbers that are in the story facts, never a quotation from a book or person.
+Screens and papers without such text show abstract light or marks only.
 
 Return ONLY this JSON object:
 {"scenes": [{

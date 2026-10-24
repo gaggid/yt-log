@@ -10,7 +10,7 @@ import re
 import uuid
 
 from story import db, llm, settings as settings_mod
-from . import intake, leak, planner, prompts as P, providers, store, styles, svara
+from . import describe, intake, leak, planner, prompts as P, providers, store, styles, svara
 from .scene_schemas import ASPECTS, NEEDS_ASSET, RegistryOut, SceneOut, ScenesOut
 
 MIN_SCENE_S, MAX_SCENE_S = 2.0, 20.0
@@ -79,6 +79,9 @@ def _seq(seg: dict, n: int) -> float:
     return seg["seq"] + n / 1000
 
 
+_NOT_AN_OBJECT = re.compile(r"\b(chart|graph|diagram|infographic|report|document|spreadsheet|statement|filing)\b", re.I)
+
+
 # ── registry ────────────────────────────────────────────────────────────────
 
 async def make_registry(plan_id: str, backend, s: dict | None = None) -> dict:
@@ -100,8 +103,16 @@ async def make_registry(plan_id: str, backend, s: dict | None = None) -> dict:
                 continue
             if a.kind == "style":
                 continue                                            # the style asset is written from the chosen preset below
+            if a.kind == "prop" and _NOT_AN_OBJECT.search(a.name + " " + a.appearance.get("type", "")):
+                continue                                            # charts, graphs and documents are built from facts later, never listed as a drawable object
+            data = a.model_dump()
+            ap = describe.clean(data.get("appearance"))
+            if ap:                                                  # the description the image model reads is composed from the slots, so no slot is dropped
+                data["appearance"] = ap
+                data["description"] = describe.describe(a.kind, ap) or data["description"]
+                data["fixed"] = describe.fixed_from(a.kind, ap) or data["fixed"]
             c.execute("INSERT INTO assets(id,plan_id,kind,name,data,updated_at) VALUES(?,?,?,?,?,?)",
-                      ("as-" + uuid.uuid4().hex[:8], plan_id, a.kind, a.name, db.jdump(a.model_dump()), db.now()))
+                      ("as-" + uuid.uuid4().hex[:8], plan_id, a.kind, a.name, db.jdump(data), db.now()))
         if not any(a["kind"] == "style" for a in kept.values()):
             c.execute("INSERT INTO assets(id,plan_id,kind,name,data,updated_at) VALUES(?,?,?,?,?,?)",
                       ("as-" + uuid.uuid4().hex[:8], plan_id, "style", "style", db.jdump(styles.style_asset_data(plan["settings"])), db.now()))

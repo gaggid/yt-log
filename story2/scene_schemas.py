@@ -62,6 +62,7 @@ class AssetOut(M):
     name: Str
     kind: Annotated[str, BeforeValidator(_kind)] = "prop"
     description: Str = ""                           # approved visual attributes, only what is supported or deliberately fictional
+    appearance: dict[str, Str] = {}                  # one concrete value per slot (story2/describe.py); the description is composed from it
     fixed: StrList = []                              # must stay the same in every scene
     flexible: StrList = []                           # may change between scenes
     period: Str = ""
