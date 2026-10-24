@@ -1,8 +1,13 @@
 # Source to Story
 
-Phase 1 of a modular content pipeline. Import a **book (PDF)** or an **article (URL, pasted text, TXT/HTML)** and get a
-searchable, scored, evidence-linked list of **story candidates** to review and export as JSON/CSV for a later
-script-generation module. It does not write scripts, narration, images or video.
+Turns a **book (PDF) or article** into a **16:9 long-form video**, in three stages with a human checkpoint at each:
+
+1. **Story** (Phase 1): evidence-linked story candidates to review and approve.
+2. **Video plan** (Phase 2): narration, storyboard, model-aware image prompts, editorial scores, approval, versioned JSON export.
+3. **Media** (Phase 3, in progress): voice (done), reference pictures (done), scene pictures, built graphics, ffmpeg draft video.
+
+**Start here:** [docs/APP_GUIDE.md](docs/APP_GUIDE.md) (what it is, how it is built, how to use and run it) and [docs/ROADMAP.md](docs/ROADMAP.md)
+(what is left, and a paste-ready prompt for a new chat). The sections below describe Phase 1 in detail.
 
 The previous news-podcast video generator is kept untouched in [legacy/](legacy/) and is no longer served.
 
