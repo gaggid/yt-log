@@ -5,28 +5,39 @@ import io
 
 import httpx
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from story import db
 from story2 import editorial, imgplan, planner, storyboard
-from story3 import refs, store, voice
+from story3 import refs, refscore, store, voice
 from test_phase2b import boarded
 from test_phase3e import exported
 
-SETTINGS = {"base_url": "http://gw/v1"}
+SETTINGS = {"base_url": "http://gw/v1", "model": "chat-model"}
 
 
-def png(w=64, h=48) -> str:
+def figure(w=64, h=48, cut=False, blank=False) -> Image.Image:
+    """A grey backdrop with one navy subject standing clear of the edges (or running off the top, or nothing at all)."""
+    im = Image.new("RGB", (w, h), (200, 200, 200))
+    if not blank:
+        d = ImageDraw.Draw(im)
+        d.rectangle((w * 0.3, 0 if cut else h * 0.12, w * 0.7, h * 0.9), fill=(20, 40, 110))
+        d.rectangle((w * 0.4, h * 0.3, w * 0.5, h * 0.5), fill=(30, 160, 90))
+    return im
+
+
+def png(w=64, h=48, **kw) -> str:
     buf = io.BytesIO()
-    Image.new("RGB", (w, h), (30, 90, 160)).save(buf, "PNG")
+    figure(w, h, **kw).save(buf, "PNG")
     return base64.b64encode(buf.getvalue()).decode()
 
 
 class Gateway:
     """Stands in for the image model: answers every generation request with a small picture."""
 
-    def __init__(self, fail_for=()):
-        self.requests, self.fail_for = [], set(fail_for)
+    def __init__(self, fail_for=(), looks=None, vision_down=False):
+        self.requests, self.fail_for, self.vision_down = [], set(fail_for), vision_down
+        self.looks = list(looks or [])                                                                  # answers of the vision check, in order
 
     def client(self):
         gw = self
@@ -38,9 +49,16 @@ class Gateway:
 
             async def post(self, url, json=None, headers=None):
                 gw.requests.append({"url": url, "body": json, "auth": headers})
-                if len(gw.requests) in gw.fail_for:
+                if url.endswith("/chat/completions"):
+                    if gw.vision_down:
+                        return httpx.Response(502, text="model not loaded")
+                    ans = gw.looks.pop(0) if gw.looks else {}
+                    good = {k: 8 for k, _ in refscore.DIMS} | {"text_visible": False, "defects": []}
+                    return httpx.Response(200, json={"choices": [{"message": {"content": "```json\n" + __import__("json").dumps(good | ans) + "\n```"}}]})
+                if len([r for r in gw.requests if r["url"].endswith("/images/generations")]) in gw.fail_for:
                     return httpx.Response(502, text="image engine error")
-                return httpx.Response(200, json={"data": [{"b64_json": png(), "seed": json.get("seed"), "width": 64, "height": 48}]})
+                w, h = (int(v) for v in json["size"].split("x"))
+                return httpx.Response(200, json={"data": [{"b64_json": png(w // 16, h // 16), "seed": json.get("seed"), "width": w, "height": h}]})
         return C
 
 
@@ -55,8 +73,24 @@ def planned(env):
     pid, cid, be, p = boarded(env)
     plan_id = p["id"]
     two_scenes_with_the_person(plan_id)
+    more_assets(plan_id)
     imgplan.compile_plan(plan_id)
     return plan_id
+
+
+def more_assets(plan_id):
+    """Add a place and a prop that each appear in two scenes, so there are three recurring items to choose between."""
+    scenes = storyboard.get_scenes(plan_id)
+    for n, (kind, name, desc) in enumerate([("place", "the old office", "a narrow office with wooden desks and tall windows"),
+                                            ("prop", "the brass clock", "a round brass wall clock with a white face")]):
+        aid = f"as-test{n}"
+        db.ex("INSERT INTO assets(id,plan_id,kind,name,data,updated_at) VALUES(?,?,?,?,?,?)",
+              (aid, plan_id, kind, name, db.jdump({"name": name, "kind": kind, "description": desc, "fixed": ["brass frame"], "flexible": [], "period": "",
+                                                  "fictionalisation": "generic_reconstruction", "evidence_note": ""}), db.now()))
+        for sc in scenes[3 + 2 * n:5 + 2 * n]:
+            d = sc["data"]
+            d["continuity"]["assets"] = d["continuity"]["assets"] + [aid]
+            db.ex("UPDATE scenes SET data=?, updated_at=? WHERE id=?", (db.jdump(d), db.now(), sc["id"]))
 
 
 def two_scenes_with_the_person(plan_id):
@@ -103,11 +137,12 @@ def test_one_request_per_candidate_with_distinct_seeds_and_files_saved(env, monk
     gw = Gateway()
     out = run(plan_id, gw, monkeypatch, candidates=2)
     n = len(refs.targets(plan_id))
-    assert out["made"] == len(gw.requests) == 2 * n and not out["failed"]
-    r = gw.requests[0]
+    imgs = [r for r in gw.requests if r["url"].endswith("/images/generations")]
+    assert out["made"] == len(imgs) == 2 * n and not out["failed"]
+    r = imgs[0]
     assert r["url"] == "http://gw/v1/images/generations" and r["auth"]["Authorization"] == "Bearer k"
     assert r["body"]["model"] == "qwen-image-2.1" and r["body"]["response_format"] == "b64_json" and "negative_prompt" not in r["body"]
-    assert gw.requests[0]["body"]["seed"] != gw.requests[1]["body"]["seed"]
+    assert imgs[0]["body"]["seed"] != imgs[1]["body"]["seed"]
     items = store.items(plan_id, "reference")
     assert all(store.path_of(i).is_file() and i["status"] == "done" and i["meta"]["prompt"] for i in items)
 
@@ -261,3 +296,108 @@ def test_api_round_trip(tmp_path, monkeypatch):
         assert r.status_code == 400 and "no person" in r.json()["detail"]
         assert c.get(f"/api/media/{plan['id']}").json()["refs"]["total"] == 0
         assert c.post(f"/api/media/{plan['id']}/references/skip", json={"asset_id": "as-x"}).status_code == 400
+
+
+# ── scoring and bulk approval ───────────────────────────────────────────────
+
+def test_measuring_catches_blank_cut_and_cluttered_pictures(tmp_path):
+    def save(im, name):
+        p = tmp_path / name
+        im.save(p)
+        return p
+    ok = refscore.measure(save(figure(256, 336), "ok.png"), "person", (256, 336))
+    assert ok["score"] == 100 and not ok["reasons"]
+    assert refscore.measure(save(figure(256, 336, blank=True), "blank.png"), "person")["score"] == 0
+    cut = refscore.measure(save(figure(256, 336, cut=True), "cut.png"), "person")
+    assert cut["score"] <= 65 and any("cut by the frame" in r for r in cut["reasons"])
+    busy = figure(256, 336)
+    d = ImageDraw.Draw(busy)
+    for x in range(0, 256, 16):
+        d.rectangle((x, 0, x + 8, 30), fill=(10, 10, 10))
+    assert any("backdrop is not plain" in r for r in refscore.measure(save(busy, "busy.png"), "person")["reasons"])
+    assert any("differs from" in r for r in refscore.measure(save(figure(256, 336), "shape.png"), "person", (336, 256))["reasons"])
+
+
+def test_combine_never_lets_a_hard_problem_through_and_ranks_the_rest():
+    auto = {"score": 100, "reasons": []}
+    seen = {"score": 80, "defects": ["a hand is melted"], "text_visible": False}
+    c = refscore.combine(auto, seen)
+    assert c["total"] == 90 and not c["hard"] and c["flags"] == ["looks wrong: a hand is melted"]
+    t = refscore.combine(auto, {"score": 95, "defects": [], "text_visible": True})
+    assert t["hard"] and t["total"] <= 49
+    assert refscore.combine({"score": 65, "reasons": ["subject is cut by the frame (top)"]}, None)["hard"]
+    assert refscore.combine({"score": 90, "reasons": []}, None)["total"] == 90              # no vision check: the measured score stands alone
+
+
+def test_new_pictures_are_scored_after_drawing_and_the_best_is_marked(env, monkeypatch, fast):
+    plan_id = planned(env)
+    n = len(refs.targets(plan_id))
+    looks = []
+    for _ in range(n):                                                                              # per item: a weak first picture, a strong second
+        looks += [{"anatomy_clean": 4, "defects": ["extra fingers"]}, {}]
+    out = run(plan_id, Gateway(looks=looks), monkeypatch, candidates=2)
+    assert out["scored"] == 2 * n
+    st = refs.state(plan_id)
+    for r in st["assets"]:
+        a, b = r["candidates"]
+        assert a["score"]["total"] < b["score"]["total"] and r["best"] == b["id"]
+        assert any("extra fingers" in f for f in a["score"]["flags"])
+    assert st["unscored"] == 0 and st["bulk_ready"] == n
+
+
+def test_bulk_approve_takes_the_best_of_each_and_leaves_problems_for_a_person(env, monkeypatch, fast):
+    plan_id = planned(env)
+    n = len(refs.targets(plan_id))
+    looks = [{"text_visible": True, "defects": ["a caption"]}] * 2 + [{}, {"defects": ["a fold looks odd"]}] * (n - 1)    # the first item has text on both pictures
+    run(plan_id, Gateway(looks=looks), monkeypatch, candidates=2)
+    before = refs.state(plan_id)["scenes_using_references"]
+    res = refs.approve_best(plan_id)
+    assert res["approved"] == n - 1 and len(res["left"]) == 1 and "problem" in res["left"][0]["why"]
+    st = res["state"]
+    assert st["approved"] == n - 1 and st["open"] == 1 and st["scenes_using_references"] > before
+    for r in st["assets"]:
+        if r["approved"]:
+            assert r["approved"] == r["best"]
+            a = next(x for x in storyboard.get_assets(plan_id) if x["id"] == r["asset_id"])
+            assert a["data"]["reference_images"][0]["id"] == r["best"] and "score" in a["data"]["reference_images"][0]["note"]
+    assert refs.approve_best(plan_id)["approved"] == 0                                              # nothing more to take
+
+
+def test_bulk_approve_respects_the_minimum_and_never_replaces_a_chosen_picture(env, monkeypatch, fast):
+    plan_id = planned(env)
+    run(plan_id, Gateway(looks=[{k: 3 for k, _ in refscore.DIMS}] * 20), monkeypatch, candidates=1)
+    assert refs.approve_best(plan_id)["approved"] == 0                                              # scores around 65 fall under 70
+    assert refs.approve_best(plan_id, min_score=50)["approved"] == len(refs.targets(plan_id))
+    st = refs.state(plan_id)
+    first = st["assets"][0]["approved"]
+    run(plan_id, Gateway(), monkeypatch, candidates=1, only_missing=False)
+    refs.approve_best(plan_id, min_score=0)
+    assert refs.state(plan_id)["assets"][0]["approved"] == first                                    # a chosen picture is not replaced by a newer one
+
+
+def test_bulk_approve_skips_skipped_items(env, monkeypatch, fast):
+    plan_id = planned(env)
+    run(plan_id, Gateway(), monkeypatch, candidates=1)
+    victim = refs.state(plan_id)["assets"][-1]["asset_id"]
+    refs.set_skip(plan_id, victim, True)
+    res = refs.approve_best(plan_id, min_score=0)
+    assert res["approved"] == len(refs.targets(plan_id)) - 1
+    assert next(r for r in res["state"]["assets"] if r["asset_id"] == victim)["approved"] is None
+
+
+def test_scoring_still_works_when_the_vision_check_is_unavailable(env, monkeypatch, fast):
+    plan_id = planned(env)
+    out = run(plan_id, Gateway(vision_down=True), monkeypatch, candidates=1)
+    assert out["scored"] == len(refs.targets(plan_id))
+    c = refs.state(plan_id)["assets"][0]["candidates"][0]["score"]
+    assert c["looked_at"] is None and c["measured"] > 0 and "unavailable" in c["note"]
+
+
+def test_score_later_fills_in_pictures_made_without_scoring(env, monkeypatch, fast):
+    plan_id = planned(env)
+    run(plan_id, Gateway(), monkeypatch, candidates=1, score=False)
+    assert refs.state(plan_id)["unscored"] == len(refs.targets(plan_id))
+    monkeypatch.setattr(refscore.httpx, "AsyncClient", Gateway().client())
+    out = asyncio.run(refs.score_items(plan_id, s=SETTINGS, key="k"))
+    assert out["scored"] == len(refs.targets(plan_id)) and refs.state(plan_id)["unscored"] == 0
+

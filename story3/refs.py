@@ -11,7 +11,7 @@ import httpx
 from story import db, settings as settings_mod
 from story2 import imgplan, imgprompts, intake, leak, planner, providers, storyboard, store as plan_store
 
-from . import store
+from . import refscore, store
 from .voice import MediaError
 
 RETRIES = 1
@@ -138,8 +138,9 @@ async def _draw(client: httpx.AsyncClient, base: str, key: str, body: dict) -> d
 
 
 async def generate(plan_id: str, asset_ids: list[str] | None = None, candidates: int = DEFAULT_CANDIDATES, only_missing: bool = True,
-                   model: str | None = None, progress=None, s: dict | None = None, key: str = "") -> dict:
-    """Make `candidates` pictures for each chosen asset. only_missing skips assets that already have an approved or current picture."""
+                   model: str | None = None, progress=None, s: dict | None = None, key: str = "", score: bool = True) -> dict:
+    """Make `candidates` pictures for each chosen asset. only_missing skips assets that already have an approved or current picture. When `score`
+    is on, each new picture is then measured and looked at (the chat model takes over from the image model once all pictures are drawn)."""
     s = s or settings_mod.get()
     key = key or settings_mod.api_key()
     plan = planner.get_plan(plan_id)
@@ -156,7 +157,7 @@ async def generate(plan_id: str, asset_ids: list[str] | None = None, candidates:
                 and not any(r.get("approved") for r in t["asset"]["data"].get("reference_images", []))]
     candidates = max(1, min(int(candidates), 4))
     jobs = [(t, n) for t in todo for n in range(candidates)]
-    made, failed = 0, []
+    made, failed, new_ids = 0, [], []
     exp = None
     try:
         from story2 import export
@@ -190,6 +191,7 @@ async def generate(plan_id: str, asset_ids: list[str] | None = None, candidates:
                 store.update(it["id"], status="done", file=name, meta={"seed": img.get("seed", seed), "width": img.get("width"), "height": img.get("height"),
                                                                        "seconds_taken": round(time.time() - t0, 1), "request": {k: v for k, v in body.items() if k not in ("prompt", "negative_prompt")}})
                 made += 1
+                new_ids.append(it["id"])
             except asyncio.CancelledError:
                 store.update(it["id"], status="failed", meta={"error": "stopped before it finished"})
                 raise
@@ -198,10 +200,71 @@ async def generate(plan_id: str, asset_ids: list[str] | None = None, candidates:
                 failed.append({"asset": a["id"], "error": str(e)[:200]})
                 if "not reachable" in str(e):
                     break
+    scored = 0
+    if score and new_ids:
+        scored = (await score_items(plan_id, new_ids, progress, s, key))["scored"]
+    if progress:
+        progress(len(jobs), len(jobs), "done")
+    plan_store.log(plan_id, "references", {"made": made, "failed": len(failed), "model": model, "scored": scored})
+    return {"made": made, "failed": failed, "assets": len(todo), "scored": scored}
+
+
+async def score_items(plan_id: str, item_ids: list[str] | None = None, progress=None, s: dict | None = None, key: str = "") -> dict:
+    """Measure and look at finished pictures that have no score yet (or the ones named). A failed vision check keeps the measured score and says so."""
+    s = s or settings_mod.get()
+    style = style_text(plan_id)
+    by_id = {t["asset"]["id"]: t["asset"] for t in targets(plan_id)}
+    todo = [i for i in store.items(plan_id, "reference") if i["status"] == "done" and i["key"] in by_id
+            and (i["id"] in item_ids if item_ids else not i["meta"].get("score"))]
+    done, vision_down = 0, False
+    for n, it in enumerate(todo):
         if progress:
-            progress(len(jobs), len(jobs), "done")
-    plan_store.log(plan_id, "references", {"made": made, "failed": len(failed), "model": model})
-    return {"made": made, "failed": failed, "assets": len(todo)}
+            progress(n, len(todo), f"checking picture {n + 1} of {len(todo)}")
+        a = by_id[it["key"]]
+        asked = (it["meta"].get("request") or {}).get("size")
+        auto = refscore.measure(store.path_of(it), a["kind"], tuple(int(v) for v in asked.split("x")) if asked else None)
+        seen, note = None, ""
+        if not vision_down:
+            try:
+                seen = await refscore.look(store.path_of(it), {"name": a["name"], "kind": a["kind"], "description": _s(a["data"].get("description")), "fixed": a["data"].get("fixed", [])}, style, s, key)
+            except Exception as e:  # noqa: BLE001 - reported on the picture; scoring continues with measured facts only
+                vision_down, note = True, f"vision check unavailable: {str(e)[:120]}"
+        else:
+            note = "vision check unavailable"
+        sc = refscore.combine(auto, seen)
+        sc["note"] = note
+        store.update(it["id"], meta={"score": sc, "scored_at": db.now()})
+        done += 1
+    return {"scored": done}
+
+
+def best(plan_id: str, row_candidates: list[dict]) -> dict | None:
+    """The best current finished picture of one item: highest total, then fewest flags, then the earlier attempt."""
+    cands = [c for c in row_candidates if c["status"] == "done" and c["current"] and c.get("score")]
+    return min(cands, key=lambda c: (-c["score"]["total"], len(c["score"]["flags"]), c["attempt"])) if cands else None
+
+
+def approve_best(plan_id: str, min_score: int = refscore.AUTO_APPROVE_MIN) -> dict:
+    """Approve, for every item still open, its best picture, but only when it scores at least `min_score` and has no hard problem. The rest are
+    left for a person. Prompts are recompiled once at the end."""
+    st = state(plan_id)
+    chosen, left = [], []
+    for r in st["assets"]:
+        if r["approved"] or r["skipped"]:
+            continue
+        b = best(plan_id, r["candidates"])
+        if b and b["score"]["total"] >= min_score and not b["score"]["hard"]:
+            chosen.append((r["asset_id"], b["id"]))
+        else:
+            left.append({"asset": r["name"], "why": "no picture scored yet" if not b else "best picture has a problem" if b["score"]["hard"] else f"best score {b['score']['total']} is under {min_score}"})
+    for aid, iid in chosen:
+        store.approve(iid, True)
+        it = store.get(iid)
+        _write_asset(aid, [{"id": it["id"], "file": it["file"], "approved": True, "note": f"attempt {it['attempt']}, seed {it['meta'].get('seed')}, score {it['meta']['score']['total']}"}])
+        plan_store.log(plan_id, "reference_approved", {"asset": aid, "item": iid, "bulk": True})
+    if chosen:
+        imgplan.compile_plan(plan_id)
+    return {"approved": len(chosen), "left": left, "state": state(plan_id)}
 
 
 def _write_asset(asset_id: str, entries: list[dict]) -> None:
@@ -249,12 +312,17 @@ def state(plan_id: str) -> dict:
                      "candidates": [{"id": i["id"], "attempt": i["attempt"], "status": i["status"], "approved": i["approved"],
                                      "url": f"/api/media/file/{plan_id}/{i['file']}" if i["file"] else "", "current": i["meta"].get("asset_hash") == want,
                                      "model": i["meta"].get("model"), "seed": i["meta"].get("seed"), "seconds_taken": i["meta"].get("seconds_taken"),
-                                     "error": i["meta"].get("error", "")} for i in att]})
+                                     "error": i["meta"].get("error", ""), "score": i["meta"].get("score")} for i in att]})
+    for r in rows:
+        b = best(plan_id, r["candidates"])
+        r["best"] = b["id"] if b else None
     per = sum(secs) / len(secs) if secs else DEFAULT_SECONDS
     open_rows = [r for r in rows if not r["approved"] and not r["skipped"]]
     need_pics = [r for r in open_rows if not any(c["status"] == "done" and c["current"] for c in r["candidates"])]
     edit_scenes = sum(1 for sc in storyboard.get_scenes(plan_id) if any((c or {}).get("mode") == "edit" for c in (sc["data"].get("prompts") or {}).values()))
     return {"model": model, "assets": rows, "total": len(rows), "approved": sum(1 for r in rows if r["approved"]), "skipped": sum(1 for r in rows if r["skipped"]),
-            "open": len(open_rows), "without_pictures": len(need_pics), "seconds_per_picture": round(per), "default_candidates": DEFAULT_CANDIDATES,
+            "open": len(open_rows), "unscored": sum(1 for r in rows for c in r["candidates"] if c["status"] == "done" and not c.get("score")),
+            "bulk_ready": sum(1 for r in open_rows if (lambda b: b and b["score"]["total"] >= refscore.AUTO_APPROVE_MIN and not b["score"]["hard"])(best(plan_id, r["candidates"]))),
+            "min_score": refscore.AUTO_APPROVE_MIN, "without_pictures": len(need_pics), "seconds_per_picture": round(per), "default_candidates": DEFAULT_CANDIDATES,
             "eta_missing_s": round(len(need_pics) * DEFAULT_CANDIDATES * per), "scenes_using_references": edit_scenes,
             "done": bool(rows) and not open_rows, "style": style}

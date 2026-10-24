@@ -65,6 +65,7 @@ class RefsReq(BaseModel):
     candidates: int = refs.DEFAULT_CANDIDATES
     only_missing: bool = True
     model: str | None = None
+    score: bool = True
 
 
 @router.post("/{plan_id}/references")
@@ -74,8 +75,28 @@ async def make_references(plan_id: str, body: RefsReq | None = None):
         raise HTTPException(400, "no person, place or object appears in two or more scenes, so no reference pictures are needed")
 
     async def work(progress):
-        await refs.generate(plan_id, body.asset_ids, body.candidates, body.only_missing, body.model, progress, settings_mod.get(), settings_mod.api_key())
+        await refs.generate(plan_id, body.asset_ids, body.candidates, body.only_missing, body.model, progress, settings_mod.get(), settings_mod.api_key(), score=body.score)
     return _start(plan_id, "references", work)
+
+
+@router.post("/{plan_id}/references/score")
+async def score_references(plan_id: str):
+    if not refs.state(plan_id)["unscored"]:
+        raise HTTPException(400, "every finished picture already has a score")
+
+    async def work(progress):
+        await refs.score_items(plan_id, None, progress, settings_mod.get(), settings_mod.api_key())
+        progress(1, 1, "done")
+    return _start(plan_id, "references", work)
+
+
+class BestReq(BaseModel):
+    min_score: int = 70
+
+
+@router.post("/{plan_id}/references/approve-best")
+async def approve_best_references(plan_id: str, body: BestReq | None = None):
+    return _guard(refs.approve_best, plan_id, (body or BestReq()).min_score)
 
 
 class SkipReq(BaseModel):
