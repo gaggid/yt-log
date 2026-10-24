@@ -109,6 +109,11 @@ Rules:
 - Places are real-feeling settings where the story happens (a trading floor, a small office, a street at dusk): architecture,
   materials, light, typical objects. Props are physical things people use or hold (a desk phone, a wall of monitors, a printed
   report). Never list a chart, graph, diagram or document as an asset.
+- A prop is a physical object that is actually IN the scene. Never list an idea, a figure of speech or a chart feature as a prop (a support line, a
+  moving average, a pattern, a "heavy bag" meant as a metaphor): it has no shape and the picture model will invent one. Say "markings: none" for
+  anything that normally carries writing (paper, tape, a screen, a sign): it must be blank.
+- A crowd, the market, the public or investors are NOT one person. List the individual roles that appear on screen instead (a nervous clerk,
+  a veteran trader); a crowd scene is drawn by the storyboard from those people.
 - Only describe appearance that the story supports or that you clearly mark as a creative choice. Do not invent facts.
 - Read the whole NARRATION. Every person or role it mentions or clearly implies, every place it is set in and every object that matters
   to the story must be an asset, so no scene ever needs something that is missing from this list. Include secondary people

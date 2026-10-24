@@ -261,3 +261,13 @@ def test_number_words_count_as_facts_and_repeats_can_be_fixed(env):
     assert fixed >= 1
     again = storyboard.validate_storyboard(p["id"])
     assert len([i for i in again["issues"] if i["kind"] == "repeat"]) < len([i for i in rep["issues"] if i["kind"] == "repeat"])
+
+
+def test_ideas_figures_of_speech_and_groups_are_not_listed_as_things_to_draw():
+    nd = storyboard.not_drawable
+    assert nd("prop", "support beam", {}, "Visualizes the 50-day EMA support line")
+    assert nd("prop", "cup and handle", {}, "")
+    assert nd("prop", "the heavy bag", {}, "stands for the bag holder in the narration")
+    assert nd("prop", "annual report", {}, "")
+    assert nd("person", "the crowd", {}, "") and nd("person", "investors", {}, "")
+    assert not nd("prop", "desk phone", {"type": "phone"}, "on every desk") and not nd("person", "the analyst", {}, "a trader") and not nd("prop", "wall of monitors", {}, "")

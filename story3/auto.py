@@ -93,6 +93,18 @@ def state(plan_id: str, st: dict | None = None) -> dict:
 
 # ── the stages ──────────────────────────────────────────────────────────────
 
+WEAK_BELOW = 50
+
+
+def _weak(cands: list[dict], best_id: str | None, approved: str | None = None) -> bool:
+    """No finished current picture yet, or the best (or the approved) one has a hard problem or scores under 50."""
+    pick = next((c for c in cands if c["id"] == (approved or best_id)), None)
+    if not pick:
+        return True
+    sc = pick.get("score")
+    return bool(sc and (sc["hard"] or sc["total"] < WEAK_BELOW))
+
+
 def _approve_first(plan_id: str, kind: str) -> int:
     """Approve what is still open: the best finished outcome of each item, and where nothing scored well, its first finished one."""
     n = 0
@@ -148,7 +160,13 @@ async def run_stage(plan_id: str, key: str, be, s: dict, api_key: str, progress,
         if not refs.targets(plan_id):
             return
         await refs.generate(plan_id, None, 1, True, None, sub, s, api_key, True)
+        weak = [r["asset_id"] for r in refs.state(plan_id)["assets"] if not r["approved"] and not r["skipped"] and _weak(r["candidates"], r["best"])]
+        if weak:                                                    # a picture with a hard problem or a poor score gets two more tries before the best of them is taken
+            await refs.generate(plan_id, weak, 2, False, None, sub, s, api_key, True)
         _approve_first(plan_id, "references")
+        left = [r["name"] for r in refs.state(plan_id)["assets"] if r["approved"] and _weak(r["candidates"], r["best"], approved=r["approved"])]
+        if left:
+            notes.append("reference picture(s) approved with problems after three tries, look at them: " + ", ".join(left))
         imgplan_ok = bool(storyboard.get_scenes(plan_id))
         if imgplan_ok:
             imgplan.compile_plan(plan_id)
@@ -187,7 +205,13 @@ async def run_stage(plan_id: str, key: str, be, s: dict, api_key: str, progress,
             scenes.set_settings(plan_id, {"model": "qwen-image-2.1", "mode": "generate", "chosen": True})
             notes.append("scene pictures use Qwen, drawn plain from each scene's prompt (run the three-scene trial yourself to try the reference-sheet mode)")
         await scenes.generate(plan_id, None, 1, True, None, None, sub, s, api_key, True)
+        weak = [r["id"] for r in scenes.state(plan_id)["scenes"] if not r["approved_current"] and _weak(r["candidates"], r["best"])]
+        if weak:                                                    # one more try for each picture with a hard problem or a poor score
+            await scenes.generate(plan_id, weak, 1, False, None, None, sub, s, api_key, True)
         _approve_first(plan_id, "scenes")
+        n_left = sum(1 for r in scenes.state(plan_id)["scenes"] if r["approved_current"] and _weak(r["candidates"], r["best"], approved=r["approved"]))
+        if n_left:
+            notes.append(f"{n_left} scene picture(s) approved with problems after two tries: filter the Scene pictures list and look at them")
         st = scenes.state(plan_id)
         if not st["done"]:
             raise AutoStop(f"{st['needs_picture'] + st['needs_choice']} scene(s) still have no approved picture (see Scene pictures)")

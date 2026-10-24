@@ -167,3 +167,27 @@ def test_from_a_brand_new_plan_every_step_runs_including_the_model_steps(env, mo
     plan = planner.get_plan(plan_id)
     assert plan["blueprint"] and plan["segments"] and storyboard.get_scenes(plan_id) and editorial.approval_state(plan)["state"] == "approved"
     assert [c["task"] for c in be.calls if c["task"] == "p2_registry"] and video.state(plan_id)["done"]
+
+
+def test_a_picture_with_a_hard_problem_gets_more_tries_before_the_best_is_taken(env, monkeypatch, fast):
+    plan_id = planned(env)
+    n = len(refs.targets(plan_id))
+    bad = {"text_visible": True, "text_read": "XD", "defects": ["letters on the tape"]}
+    looks = [bad] + [{}] * (n - 1)                                  # the first reference picture shows writing; everything else is fine
+    gw = AllGateway(looks=looks)
+    out, gw, _ = go(plan_id, monkeypatch, gw=gw, only=["references"])
+    gens = gw.count("/images/generations")
+    assert len(gens) == n + 2                                       # the weak item was drawn twice more
+    rows = refs.state(plan_id)["assets"]
+    assert all(r["approved"] for r in rows)
+    first = rows[0]
+    chosen = next(c for c in first["candidates"] if c["id"] == first["approved"])
+    assert not chosen["score"]["hard"] and chosen["attempt"] > 1    # a clean retry won over the flawed first outcome
+
+
+def test_weak_means_hard_problem_low_score_or_nothing_yet():
+    ok = {"id": "a", "status": "done", "current": True, "score": {"hard": False, "total": 80}}
+    bad = {"id": "b", "status": "done", "current": True, "score": {"hard": True, "total": 40}}
+    low = {"id": "c", "status": "done", "current": True, "score": {"hard": False, "total": 45}}
+    assert not auto._weak([ok], "a") and auto._weak([bad], "b") and auto._weak([low], "c") and auto._weak([], None)
+    assert auto._weak([ok, bad], "a", approved="b")

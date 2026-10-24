@@ -80,6 +80,25 @@ def _seq(seg: dict, n: int) -> float:
 
 
 _NOT_AN_OBJECT = re.compile(r"\b(chart|graph|diagram|infographic|report|document|spreadsheet|statement|filing)\b", re.I)
+# Ideas are not things. A chart feature, an indicator or a figure of speech (a "support line", a "bag holder's heavy bag") has no shape to draw: the image model
+# invents one (a glowing beam, a robot). Props must be physical objects that are in the scene, and a crowd is not one person.
+_ABSTRACT_PROP = re.compile(r"\b(support|resistance|trend ?line|indicator|breakout|pattern|cup and handle|moving average|ema|sma|rsi|candlestick|trend|volatility|momentum)\b", re.I)
+_FIGURATIVE_NOTE = re.compile(r"\b(metaphor\w*|symboli[sz]\w*|represent\w*|visuali[sz]\w*|stands? for|figure of speech)\b", re.I)
+_GROUP_PERSON = re.compile(r"\b(crowd|crowds|mob|public|market|audience|everyone|investors|traders|people|group|shareholders)\b", re.I)
+
+
+def not_drawable(kind: str, name: str, appearance: dict, note: str) -> str:
+    """Why a registry entry cannot be drawn as one thing, or an empty string when it can."""
+    if kind == "prop":
+        if _NOT_AN_OBJECT.search(name + " " + appearance.get("type", "")):
+            return "a chart, graph or document is built from facts later"
+        if _ABSTRACT_PROP.search(name + " " + appearance.get("type", "")):
+            return "a chart feature or indicator has no shape to draw"
+        if _FIGURATIVE_NOTE.search(note or ""):
+            return "it stands for an idea in the narration rather than being an object in the scene"
+    if kind == "person" and _GROUP_PERSON.search(name):
+        return "a group is not one person: name the individual roles instead"
+    return ""
 
 
 # ── registry ────────────────────────────────────────────────────────────────
@@ -103,8 +122,8 @@ async def make_registry(plan_id: str, backend, s: dict | None = None) -> dict:
                 continue
             if a.kind == "style":
                 continue                                            # the style asset is written from the chosen preset below
-            if a.kind == "prop" and _NOT_AN_OBJECT.search(a.name + " " + a.appearance.get("type", "")):
-                continue                                            # charts, graphs and documents are built from facts later, never listed as a drawable object
+            if a.kind in ("prop", "person") and not_drawable(a.kind, a.name, a.appearance, a.evidence_note):
+                continue                                            # charts, ideas and groups are never listed as one drawable thing
             data = a.model_dump()
             ap = describe.clean(data.get("appearance"))
             if ap:                                                  # the description the image model reads is composed from the slots, so no slot is dropped
