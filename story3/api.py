@@ -1,5 +1,7 @@
 """HTTP API for Phase 3 media (mounted under /api/media). Same login as the rest of the app; generation runs as the same one-at-a-time background
 jobs as Phase 2 (the model server answers one request at a time)."""
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -8,7 +10,7 @@ from story import llm, settings as settings_mod
 from story.pipeline import manager
 from story2 import jobs, planner
 
-from . import graphics, refs, scenes, store, voice
+from . import graphics, refs, scenes, store, video, voice
 
 router = APIRouter(prefix="/api/media")
 
@@ -42,7 +44,7 @@ async def media_file(plan_id: str, name: str):
 @router.get("/{plan_id}")
 async def media_state(plan_id: str):
     _guard(planner.get_plan, plan_id)
-    return {"voice": voice.state(plan_id), "refs": refs.state(plan_id), "scenes": scenes.state(plan_id), "graphics": graphics.state(plan_id)}
+    return {"voice": voice.state(plan_id), "refs": refs.state(plan_id), "scenes": scenes.state(plan_id), "graphics": graphics.state(plan_id), "video": video.state(plan_id)}
 
 
 class VoiceReq(BaseModel):
@@ -194,6 +196,27 @@ async def correct_scene(plan_id: str, scene_id: str, body: CorrectReq):
     async def work(progress):
         await scenes.correct(plan_id, scene_id, body.change, body.keep, body.item_id, progress, settings_mod.get(), settings_mod.api_key())
     return _start(plan_id, "scene picture", work)
+
+
+class VideoReq(BaseModel):
+    profile: str = "draft"
+    captions: bool = False
+    allow_gaps: bool = False
+
+
+@router.post("/{plan_id}/video")
+async def make_video(plan_id: str, body: VideoReq | None = None):
+    body = body or VideoReq()
+    _guard(planner.get_plan, plan_id)
+    if body.profile not in video.PROFILES:
+        raise HTTPException(400, f"unknown profile '{body.profile}'")
+    chk = _guard(video.checklist, plan_id)
+    if chk["blockers"] and not body.allow_gaps:
+        raise HTTPException(400, f"{len(chk['blockers'])} thing(s) are missing (see the checklist); make them first or build anyway with placeholders")
+
+    async def work(progress):
+        await asyncio.to_thread(video.build, plan_id, body.profile, body.captions, body.allow_gaps, progress)
+    return _start(plan_id, "video", work)
 
 
 class GraphicsReq(BaseModel):
