@@ -10,7 +10,7 @@ from story import llm, settings as settings_mod
 from story.pipeline import manager
 from story2 import jobs, planner
 
-from . import graphics, refs, scenes, store, video, voice
+from . import auto, graphics, refs, scenes, store, video, voice
 
 router = APIRouter(prefix="/api/media")
 
@@ -44,7 +44,8 @@ async def media_file(plan_id: str, name: str):
 @router.get("/{plan_id}")
 async def media_state(plan_id: str):
     _guard(planner.get_plan, plan_id)
-    return {"voice": voice.state(plan_id), "refs": refs.state(plan_id), "scenes": scenes.state(plan_id), "graphics": graphics.state(plan_id), "video": video.state(plan_id)}
+    st = {"voice": voice.state(plan_id), "refs": refs.state(plan_id), "scenes": scenes.state(plan_id), "graphics": graphics.state(plan_id), "video": video.state(plan_id)}
+    return {**st, "auto": auto.state(plan_id, st)}
 
 
 class VoiceReq(BaseModel):
@@ -196,6 +197,24 @@ async def correct_scene(plan_id: str, scene_id: str, body: CorrectReq):
     async def work(progress):
         await scenes.correct(plan_id, scene_id, body.change, body.keep, body.item_id, progress, settings_mod.get(), settings_mod.api_key())
     return _start(plan_id, "scene picture", work)
+
+
+class AutoReq(BaseModel):
+    only: list[str] | None = None
+
+
+@router.post("/{plan_id}/auto")
+async def auto_run(plan_id: str, body: AutoReq | None = None):
+    _guard(planner.get_plan, plan_id)
+    if not auto.state(plan_id)["remaining"]:
+        raise HTTPException(400, "every step is already finished")
+    only = (body.only if body else None)
+    if only and not set(only) <= {k for k, _l in auto.STAGES}:
+        raise HTTPException(400, "unknown step")
+
+    async def work(progress):
+        await auto.run(plan_id, progress, settings_mod.get(), settings_mod.api_key(), only)
+    return _start(plan_id, "auto-run", work)
 
 
 class VideoReq(BaseModel):

@@ -16,6 +16,8 @@ Written 2026-10-24 (updated after the visual-direction change). Read [APP_GUIDE.
 6. Verify the story's facts independently and set the narrator name (both still open).
 7. Optional clean-up: delete the three empty draft plans.
 
+**Auto-run (built):** `story3/auto.py`, `tests/test_auto.py`. One job that takes every unfinished step with the default choice (see APP_GUIDE). Also fixed on the way: approving a reference picture before the storyboard exists no longer fails, and reference pictures stay available when the characters were made again after the scenes (those scenes are flagged for redesign).
+
 ## Remaining Phase 3 batches
 
 Each batch: build, test with fakes, run once for real on three items, then the full run; connect to the screen; commit; update the docs.

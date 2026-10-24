@@ -415,3 +415,17 @@ def test_recreating_the_characters_after_scenes_exist_reopens_references_and_fla
     assert {x["asset"]["id"] for x in t} == {"as-new0", "as-new1"}                                 # references can be made before the scenes are redone
     full = planner.get_plan(plan_id) | {"assets": storyboard.get_assets(plan_id), "scenes": storyboard.get_scenes(plan_id)}
     assert plans_api.orphaned_scenes(full) and plans_api.style_info(full)["storyboard_stale"]
+
+
+def test_references_can_be_approved_before_the_storyboard_exists(env, monkeypatch, fast):
+    from test_phase2a import approved_story
+    pid, cid = approved_story(env)
+    plan_id = planner.create_plan(cid, minutes=2)["id"]
+    db.ex("INSERT INTO assets(id,plan_id,kind,name,data,updated_at) VALUES(?,?,?,?,?,?)",
+          ("as-early", plan_id, "person", "the analyst", db.jdump({"name": "the analyst", "kind": "person", "description": "a tall woman", "fixed": [], "fictionalisation": "fictional"}), db.now()))
+    db.ex("INSERT INTO assets(id,plan_id,kind,name,data,updated_at) VALUES(?,?,?,?,?,?)",
+          ("as-style", plan_id, "style", "style", db.jdump({"name": "style", "kind": "style", "description": "bold outlines", "fixed": []}), db.now()))
+    assert [t["asset"]["id"] for t in refs.targets(plan_id)] == ["as-early"] and not storyboard.get_scenes(plan_id)
+    run(plan_id, Gateway(), monkeypatch, candidates=1)
+    st = refs.approve(refs.state(plan_id)["assets"][0]["candidates"][0]["id"])                       # used to fail: "design the storyboard first"
+    assert st["approved"] == 1 and refs.approve_best(plan_id, 0)["approved"] == 0

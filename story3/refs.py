@@ -279,7 +279,7 @@ def approve_best(plan_id: str, min_score: int = refscore.AUTO_APPROVE_MIN) -> di
         it = store.get(iid)
         _write_asset(aid, [{"id": it["id"], "file": it["file"], "approved": True, "note": f"attempt {it['attempt']}, seed {it['meta'].get('seed')}, score {it['meta']['score']['total']}"}])
         plan_store.log(plan_id, "reference_approved", {"asset": aid, "item": iid, "bulk": True})
-    if chosen:
+    if chosen and storyboard.get_scenes(plan_id):
         imgplan.compile_plan(plan_id)
     return {"approved": len(chosen), "left": left, "state": state(plan_id)}
 
@@ -302,7 +302,8 @@ def approve(item_id: str, on: bool = True) -> dict:
     store.approve(item_id, on)
     _write_asset(it["key"], [{"id": it["id"], "file": it["file"], "approved": True, "note": f"attempt {it['attempt']}, seed {it['meta'].get('seed')}"}] if on else [])
     plan_store.log(it["plan_id"], "reference_approved" if on else "reference_unapproved", {"asset": it["key"], "item": item_id})
-    imgplan.compile_plan(it["plan_id"])
+    if storyboard.get_scenes(it["plan_id"]):                        # before the storyboard there are no prompts to refresh
+        imgplan.compile_plan(it["plan_id"])
     return state(it["plan_id"])
 
 
