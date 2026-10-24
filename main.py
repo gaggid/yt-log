@@ -69,6 +69,7 @@ async def plan_js():
 
 @app.get("/style-samples/{name}")
 async def style_sample(name: str):
+    name = name.removesuffix(".jpg")
     f = STATIC / "style_samples" / (name + ".jpg")
     if name not in ("gta", "noir", "concept") or not f.is_file():
         raise HTTPException(404, "no such sample")
