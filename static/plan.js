@@ -82,15 +82,15 @@ window.newPlan = async function (cid, status) {
 
 window.viewPlan = async function (id) {
   const my = route_id;
-  let P = null, PV = {}, MS = null, sig = '', seenRun = false;
+  let P = null, PV = {}, MS = null, RS = null, sig = '', seenRun = false;
   const app = $('#app');
   const busyJob = () => P && P.job && P.job.state === 'running';
   const editing = () => { const a = document.activeElement; return a && a.closest && a.closest('#plan') && ['TEXTAREA', 'INPUT', 'SELECT'].includes(a.tagName); };
 
   async function load(force) {
     const [p, m] = await Promise.all([api('/plans/' + id), api('/media/' + id).catch(() => null)]);
-    MS = m && m.voice;
-    const s = JSON.stringify([MS && [MS.have, MS.approved, MS.export.current, MS.segments.map(r => r.attempts.map(a => a.id + a.status + a.approved + a.current))], p.rev, p.job.state, p.job.done, p.job.label, p.segments.map(x => x.rev), p.scenes.map(x => [x.rev, x.stale, x.start_s, x.status, x.locked]), p.assets.map(x => x.rev), p.validation ? 1 : 0, p.narrator.name, p.content_hash, p.approval && p.approval.state, p.exports.length, ((p.validation || {}).scores || {}).computed_at]);
+    MS = m && m.voice; RS = m && m.refs;
+    const s = JSON.stringify([RS && [RS.approved, RS.skipped, RS.without_pictures, RS.assets.map(r => r.candidates.map(a => a.id + a.status + a.approved + a.current))], MS && [MS.have, MS.approved, MS.export.current, MS.segments.map(r => r.attempts.map(a => a.id + a.status + a.approved + a.current))], p.rev, p.job.state, p.job.done, p.job.label, p.segments.map(x => x.rev), p.scenes.map(x => [x.rev, x.stale, x.start_s, x.status, x.locked]), p.assets.map(x => x.rev), p.validation ? 1 : 0, p.narrator.name, p.content_hash, p.approval && p.approval.state, p.exports.length, ((p.validation || {}).scores || {}).computed_at]);
     const changed = s !== sig; P = p;
     if (changed || force) { sig = s; if (!editing() || force) render(); }
     if (p.job.state === 'running') seenRun = true;
@@ -171,6 +171,14 @@ window.viewPlan = async function (id) {
       await act(b, async () => { for (const a of todo) await api(`/media/item/${a.id}`, {method: 'PATCH', json: {approved: true}}); return todo.length; }, n => `Approved ${n} voice take(s)`);
       await load(true);
     },
+    async refsAll(b) {
+      const n = RS ? RS.without_pictures : 0;
+      if (!await confirmDlg('Make reference pictures?', `${RS.default_candidates} picture(s) for each of the ${n || RS.open} recurring thing(s) that have none yet, about ${hd((n || RS.open) * RS.default_candidates * RS.seconds_per_picture)} in total with ${RS.model}. The model server handles one job at a time, so other steps wait. Finished pictures are saved even if you stop.`, 'Start')) return;
+      await run(b, `/media/${id}/references`, {only_missing: true});
+    },
+    async refsOne(b, aid) { await run(b, `/media/${id}/references`, {asset_ids: [aid], only_missing: false, candidates: RS.default_candidates}); toast('Drawing new pictures for this one.'); },
+    async refsApprove(iid, on) { await act(null, () => api(`/media/item/${iid}`, {method: 'PATCH', json: {approved: on}}), on ? 'Reference approved; scene prompts updated' : 'Approval removed; scene prompts updated'); await load(true); },
+    async refsSkip(aid, on) { await act(null, () => api(`/media/${id}/references/skip`, {method: 'POST', json: {asset_id: aid, skip: on}}), on ? 'Skipped: no reference for this one' : 'Back on the list'); await load(true); },
     async voiceApprove(iid, on) { await act(null, () => api(`/media/item/${iid}`, {method: 'PATCH', json: {approved: on}}), on ? 'Recording approved' : 'Approval removed'); await load(true); },
     async validate(b) { const r = await act(b, () => api(`/plans/${id}/validate`, {method: 'POST'})); if (r) { await load(true); toast(r.ok ? 'No blocking problems found' : 'Some problems need attention'); } },
     async narrator(el) { await act(null, () => api(`/plans/${id}/narrator`, {method: 'PATCH', json: {name: el.value}}), 'Narrator name saved'); await load(true); },
@@ -237,6 +245,7 @@ window.viewPlan = async function (id) {
     const compiled = p.scenes.length > 0 && p.scenes.every(s => s.data.prompts && s.data.prompts.qwen), promptStale = !!(vp && vp.issues.some(i => i.kind === 'stale'));
     const sc = v.scores || null, so = v.signoff || null, reviewed = !!(sc && sc.content_hash === p.content_hash);
     const voiceDone = !!(MS && MS.total && MS.have === MS.total), exportReady = !!(MS && MS.export.exists && MS.export.current);
+    const refsDone = !!(RS && (RS.done || RS.total === 0)), refsOn = !!(RS && RS.total);
     const voiceToApprove = MS ? MS.segments.map(r => r.attempts.find(a => a.id === r.chosen)).filter(a => a && !a.approved && !(a.flags || []).length) : [];
     const ap = p.approval || {state: 'draft'}, approved = ap.state === 'approved', lastExp = (p.exports || [])[0], exported = !!(lastExp && lastExp.content_hash === p.content_hash);
     const missingBeats = p.blueprint ? p.blueprint.beats.filter(b => !p.segments.some(s => s.beat === b.id)) : [];
@@ -257,7 +266,7 @@ window.viewPlan = async function (id) {
     if (stale) warns.push(`${stale} scene(s) follow narration you changed: look at them, then approve.`);
     if (nRepeat) warns.push(`${nRepeat} scene(s) repeat the previous camera: use “Fix camera repeats”.`);
     if (p.scenes.length && !segNoScene.length && (!compiled || promptStale)) warns.push(promptStale ? 'Some scenes changed after their image prompts were written: press “Write image prompts”.' : 'Image prompts are not written yet: press “Write image prompts”.');
-    return {voiceToApprove, voiceDone, exportReady, sc, so, reviewed, ap, approved, lastExp, exported, compiled, promptStale, j, running, v, vs, issues, missingBeats, segNoScene, errors, nRepeat, stale, checked, blocks, warns};
+    return {refsDone, refsOn, voiceToApprove, voiceDone, exportReady, sc, so, reviewed, ap, approved, lastExp, exported, compiled, promptStale, j, running, v, vs, issues, missingBeats, segNoScene, errors, nRepeat, stale, checked, blocks, warns};
   }
 
   function render() {
@@ -265,10 +274,10 @@ window.viewPlan = async function (id) {
     const imSet = {default: 'qwen-image-2.1', by_type: {}, previews_enabled: false, ...(p.settings.image_models || {})};
     imSet.licence_checks = {'qwen-image-2.1': true, 'flux2-klein-9b': true, ...(imSet.licence_checks || {})};
     const modelFor = d => d.model || (imSet.by_type || {})[d.visual_type] || imSet.default;
-    const a = analyse(), {voiceToApprove, voiceDone, exportReady, sc, so, reviewed, ap, approved, lastExp, exported, compiled, promptStale, j, running, v, vs, issues, missingBeats, segNoScene, errors, nRepeat, checked, blocks, warns} = a;
+    const a = analyse(), {refsDone, refsOn, voiceToApprove, voiceDone, exportReady, sc, so, reviewed, ap, approved, lastExp, exported, compiled, promptStale, j, running, v, vs, issues, missingBeats, segNoScene, errors, nRepeat, checked, blocks, warns} = a;
     const dis = running ? 'disabled' : '';
     const steps = [['Story', true], ['Blueprint', !!p.blueprint], ['Narration', p.segments.length && p.blueprint && !missingBeats.length], ['Storyboard', p.scenes.length && !segNoScene.length], ['Image prompts', compiled && !promptStale],
-      ['Checked', checked && !errors.length], ['Reviewed', reviewed], ['Approved', approved], ['Exported', exported], ['Voice', voiceDone]];
+      ['Checked', checked && !errors.length], ['Reviewed', reviewed], ['Approved', approved], ['Exported', exported], ['Voice', voiceDone], ['References', refsDone]];
     const firstOpen = steps.findIndex(s => !s[1]);
     const sceneAt = wid => p.scenes.find(x => x.id === wid) || null;
     const groups = []; for (const i of issues) { const k = i.part + '|' + i.kind + '|' + (i.kind === 'repeat' ? '' : i.text); let g = groups.find(x => x.k === k); if (!g) groups.push(g = {k, i, where: []}); g.where.push(i.where); }
@@ -281,7 +290,7 @@ window.viewPlan = async function (id) {
     // side panel: one row per action, in the order you do them
     const act_ = (n, label, onclick, {done, ok = true, why = '', next = false, cls = ''}) => `<div class="act ${done ? 'done' : next ? 'next' : ''}">
         <div class="an">${done ? '✓' : n}</div><div style="flex:1;min-width:0"><button class="${next ? 'primary' : cls}" style="width:100%" ${ok && !running ? '' : 'disabled'} onclick="${onclick}">${label}</button>${!ok && why ? `<div class="small mute mt-s">${esc(why)}</div>` : ''}</div></div>`;
-    const nextKey = !p.blueprint ? 'blueprint' : missingBeats.length ? 'narration' : (segNoScene.length || !p.scenes.length) ? 'storyboard' : (!compiled || promptStale) ? 'prompts' : !checked ? 'check' : nRepeat ? 'repeats' : !reviewed ? 'review' : !approved ? (so && so.blockers.length ? 'blocked' : 'approve') : !exported ? 'export' : !voiceDone ? 'voice' : 'done';
+    const nextKey = !p.blueprint ? 'blueprint' : missingBeats.length ? 'narration' : (segNoScene.length || !p.scenes.length) ? 'storyboard' : (!compiled || promptStale) ? 'prompts' : !checked ? 'check' : nRepeat ? 'repeats' : !reviewed ? 'review' : !approved ? (so && so.blockers.length ? 'blocked' : 'approve') : !exported ? 'export' : !voiceDone ? 'voice' : !refsDone ? 'refs' : 'done';
     const side = `<aside class="plan-side"><div class="card pad">
         ${running ? `<div class="jobbox"><b>${esc(j.kind)}</b> <span class="mute small">${esc(j.label)}</span>${bar(j.total ? 100 * j.done / j.total : 5)}<div class="small mute">${hd(j.elapsed_s)}${j.eta_s ? ' · about ' + hd(j.eta_s) + ' left' : ''}</div><button class="small mt-s" onclick="_plan.cancel(this)">Stop after this step</button><div class="small mute mt-s">You can leave the page; finished parts are saved.</div></div>` : ''}
         <div class="small mute" style="text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Do these in order</div>
@@ -295,25 +304,27 @@ window.viewPlan = async function (id) {
         ${act_(8, approved ? 'Approved' : ap.state === 'changed' ? 'Approve the changed plan' : 'Approve the plan', '_plan.approve(this)', {done: approved, ok: reviewed, why: 'Review and score first.', next: nextKey === 'approve'})}
         ${act_(9, exported ? 'Export again' : 'Export for the next modules', '_plan.export(this)', {done: exported, ok: p.scenes.length > 0 && compiled, why: 'Write the image prompts first.', next: nextKey === 'export'})}
         ${act_(10, voiceDone ? 'Make the voice again' : MS && MS.have ? 'Make the missing voice' : 'Make the voice', '_plan.voiceAll(this)', {done: voiceDone, ok: exportReady, why: exported ? 'Export again first.' : 'Export first.', next: nextKey === 'voice'})}
-        ${act_(11, 'Go to the first problem', '_plan.firstProblem()', {done: false, ok: issues.some(i => i.level === 'error') || a.stale > 0, why: 'No errors to fix.', cls: 'small'})}
+        ${act_(11, refsDone ? 'Make reference pictures again' : RS && RS.open && RS.open < RS.total ? 'Make the missing reference pictures' : 'Make reference pictures', '_plan.refsAll(this)', {done: refsDone, ok: p.scenes.length > 0 && refsOn, why: refsOn ? 'Design the storyboard first.' : 'No person, place or object repeats, so none is needed.', next: nextKey === 'refs'})}
+        ${act_(12, 'Go to the first problem', '_plan.firstProblem()', {done: false, ok: issues.some(i => i.level === 'error') || a.stale > 0, why: 'No errors to fix.', cls: 'small'})}
         <div class="small mute" style="text-transform:uppercase;letter-spacing:.04em;margin:12px 0 6px">When you are happy</div>
         <button class="small" style="width:100%" ${p.segments.length && !running ? '' : 'disabled'} onclick="_plan.approveAll(this,'narration')">Approve all narration (${segApproved}/${p.segments.length})</button>
         <button class="small mt-s" style="width:100%" ${p.scenes.length && !running ? '' : 'disabled'} onclick="_plan.approveAll(this,'scenes')">Approve all scenes (${scApproved}/${p.scenes.length})</button>
         <div class="small mute mt-s">Approved and locked parts are never overwritten when something else is regenerated.</div>
         <div class="small mute" style="text-transform:uppercase;letter-spacing:.04em;margin:12px 0 6px">Jump to</div>
-        <div class="row small" style="gap:4px 12px">${[['sec-top', 'Top'], p.blueprint && ['sec-blueprint', 'Blueprint'], p.segments.length && ['sec-narration', 'Narration'], p.segments.length && ['sec-assets', 'Continuity'], p.scenes.length && ['sec-models', 'Image models'], p.scenes.length && ['sec-storyboard', 'Storyboard'], p.scenes.length && ['sec-review', 'Review and export'], MS && ['sec-voice', 'Voice'], (groups.length || v.ok != null) && ['sec-results', 'Check results']].filter(Boolean).map(([id_, l]) => `<a href="#" onclick="_plan.go('${id_}');return false">${l}</a>`).join('')}</div>
+        <div class="row small" style="gap:4px 12px">${[['sec-top', 'Top'], p.blueprint && ['sec-blueprint', 'Blueprint'], p.segments.length && ['sec-narration', 'Narration'], p.segments.length && ['sec-assets', 'Continuity'], p.scenes.length && ['sec-models', 'Image models'], p.scenes.length && ['sec-storyboard', 'Storyboard'], p.scenes.length && ['sec-review', 'Review and export'], MS && ['sec-voice', 'Voice'], refsOn && ['sec-refs', 'Reference pictures'], (groups.length || v.ok != null) && ['sec-results', 'Check results']].filter(Boolean).map(([id_, l]) => `<a href="#" onclick="_plan.go('${id_}');return false">${l}</a>`).join('')}</div>
       </div></aside>`;
 
     const banner = blocks.length
       ? `<div class="banner block"><b>Stopping you from moving on</b><ul class="tight">${blocks.map(b => `<li>${esc(b)}</li>`).join('')}</ul>${warns.length ? `<div class="small mt-s">Also: ${warns.map(esc).join(' · ')}</div>` : ''}</div>`
       : warns.length ? `<div class="banner warn"><b>Nothing blocks you, but note:</b><ul class="tight">${warns.map(w => `<li>${esc(w)}</li>`).join('')}</ul></div>`
-      : nextKey === 'done' ? `<div class="banner good"><b>Done so far.</b> Export v${lastExp.rev} is saved and the voice is made (${mmss(MS.real_s)} of real speech). Pictures and the video are the next batches. <a href="/api/plans/exports/${esc(p.id)}/${esc(lastExp.file)}" download>Download the export</a>. Listen to each part below and approve the ones you like.</div>`
+      : nextKey === 'done' ? `<div class="banner good"><b>Done so far.</b> Export v${lastExp.rev} is saved and the voice is made (${mmss(MS.real_s)} of real speech). Reference pictures are approved (${RS && RS.total ? RS.approved + ' approved, ' + RS.skipped + ' skipped' : 'none needed'}). Scene pictures and the video are the next batches; export again later to include the references in the file. <a href="/api/plans/exports/${esc(p.id)}/${esc(lastExp.file)}" download>Download the export</a>. Listen and look below and approve what you like.</div>`
       : `<div class="banner good"><b>Nothing is blocking you.</b> Narration, storyboard and image prompts are consistent and checked.</div>`;
     const NEXT = {blueprint: ['Plan the story', 'Decide how this story is told.', '_plan.blueprint(this)'], narration: ['Write the narration', 'Write the spoken narration for each part.', '_plan.narration(this,' + !!(missingBeats.length && p.segments.length) + ')'],
       storyboard: ['Design the storyboard', 'Design the scenes that go with the narration.', '_plan.storyboard(this)'], prompts: ['Write image prompts', 'Turn each scene into prompts for the image models. Instant, no model needed.', '_plan.compile(this)'],
       check: ['Check everything', 'Look for mistakes before you review.', '_plan.validate(this)'], repeats: ['Fix camera repeats', 'Some scenes repeat the previous camera.', '_plan.fixRepeats(this)'],
       review: ['Review and score', 'See twelve scores with reasons, and what stands between this plan and approval.', '_plan.review(this)'], approve: ['Approve the plan', 'Sign off the exact version you reviewed.', '_plan.approve(this)'],
       export: ['Export', 'Save the file the image, voice and video modules will read.', '_plan.export(this)'],
+      refs: ['Make reference pictures', RS ? `${RS.open} recurring thing(s) still need a picture you approve (about ${hd(RS.eta_missing_s || RS.seconds_per_picture * 2)} of drawing). Approve one per item, or skip it.` : '', '_plan.refsAll(this)'],
       voice: ['Make the voice', 'Svara reads each narration part; scenes are re-timed to the real audio. About ' + (MS ? hd(MS.eta_missing_s) : 'a while') + '.', '_plan.voiceAll(this)'],
       blocked: ['See what blocks approval', `${so ? so.blockers.length : 0} thing(s) stand between this plan and approval: ${so ? so.blockers.map(b => b.text).join(' ') : ''}`, "_plan.go('sec-review')"]};
     const nx = NEXT[nextKey];
@@ -416,6 +427,20 @@ window.viewPlan = async function (id) {
           ${r.attempts.filter(a => a.status === 'done' && a.current && a.id !== r.chosen).length ? `<div class="small mute mt-s">Other recordings: ${r.attempts.filter(a => a.status === 'done' && a.current && a.id !== r.chosen).map(a => `<a href="${esc(a.url)}" target="_blank">attempt ${a.attempt} (${a.duration_s.toFixed(1)}s)</a> <a href="#" onclick="_plan.voiceApprove('${a.id}',true);return false">use this one</a>`).join(' · ')}</div>` : ''}
           <details class="mt-s"><summary class="small mute">What is spoken</summary><div class="small" lang="hi">${esc(r.plain)}</div></details></div>`; }).join('')}
         <div class="mute small mt-s">Listen to each part. If a word is repeated or skipped, press “Make again” (it uses a new seed). Approving a recording locks it in for the video.</div></div>` : ''}
+
+      ${refsOn && p.scenes.length ? `<div class="card pad mt" id="sec-refs"><div class="row"><h3 style="margin:0">Reference pictures</h3>${refsDone ? badge('good', 'all settled') : badge('queued', RS.approved + ' of ' + RS.total + ' approved' + (RS.skipped ? ', ' + RS.skipped + ' skipped' : ''))}<span class="sp"></span>
+          <button class="small primary" ${dis} onclick="_plan.refsAll(this)">${RS.without_pictures ? 'Make pictures for the ones without' : 'Make more pictures for all'}</button></div>
+        <div class="mute small mt-s">A person, place or object that appears in two or more scenes is drawn once here. Approve one picture per item and every later scene that shows it is drawn <b>from that picture</b>, so it looks the same each time (up to three references per scene). Pictures are made with ${esc(RS.model)}, about ${hd(RS.seconds_per_picture)} each. ${RS.scenes_using_references ? `<b>${RS.scenes_using_references}</b> scene prompt(s) now use a reference.` : 'No scene prompt uses a reference yet.'} Skip an item if a plain description is enough (for example an abstract chart).</div>
+        ${RS.assets.map(r => { const good = r.candidates.filter(c => c.status === 'done'); const old = good.filter(c => !c.current).length; return `<div class="seg ${r.approved ? 'approved' : ''}" style="padding:10px 14px"><div class="row"><b>${esc(r.name)}</b><span class="mute small">${esc(r.kind)} · in ${r.scenes} scenes · ${esc(r.size)}</span>${r.approved ? badge('approved', 'approved') : r.skipped ? badge('info', 'skipped') : good.length ? badge('info', 'choose one') : badge('queued', 'no picture yet')}<span class="sp"></span>
+          <button class="small" ${dis} onclick="_plan.refsSkip('${r.asset_id}',${!r.skipped})">${r.skipped ? 'Use a reference' : 'Skip'}</button>
+          ${r.skipped ? '' : `<button class="small" ${dis} onclick="_plan.refsOne(this,'${r.asset_id}')">${good.length ? 'Draw more' : 'Draw pictures'}</button>`}</div>
+          <div class="small mt-s">${esc(r.description || 'No description yet; add one in Continuity so the picture has something to show.')}${r.fixed.length ? ` <span class="mute">Always the same: ${esc(r.fixed.join('; '))}.</span>` : ''}</div>
+          ${r.candidates.filter(c => c.status === 'failed').slice(-1).map(c => `<div class="iss error">✗ Last try failed: ${esc(c.error)}</div>`).join('')}
+          ${old ? `<div class="iss warn">⚠ ${old} picture(s) were made before this item's description or the style changed and are marked old.</div>` : ''}
+          ${r.skipped ? '' : `<div class="row mt-s" style="align-items:flex-start;gap:12px;flex-wrap:wrap">${good.map(c => `<div style="width:200px"><a href="${esc(c.url)}" target="_blank"><img src="${esc(c.url)}" loading="lazy" style="width:200px;border-radius:6px;border:${c.approved ? '3px solid var(--good,#2a9d5c)' : '1px solid var(--line,#ccc)'};${c.current ? '' : 'opacity:.5'}"></a>
+            <div class="row small mt-s"><span class="mute">#${c.attempt}${c.seconds_taken ? ' · ' + Math.round(c.seconds_taken) + 's' : ''}${c.current ? '' : ' · old'}</span><span class="sp"></span><button class="small" ${dis} onclick="_plan.refsApprove('${c.id}',${!c.approved})">${c.approved ? 'Unapprove' : 'Approve'}</button></div></div>`).join('')}</div>`}
+          <details class="mt-s"><summary class="small mute">The prompt sent to the model</summary><div class="small">${esc(r.prompt)}${r.negative_prompt ? `<div class="mute mt-s">Negative: ${esc(r.negative_prompt)}</div>` : ''}</div></details></div>`; }).join('')}
+        <div class="mute small mt-s">Look at each picture at full size (click it). Approve the one whose look you want to see throughout the video; if none is right, press “Draw more” (new seeds). Approving updates the scene prompts at once; your approved plan stays approved.</div></div>` : ''}
 
       ${issues.length || v.ok != null || vs ? `<div class="card pad mt" id="sec-results"><h3 style="margin:0 0 6px">Check results</h3>${groups.length ? `<ul class="tight">${groups.map(g => `<li class="${g.i.level === 'warn' ? '' : 'err'}"><b>${g.i.level === 'warn' ? 'Check' : 'Fix'}</b> · ${esc(g.i.part)} · ${esc((g.i.kind || '').replace(/_/g, ' '))}: ${esc(g.i.kind === 'repeat' ? `${g.where.length} scene(s) use the same camera distance and angle as the scene before` : g.i.text)}
           <div class="small mute">${g.where.map(w => { const sc = sceneAt(w); return sc ? `<a href="#" onclick="_plan.jump('${sc.id}');return false">${mmss(sc.start_s)}</a>` : (p.segments.some(x => x.id === w) ? `<a href="#" onclick="_plan.go('seg-${w}');return false">${esc(segName(w))}</a>` : esc(w === 'plan' ? 'whole plan' : w)); }).join(' · ')}</div></li>`).join('')}</ul>` : '<span class="ok">✓ No problems found.</span>'}

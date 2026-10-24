@@ -49,8 +49,8 @@ def _pct(n: float, d: float) -> float:
 def content_hash(plan: dict) -> str:
     """Identity of what would be exported: wording, scenes, prompts, registry and the settings that change them. Approval state, previews,
     ratings, issue lists, revision counters and timings are left out: timings are derived from the narration and, later, from the real audio,
-    so making the voice must not make an approved plan look changed."""
-    skip = {"previews", "issues"}
+    and prompts and reference pictures are derived from the plan and made after approval, so making media must not make an approved plan look changed."""
+    skip = {"previews", "issues", "prompts", "adapters"}                   # prompts are derived from the scenes and the approved reference pictures
     doc = {
         "format": plan["format"], "blueprint": plan["blueprint"],
         "narrator": {k: plan["narrator"].get(k) for k in ("name", "voice", "gender", "person", "language")},
@@ -59,7 +59,8 @@ def content_hash(plan: dict) -> str:
                       "pronounce": s["pronounce"], "emphasis": s["emphasis"]} for s in plan["segments"]],
         "scenes": [{"id": s["id"], "seq": s["seq"], "seg": s["segment_id"], "range": [s["s_from"], s["s_to"]],
                     "data": {k: v for k, v in s["data"].items() if k not in skip}} for s in plan["scenes"]],
-        "assets": [{"id": a["id"], "name": a["name"], "kind": a["kind"], "data": a["data"]} for a in plan["assets"]],
+        "assets": [{"id": a["id"], "name": a["name"], "kind": a["kind"], "data": {k: v for k, v in a["data"].items() if k != "reference_images"}}
+                   for a in plan["assets"]],
     }
     return hashlib.sha1(json.dumps(doc, sort_keys=True, default=str, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
 

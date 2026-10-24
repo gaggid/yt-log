@@ -8,7 +8,7 @@ from story import llm, settings as settings_mod
 from story.pipeline import manager
 from story2 import jobs, planner
 
-from . import store, voice
+from . import refs, store, voice
 
 router = APIRouter(prefix="/api/media")
 
@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/media")
 def _guard(fn, *a, **kw):
     try:
         return fn(*a, **kw)
-    except (planner.PlanError, voice.MediaError) as e:
+    except (planner.PlanError, voice.MediaError) as e:   # refs raises the same MediaError
         raise HTTPException(400, str(e))
 
 
@@ -42,7 +42,7 @@ async def media_file(plan_id: str, name: str):
 @router.get("/{plan_id}")
 async def media_state(plan_id: str):
     _guard(planner.get_plan, plan_id)
-    return {"voice": voice.state(plan_id)}
+    return {"voice": voice.state(plan_id), "refs": refs.state(plan_id)}
 
 
 class VoiceReq(BaseModel):
@@ -60,6 +60,34 @@ async def make_voice(plan_id: str, body: VoiceReq | None = None):
     return _start(plan_id, "voice", work)
 
 
+class RefsReq(BaseModel):
+    asset_ids: list[str] | None = None
+    candidates: int = refs.DEFAULT_CANDIDATES
+    only_missing: bool = True
+    model: str | None = None
+
+
+@router.post("/{plan_id}/references")
+async def make_references(plan_id: str, body: RefsReq | None = None):
+    body = body or RefsReq()
+    if not refs.targets(plan_id):
+        raise HTTPException(400, "no person, place or object appears in two or more scenes, so no reference pictures are needed")
+
+    async def work(progress):
+        await refs.generate(plan_id, body.asset_ids, body.candidates, body.only_missing, body.model, progress, settings_mod.get(), settings_mod.api_key())
+    return _start(plan_id, "references", work)
+
+
+class SkipReq(BaseModel):
+    asset_id: str
+    skip: bool = True
+
+
+@router.post("/{plan_id}/references/skip")
+async def skip_reference(plan_id: str, body: SkipReq):
+    return {"refs": _guard(refs.set_skip, plan_id, body.asset_id, body.skip)}
+
+
 class ItemPatch(BaseModel):
     approved: bool | None = None
 
@@ -72,7 +100,11 @@ async def patch_item(item_id: str, body: ItemPatch):
     if body.approved is not None:
         if body.approved and it["status"] != "done":
             raise HTTPException(400, "only a finished file can be approved")
-        store.approve(item_id, body.approved)
+        if it["kind"] == "reference":
+            _guard(refs.approve, item_id, body.approved)
+        else:
+            store.approve(item_id, body.approved)
         if it["kind"] == "voice":
             voice.apply_timing(it["plan_id"])
-    return {"item": store.get(item_id), "voice": voice.state(it["plan_id"]) if it["kind"] == "voice" else None}
+    return {"item": store.get(item_id), "voice": voice.state(it["plan_id"]) if it["kind"] == "voice" else None,
+            "refs": refs.state(it["plan_id"]) if it["kind"] == "reference" else None}
