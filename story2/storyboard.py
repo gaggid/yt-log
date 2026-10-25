@@ -617,7 +617,7 @@ def _set_camera(sc: dict, prev: tuple, nxt: tuple | None) -> None:
 async def fix_repeats(plan_id: str, backend, s: dict | None = None, progress=None) -> int:
     """Redraw, one by one and in order, every unlocked scene that repeats the previous scene's camera distance and angle."""
     cam = lambda sc: (sc["data"]["composition"].get("distance", "").strip().lower(), sc["data"]["composition"].get("camera_angle", "").strip().lower())  # noqa: E731
-    first = [sc for sc in sorted(get_scenes(plan_id), key=lambda x: x["start_s"])]
+    first = [sc for sc in sorted(get_scenes(plan_id), key=lambda x: (x["start_s"], x["seq"]))]
     todo = [cur["id"] for prev, cur in zip(first, first[1:]) if cam(prev) == cam(cur) and all(cam(prev)) and not cur["locked"]]
     done = fixed = 0
     for sid in todo:
@@ -636,11 +636,30 @@ async def fix_repeats(plan_id: str, backend, s: dict | None = None, progress=Non
         ordered = sorted(get_scenes(plan_id), key=lambda x: x["start_s"])
         if cam(ordered[i - 1]) == cam(ordered[i]):                # the model kept the camera: change it directly so the run never stalls on one scene
             _set_camera(ordered[i], cam(ordered[i - 1]), cam(ordered[i + 1]) if i + 1 < len(ordered) else None)
+    swept = _sweep_repeats(plan_id)                               # a redraw can leave a new repeat with the next scene: settle every one that is left, so pressing the button once is enough
     retime(plan_id)
     if progress:
         progress(len(todo), len(todo), "done")
-    store.log(plan_id, "fix_repeats", {"redrawn": fixed})
-    return fixed
+    store.log(plan_id, "fix_repeats", {"redrawn": fixed, "camera_changed": swept})
+    return fixed + swept
+
+
+def _sweep_repeats(plan_id: str) -> int:
+    """Change the camera of every unlocked scene that still has the camera of the scene before it. Needs no model, goes in order, looks at both neighbours, so it ends."""
+    cam = lambda sc: (sc["data"]["composition"].get("distance", "").strip().lower(), sc["data"]["composition"].get("camera_angle", "").strip().lower())  # noqa: E731
+    n = 0
+    for _ in range(3):
+        ordered = sorted(get_scenes(plan_id), key=lambda x: (x["start_s"], x["seq"]))
+        changed = False
+        for i in range(1, len(ordered)):
+            if cam(ordered[i]) == cam(ordered[i - 1]) and all(cam(ordered[i])) and not ordered[i]["locked"]:
+                _set_camera(ordered[i], cam(ordered[i - 1]), cam(ordered[i + 1]) if i + 1 < len(ordered) else None)
+                ordered = sorted(get_scenes(plan_id), key=lambda x: (x["start_s"], x["seq"]))
+                n += 1
+                changed = True
+        if not changed:
+            break
+    return n
 
 
 # ── validation ──────────────────────────────────────────────────────────────
@@ -710,7 +729,7 @@ def validate_storyboard(plan_id: str) -> dict:
     if scenes and abs(total - scene_total) > 0.5 and not any(i["kind"] == "coverage" for i in issues):
         issues.append({"where": "plan", "kind": "timing", "text": f"scenes add up to {scene_total:.1f}s but narration is {total:.1f}s", "level": "error"})
     # variety
-    ordered = sorted([sc for sc in scenes if sc["segment_id"] in seg_ids], key=lambda x: x["start_s"])
+    ordered = sorted([sc for sc in scenes if sc["segment_id"] in seg_ids], key=lambda x: (x["start_s"], x["seq"]))
     for prev, cur in zip(ordered, ordered[1:]):
         a, b = prev["data"], cur["data"]
         cam = lambda d: (d["composition"].get("distance", "").strip().lower(), d["composition"].get("camera_angle", "").strip().lower())  # noqa: E731

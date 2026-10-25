@@ -162,3 +162,17 @@ def test_stock_phrases_are_caught_on_a_second_use_and_a_long_opening_sentence_is
     asyncio.run(planner.make_narration(p["id"], be))
     firsts = [c for c in be.calls if c["task"] == "p2_narrate"]
     assert len(firsts) >= 2                                                                                      # the long opening was sent back and asked again
+
+
+def test_fix_repeats_ends_with_no_repeat_even_when_the_redraw_keeps_the_camera(env):
+    import asyncio
+    from story import db
+    from story2 import storyboard
+    pid, cid, be, p = boarded(env)
+    for sc in storyboard.get_scenes(p["id"]):                                            # every scene has the same camera
+        d = sc["data"]
+        d["composition"] = {**d["composition"], "distance": "wide", "camera_angle": "high"}
+        db.ex("UPDATE scenes SET data=? WHERE id=?", (db.jdump(d), sc["id"]))
+    assert any(i["kind"] == "repeat" for i in storyboard.validate_storyboard(p["id"])["issues"])
+    asyncio.run(storyboard.fix_repeats(p["id"], be))
+    assert not any(i["kind"] == "repeat" for i in storyboard.validate_storyboard(p["id"])["issues"])      # one press is enough

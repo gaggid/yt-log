@@ -229,6 +229,8 @@ async def narration(plan_id: str, body: NarrationReq | None = None):
 async def fix_repeats(plan_id: str):
     async def step(be, s, progress):
         await storyboard.fix_repeats(plan_id, be, s, progress)
+        await asyncio.to_thread(imgplan.compile_plan, plan_id)             # the prompts follow the new cameras at once, and the checks are run again,
+        await asyncio.to_thread(editorial.run_checks, plan_id)             # so the next step is the next step and not "write prompts" or "fix repeats" again
     return _start(plan_id, "fix repeats", step)
 
 

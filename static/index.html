@@ -88,6 +88,7 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:8px;
 .big-empty{text-align:center;padding:48px 20px}.big-empty h2{font-size:20px}
 .dirty{color:var(--warn)}
 @media (max-width:640px){main{padding:12px}.story{grid-template-columns:auto 1fr}.story .score{grid-column:2;text-align:left}}
+#to-top{position:fixed;right:22px;bottom:22px;width:44px;height:44px;border-radius:50%;padding:0;font-size:20px;line-height:1;background:var(--accent);color:var(--accent-ink);border-color:var(--accent);box-shadow:0 4px 14px rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:opacity .18s;z-index:20}#to-top.show{opacity:.92;pointer-events:auto}#to-top:hover:not(:disabled){opacity:1;border-color:var(--accent)}
 </style>
 </head>
 <body>
@@ -685,6 +686,16 @@ async function testConn(btn) {
 }
 addEventListener('beforeunload', e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
 route();
+</script>
+<button id="to-top" type="button" title="Back to the top" aria-label="Back to the top">&#8593;</button>
+<script>
+(function () {
+  const b = document.getElementById('to-top');
+  const show = () => b.classList.toggle('show', (window.scrollY || document.documentElement.scrollTop) > 400);
+  window.addEventListener('scroll', show, {passive: true});
+  b.addEventListener('click', () => window.scrollTo({top: 0, behavior: 'smooth'}));
+  show();
+})();
 </script>
 </body>
 </html>
