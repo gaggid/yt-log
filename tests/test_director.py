@@ -103,5 +103,62 @@ def test_sentences_that_all_begin_the_same_way_are_sent_back():
     from story2 import planner
     prior = ["पर यहाँ एक सवाल था।", "पर यहाँ एक सवाल और आया।"]
     assert planner.overused_openers(prior, ["पर यहाँ एक नई बात थी।"]) == ["पर यहाँ एक"]               # third time the same three words open a sentence
-    assert planner.overused_openers([], ["मैं आपको बताता हूँ यह।", "मैं आपको बताता हूँ वह।"]) == ["मैं आपको बताता"]      # a stock phrase twice
+    assert planner.overused_openers([], ["मैं आपको बताता हूँ यह।", "मैं आपको बताता हूँ वह।"]) == ["मैं आपको"]      # a stock phrase twice
     assert planner.overused_openers(prior[:1], ["बिल्कुल अलग शुरुआत यहाँ।"]) == []
+
+
+def test_the_suspense_plan_reaches_each_beats_narration_prompt(env):
+    from story2 import planner
+    from test_phase2a import approved_story, written_plan
+    from test_phase2b import P2BFake
+    pid, cid = approved_story(env)
+    be = P2BFake()
+    p = written_plan(cid, be)
+    bp = p["blueprint"]
+    assert bp["cold_open"] == "a pump handle is removed" and bp["false_answer"] == "bad air" and bp["beats"][0]["hold_back"].startswith("answer 1")
+    users = [c["user"] for c in be.calls if c["task"] == "p2_narrate"]
+    assert users and all("SUSPENSE PLAN" in u and "This beat must NOT say yet" in u and "Cold open: a pump handle is removed" in u for u in users)
+    assert "[reveals: reveal 2]" in users[0] and "End this beat on: question 1" in users[0]            # every beat also sees what the other beats reveal
+    assert planner.suspense_text({}, {}) == ""                                                      # a blueprint from before the plan existed adds nothing
+
+
+def test_hindi_written_in_latin_letters_is_caught_but_english_words_are_fine():
+    from story2 import svara
+    assert svara.romanised_hindi("Par sawal ye tha ki us pump ke pani mein aisa kya tha?")
+    assert svara.romanised_hindi("Sab kuch upar se toh normal lag raha tha.")
+    assert not svara.romanised_hindi("London की एक गली में एक छोटा सा handle हटाया गया।")
+    assert not svara.romanised_hindi("Snow ने एक बहुत ही interesting clue ढूँढा, a very strong clue.")
+
+
+def test_the_narration_audit_counts_what_it_says_it_counts():
+    from story2 import narration_audit
+    seg = lambda seq, texts, emo: {"seq": seq, "duration_s": 10.0, "sentences": [{"text": t, "emotion": e} for t, e in zip(texts, emo)]}
+    plan = {"segments": [seg(0, ["एक छोटा handle हटाया गया।", "क्या यह सच था?"], ["clear", "fear"]), seg(1, ["Par sawal ye tha ki kya hua?", "मैं आपको बताता हूँ।"], ["neutral", "neutral"])],
+            "blueprint": {"cold_open": "x"}}
+    a = narration_audit.audit(plan)
+    assert a["sentences"] == 4 and a["seconds"] == 20 and a["questions"] == 2 and a["beats_ending_on_a_question"] == 1 and a["emotion_flips_inside_a_beat"] == 1
+    assert a["romanised_hindi_sentences"] == 1 and a["stock_phrases"] == 1 and a["flat_share"] == 0.75 and a["suspense_plan"] is True
+
+
+def test_stock_phrases_are_caught_on_a_second_use_and_a_long_opening_sentence_is_sent_back(env, monkeypatch):
+    from story2 import planner
+    assert planner.overused_openers(["मैं आपको बताता हूँ यह।"], ["मैं आपको इस कहानी के बारे में बताना चाहता हूँ।"]) == ["मैं आपको"]
+    assert planner.overused_openers([], ["मैं आपको एक बात बताता हूँ।"]) == []                                       # once is allowed
+    from test_phase2a import approved_story, P2Fake
+    import asyncio
+    pid, cid = approved_story(env)
+
+    class LongOpening(P2Fake):
+        async def complete(self, messages, max_tokens):
+            r = await super().complete(messages, max_tokens)
+            if "[TASK:p2_narrate]" in messages[0]["content"] and "This is the opening of the video" in messages[1]["content"] and not getattr(self, "sent", 0):
+                self.sent = 1
+                r.text = r.text.replace("यह एक परीक्षण वाक्य है", "यह एक बहुत लंबा परीक्षण वाक्य है जो चौदह शब्दों से कहीं ज़्यादा शब्द रखता है और खत्म नहीं होता", 1)
+            return r
+    be = LongOpening()
+    monkeypatch.setattr(planner, "MAX_FIRST_SENTENCE_WORDS", 14)
+    p = planner.create_plan(cid, minutes=2)
+    asyncio.run(planner.make_blueprint(p["id"], be))
+    asyncio.run(planner.make_narration(p["id"], be))
+    firsts = [c for c in be.calls if c["task"] == "p2_narrate"]
+    assert len(firsts) >= 2                                                                                      # the long opening was sent back and asked again

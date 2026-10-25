@@ -76,6 +76,20 @@ def foreign_chars(text: str) -> list[str]:
     return sorted({c for c in plain_text(text) if not _ALLOWED.match(c)})
 
 
+_ROMAN_HINDI = {"ke", "ki", "ka", "ko", "se", "ne", "ye", "yeh", "woh", "wo", "tha", "thi", "the", "hai", "hain", "tha", "mein", "main", "par", "pe", "aur", "toh", "to", "kya", "kuch",
+                "sab", "ek", "nahi", "nahin", "jab", "tab", "lekin", "magar", "sawal", "pani", "shehar", "baat", "kaise", "bahut", "ganda", "andar", "upar", "niche", "hua", "gaya", "raha"}
+
+
+def romanised_hindi(text: str) -> bool:
+    """Hindi written in Latin letters ("Par sawal ye tha ki ..."): the voice reads it as English. A sentence with several such words next to each other is a slip."""
+    words = [w.lower() for w in re.findall(r"[A-Za-z]+", plain_text(text))]
+    run = best = 0
+    for w in words:
+        run = run + 1 if w in _ROMAN_HINDI else 0
+        best = max(best, run)
+    return best >= 3
+
+
 def mixed_words(text: str) -> list[str]:
     """Words that mix Devanagari and Latin letters ("stockको"); the voice reads these badly. English words stand alone."""
     return sorted({w for w in re.findall(r"\S+", plain_text(text)) if _DEV.search(w) and _LAT.search(w)})

@@ -43,6 +43,11 @@ class Beat(M):
     purpose: Str
     takeaway: Str = ""                  # what the viewer should understand or feel after this beat
     facts: StrList = []                 # which facts of the story it uses, in our words
+    reveal: Str = ""                    # the one thing this beat lets the viewer learn (the answer to a question opened earlier)
+    hold_back: Str = ""                 # what this beat deliberately does NOT say yet, and the beat where it will be told
+    plant: Str = ""                     # a small detail told here that pays off later (empty if none)
+    feeling: Str = ""                   # the one feeling of this beat: fear, sad, anger, happy or neutral
+    ends_on: Str = ""                   # the question, promise or ticking clock this beat ends on, so the viewer needs the next beat
 
 
 class Blueprint(M):
@@ -50,6 +55,10 @@ class Blueprint(M):
     why_structure: Str = ""
     viewer_promise: Str
     central_question: Str = ""
+    cold_open: Str = ""                 # the single most striking moment, shown first, before any background
+    stakes: Str = ""                    # who or what is at risk, and the clock if there is one
+    false_answer: Str = ""              # the obvious explanation the story first leans on, which turns out wrong (empty if none)
+    dark_moment: Str = ""               # the point where it looks lost, just before the turn (empty if none)
     opening: Str = ""
     context: Str = ""
     conflict: Str = ""

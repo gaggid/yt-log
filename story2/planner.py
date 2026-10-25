@@ -131,23 +131,47 @@ def _tokens(text: str) -> set[str]:
     return {w for w in _PUNCT.split(text.lower()) if w}
 
 
-STOCK_OPENERS = ("मैं आपको बताता", "मैं आपको दिखाता", "पर यहाँ एक सवाल", "पर यहाँ एक उलझन", "पर यहाँ एक twist")
+def suspense_text(bp: dict, beat: dict) -> str:
+    """The blueprint's suspense plan, as instructions for one beat: what the video as a whole is built on, and what this beat reveals, holds back, plants and ends on.
+    Empty for a blueprint made before the plan existed."""
+    whole = [f"{lbl}: {bp[k]}" for lbl, k in (("Cold open", "cold_open"), ("What is at stake", "stakes"), ("The obvious explanation that turns out wrong", "false_answer"),
+                                              ("The dark moment before the turn", "dark_moment")) if bp.get(k)]
+    mine = [f"{lbl}: {beat[k]}" for lbl, k in (("This beat reveals", "reveal"), ("This beat must NOT say yet (a later beat tells it)", "hold_back"),
+                                              ("Plant this small detail here", "plant"), ("The feeling of this beat (let the words carry it; tag a sentence with an emotion only at a true peak, neutral otherwise)", "feeling"), ("End this beat on", "ends_on")) if beat.get(k)]
+    if not whole and not mine:
+        return ""
+    return ("SUSPENSE PLAN (tell it as a storyteller who raises the question before the fact):\n" + "\n".join(whole + mine) + "\n\n")
+
+
+STOCK_OPENERS = ("मैं आपको", "यहाँ मैं आपको", "चलिए मैं", "पर यहाँ एक सवाल", "पर यहाँ एक उलझन", "पर यहाँ एक twist", "यहाँ मुझे सबसे")
+MAX_FIRST_SENTENCE_WORDS = 14
+
+
+def stock_opener(text: str) -> str:
+    return next((s for s in STOCK_OPENERS if text.startswith(s)), "")
 
 
 def overused_openers(prior: list[str], new: list[str], limit: int = 2, words: int = 3) -> list[str]:
-    """Sentence openers (the first words) that the whole video would use more than `limit` times, and the stock phrases that made earlier narration sound alike."""
+    """Sentence openers (the first words) that the whole video would use more than `limit` times, and the stock phrases ("मैं आपको बताता हूँ ...") that make a video
+    sound the same everywhere: a second use is already too many."""
     def head(t: str) -> str:
         return " ".join(t.split()[:words])
     count: dict[str, int] = {}
+    stock: dict[str, int] = {}
     for t in prior:
         count[head(t)] = count.get(head(t), 0) + 1
+        if stock_opener(t):
+            stock[stock_opener(t)] = stock.get(stock_opener(t), 0) + 1
     out = []
     for t in new:
         h = head(t)
         count[h] = count.get(h, 0) + 1
-        if len(h.split()) == words and count[h] > limit or any(t.startswith(s) for s in STOCK_OPENERS) and count[h] > 1:
-            if h not in out:
-                out.append(h)
+        so = stock_opener(t)
+        if so:
+            stock[so] = stock.get(so, 0) + 1
+        if (len(h.split()) == words and count[h] > limit) or (so and stock[so] > 1):
+            if (so or h) not in out:
+                out.append(so or h)
     return out
 
 
@@ -193,18 +217,17 @@ async def make_narration(plan_id: str, backend, s: dict | None = None, beat_ids:
     per_beat = max(40, int(minutes * wpm / n_beats))
     order = {b["id"]: i for i, b in enumerate(bp["beats"])}
     ev_ids = story["evidence"]["paragraph_ids"]
-    outline = "\n".join(f"{b['id']} ({b['name']}): {b['purpose']}" for b in bp["beats"])
+    outline = "\n".join(f"{b['id']} ({b['name']}): {b['purpose']}" + (f" [reveals: {b['reveal']}]" if b.get("reveal") else "") for b in bp["beats"])
     caller = llm.JsonCaller(backend, s)
 
-    flat_tries: list[int] = []
     spoken: list[str] = []
+    opening = {"on": False}
 
     def check(out: NarrationOut) -> None:
-        flat_tries.append(1)
-        felt = [svara.norm_emotion(x.emotion) for seg in out.segments for x in seg.sentences]
-        if len(flat_tries) <= 2 and not caller.last_attempt and felt and all(e in ("neutral", "clear") for e in felt):          # a whole beat in one flat voice: sent back twice
-            raise ValueError("Every sentence of this beat is neutral or clear. A story told in one flat voice loses the viewer. Find the moment in this beat that is "
-                             "frightening, sad, angering or relieving and give the sentences around it that emotion (fear, sad, anger or happy), keeping one emotion within a segment.")
+        first = out.segments[0].sentences[0].text if out.segments and out.segments[0].sentences else ""
+        if opening["on"] and len(first.split()) > MAX_FIRST_SENTENCE_WORDS and not caller.last_attempt:
+            raise ValueError(f"The first sentence of the video has {len(first.split())} words; it must have {MAX_FIRST_SENTENCE_WORDS} or fewer. Put the single most striking moment in it "
+                             "and move the date, the place and the details to the sentences after it.")
         again = repeated_sentences(spoken, [x.text for seg in out.segments for x in seg.sentences])
         if again and not caller.last_attempt:
             raise ValueError("These sentences repeat something already spoken in the video; say something new instead: " + " | ".join(again[:4]))
@@ -217,6 +240,9 @@ async def make_narration(plan_id: str, backend, s: dict | None = None, beat_ids:
             if bad:
                 raise ValueError(f"segment {n} contains characters that cannot be spoken: {' '.join(bad)}. "
                                  "Use Devanagari for Hindi and Latin letters for English words only; write numbers as words, never digits; no other script.")
+            roman = [x.text for x in seg.sentences if svara.romanised_hindi(x.text)]
+            if roman:
+                raise ValueError(f"segment {n} writes Hindi in Latin letters ({roman[0][:60]}). Hindi words must be in Devanagari; only English words use Latin letters.")
             mixed = svara.mixed_words(text)
             if mixed:
                 raise ValueError(f"segment {n} glues English letters to Hindi letters in one word: {' '.join(mixed)}. "
@@ -231,18 +257,19 @@ async def make_narration(plan_id: str, backend, s: dict | None = None, beat_ids:
             progress(k, len(want), f"beat {k + 1} of {len(want)}: {beat['name']}")
         before = [x for x in list_segments(plan_id) if order.get(x["beat"], 99) < order[beat["id"]]]
         said = " ".join(x["plain"] for x in before)[-1200:]
+        opening["on"] = not said
         spoken.clear()
         spoken.extend(s_["text"] for x in list_segments(plan_id) if x["beat"] != beat["id"] for s_ in x["sentences"])       # the whole video so far, whichever beat it belongs to
         earlier = chr(10).join(f"- {t}" for t in spoken)[-3500:]
         user = (f"STORY FACTS:\n{intake.facts_text(story['public'])}\n\nBLUEPRINT (structure: {bp['structure']}):\n"
                 f"Viewer promise: {bp['viewer_promise']}\nCentral question: {bp['central_question']}\n"
                 f"Turning point: {bp['turning_point']}\nPayoff: {bp['payoff']}\nEnding: {bp['ending']}\n\n"
+                + suspense_text(bp, beat) +
                 f"ALL BEATS (for orientation):\n{outline}\n\n"
                 + (f"ALREADY NARRATED (continue from here, do not repeat it):\n{said}\n\nEVERY SENTENCE SPOKEN SO FAR (never say any of these again, and do not tell a fact "
                    f"again that they already told; move the story forward):\n{earlier}\n\n" if said else "This is the opening of the video.\n\n")
                 + f"WRITE NARRATION FOR THIS BEAT ONLY ({beat['id']}, about {per_beat} words):\n"
                   f"purpose: {beat['purpose']}\nviewer takeaway: {beat['takeaway']}\nfacts: {'; '.join(beat['facts'])}")
-        flat_tries.clear()
         res = await caller.call(system, user, NarrationOut, check)
         tokens_out += res.tokens_out
         with db.tx() as c:

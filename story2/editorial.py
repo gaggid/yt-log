@@ -187,15 +187,13 @@ def emotional_coherence(c: Ctx) -> dict:
     intense = _pct(sum(1 for e in emos if e in INTENSE), len(emos))
     kinds = len({tone(e) for e in emos})
     quiet = any((x.get("pause_after_s") or 0) >= 0.8 for s in c.segs for x in s["sentences"])
-    score = 100 - 12 * len(switchy) - max(0, intense - 35) * 1.2 - (18 if kinds == 1 else 0) - (0 if quiet else 8)
+    score = 100 - 12 * len(switchy) - max(0, intense - 35) * 1.2 - (0 if quiet else 8)                 # a neutral voice is the default and works best: it is never penalised
     fixes = []
     if switchy:
         fixes.append(_fix(f"{len(switchy)} narration part(s) change emotion more than once; the voice and pace shift audibly. Keep one emotion per part and change it only at a real turn.",
                           [s["id"] for s in switchy], "narration"))
     if intense > 35:
         fixes.append(_fix(f"{intense:.0f}% of sentences are emotional (happy, sad, anger, fear). Use neutral and clear for most of them.", tab="narration"))
-    if kinds == 1:
-        fixes.append(_fix("The whole voice is flat. A viewer who hears one tone for minutes leaves: give the turning point, the shock and the payoff a real emotion (fear, sad, happy), one per part.", tab="narration"))
     if not quiet:
         fixes.append(_fix("There is no pause of 0.8 seconds or more. Add one after the reveal so it can land.", tab="narration"))
     return _dim("emotional_coherence", "Emotional coherence", score, f"{len(switchy)} part(s) switch emotion more than once; {intense:.0f}% of sentences are emotional; {kinds} different emotion(s); "

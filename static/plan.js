@@ -441,7 +441,7 @@ Be concrete: colours, materials, numbers. Leave empty to skip.`); if (v === null
         <ul class="tight mt-s">${p.readiness.checks.map(c => `<li><span class="${c.level === 'blocked' ? 'err' : ''}">${c.level === 'blocked' ? '✗' : '•'}</span> ${esc(c.text)}</li>`).join('')}</ul></details>
 
       ${p.blueprint ? `<div class="card pad mt" id="sec-blueprint"><div class="row"><h3 style="margin:0">Blueprint</h3>${badge('info', p.blueprint.structure.replace(/_/g, ' '))}</div>
-        <div class="mt-s"><b>Viewer promise:</b> ${esc(p.blueprint.viewer_promise)}</div><div><b>Central question:</b> ${esc(p.blueprint.central_question)}</div><div class="mute small">${esc(p.blueprint.why_structure)}</div>
+        <div class="mt-s"><b>Viewer promise:</b> ${esc(p.blueprint.viewer_promise)}</div><div><b>Central question:</b> ${esc(p.blueprint.central_question)}</div><div class="mute small">${esc(p.blueprint.why_structure)}</div>${p.blueprint.cold_open ? `<div><b>Cold open:</b> ${esc(p.blueprint.cold_open)}</div>` : ''}${p.blueprint.stakes ? `<div><b>At stake:</b> ${esc(p.blueprint.stakes)}</div>` : ''}${p.blueprint.false_answer ? `<div><b>The wrong answer first:</b> ${esc(p.blueprint.false_answer)}</div>` : ''}
         <div class="mt-s">${p.blueprint.beats.map(b => `<div class="beatrow"><b>${esc(b.id)}</b><span>${esc(b.name)}</span><span>${esc(b.purpose)}</span><span class="mute">${esc(b.takeaway)}</span></div>`).join('')}</div></div>` : ''}
 
       ${p.segments.length ? `<div class="mt" id="sec-narration"><div class="row"><h3 style="margin:0">Narration (Hindi)</h3><span class="mute">${mmss(p.duration_s)} spoken · target ${mmss(p.settings.minutes * 60)}</span></div>

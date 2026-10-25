@@ -39,3 +39,37 @@ Started 2026-10-25. Each line: what was done or seen, and what is next to fix.
 - Auto-run now SKIPS the references stage when scenes are drawn plain (uses_references: mode != generate) since plain drawing never sends them (verification run wasted ~10 min on 10 reference pictures before this). Tests updated + new test.
 - VERIFY RUN DONE pl-e6535eac (3 min story, new code): 13/13 with NO stop, 95 min (10 min of it on 10 reference pictures, now skipped). 36 scenes, video 206 s with captions, no placeholders. vs pl-22f2f454: director hold 39% -> 13%; character-type scenes 44% -> 31%; scene avg 5.7 s, max 9.6 s; narration has no repeated sentence; clear/neutral sentences 86% -> 62% (fear 7, happy 8: 'happy' on a cholera story is still off); first-try pictures failing the check 59% -> 29% (13 of 45); person-in-scene share 44%; 5 place strings. Sheet: brighter, more empty streets/objects/vat/tunnel/map, Snow more consistent. Remaining: 4 near-identical empty-pump shots (scenes 3/14/30/32), 'The Pump Handle' still listed as a prop, emotion mapping (happy) not story-aware.
 - Narration upgrade (after research + user ask): storyteller toolkit in the NARRATE prompt (show before explain, human stakes, open/close loops, no stock openers, contrast, earned ending, story-aware emotion: happy only for relief), planner.overused_openers check (same 3-word opener >2 times or a stock phrase twice -> sent back). Scene prompt: a person is not shown sitting/lying twice in a segment or in the same posture+place twice. Commit 18b4c14 pushed earlier (director/camera/auto-run work).
+- NARRATION-ONLY CHECK started: plan pl-52671768 (2 min) with the storyteller prompt + opener/repeat/flat checks.
+- NARRATION BASELINE (pl-52671768 , storyteller prompt v1, 2 min): 28 sentences, 149 s, 6 beats, finished first pass in 7 min with no stop. No repeated sentences/openers; 0 questions; clear/neutral 17 of 28 (61%); 'happy' tagged on neutral discoveries (b4 x3, b1); b1 gives the answer away ('एक simple action ने mystery solve कर दिया') so no suspense; still 'मैं आपको बताता/दिखाता हूँ' x2. This is the baseline for the suspense-plan (Lite) comparison.
+- SUSPENSE PLAN LITE built: Blueprint gets cold_open/stakes/false_answer/dark_moment and per beat reveal/hold_back/plant/ends_on (optional fields, old plans fine); BLUEPRINT prompt has the suspense-master persona + rules; NARRATE prompt has the storyteller persona; planner.suspense_text() puts the plan and the beat's own instructions in each beat's prompt, outline shows what each beat reveals; blueprint card on the screen shows cold open/stake/wrong answer; test added.
+- SUSPENSE LITE TEST (pl-90126131 vs baseline): plan works (blueprint has cold open, stakes, false answer 'miasma', dark moment; beats ordered false answer -> Snow -> evidence -> map -> cause -> legacy). Questions 0 -> 4; 28 -> 38 sentences, 149 -> 221 s, 6 -> 8 beats; repeats 0. Flat voice 61% -> 58% (unchanged); 'happy' tagged on whole evidence beat (b5) = emotion not story-aware. NEW BUG FOUND: beat 7 written in romanised Hindi ('Par sawal ye tha ki ...') - no check caught it (foreign_chars only sees other scripts). Fixes: svara.romanised_hindi check (3+ Hindi words in a row in Latin letters -> sent back); Beat.feeling field in the blueprint, passed to narration with 'happy only for real relief or triumph'. Re-test next.
+- OPEN (user asked, not done): auto-run approves ALL graphics incl. fallbacks, so thin cards ('data map' label only; '1858 / Snow's death in' truncated) enter the video. Plan: reject cards that are only a label or have a truncated caption and use the scene's drawn picture.
+- TASK ADDED (user): THUMBNAIL. One more image at the end of the run, made with Qwen Image 2.1 at high quality, as a YouTube thumbnail that looks like a MOVIE POSTER with a consistent poster theme (design language chosen once, like the visual style). It carries short text that is a statement or, usually, a QUESTION that creates curiosity (click-bait but honest: no claim the video does not answer). Notes for the build: text goes in quotes (Qwen draws quoted words best); English letters, <= 8 words (existing rule), words only from the story facts; leak gate and source rules apply; reuse the main character + key place from the registry; size 1280x720 (16:9); an LLM step writes 3 title/question options from the blueprint (cold_open, central_question) and the best is drawn; picture check (readable text matches the quote) like scene pictures; becomes an auto-run stage after 'pictures' (before 'video' or after) and is saved/exported with the plan. Not started.
+- USER DECISION: romanised Hindi (Hindi in Latin letters) is NOT wanted, it does not play well in the voice. The romanised_hindi check enforces it (sent back, last attempt accepted).
+
+- NARRATION AUDIT TOOL: story2/narration_audit.py (python -m story2.narration_audit plan1.json plan2.json). Baseline vs suspense v1:
+| measure | baseline | suspense-v1 |
+|---|---|---|
+| beats | 6 | 8 |
+| sentences | 28 | 38 |
+| seconds | 149 | 221 |
+| first_sentence_words | 10 | 11 |
+| questions | 0 | 4 |
+| beats_ending_on_a_question | 0 | 3 |
+| flat_share | 0.61 | 0.58 |
+| emotion_flips_inside_a_beat | 8 | 11 |
+| happy_share | 0.18 | 0.21 |
+| repeated_sentences | 0 | 0 |
+| overused_openers | [] | [] |
+| stock_phrases | 3 | 2 |
+| romanised_hindi_sentences | 0 | 4 |
+| i_statements | 4 | 5 |
+| talks_to_viewer | 3 | 2 |
+| avg_words | 12.3 | 13.3 |
+| short_sentences_share | 0.04 | 0.08 |
+| long_sentences_share | 0.0 | 0.03 |
+| devanagari_share | 0.68 | 0.59 |
+| digits_in_text | 0 | 0 |
+- Also seen in the audit: emotion flips inside a beat are 8 (baseline) and 11 (v1), against the rule 'one emotion per segment, at most one change'; nothing enforces it yet. Both have 2-3 stock phrases; v1 has 4 romanised-Hindi sentences and Devanagari share fell 0.68 -> 0.59.
+- FINAL NARRATION CHECK started pl-7a5f6bc5: neutral default, first sentence <=14 words, wider stock-phrase check, romanised-Hindi check, suspense plan.
+- User: no more re-tests; the confirming run pl-7a5f6bc5 was cancelled. Suspense plan v2 (with the later fixes) is the version to use.

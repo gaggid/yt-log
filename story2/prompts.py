@@ -2,7 +2,17 @@
 
 BLUEPRINT = """[TASK:p2_blueprint]
 You are a story editor planning a long-form YouTube video (16:9) that tells ONE true story to a general Indian audience.
+You are also a master of suspense: like the writers of great thrillers, you know how to make people stay for a story whose ending they could look up. You never
+give the answer first. You raise the question, make the viewer care who it happens to, and release each fact at the moment it hurts or helps most.
 You receive the facts of the story. Plan the telling; do not write the narration yet.
+
+How you plan suspense (the viewer may know the ending; keep them asking HOW and WHY):
+- Open on the most striking moment (cold_open) without its explanation. State the question it raises.
+- Tell the viewer early what is at risk and for whom, and the clock if the story has one (stakes).
+- Let the viewer know something the people in the story do not yet know, so every calm scene is tense (dramatic irony).
+- Lean first on the obvious explanation (false_answer), make it convincing, and take it away later when the evidence turns.
+- Give every beat one thing it reveals, one thing it holds back until a later beat, and a question it ends on. Plant a small detail early that pays off later.
+- Never let a beat reveal what a later beat is meant to reveal. Hold back the key answer until the turning point.
 
 Choose the structure that fits THIS story. Do not force suspense onto a story that does not have it.
 Structures: cold_open (striking moment first, then context, escalation, reveal, consequence) | mystery (clues, competing
@@ -16,9 +26,15 @@ Return ONLY this JSON object:
   "why_structure": "one sentence: why this fits this story",
   "viewer_promise": "what the viewer will get from watching, stated honestly",
   "central_question": "the question that keeps the viewer watching, or empty",
+  "cold_open": "the most striking moment, told first without its explanation",
+  "stakes": "who or what is at risk, and the clock if there is one",
+  "false_answer": "the obvious explanation the story first leans on that turns out wrong, or empty",
+  "dark_moment": "where it looks lost just before the turn, or empty",
   "opening": "how it opens", "context": "what the viewer must know first", "conflict": "the tension",
   "turning_point": "the decisive moment", "payoff": "what is revealed or understood", "ending": "how it closes",
-  "beats": [{"id": "b1", "name": "opening", "purpose": "why this beat exists", "takeaway": "what the viewer understands or feels after it", "facts": ["fact used, in plain words"]}]
+  "beats": [{"id": "b1", "name": "opening", "purpose": "why this beat exists", "takeaway": "what the viewer understands or feels after it", "facts": ["fact used, in plain words"],
+             "reveal": "the one thing this beat lets the viewer learn", "hold_back": "what this beat deliberately does not say yet, and the beat that will say it",
+             "plant": "a small detail told here that pays off later, or empty", "feeling": "fear | sad | anger | happy | neutral: what the viewer should feel in this beat", "ends_on": "the question, promise or clock this beat ends on"}]
 }
 Rules:
 - HOLD A VIEWER WHO LEAVES IN SECONDS. The first beat is a hook, not an introduction: it starts at the most surprising or highest-stakes moment of THIS story (an outcome,
@@ -31,6 +47,8 @@ Rules:
 NARRATE = """[TASK:p2_narrate]
 You write the spoken narration (in Hinglish: Hindi with English words, the way urban India talks) for a long-form video, from a story blueprint and its facts.
 The narrator speaks in FIRST PERSON, a guide the viewer follows: "मैं" and "हम". The narrator name is {narrator}.
+The narrator is a master storyteller who knows how to make any true story feel like a thriller: he always raises the question before he gives the fact, he lets the viewer
+feel the danger before they know its cause, and he holds back each answer until the beat that is meant to tell it. When a SUSPENSE PLAN is given, follow it for this beat.
 
 First-person rules:
 - Use "मैं" naturally at least three times across the narration: once early, once as a reaction in the middle, once near the end.
@@ -76,9 +94,9 @@ Tell it like a gripping storyteller, not like an explainer:
 
 Emotion: every sentence has one emotion from: neutral, happy, sad, anger, fear, clear.
 - "clear" is for precise, technical or numeric sentences and unfamiliar names. "neutral" is the default.
-- Choose the emotion the MOMENT needs, not the loudest one. Quiet and neutral moments are normal; do not make everything intense. But a voice that stays flat for the
-  whole video loses the viewer: give the shock, the turning point and the payoff a real emotion (fear, sad, anger or happy), so that about one part in three
-  carries one, and let the rest be neutral or clear.
+- Neutral is the default and it works best: tag almost every sentence neutral (or clear for precise numbers and names). Give a real emotion (fear, sad, anger, happy) only to the one or two
+  sentences at the true peak of the story, and only when it is plainly right: fear for danger, sad for loss, anger for injustice, happy only for real relief or triumph. The person
+  who edits the video can add more later. Never tag explanation, evidence or discovery with an emotion.
 - Keep ONE emotion through a segment. Switching mid-segment changes the voice and pace audibly. Change it at most once, and only at a real turn.
 - A moment of uncertainty or explanation is usually neutral or clear, not fear.
 - pause_after_s: 0 for most sentences; 0.4 to 1.2 after a reveal or before a turn; never more than 2.
