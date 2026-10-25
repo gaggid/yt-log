@@ -4,15 +4,16 @@ accepted as they are. It uses the same functions as the buttons, so everything i
 the first thing that needs a person (a sign-off blocker, a missing model) and says what, keeping everything finished so far. Gaps in a character's
 description are not filled in (that needs a person); the models invent the missing details."""
 import asyncio
+import re
 
 from story import db, llm, settings as settings_mod
-from story2 import api as plans_api, editorial, export, imgplan, planner, storyboard, store as plan_store
+from story2 import api as plans_api, director, editorial, export, imgplan, planner, storyboard, store as plan_store
 
 from . import graphics, refs, scenes, store, video, voice
 from .voice import MediaError
 
-STAGES = [("blueprint", "Plan the story"), ("narration", "Write the narration"), ("characters", "Create characters and places"), ("references", "Make and approve reference pictures"),
-          ("storyboard", "Design the storyboard"), ("prompts", "Write image prompts"), ("repeats", "Fix camera repeats"), ("approve", "Check, review and approve the plan"),
+STAGES = [("blueprint", "Plan the story"), ("narration", "Write the narration"), ("characters", "Create characters and places"),
+          ("storyboard", "Design the storyboard"), ("references", "Make and approve reference pictures"), ("prompts", "Write image prompts"), ("repeats", "Fix camera repeats"), ("approve", "Check, review and approve the plan"),
           ("export", "Export"), ("voice", "Make and approve the voice"), ("pictures", "Draw and approve the scene pictures"), ("graphics", "Build and approve the graphics"),
           ("video", "Make the draft video")]
 
@@ -39,6 +40,12 @@ def _compiled(plan: dict) -> bool:
     return bool(plan["scenes"]) and all((s["data"].get("prompts") or {}).get("qwen") for s in plan["scenes"])
 
 
+def uses_references(plan: dict) -> bool:
+    """Reference pictures reach the picture model only when scenes are drawn from them (edit mode). Plain drawing, which auto-run uses unless a person chose
+    otherwise, never sends them, so making them would cost minutes and change nothing."""
+    return scenes.settings(plan)["mode"] != "generate"
+
+
 def done(plan_id: str, key: str, st: dict | None = None) -> bool:
     """Is this stage already finished? `st` may hold the media states the screen has just computed (refs, scenes, graphics, video)."""
     st = st or {}
@@ -50,10 +57,12 @@ def done(plan_id: str, key: str, st: dict | None = None) -> bool:
     if key == "characters":
         return bool(plan["assets"]) and not plans_api.style_info(plan)["registry_stale"]
     if key == "references":
+        if not uses_references(plan):
+            return True
         r = st.get("refs") or refs.state(plan_id)
         return bool(r["done"] or r["total"] == 0)
     if key == "storyboard":
-        return bool(plan["scenes"]) and not _uncovered(plan) and not plans_api.style_info(plan)["storyboard_stale"]
+        return bool(plan["scenes"]) and not _uncovered(plan) and not plans_api.style_info(plan)["storyboard_stale"] and director.current(plan)
     if key == "prompts":
         return _compiled(plan) and not any(i["kind"] in ("stale", "not_compiled") for i in imgplan.validate_prompts(plan_id)["issues"])
     if key == "repeats":
@@ -138,6 +147,30 @@ def _approve_content(plan_id: str) -> None:
             storyboard.edit_scene(sc["id"], {"status": "approved"})
 
 
+async def _repair_scenes(plan_id: str, be, s: dict, sub, notes: list[str]) -> None:
+    """A scene whose prompt or text carries an error (a year or number that is not in the facts, wording copied from the source) is redrawn with the error as
+    the editor's request, twice at most, so one bad scene does not stop the whole run."""
+    for attempt in range(3):
+        reports = await asyncio.to_thread(editorial.run_checks, plan_id)
+        bad: dict[str, list[str]] = {}
+        for rep in (reports["storyboard"], reports["prompts"]):
+            for i in (rep or {}).get("issues", []):
+                if i.get("level") == "error" and str(i.get("where", "")).startswith("sc-"):
+                    bad.setdefault(i["where"], []).append(i["text"])
+        bad = {k: v for k, v in bad.items() if not storyboard.get_scene(k)["locked"]}
+        if not bad:
+            return
+        for n, (sid, why) in enumerate(bad.items(), 1):
+            sub(n, len(bad), f"fixing scene {n} of {len(bad)}")
+            if attempt == 2:                                        # the model keeps writing a number of its own (a year it worked out): take it out
+                gone = [m for t in why for m in re.findall(r"states (\S+?),", t)] + [t.split("copied_wording:", 1)[1].strip() for t in why if "copied_wording:" in t]
+                await asyncio.to_thread(storyboard.scrub_numbers, sid, gone)
+                continue
+            await storyboard.regenerate_scene(sid, be, s, "Fix this problem and keep the same story beat: " + "; ".join(dict.fromkeys("some wording is copied from the source: describe it in completely new words" if "copied_wording" in t else t for t in why)) + ". Use only years, numbers and names that are in the story facts.")
+        await asyncio.to_thread(imgplan.compile_plan, plan_id)
+        notes.append(f"{len(bad)} scene(s) had an error in their wording and were redrawn")
+
+
 async def run_stage(plan_id: str, key: str, be, s: dict, api_key: str, progress, notes: list[str]) -> None:
     sub = lambda d, t, label="": progress(None, None, label)          # noqa: E731 - stage progress shown as the label only
     if key == "blueprint":
@@ -157,7 +190,7 @@ async def run_stage(plan_id: str, key: str, be, s: dict, api_key: str, progress,
         if n:
             notes.append(f"{n} character, place or object description(s) have gaps: use Fill in the gaps later, the models invent the missing details until then")
     elif key == "references":
-        if not refs.targets(plan_id):
+        if not refs.targets(plan_id) or not uses_references(planner.get_plan(plan_id)):
             return
         await refs.generate(plan_id, None, 1, True, None, sub, s, api_key, True)
         weak = [r["asset_id"] for r in refs.state(plan_id)["assets"] if not r["approved"] and not r["skipped"] and _weak(r["candidates"], r["best"])]
@@ -181,6 +214,7 @@ async def run_stage(plan_id: str, key: str, be, s: dict, api_key: str, progress,
             await storyboard.fix_repeats(plan_id, be, s, sub)
             await asyncio.to_thread(imgplan.compile_plan, plan_id)
     elif key == "approve":
+        await _repair_scenes(plan_id, be, s, sub, notes)
         await asyncio.to_thread(_approve_content, plan_id)
         so = await asyncio.to_thread(editorial.signoff, plan_id)
         if not so["ok"]:
@@ -223,7 +257,7 @@ async def run_stage(plan_id: str, key: str, be, s: dict, api_key: str, progress,
         chk = await asyncio.to_thread(video.checklist, plan_id)
         if chk["blockers"]:
             raise AutoStop(f"{len(chk['blockers'])} thing(s) are missing for the video (see the Draft video section)")
-        await asyncio.to_thread(video.build, plan_id, "draft", False, False, sub)
+        await asyncio.to_thread(video.build, plan_id, "draft", bool(video.available()["captions"]), False, sub)          # most people watch with the sound off: captions on whenever ffmpeg can burn them
     else:
         raise AutoStop(f"unknown step {key}")
 

@@ -54,6 +54,14 @@ def _range(v):
     return [min(v), max(v)] if len(v) > 1 else [v[0], v[0]]
 
 
+def _shot(v):
+    """The director's shot number, however the model wrote it (3, "3", "shot 3", [3, 4]); 0 when there is none."""
+    if isinstance(v, (list, tuple)):
+        v = v[0] if v else 0
+    m = __import__("re").search(r"\d+", str(v if v is not None else ""))
+    return int(m.group()) if m else 0
+
+
 class M(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -100,6 +108,9 @@ class OnScreen(M):
 
 class SceneOut(M):
     sentences: Annotated[list[int], BeforeValidator(_range)] = []
+    idea: Str = ""                                   # what the narration MEANS here, in plain words (the thing to carry, not the words to draw)
+    translation: Str = ""                            # the concrete moment in the story's world (who, where, doing what) that carries that idea
+    shot: Annotated[int, BeforeValidator(_shot)] = 0                                    # the number of the director's shot this scene follows (0: none)
     purpose: Str
     new_information: Str = ""                        # what the viewer learns, notices or feels that the previous visual did not give
     takeaway: Str = ""

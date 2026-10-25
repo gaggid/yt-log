@@ -21,6 +21,9 @@ Return ONLY this JSON object:
   "beats": [{"id": "b1", "name": "opening", "purpose": "why this beat exists", "takeaway": "what the viewer understands or feels after it", "facts": ["fact used, in plain words"]}]
 }
 Rules:
+- HOLD A VIEWER WHO LEAVES IN SECONDS. The first beat is a hook, not an introduction: it starts at the most surprising or highest-stakes moment of THIS story (an outcome,
+  a number, a decision, a question the viewer cannot answer yet) and raises the central question inside the first 15 seconds. Give every beat after it a reason to
+  stay: end it by opening a new question, a surprise or a consequence, so the viewer always wants the next beat. Never open with a greeting, a topic announcement or background.
 - 5 to 9 beats, in telling order. Every beat has a purpose and uses only facts you were given.
 - Use only the facts given. If something is not known (an outcome, a year, a name) leave it out of the plan; never fill it in.
 - Everything is our own telling. Never mention a book, an author, a chapter, a page, a source or "the text"."""
@@ -52,9 +55,18 @@ Originality rules (very important):
 - Do not quote anyone. No quotation marks. Tell what people did and said in your own words.
 - Use only the facts given. If a year, a number, an outcome or a name is not given, do not state it; speak around it honestly.
 
+Hook and pace (viewers leave in seconds, so earn every sentence):
+- The first sentence is at most twelve words, concrete, and puts the viewer in the middle of something: a moment, a number, a question. No greeting, no "आज हम बात करेंगे",
+  no "this is a story about". The second sentence deepens the question instead of explaining it.
+- Open a small question or promise about every fifteen to twenty seconds ("पर यहाँ एक गड़बड़ थी", "और अगले पल जो हुआ") and answer it later, so there is always something pending.
+- Mix very short sentences with longer ones. Speak to the viewer ("आप सोचिए"). One idea per sentence; cut every sentence that only repeats the last one.
+- Give the turning point room: short sentences, a pause, then the consequence.
+
 Emotion: every sentence has one emotion from: neutral, happy, sad, anger, fear, clear.
 - "clear" is for precise, technical or numeric sentences and unfamiliar names. "neutral" is the default.
-- Choose the emotion the MOMENT needs, not the loudest one. Quiet and neutral moments are normal; do not make everything intense.
+- Choose the emotion the MOMENT needs, not the loudest one. Quiet and neutral moments are normal; do not make everything intense. But a voice that stays flat for the
+  whole video loses the viewer: give the shock, the turning point and the payoff a real emotion (fear, sad, anger or happy), so that about one part in three
+  carries one, and let the rest be neutral or clear.
 - Keep ONE emotion through a segment. Switching mid-segment changes the voice and pace audibly. Change it at most once, and only at a real turn.
 - A moment of uncertainty or explanation is usually neutral or clear, not fear.
 - pause_after_s: 0 for most sentences; 0.4 to 1.2 after a reveal or before a turn; never more than 2.
@@ -123,7 +135,19 @@ Rules:
 - Read the whole NARRATION. Every person or role it mentions or clearly implies, every place it is set in and every object that matters
   to the story must be an asset, so no scene ever needs something that is missing from this list. Include secondary people
   (a colleague, a manager, a customer, a crowd member who appears) when the narration needs them. Merge duplicates.
-- Keep it complete but small: 4 to 12 assets in total.
+- A place must exist in the physical world and be somewhere a person could stand: a room, street, building, field, vehicle. Never an "abstract" space, a grid, a void, a
+  digital or imagined world, or the setting of an idea. If the narration talks about an idea (a market, a trend, a feeling), choose a real place where people live that
+  idea, and show it through them.
+- The narration sometimes compares the story to something else ("like a sea after a storm", "building a base", "a machine"). That comparison is not a place and
+  not a prop of the story: do not list the thing it is compared to. Places are only where the story's own people physically are.
+- Give the video a world to move through, not one room. List at least 4 different places (where the story starts, where it turns, where it ends, and
+  places the story only passes through: a street, a lobby, a home, a corridor, a rooftop, a vehicle, whatever fits THIS story) and, besides the
+  main person, at least 2 supporting people who can share a scene or react (a colleague, a boss, a customer, a family member, a passer-by).
+  A viewer who sees the same person in the same room for minutes stops watching.
+- Props are rare: list at most three, and only a solid object that comes back in several scenes and whose shape matters to the story (the pump, a letter, a lantern).
+  Never list a liquid, smoke, light, a surface (a floor, the ground) or a part of a place or of another listed object (a pump's handle belongs in the pump's
+  description): they are drawn as part of the place or the scene, and a model sheet of them is useless.
+- Keep it complete but small: 8 to 14 assets in total.
 - Never mention a book, an author, a chapter, a page or a source."""
 
 SCENES = """[TASK:p2_scenes]
@@ -131,31 +155,56 @@ You are a storyboard artist for a long-form 16:9 explainer video. You receive on
 (with their spoken seconds), the story facts and the continuity assets. Design the scenes that show this segment.
 
 Each scene covers a run of consecutive sentences ("sentences": [first, last], 1-based, inclusive). Together the scenes must
-cover EVERY sentence of the segment exactly once, in order, with no gaps and no overlaps. A scene usually lasts 4 to 12
-seconds; a long reveal may hold longer; do not cut faster than the viewer can understand.
+cover EVERY sentence of the segment exactly once, in order, with no gaps and no overlaps. A scene usually lasts 3 to 7
+seconds, because viewers leave when a picture stays too long; only a real reveal may hold longer. Split a long sentence run into several scenes that each show something new.
 
-For every scene answer: what does the viewer learn, notice or feel from this picture that the previous picture did not give?
-Do not repeat a keyword from the narration as a generic picture. Vary the visual type and composition between neighbouring scenes.
+TRANSLATE, DO NOT ILLUSTRATE THE WORDS. The narration says things in words: numbers, trends, comparisons, abstract ideas, figures of speech,
+summaries. A picture cannot say those words and must not try. For every scene first decide what the narration MEANS at that point ("idea"),
+then invent a concrete moment in the story's world that makes the viewer feel or understand it ("translation"): who is there, where,
+doing what, and what the face and body show. The moment does not have to be mentioned in the narration. It has to belong to the world,
+the people and the period of the story, and it has to fit what is being said.
+Examples of the thinking, in different subjects (never copy them, they only show the move from words to a moment):
+- "everything looked perfect, then it collapsed": a person at their desk smiling at good news with a full cup of tea, then, in the next
+  scene, the same person standing very still while something is knocked over behind them. Not a picture of a rising and falling line.
+- "the village grew every year": the same square drawn first with three stalls and a few children, later crowded, with a new well and a cart.
+- "children played all afternoon": two kids running across a lawn, one holding a kite string, a parent on a bench in the background.
+- "the experiment finally worked": a researcher's hands holding a small glowing test tube, a colleague in the background leaning in.
+The idea may be shown by a person's reaction, a place changing, an object being used or handed over, a before and after of the same
+place, or the people around the main person. Never show an abstract shape, a line, a symbol, a floating object or a plain background
+instead of a person or a place. Every scene happens in a named place from the continuity list, with at least one continuity person or the
+place itself visible, and a foreground, a subject and a background.
+Over the whole segment the scenes must read as a story: who it is about, what they want, what changes, how they feel, in order, so the viewer
+could follow the story with the sound off. Do not repeat a keyword from the narration as a generic picture.
 
 TELL THE STORY WITH PICTURES. The video is a graphic novel: every scene is an illustrated moment of the story world, drawn like a
-panel. Show people, places and things happening: who is there, where, doing what, feeling what. Prefer these visual types:
+panel. Show people, places and things happening. Prefer these visual types:
 reconstruction (a moment that happened or could have happened) | character (a person's face, hands or posture) | establishing
 (the place, wide) | atmospheric (the mood of a place) | object_process (a thing being used) | montage | transition.
 Use at least four in five scenes from this list. Use "metaphor" rarely, and only as an image inside the story world (a lit window
-in a dark street, a hand hovering over a phone). Never invent unrelated symbols such as a runner, a train, a pillar, a bridge,
-a mountain or a ship: every object and person in a picture must belong to the places and people of the story.
-Do not turn an idea into a diagram. If the narration talks about momentum, pressure or a drop, show a person living it (a trader
-leaning toward his screens, a hand over a phone, a street in rain) instead of a chart.
+in a dark street, a hand hovering over a phone). Never invent unrelated symbols (a runner, a train, a pillar, a bridge, a mountain, a ship):
+every object and person in a picture must belong to the places and people of the story.
+Never draw an effect on its own (a pulse or burst of light, energy, a vortex, a glow, a shockwave): show a person reacting to what happened, an object, or the place itself. Do not turn an idea into a diagram. If the narration talks about growth, pressure, a drop, a pattern or a comparison, show a person living it
+instead of a chart.
 Charts, documents, screens, maps and diagrams (visual types data_chart | document_archival | screen_interface | map_timeline |
 diagram | comparison | text_led) are allowed only when the narration states exact numbers, dates or a document that the viewer must
 read, and then in at most one scene in six. They cannot be drawn reliably by an image model and must never show invented numbers,
 text or quotes: describe in "needs_asset" what verified content it must show (only numbers and events given in the facts), and
-make the "fallback" a full illustrated scene in the story world (for example a trader at a wall of glowing monitors; the screens
+make the "fallback" a full illustrated scene in the story world (a person looking at a lit screen in their place; the screens
 show abstract light only). Elsewhere, a chart may appear only as a glowing, unreadable shape on a screen inside a room.
 Panel language to use: an establishing wide of the place, over-the-shoulder, a close-up on eyes or hands, a low angle that gives
 a person weight, a high angle that makes someone small, a silhouette against a lit window, a foreground object framing the
 subject. Give every scene depth: something in the foreground, the subject, something behind.
 
+Keep the viewer's eye moving. Every scene must differ from the one before it in at least two of: place, who is in frame, what they are doing, distance. Do
+not stay in one place for more than three scenes in a row, and do not have the same person as the only subject in more than two scenes in a row: bring in
+supporting people, show their reactions, show the place without anyone, show hands or objects, then return. Move the story through the places on the
+continuity list as it progresses. Let people do different things (walk, talk, wait, hand something over, look away, argue, laugh); not "leaning forward"
+or "pointing" in every scene.
+
+When a DIRECTOR'S SHOT LIST is given, it is the plan for the camera: every scene follows one numbered shot ("shot": its number). The scene's
+composition distance and camera_angle must be that shot's size and angle, its motion_intent that shot's camera move, and what is in front of the
+camera must be that shot's focus. Use the shots in order; a long shot may be split into two scenes that follow the same shot number only if they differ in
+what is in frame. Without a shot list, vary the camera yourself.
 Vary the camera. Distances: extreme wide | wide | medium | close | extreme close. Angles: eye level | high | low | overhead | side.
 No two neighbouring scenes may share the same distance AND angle, and do not use "medium, eye level" more than once in three scenes.
 Describe only what is VISIBLE, in concrete words. Say who or what, how many, where in the frame (left, centre, right), what they
@@ -164,13 +213,16 @@ are doing at this exact instant, camera angle and distance, light and its direct
 People are the continuity characters, drawn with faces and clear emotion (what the face and body show), using the same names as the
 assets. A real, named person is shown only as a silhouette, from behind, in shadow or by the hands. Clothing, devices and rooms
 must fit the period. No logos and no brand text. On-screen text is allowed and the picture models draw it correctly when it is short and
-quoted: a headline, a sign, a label, a big number on a screen (for example "STOCK FALLS 17%"). Rules for it: English letters only (never
+quoted: a headline, a sign, a label, a big number on a sign or screen (for example "OPEN 24 HOURS"). Rules for it: English letters only (never
 Hindi on screen), 8 words at most per text, only words and numbers that are in the story facts, never a quotation from a book or person.
-Screens and papers without such text show abstract light or marks only.
+Screens and papers without such text show abstract light or marks only. A sign, shop front or notice board that is visible must carry short quoted words in text_on_screen (a place name from the continuity list or the story facts, in capitals, such as "BREWERY"): the picture model draws quoted words correctly and draws gibberish on a sign that has none. Any sign without such words must be blank or turned away from the camera.
 
 Return ONLY this JSON object:
 {"scenes": [{
   "sentences": [1, 2],
+  "shot": 1,
+  "idea": "what the narration means here, in plain words",
+  "translation": "the concrete moment in the story world that carries it: who, where, doing what, what the face shows",
   "purpose": "why this scene exists in the story",
   "new_information": "what is new for the viewer compared with the previous scene",
   "takeaway": "what the viewer understands or feels after it",
@@ -193,3 +245,36 @@ Return ONLY this JSON object:
   "needs_asset": "", "fallback": ""
 }]}
 Never mention a book, an author, a chapter, a page or a source. Use only facts given; do not invent names, numbers or outcomes."""
+
+
+DIRECTOR = """[TASK:p2_director]
+You are the director of a long-form 16:9 story video, working with a cinematographer. You receive the whole narration (numbered segments with their
+spoken seconds), the story facts and the continuity list of people and places. Plan how the whole film is SHOT before any scene is drawn, so the
+viewer feels a story told by a camera, not a slideshow.
+
+Think like a film director:
+- First find the emotional arc of the whole video in one or two sentences: where the viewer starts, where the story turns, how it ends.
+- For every segment decide the emotion at that point, the one real place from the continuity list where it happens, and a short state sheet: where the
+  main person is, how they feel, what they wear or hold, what has changed since the segment before.
+- Then list the shots of that segment, in order. Plan about one shot for every 4 to 6 seconds of the segment. For each shot say:
+  - "focus": what the camera is on, in plain visible words (a person's face, hands on a table, the street from above, a door closing, a crowd's backs)
+  - "kind": person | reaction | hands | object | place | establishing
+  - "size": extreme wide | wide | medium | close | extreme close
+  - "angle": eye level | low | high | overhead | side | over the shoulder
+  - "move": push in | pull back | pan right | pan left | tilt up | tilt down | drift | hold. A push in for a realisation or a growing worry, a pull back
+    for a reveal or being alone, a pan across a wide place or a crowd, a tilt up for scale or hope, a tilt down for a drop or defeat. Use "hold" for no more than one shot in eight, only where a still frame is the point (a held stare, a silence); every other shot moves.
+  - "why": the reason for this camera in one short phrase (low angle: the person has power; high angle: small and overwhelmed; extreme close: the decision lands).
+
+Rules of the craft:
+- Start a new place with an establishing or wide shot. Move in closer as feeling rises; pull out after a turning point.
+- Vary the size and angle from shot to shot. Never three shots of the same size in a row. Never two shots in a row with the same size and angle.
+- People are not in every shot. At most 4 shots in 10 are of a person's face or body (kind person or reaction). The rest are hands, objects, places, establishing
+  shots and the world around the people. Give the places and things of the story room to be seen.
+- Keep the sense of one world: the same places come back, shown from new angles.
+- Never plan a diagram, a symbol, a floating object or an abstract shape. Every shot is something that could be filmed in that place and period.
+- Never mention a book, an author, a chapter, a page or a source.
+
+Return ONLY this JSON object:
+{"arc": "the emotional arc of the whole video",
+ "segments": [{"segment": 1, "emotion": "one or two words", "place": "name from the continuity list", "state": "where the main person is, how they feel, what has changed",
+   "shots": [{"focus": "", "kind": "", "size": "", "angle": "", "move": "", "why": ""}]}]}"""

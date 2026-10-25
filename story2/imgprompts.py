@@ -12,6 +12,7 @@ from . import leak, providers, styles
 from .scene_schemas import NEEDS_ASSET
 from .storyboard import fact_numbers
 
+MAX_PROMPT_WORDS = 300             # the image models follow short prompts far better: past this, details get ignored
 MAX_PROMPT_CHARS = 2400            # conservative: the gateway caps prompt length but does not publish the number
 MAX_TEXT_WORDS = 8
 # wording that asks the model for an effect without saying what is visible (brief: say the visible details instead)
@@ -93,6 +94,7 @@ def source_hash(scene: dict, assets_used: list[dict], fmt: str) -> str:
     keep["assets"] = [(a["id"], a["rev"], a["data"].get("description"), a["data"].get("fixed"),
                        [r.get("id") for r in a["data"].get("reference_images", []) if r.get("approved")]) for a in assets_used]
     keep["fmt"] = fmt
+    keep["shot"] = [(d.get("composition") or {}).get(k) for k in ("distance", "camera_angle", "perspective")]
     return hashlib.sha1(json.dumps(keep, sort_keys=True, default=str).encode()).hexdigest()[:12]
 
 
@@ -140,10 +142,10 @@ def _subject_text(d: dict, people: list[dict]) -> str:
     out = [_s(d.get("subject"))]
     for a in people:
         det = _s(a["data"].get("description"))
-        fixed = "; ".join(_s(x) for x in a["data"].get("fixed", []))
+        extra = "; ".join(_s(x) for x in a["data"].get("fixed", []) if _s(x) and not covers(det, _s(x)))       # fixed details the description does not already say
         fic = a["data"].get("fictionalisation", "")
         out.append(f"Appearance of {a['name']}: {det}" if det else "")
-        out.append(f"Always the same: {fixed}" if fixed else "")
+        out.append(f"Always the same: {extra}" if extra else "")
         if fic == "real_person_no_likeness" and a["kind"] == "person":
             out.append("Shown only as a silhouette, from behind or in deep shadow, with no recognisable face; no real person's likeness is implied")
     return _sent(*[x for x in out if x])
@@ -161,7 +163,7 @@ def _positions(c: dict) -> str:
 
 def _camera(c: dict) -> str:
     bits = [f"{_s(c.get('distance'))} shot" if _s(c.get("distance")) else "", f"{_s(c.get('camera_angle'))} angle" if _s(c.get("camera_angle")) else "",
-            f"{_s(c.get('perspective'))} perspective" if _s(c.get("perspective")) else "", f"{_s(c.get('framing'))} framing" if _s(c.get("framing")) else ""]
+            f"{_s(c.get('perspective'))} perspective" if _s(c.get("perspective")) else "", f"{_s(c.get('framing'))} framing" if _s(c.get("framing")) and _s(c.get("distance")).lower() not in _s(c.get("framing")).lower() else ""]
     return ", ".join(b for b in bits if b)
 
 
@@ -223,6 +225,40 @@ def _plate(d: dict) -> bool:
 
 # ── Qwen Image 2.1: explicit labelled brief, exclusions stated in the prompt (no negative field) ──
 
+# What goes first when a prompt is over MAX_PROMPT_WORDS: wording that repeats the style, the story's abstract role of the scene, then secondary detail.
+_DROP_ORDER = ("colour", "framing", "composition")
+
+
+def _fit(sec: dict[str, str], sep: str) -> str:
+    """Join the sections, dropping the least useful ones (in _DROP_ORDER) until the prompt is within MAX_PROMPT_WORDS."""
+    def join() -> str:
+        return sep.join(v.strip() for v in sec.values() if v.strip())
+    for k in _DROP_ORDER:
+        if len(join().split()) <= MAX_PROMPT_WORDS:
+            break
+        sec.pop(k, None)
+    return join()
+
+
+_LENS = (("extreme wide", "very wide-angle lens, deep focus, the people tiny in a vast place"), ("wide", "wide-angle lens, deep focus"),
+         ("extreme close", "macro detail shot, very shallow depth of field"), ("close", "85mm portrait lens, shallow depth of field, background softly blurred"),
+         ("medium", "50mm lens, natural perspective"))
+_ANGLE = (("overhead", "camera directly overhead, looking straight down"), ("low", "camera low, looking up at the subject"), ("high", "camera high, looking down on the subject"),
+          ("side", "side-on profile view"), ("over", "over the shoulder of a person in the foreground"), ("eye", "camera at eye level"))
+NO_STRANGE = "no floating objects, platforms or symbols, no anime or cartoon faces, no extra people"
+
+
+def shot_line(comp: dict) -> str:
+    """The camera, written first and in the words a film crew uses: size, angle, lens. The picture model weights the opening of a prompt most."""
+    dist, ang = _s(comp.get("distance")).lower(), _s(comp.get("camera_angle")).lower()
+    if not dist and not ang:
+        return ""
+    lens = next((t for k, t in _LENS if k in dist), "")
+    how = next((t for k, t in _ANGLE if k in ang), "")
+    head = ", ".join(x for x in (f"{_s(comp.get('distance'))} shot" if dist else "", f"{_s(comp.get('camera_angle'))} angle" if ang else "") if x)
+    return _sent("Shot: " + head, how, lens, f"{_s(comp.get('perspective'))} perspective" if _s(comp.get("perspective")) else "")
+
+
 def compile_qwen(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -> dict:
     d, cfg, notes = scene["data"], providers.get("qwen-image-2.1"), []
     fmt = plan["format"]
@@ -231,13 +267,14 @@ def compile_qwen(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
     shown, _skipped = _exact_text(d, notes)
     must, avoid = _constraints(d)
     people = [a for a in assets_used if a["kind"] in ("person", "narrator")]
-    nar = d.get("narrative") or {}
     look = styles.for_plan(plan.get("settings"))
-    sec: dict[str, str] = {"style": "Visual style: " + _sent(look["look"])}                    # first: the opening words steer the whole picture
+    use_refs = bool(refs["references"]) and (plan.get("settings") or {}).get("scene_pictures", {}).get("mode") in ("edit", "auto")
+    comp = d.get("composition") or {}
+    sec: dict[str, str] = {}
+    sec["shot"] = shot_line(comp) or "Shot: a medium shot at eye level."                      # first: the opening words steer the whole picture
+    sec["style"] = "Visual style: " + _sent(look["look"])
     if plate:
         notes.append("this visual needs a verified chart, document, screen, map or diagram: the picture is the illustrated scene around it; the exact content is added later")
-    sec["objective"] = "Image objective: " + _sent(f"Create a {_aspect(fmt)} {look['short']} for a story-driven video. Its role in the story: {_s(nar.get('purpose'))}",
-                                                   f"The viewer should come away with this: {_s(nar.get('new_information') or nar.get('takeaway'))}" if _s(nar.get("new_information") or nar.get("takeaway")) else "")
     if plate:
         sec["subject"] = "Main subject: " + _sent(_s(_g(d, "feasibility", "fallback")) or _subject_text(d, people),
                                                  ("Apart from the quoted words, any screen, paper or sign shows only abstract glowing light and shapes" if shown else
@@ -248,31 +285,28 @@ def compile_qwen(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
                                                   "A still, held moment with no competing action")
     sec["environment"] = "Environment: " + _sent(_val(_g(d, "setting", "location")), f"Period: {_val(_g(d, 'setting', 'period'))}" if _val(_g(d, "setting", "period")) else "",
                                                  f"Atmosphere: {_s(d.get('atmosphere'))}" if _s(d.get("atmosphere")) else "") + ("" if plate else " " + _layers(d))
-    comp = d.get("composition") or {}
-    sec["composition"] = "Composition: " + _sent(f"The subject sits {_s(comp.get('position'))}" if _s(comp.get("position")) else "", _positions(comp), f"Camera: {_camera(comp)}" if _camera(comp) else "")
+    sec["composition"] = "Composition: " + _sent(f"The subject sits {_s(comp.get('position'))}" if _s(comp.get("position")) else "", _positions(comp))
     sec["lighting"] = "Lighting: " + _sent(_s(d.get("lighting")) or "soft even light from a single clear direction")
-    style_asset = next((a for a in assets_used if a["kind"] == "style"), None)
-    sec["treatment"] = "Visual treatment: " + _sent(f"{look['short']}, {look['linework']}", styles.NOT_PHOTO)
     sec["colour"] = "Colour and mood: " + _sent(f"Palette: {_s(d.get('palette')) or look['palette']}", f"Mood shown through: {_s(d.get('atmosphere'))}" if _s(d.get("atmosphere")) else "")
-    fixed_lines = [f"{a['name']}: {'; '.join(_s(x) for x in a['data'].get('fixed', []))}" for a in assets_used if a["data"].get("fixed") and a["kind"] != "style" and not plate]
-    ref_lines = [f"Image {i}: {r['role']} ({r['name']})" for i, r in enumerate(refs["references"], 1)]
-    sec["continuity"] = "Continuity: " + _sent(*(["Keep these exactly the same as in the other pictures: " + "; ".join(fixed_lines)] if fixed_lines else ["No recurring people or objects in this picture"]),
-                                               *(["Reference images: " + "; ".join(ref_lines)] if ref_lines else []))
+    fixed_lines = [f"{a['name']}: {'; '.join(_s(x) for x in a['data'].get('fixed', []))}" for a in assets_used if a["data"].get("fixed") and a["kind"] not in ("style", "person", "narrator") and not plate]
+    ref_lines = [f"Image {i}: {r['role']} ({r['name']})" for i, r in enumerate(refs["references"], 1)] if use_refs else []
+    if fixed_lines or ref_lines:                                                              # reference images are named only when they are really sent
+        sec["continuity"] = "Continuity: " + _sent(*(["Keep these the same as in the other pictures: " + "; ".join(fixed_lines)] if fixed_lines else []),
+                                                   *(["Reference images: " + "; ".join(ref_lines)] if ref_lines else []))
     sec["framing"] = "Aspect ratio and framing: " + _sent(f"{w}x{h} pixels, {_aspect(fmt)}", _safe_area(fmt))
     if shown:
         sec["text"] = "Exact text: " + _sent("; ".join(f'the words "{_s(t["text"])}"' + (f" placed {_s(t['placement'])}" if _s(t.get("placement")) else "") for t in shown),
-                                              "Each quoted text is written in clear English letters, spelled exactly as inside the quotes, once only",
-                                              "No other text appears anywhere in the image")
+                                              "Written once in clear English letters, spelled exactly as quoted; no other text anywhere")
     else:
-        sec["text"] = "Text: " + _sent("Screens show only abstract glowing light and shapes; papers, signs and labels carry no readable letters or numbers")
+        sec["text"] = "Text: " + _sent("Every sign, shop front, notice board, poster, paper and screen is blank or turned away: no letters, words or marks anywhere in the picture")
     cons = []
     if must:
         cons.append("These must be clearly visible: " + "; ".join(must))
     if avoid:
         cons.append("These must not appear: " + "; ".join(avoid))
-    cons.append("One clear focal point; no extra people or objects beyond those described")
+    cons.append("One clear focal point; " + NO_STRANGE)
     sec["constraints"] = "Constraints: " + _sent(*cons)
-    prompt = "\n".join(v.strip() for v in sec.values() if v.strip())
+    prompt = _fit(sec, chr(10))
     return _finish("qwen", "qwen-image-2.1", cfg, scene, prompt, "", sec, (w, h), refs, notes, plate, plan)
 
 
@@ -306,7 +340,7 @@ def compile_flux(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
     style_asset = next((a for a in assets_used if a["kind"] == "style"), None)
     sec["treatment"] = _sent(f"Rendered as {look['short']}, {look['linework']}", styles.NOT_PHOTO)
     sec["camera"] = _sent(f"Camera: {_camera(comp)}" if _camera(comp) else "")
-    fixed_lines = [f"{a['name']} ({'; '.join(_s(x) for x in a['data'].get('fixed', []))})" for a in assets_used if a["data"].get("fixed") and a["kind"] != "style" and not plate]
+    fixed_lines = [f"{a['name']} ({'; '.join(_s(x) for x in a['data'].get('fixed', []))})" for a in assets_used if a["data"].get("fixed") and a["kind"] not in ("style", "person", "narrator") and not plate]
     sec["continuity"] = _sent("Consistent with the rest of the film: " + "; ".join(fixed_lines)) if fixed_lines else ""
     if refs["references"]:
         sec["references"] = _sent("; ".join(f"Image {i}: {r['role']} ({r['name']})" for i, r in enumerate(refs["references"], 1)))
@@ -314,13 +348,13 @@ def compile_flux(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
         sec["text"] = _sent("The image contains exactly this text: " + "; ".join(f'"{_s(t["text"])}"' + (f" {_s(t['placement'])}" if _s(t.get("placement")) else "") for t in shown),
                             "Each text is written once, in clear English letters, spelled exactly as inside the quotes", "It contains no other writing")
     else:
-        sec["text"] = _sent("Screens show only abstract glowing light and shapes; papers and signs carry no readable letters or numbers")
+        sec["text"] = _sent("Screens, papers and signs show no readable writing")
     if must:
         sec["must"] = _sent("Clearly visible: " + "; ".join(must))
     if avoid:
         sec["avoid"] = _sent("The frame is free of " + ", ".join(avoid))        # positive-form statement; also sent as negative_prompt below
     sec["output"] = _sent(f"{w}x{h} pixels, {_aspect(fmt)} composition", _safe_area(fmt))
-    prompt = " ".join(v.strip() for v in sec.values() if v.strip())
+    prompt = _fit(sec, " ")
     negative = ", ".join([*avoid, *FLUX_STANDARD_NEGATIVE.split(", ")]) if cfg["negative_prompt"] else ""
     return _finish("flux", "flux2-klein-9b", cfg, scene, prompt, negative, sec, (w, h), refs, notes, plate, plan)
 
@@ -429,6 +463,8 @@ def validate_prompt(c: dict, scene: dict, assets: list[dict], facts: str, prof: 
         n = next(g for g in m.groups() if g).strip(",.")
         if n and n not in known and n not in facts:
             add("number", f"the prompt states {n}, which is not in the story's facts")
+    if len(p.split()) > MAX_PROMPT_WORDS:
+        add("length", f"the prompt is {len(p.split())} words (limit {MAX_PROMPT_WORDS}); shorten the scene's details", "warn")
     if len(p) > MAX_PROMPT_CHARS:
         add("length", f"the prompt is {len(p)} characters (limit {MAX_PROMPT_CHARS}); shorten the scene's details", "warn")
     for w in VAGUE:

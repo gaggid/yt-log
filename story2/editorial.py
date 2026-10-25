@@ -139,10 +139,10 @@ def opening_strength(c: Ctx) -> dict:
     first_scene = next((s for s in c.scenes if s["segment_id"] == first["id"]), None)
     scene_ok = bool(first_scene and first_scene["data"]["visual_type"] not in NEEDS_ASSET and first_scene["data"]["narrative"].get("new_information"))
     share = _pct(first["duration_s"], c.total_s)
-    score = (30 if n1 <= 25 else 15) + (30 if concrete else 5) + (20 if scene_ok else 5) + (20 if share <= 20 else 8)
+    score = (30 if n1 <= 14 else 18 if n1 <= 25 else 8) + (30 if concrete else 5) + (20 if scene_ok else 5) + (20 if share <= 20 else 8)
     fixes = []
-    if n1 > 25:
-        fixes.append(_fix(f"The first sentence has {n1} words. Open on one short, concrete sentence.", [first["id"]], "narration"))
+    if n1 > 14:
+        fixes.append(_fix(f"The first sentence has {n1} words. Open on one short, concrete sentence of twelve words or fewer.", [first["id"]], "narration"))
     if not concrete:
         fixes.append(_fix("The first two sentences name no person, place, number or event. Start from something specific that is true in the story.", [first["id"]], "narration"))
     if not scene_ok:
@@ -182,11 +182,12 @@ def emotional_coherence(c: Ctx) -> dict:
     emos = [x["emotion"] for s in c.segs for x in s["sentences"]]
     if not emos:
         return _dim("emotional_coherence", "Emotional coherence", 0, "There is no narration yet.", [_fix("Write the narration first.", tab="narration")])
-    switchy = [s for s in c.segs if sum(1 for a, b in zip(s["sentences"], s["sentences"][1:]) if a["emotion"] != b["emotion"]) > 1]
+    tone = lambda e: "neutral" if e == "clear" else e                        # noqa: E731 - "clear" is precise delivery of a flat voice; a flip between it and neutral is not heard as a mood change
+    switchy = [s for s in c.segs if sum(1 for a, b in zip(s["sentences"], s["sentences"][1:]) if tone(a["emotion"]) != tone(b["emotion"])) > 1]
     intense = _pct(sum(1 for e in emos if e in INTENSE), len(emos))
-    kinds = len(set(emos))
+    kinds = len({tone(e) for e in emos})
     quiet = any((x.get("pause_after_s") or 0) >= 0.8 for s in c.segs for x in s["sentences"])
-    score = 100 - 12 * len(switchy) - max(0, intense - 35) * 1.2 - (10 if kinds == 1 else 0) - (0 if quiet else 8)
+    score = 100 - 12 * len(switchy) - max(0, intense - 35) * 1.2 - (18 if kinds == 1 else 0) - (0 if quiet else 8)
     fixes = []
     if switchy:
         fixes.append(_fix(f"{len(switchy)} narration part(s) change emotion more than once; the voice and pace shift audibly. Keep one emotion per part and change it only at a real turn.",
@@ -194,7 +195,7 @@ def emotional_coherence(c: Ctx) -> dict:
     if intense > 35:
         fixes.append(_fix(f"{intense:.0f}% of sentences are emotional (happy, sad, anger, fear). Use neutral and clear for most of them.", tab="narration"))
     if kinds == 1:
-        fixes.append(_fix("Every sentence has the same emotion. Mark the one or two real turning moments.", tab="narration"))
+        fixes.append(_fix("The whole voice is flat. A viewer who hears one tone for minutes leaves: give the turning point, the shock and the payoff a real emotion (fear, sad, happy), one per part.", tab="narration"))
     if not quiet:
         fixes.append(_fix("There is no pause of 0.8 seconds or more. Add one after the reveal so it can land.", tab="narration"))
     return _dim("emotional_coherence", "Emotional coherence", score, f"{len(switchy)} part(s) switch emotion more than once; {intense:.0f}% of sentences are emotional; {kinds} different emotion(s); "

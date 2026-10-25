@@ -10,7 +10,7 @@ import re
 import uuid
 
 from story import db, llm, settings as settings_mod
-from . import describe, intake, leak, planner, prompts as P, providers, store, styles, svara
+from . import describe, director, intake, leak, planner, prompts as P, providers, store, styles, svara
 from .scene_schemas import ASPECTS, NEEDS_ASSET, RegistryOut, SceneOut, ScenesOut
 
 MIN_SCENE_S, MAX_SCENE_S = 2.0, 20.0
@@ -103,11 +103,68 @@ def not_drawable(kind: str, name: str, appearance: dict, note: str) -> str:
             return "a chart, graph or document is built from facts later"
         if _ABSTRACT_PROP.search(name + " " + appearance.get("type", "")):
             return "an idea or pattern has no shape to draw"
+        if _SUBSTANCE.search(name.strip().split(" ")[-1] if name.strip() else ""):
+            return "a liquid, gas, surface or light has no fixed shape: it belongs to the place or the scene, not to a prop"
         if _FIGURATIVE_NOTE.search(note or ""):
             return "it stands for an idea in the narration rather than being an object in the scene"
+    if kind == "place" and _COMPARISON.search(note or ""):
+        return "the narration only compares the story to this; it is not somewhere the story's people are"
+    if kind == "place" and _NOT_A_PLACE.search(name + " " + appearance.get("type", "")):
+        return "a place must be somewhere that physically exists (a room, street, field, building), not a space, grid or concept"
     if kind == "person" and _GROUP_PERSON.search(name):
         return "a group is not one person: name the individual roles instead"
     return ""
+
+
+_SUBSTANCE = re.compile(r"^(water|waters|sewage|stream|streams|flow|flows|river|rivers|puddles?|smoke|steam|fog|mist|dust|mud|fire|flames?|blood|rain|snow|ice|floor|floors|ground|surface|air|light|shadows?|sky|darkness|waste|filth)$", re.I)
+_COMPARISON = re.compile(r"(like an? |as if|as though|\b(analog|simile|compar|resembl|similar to|imagine|picture a|think of))", re.I)
+_FX = re.compile(r"\b(pulse|burst|aura|energy|radiat\w*|ripples?|swirl\w*|vortex|beam|shockwave|shock wave)\b", re.I)
+_NOT_A_PLACE = re.compile(r"\b(abstract|void|limbo|grid|dimension|realm|virtual|digital|cyber\w*|matrix|infinite|empty space|conceptual|metaphor\w*|mindscape|dreamscape)\b", re.I)
+_NOWHERE = re.compile(r"\b(abstract|void|nowhere|limbo|blank|empty space|infinite|undefined|unknown|none|n/a)\b", re.I)
+
+
+def scene_problems(scenes: list, assets: list[dict]) -> list[str]:
+    """Why a designed scene would not be a picture of the story. Works for any subject: a scene must happen somewhere, to someone.
+    A scene that is only an idea (a line, a symbol, a floating object in 'abstract space') is sent back to be translated into a moment."""
+    people = {a["name"].lower() for a in assets if a["kind"] == "person"}
+    places = {a["name"].lower() for a in assets if a["kind"] == "place"}
+    if not people and not places:
+        return []                                                   # no registry to hold the scene to
+    out = []
+    for i, sc in enumerate(scenes, 1):
+        if sc.visual_type in NEEDS_ASSET:
+            continue                                                # built from verified facts later, with a full illustrated fallback
+        used = {n.lower() for n in sc.assets}
+        where = f"scene {i} ({sc.subject[:50]})"
+        if _NOWHERE.search(sc.location or "") or (not (sc.location or "").strip() and not used & places):
+            out.append(f"{where}: the location is '{sc.location}'. Every picture happens in a real place of the story's world (use a place from the list).")
+        if not (used & people or used & places):
+            out.append(f"{where}: it shows neither a person nor a place from the continuity list. Do not draw the idea itself (a line, a shape, a symbol, an object floating "
+                       "in space). Translate it: who in the story is living this idea, where, doing what, with what on their face.")
+    for i, sc in enumerate(scenes, 1):
+        if sc.visual_type not in NEEDS_ASSET and _FX.search(f"{sc.subject} {sc.action}"):
+            out.append(f"scene {i} ({sc.subject[:50]}): it draws an effect (a pulse, burst, glow, energy, vortex) instead of something in the world. Show a person reacting, "
+                       "an object, or the place, as it would look to someone standing there.")
+    out += _monotony(scenes, people, places)
+    return out
+
+
+def _monotony(scenes: list, people: set, places: set) -> list[str]:
+    """Scenes in a row that keep the same place or the same lone person. Only asked for when the registry has somewhere else to go."""
+    out = []
+    for kind, pool, limit, what in (("place", places, 3, "happen in the same place"), ("person", people, 2, "show the same person alone")):
+        if len(pool) < 2:
+            continue
+        run, last = 0, None
+        for i, sc in enumerate(scenes, 1):
+            used = frozenset(n.lower() for n in sc.assets) & pool
+            key = used if kind == "place" or len(used) == 1 else None
+            run = run + 1 if key and key == last else (1 if key else 0)
+            last = key
+            if run == limit + 1:
+                alt = sorted(pool - set(key))
+                out.append(f"scene {i}: {limit + 1} scenes in a row {what}. Move this one to a different {kind} ({', '.join(alt[:4])}) or add someone else.")
+    return out
 
 
 # ── registry ────────────────────────────────────────────────────────────────
@@ -122,7 +179,17 @@ async def make_registry(plan_id: str, backend, s: dict | None = None) -> dict:
             + "\nNARRATION (the picture list must cover everyone and everything in it):\n" + "\n".join(x["plain"] for x in plan["segments"])[:7000]
             + "\nNarrator: a first-person guide shown as an animated avatar (do not list the narrator as an asset)."
             + f"\nVISUAL STYLE of the whole video (the style asset is set for you; draw characters and places to fit it): {styles.for_plan(plan['settings'])['look']}")
-    res = await llm.JsonCaller(backend, s).call(P.REGISTRY, user, RegistryOut)
+    tries: list[int] = []
+
+    def enough(out: RegistryOut) -> None:
+        tries.append(1)
+        real = [x for x in out.assets if x.kind in ("person", "place") and x.literal and not not_drawable(x.kind, x.name, x.appearance, x.evidence_note)]
+        places, people = [x for x in real if x.kind == "place"], [x for x in real if x.kind == "person"]
+        if len(tries) <= 2 and (len(places) < 3 or len(people) < 2):
+            raise ValueError(f"The list has {len(places)} real place(s) and {len(people)} person(s) that can be drawn. A place is somewhere that physically exists (never a space, grid or idea). "
+                             "Give the story at least 3 different real places it moves through and at least 2 people (the main person and supporting people).")
+
+    res = await llm.JsonCaller(backend, s).call(P.REGISTRY, user, RegistryOut, enough)
     kept = {a["name"].lower(): a for a in get_assets(plan_id) if a["locked"]}
     with db.tx() as c:
         c.execute("DELETE FROM assets WHERE plan_id=? AND locked=0", (plan_id,))
@@ -178,6 +245,24 @@ def repair_coverage(ranges: list[list[int]], n: int) -> list[list[int]]:
     return out
 
 
+def follow_shots(scenes: list, shots: list[dict], force: bool = False) -> list[str]:
+    """Tie each scene to a director's shot (by its own "shot" number, else by position) and report scenes whose camera differs from the shot. With
+    `force` the shot's size, angle and move are written into the scene, so the plan always reaches the picture prompt and the video."""
+    off = []
+    if not shots:
+        return off
+    for k, sc in enumerate(scenes):
+        n = sc.shot if 1 <= sc.shot <= len(shots) else min(len(shots), int(k * len(shots) / len(scenes)) + 1)
+        sh = shots[n - 1]
+        sc.shot = n
+        if director._size(sc.composition.distance) != sh["size"] or director._angle(sc.composition.camera_angle) != sh["angle"]:
+            off.append(f"scene {k + 1} follows shot {n} ({sh['size']}, {sh['angle']}) but its camera is {sc.composition.distance or 'unset'}, {sc.composition.camera_angle or 'unset'}")
+        if force:
+            sc.composition.distance, sc.composition.camera_angle = sh["size"], sh["angle"]
+            sc.motion_intent = "static hold" if sh["move"] == "hold" else f"slow {sh['move']}"
+    return off
+
+
 def _compose_intent(d: dict) -> str:
     place = ", ".join(x for x in (d["setting"]["location"], d["setting"]["period"]) if x)
     comp = d["composition"]
@@ -199,11 +284,12 @@ def build_scene(sc: SceneOut, assets: list[dict], plan: dict, evidence_ids: list
         "setting": {"location": sc.location, "period": sc.period, "props": sc.props},
         "composition": sc.composition.model_dump(), "lighting": sc.lighting, "palette": sc.palette, "atmosphere": sc.atmosphere,
         "style": sc.style, "layers": {"foreground": sc.foreground, "middle": sc.middle, "background": sc.background},
-        "motion_intent": sc.motion_intent, "text_on_screen": [t.model_dump() for t in sc.text_on_screen],
+        "motion_intent": sc.motion_intent, "direction": {"shot": sc.shot, "move": director._move(sc.motion_intent)}, "text_on_screen": [t.model_dump() for t in sc.text_on_screen],
         "facts": {"fixed": sc.fixed_by_facts, "creative": sc.creative_choices},
         "evidence_ids": evidence_ids, "continuity": {"assets": ids, "unknown": unknown},
         "output": {"aspect_ratio": plan["format"], "width": w, "height": h},
         "exclusions": sc.exclusions, "prompts": {}, "adapters": {},
+        "translation": {"idea": sc.idea, "moment": sc.translation},
     }
     needs = sc.visual_type in NEEDS_ASSET
     d["feasibility"] = {
@@ -239,6 +325,9 @@ async def make_storyboard(plan_id: str, backend, s: dict | None = None, segment_
         raise planner.PlanError("write the narration first")
     if not get_assets(plan_id):
         await make_registry(plan_id, backend, s)
+    if not director.current(plan):
+        plan = await director.make(plan_id, backend, s)                     # the whole film is planned as shots before any scene is drawn
+    ordered_segs = sorted(plan["segments"], key=lambda x: x["seq"])
     story = planner._story_for(plan)
     facts = intake.facts_text(story["public"])
     ev = story["evidence"]["paragraph_ids"]
@@ -260,20 +349,40 @@ async def make_storyboard(plan_id: str, backend, s: dict | None = None, segment_
         n = len(secs)
         lines = "\n".join(f"{i}. ({secs[i - 1]:.1f}s) {x['text']}" for i, x in enumerate(seg["sentences"], 1))
         prior = [x for x in get_scenes(plan_id) if x["seq"] < seg["seq"]]
+        idx = next(i for i, x in enumerate(ordered_segs, 1) if x["id"] == seg["id"])
+        shots = director.shots_for(plan, idx)
+        nxt = ordered_segs[idx]["sentences"][0]["text"][:160] if idx < len(ordered_segs) and ordered_segs[idx]["sentences"] else "the video ends."
         user = (f"STORY FACTS:\n{facts}\n\nVISUAL STYLE (every scene is drawn in it): {look['short']}. {look['look']}\n\n"
                 f"CONTINUITY ASSETS (use these names in \"assets\"):\n{_asset_lines(assets)}\n\n"
+                f"STORY MAP (>> is this segment):\n{director.story_map(plan, idx)}\n\n"
+                f"DIRECTOR'S SHOT LIST for this segment (follow it):\n{director.shot_list(plan, idx)}\n\n"
+                f"WHAT COMES NEXT: {nxt}\n\n"
                 f"PREVIOUS SCENES (do not repeat their composition):\n{_prev_summary(prior)}\n\n"
                 f"THIS SEGMENT (beat {seg['beat']}), {n} sentence(s), {sum(secs):.1f} s:\n{lines}\n\n"
                 "Design the scenes for this segment now.")
 
-        def fix(out: ScenesOut, n=n) -> None:
+        def fix(out: ScenesOut, n=n, shots=shots) -> None:
             rngs = repair_coverage([sc.sentences for sc in out.scenes], n)
             if len(rngs) != len(out.scenes):                         # ranges collapsed: keep scenes in order, re-split
                 out.scenes = out.scenes[:len(rngs)]
             for sc, r in zip(out.scenes, rngs):
                 sc.sentences = r
+            tries.append(1)
+            last = len(tries) > 2 or caller.last_attempt                 # sent back with the reasons, then on the last attempt accepted and left to the checks
+            off = follow_shots(out.scenes, shots, force=last)
+            bad = [] if last else scene_problems(out.scenes, assets)
+            if not last and (bad or off):
+                raise ValueError("These scenes are not right yet:\n- " + "\n- ".join(bad + off))
 
-        res = await caller.call(P.SCENES, user, ScenesOut, fix)
+        tries: list[int] = []
+        for again in range(3):                                       # a long segment can come back as broken JSON three times running: ask again before giving up
+            tries.clear()
+            try:
+                res = await caller.call(P.SCENES, user, ScenesOut, fix)
+                break
+            except llm.ValidationFailed:
+                if again == 2:
+                    raise
         with db.tx() as c:
             c.execute("DELETE FROM scenes WHERE segment_id=? AND locked=0" + ("" if replace_approved else " AND status!='approved'"), (seg["id"],))
             for k, sc in enumerate(res.value.scenes):
@@ -311,9 +420,14 @@ async def regenerate_scene(scene_id: str, backend, s: dict | None = None, note: 
             f"Design exactly ONE scene for sentences {a} to {b} of this segment (use \"sentences\": [{a}, {b}]):\n{lines}\n"
             + (f"\nEditor's request: {note}\n" if note else "") + f"\nThe scene being replaced: {sc0['data']['subject']} / {sc0['data']['action']}")
 
+    tries: list[int] = []
+
     def one(out: ScenesOut) -> None:
         out.scenes = out.scenes[:1]
         out.scenes[0].sentences = [a, b]
+        tries.append(1)
+        if len(tries) <= 2 and (bad := scene_problems(out.scenes, assets)):
+            raise ValueError("This scene is not a picture of the story:\n- " + "\n- ".join(bad))
 
     res = await llm.JsonCaller(backend, s).call(P.SCENES, user, ScenesOut, one)
     data, _ = build_scene(res.value.scenes[0], assets, plan, story["evidence"]["paragraph_ids"])
@@ -321,6 +435,24 @@ async def regenerate_scene(scene_id: str, backend, s: dict | None = None, note: 
           (db.jdump(data), db.now(), scene_id))
     store.log(plan["id"], "scene_regenerated", {"id": scene_id, "note": note})
     return get_scene(scene_id)
+
+
+def scrub_numbers(scene_id: str, numbers: list[str]) -> None:
+    """Remove words that must not be there (a number not in the story's facts, a phrase copied from the source) from a scene's own wording."""
+    nums = [n for n in numbers if n]
+    sc = get_scene(scene_id)
+
+    def clean(x):
+        if isinstance(x, str):
+            for n in nums:
+                x = re.sub(r"(?<![0-9A-Za-z])" + re.escape(n) + r"(?![0-9A-Za-z])", "", x, flags=re.I)
+            return re.sub(r"\s{2,}", " ", x).strip(" ,;")
+        if isinstance(x, list):
+            return [clean(v) for v in x]
+        if isinstance(x, dict):
+            return {k: clean(v) if k not in ("prompts", "previews", "adapters") else v for k, v in x.items()}
+        return x
+    db.ex("UPDATE scenes SET data=?, rev=rev+1, status='draft', issues='[]', updated_at=? WHERE id=?", (db.jdump(clean(sc["data"])), db.now(), scene_id))
 
 
 def get_scene(scene_id: str) -> dict:
@@ -467,11 +599,26 @@ def edit_scene(scene_id: str, patch: dict) -> dict:
     return get_scene(scene_id)
 
 
+_DISTANCES = ("wide", "medium", "close-up", "medium close-up", "extreme close-up")
+_ANGLES = ("eye-level", "low", "high", "over-the-shoulder", "side")
+
+
+def _set_camera(sc: dict, prev: tuple, nxt: tuple | None) -> None:
+    """Give a scene a camera distance and angle that match neither neighbour; the framing text is left as the model wrote it."""
+    for dist in _DISTANCES:
+        for ang in _ANGLES:
+            if (dist, ang) != prev and (dist, ang) != nxt and dist != prev[0]:
+                comp = {**sc["data"]["composition"], "distance": dist, "camera_angle": ang}
+                db.ex("UPDATE scenes SET data=?, rev=rev+1, stale=0, status='draft', updated_at=? WHERE id=?",
+                      (db.jdump({**sc["data"], "composition": comp}), db.now(), sc["id"]))
+                return
+
+
 async def fix_repeats(plan_id: str, backend, s: dict | None = None, progress=None) -> int:
     """Redraw, one by one and in order, every unlocked scene that repeats the previous scene's camera distance and angle."""
     cam = lambda sc: (sc["data"]["composition"].get("distance", "").strip().lower(), sc["data"]["composition"].get("camera_angle", "").strip().lower())  # noqa: E731
     first = [sc for sc in sorted(get_scenes(plan_id), key=lambda x: x["start_s"])]
-    todo = [cur["id"] for prev, cur in zip(first, first[1:]) if cam(prev) == cam(cur) and all(cam(prev)) and not (cur["locked"] or cur["status"] == "approved")]
+    todo = [cur["id"] for prev, cur in zip(first, first[1:]) if cam(prev) == cam(cur) and all(cam(prev)) and not cur["locked"]]
     done = fixed = 0
     for sid in todo:
         ordered = sorted(get_scenes(plan_id), key=lambda x: x["start_s"])
@@ -486,6 +633,9 @@ async def fix_repeats(plan_id: str, backend, s: dict | None = None, progress=Non
                 f"'{cam(ordered[i - 1])[0]}' and angle '{cam(ordered[i - 1])[1]}'; use a clearly different distance AND a different angle{nxt}.")
         await regenerate_scene(sid, backend, s, note)
         fixed += 1
+        ordered = sorted(get_scenes(plan_id), key=lambda x: x["start_s"])
+        if cam(ordered[i - 1]) == cam(ordered[i]):                # the model kept the camera: change it directly so the run never stalls on one scene
+            _set_camera(ordered[i], cam(ordered[i - 1]), cam(ordered[i + 1]) if i + 1 < len(ordered) else None)
     retime(plan_id)
     if progress:
         progress(len(todo), len(todo), "done")
@@ -554,7 +704,8 @@ def validate_storyboard(plan_id: str) -> dict:
         else:
             issues.append({"where": seg["id"], "kind": "coverage", "text": "no scenes yet for this narration", "level": "warn"})
     # timing: scene time must equal narration time
-    total = sum(s["duration_s"] for s in plan["segments"])
+    wpm, real = plan["settings"].get("wpm", planner.WPM), real_audio(plan_id)
+    total = sum(sum(sentence_seconds(s, wpm, real.get(s["id"]))) for s in plan["segments"])           # the basis retime() uses, so the two cannot drift apart by rounding
     scene_total = sum(sc["duration_s"] for sc in scenes if sc["segment_id"] in seg_ids)
     if scenes and abs(total - scene_total) > 0.5 and not any(i["kind"] == "coverage" for i in issues):
         issues.append({"where": "plan", "kind": "timing", "text": f"scenes add up to {scene_total:.1f}s but narration is {total:.1f}s", "level": "error"})

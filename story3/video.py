@@ -35,11 +35,15 @@ PROFILES = {
     "draft": {"label": "Draft (1080p)", "size": (1920, 1080), "fps": 30, "crf": 21, "preset": "veryfast", "abr": "192k", "speed": 0.6},
     "preview": {"label": "Preview (small, fast)", "size": (640, 360), "fps": 15, "crf": 30, "preset": "veryfast", "abr": "64k", "speed": 0.15},
 }
-MOVES = ["zoom_in", "pan_right", "zoom_out", "pan_left", "drift", "pan_up"]
-ZOOM = 0.12
+MOVES = ["zoom_in", "pan_right", "zoom_out", "pan_left", "drift", "pan_up", "pan_down"]          # "settle" (a director's hold) and "hold" (cards) are not in the rotation
+ZOOM = 0.22                                   # a push in or pull back travels from 1.0 to 1.22 times
+PAN_ZOOM = 1.30                               # a pan or tilt is cropped to 1/1.3 of the picture and slides across the rest, so the scene is not shown all at once
+SUPERSAMPLE = 3                               # the still is scaled up this many times before the move, so one step of the move is a whole number of source pixels
+DIRECTOR_MOVES = {"push in": "zoom_in", "pull back": "zoom_out", "pan right": "pan_right", "pan left": "pan_left", "tilt up": "pan_up", "tilt down": "pan_down",
+                  "drift": "drift", "hold": "settle"}          # a held shot still breathes: a 5% push, so no scene is a frozen picture
 KEYWORDS = [("zoom_in", r"push in|push-in|zoom in|slow in|move in|closer|creep"), ("zoom_out", r"pull back|pull out|pull-back|zoom out|widen|reveal"),
             ("pan_left", r"pan left|track left|drift left|move left"), ("pan_right", r"pan right|track right|drift right|move right"),
-            ("pan_up", r"tilt up|pan up|rise|crane up"), ("hold", r"static|hold|still|locked")]
+            ("pan_up", r"tilt up|pan up|rise|crane up"), ("pan_down", r"tilt down|pan down|crane down")]
 DISSOLVE = re.compile(r"dissolve|cross-?fade|fade in|fade from", re.I)
 
 
@@ -82,7 +86,8 @@ def probe_seconds(path: Path) -> float:
 # ── what goes into the video ────────────────────────────────────────────────
 
 def pick_moves(scene_list: list[dict]) -> list[str]:
-    """A slow move for each scene from its motion intent; never the same move twice in a row. Cards (charts, documents) hold still."""
+    """The camera move of each scene: the director's, else one read from the scene's motion note, else the next in a rotation. Never the same move twice
+    in a row, and no still frame unless the director asked for one. Cards (charts, documents) hold still."""
     out, prev, n = [], "", 0
     for sc in scene_list:
         d = sc["data"]
@@ -90,9 +95,11 @@ def pick_moves(scene_list: list[dict]) -> list[str]:
             out.append("hold")
             prev = "hold"
             continue
-        text = f"{d.get('motion_intent') or ''}".lower()
-        want = next((m for m, rx in KEYWORDS if re.search(rx, text)), "")
-        if not want or want == prev:
+        want = DIRECTOR_MOVES.get(str((d.get("direction") or {}).get("move") or ""), "")
+        if not want:
+            text = f"{d.get('motion_intent') or ''}".lower()
+            want = next((m for m, rx in KEYWORDS if re.search(rx, text)), "")
+        if not want or (want == prev and want not in ("hold", "settle")):
             want = MOVES[n % len(MOVES)]
             while want == prev:
                 n += 1
@@ -183,20 +190,27 @@ def checklist(plan_id: str) -> dict:
 # ── ffmpeg pieces ───────────────────────────────────────────────────────────
 
 def zoompan(move: str, frames: int, w: int, h: int, fps: int) -> str:
+    """One still turned into a slow camera move. The progress is eased (slow start, slow end) so a move never starts or stops with a jerk."""
     d = max(frames, 1)
+    t = f"(on/{d})"
+    e = f"({t}*{t}*(3-2*{t}))"
     z, x, y = "1", "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
     if move == "zoom_in":
-        z = f"1+{ZOOM}*on/{d}"
+        z = f"1+{ZOOM}*{e}"
     elif move == "zoom_out":
-        z = f"{1 + ZOOM}-{ZOOM}*on/{d}"
+        z = f"{1 + ZOOM}-{ZOOM}*{e}"
     elif move == "pan_right":
-        z, x = f"{1 + ZOOM}", f"(iw-iw/zoom)*on/{d}"
+        z, x = f"{PAN_ZOOM}", f"(iw-iw/zoom)*{e}"
     elif move == "pan_left":
-        z, x = f"{1 + ZOOM}", f"(iw-iw/zoom)*(1-on/{d})"
+        z, x = f"{PAN_ZOOM}", f"(iw-iw/zoom)*(1-{e})"
     elif move == "pan_up":
-        z, y = f"{1 + ZOOM}", f"(ih-ih/zoom)*(1-on/{d})"
+        z, y = f"{PAN_ZOOM}", f"(ih-ih/zoom)*(1-{e})"
+    elif move == "pan_down":
+        z, y = f"{PAN_ZOOM}", f"(ih-ih/zoom)*{e}"
+    elif move == "settle":
+        z = f"1+0.05*{e}"
     elif move == "drift":
-        z, x = f"1.04+0.06*on/{d}", f"(iw-iw/zoom)*on/{d}"
+        z, x = f"1.10+0.08*{e}", f"(iw-iw/zoom)*{e}"
     return f"zoompan=z='{z}':x='{x}':y='{y}':d={d}:s={w}x{h}:fps={fps}"
 
 
@@ -213,7 +227,7 @@ def placeholder(path: Path, size: tuple[int, int], text: str) -> Path:
 
 def render_clip(img: Path, out: Path, frames: int, move: str, prof: dict, fade: bool) -> None:
     w, h = prof["size"]
-    chain = [f"scale={2 * w}:{2 * h}:force_original_aspect_ratio=increase", f"crop={2 * w}:{2 * h}", zoompan(move, frames, w, h, prof["fps"])]
+    chain = [f"scale={SUPERSAMPLE * w}:{SUPERSAMPLE * h}:flags=lanczos:force_original_aspect_ratio=increase", f"crop={SUPERSAMPLE * w}:{SUPERSAMPLE * h}", zoompan(move, frames, w, h, prof["fps"])]
     if fade:
         chain.append(f"fade=t=in:st=0:d={min(0.5, frames / prof['fps'] / 2):.2f}")
     chain.append("format=yuv420p")

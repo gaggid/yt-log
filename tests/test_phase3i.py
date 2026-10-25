@@ -91,7 +91,7 @@ def test_the_same_move_is_never_used_twice_in_a_row_and_cards_hold_still():
         return {"data": {"visual_type": vt, "motion_intent": motion}}
     moves = video.pick_moves([sc("character", "slow push in"), sc("character", "slow push in"), sc("establishing", ""), sc("establishing", ""), sc("data_chart", "push in"),
                               sc("atmospheric", "pull back"), sc("atmospheric", "pull back"), sc("atmospheric", "static hold")])
-    assert moves[0] == "zoom_in" and moves[4] == "hold" and moves[5] == "zoom_out" and moves[7] == "hold"
+    assert moves[0] == "zoom_in" and moves[4] == "hold" and moves[5] == "zoom_out" and moves[7] != "hold"
     assert all(a != b for a, b in zip(moves, moves[1:]) if "hold" not in (a, b))
     assert all(m in video.MOVES + ["hold"] for m in moves)
     more = video.pick_moves([sc("character", "")] * 30)

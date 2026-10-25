@@ -8,7 +8,15 @@ from story import db, settings as settings_mod
 from story2 import editorial, export, imgplan, planner, storyboard
 from story3 import auto, graphics, refs, scenes, store, video, voice
 from test_phase3e import silence
-from test_phase3f import planned
+from test_phase3f import planned as _planned
+
+
+def planned(env, edit=True):
+    """A plan with its storyboard. Reference pictures are only part of auto-run when scenes are drawn from them, so most tests choose that."""
+    plan_id = _planned(env)
+    if edit:
+        scenes.set_settings(plan_id, {"mode": "auto"})
+    return plan_id
 from test_phase3g import Gateway as ImageGateway
 from test_phase3i import TINY
 
@@ -65,7 +73,7 @@ def test_a_planned_storyboard_is_taken_all_the_way_to_a_draft_video(env, monkeyp
     assert refs.state(plan_id)["done"] and scenes.state(plan_id)["done"] and voice.state(plan_id)["approved"] == len(plan["segments"])
     v = video.state(plan_id)
     assert v["done"] and v["videos"][-1]["profile"] == "draft" and store.path_of(store.get(v["videos"][-1]["id"])).is_file()
-    assert any("step 1 of" in x[2] or "step 4 of" in x[2] for x in log) and log[-1][2] == "done"
+    assert any("step 1 of" in x[2] or "step 5 of" in x[2] for x in log) and log[-1][2] == "done"
 
 
 def test_the_first_outcome_is_approved_and_pictures_default_to_plain_qwen(env, monkeypatch, fast):
@@ -158,11 +166,12 @@ def test_from_a_brand_new_plan_every_step_runs_including_the_model_steps(env, mo
     from test_phase2b import P2BFake
     pid, cid = approved_story(env)
     plan_id = planner.create_plan(cid, minutes=2)["id"]
+    scenes.set_settings(plan_id, {"mode": "auto"})
     assert auto.state(plan_id)["next"] == "blueprint"
     be = P2BFake()
     monkeypatch.setattr(auto.llm, "ChatBackend", lambda s, k: be)
     out, gw, log = go(plan_id, monkeypatch)
-    assert out["ran"][:5] == ["blueprint", "narration", "characters", "references", "storyboard"] and out["ran"][-1] == "video"
+    assert out["ran"][:5] == ["blueprint", "narration", "characters", "storyboard", "references"] and out["ran"][-1] == "video"
     assert auto.state(plan_id)["remaining"] == 0
     plan = planner.get_plan(plan_id)
     assert plan["blueprint"] and plan["segments"] and storyboard.get_scenes(plan_id) and editorial.approval_state(plan)["state"] == "approved"
@@ -191,3 +200,11 @@ def test_weak_means_hard_problem_low_score_or_nothing_yet():
     low = {"id": "c", "status": "done", "current": True, "score": {"hard": False, "total": 45}}
     assert not auto._weak([ok], "a") and auto._weak([bad], "b") and auto._weak([low], "c") and auto._weak([], None)
     assert auto._weak([ok, bad], "a", approved="b")
+
+
+def test_reference_pictures_are_skipped_when_scenes_are_drawn_plain(env, monkeypatch, fast):
+    plan_id = planned(env, edit=False)                              # plain drawing never sends a reference picture, so none is made
+    assert auto.done(plan_id, "references") and auto.state(plan_id)["next"] in ("prompts", "repeats")
+    out, gw, _ = go(plan_id, monkeypatch)
+    assert "references" not in out["ran"] and not [r for r in gw.requests if r["body"] and "Character model sheet" in str(r["body"].get("prompt", ""))]
+    assert auto.state(plan_id)["remaining"] == 0

@@ -71,7 +71,7 @@ def leak_scan(public: dict, prof: leak.SourceProfile, title: str) -> dict:
 
 
 def _public_scene(sc: dict, plan: dict) -> dict:
-    d = {k: v for k, v in sc["data"].items() if k not in ("evidence_ids", "adapters", "model", "previews", "correction")}
+    d = {k: v for k, v in sc["data"].items() if k not in ("evidence_ids", "adapters", "model", "previews", "correction", "translation")}
     out = {"id": sc["id"], "seq": sc["seq"], "segment_id": sc["segment_id"], "sentence_range": [sc["s_from"], sc["s_to"]], "start_s": sc["start_s"], "end_s": sc["end_s"],
            "duration_s": sc["duration_s"], "status": sc["status"], "locked": sc["locked"], **d,
            "image_model": providers.model_for(sc["data"], plan["settings"])}

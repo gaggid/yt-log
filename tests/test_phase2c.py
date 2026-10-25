@@ -21,11 +21,13 @@ def test_every_scene_gets_both_prompts_with_the_required_parts(env):
     pid, scenes, rep = compiled(env)
     assert scenes and rep["compiled"] == len(scenes)
     q, f = scenes[0]["data"]["prompts"]["qwen"], scenes[0]["data"]["prompts"]["flux"]
-    for label in ("Image objective", "Main subject", "Action and moment", "Environment", "Composition", "Lighting", "Visual treatment",
-                  "Colour and mood", "Continuity", "Aspect ratio and framing", "Constraints"):
+    for label in ("Shot", "Visual style", "Main subject", "Action and moment", "Environment", "Composition", "Lighting",
+                  "Colour and mood", "Aspect ratio and framing", "Constraints"):
         assert label + ":" in q["prompt"] or label.split(" and ")[0] + ":" in q["prompt"], label
+    assert q["prompt"].startswith("Shot:")                                                       # the camera leads the prompt
+    assert "Reference images" not in q["prompt"] and "Image 1" not in q["prompt"]               # plain drawing sends no reference picture
     assert "Left of frame" in q["prompt"] and "Centre of frame" in q["prompt"] and "Right of frame" in q["prompt"]
-    assert "Image objective" not in f["prompt"] and "Constraints:" not in f["prompt"]            # FLUX is prose, not a labelled brief
+    assert "Shot:" not in f["prompt"] and "Constraints:" not in f["prompt"]            # FLUX is prose, not a labelled brief
     assert q["adapter_version"] and f["adapter_version"] and q["model"] == "qwen-image-2.1" and f["model"] == "flux2-klein-9b"
     assert scenes[0]["data"]["adapters"]["qwen"]["version"] == q["adapter_version"]
 
@@ -58,7 +60,7 @@ def test_continuity_attributes_reach_both_prompts(env):
     pid, scenes, _ = compiled(env)
     for a in ("qwen", "flux"):
         assert "dark jacket" in scenes[0]["data"]["prompts"][a]["prompt"]                            # the registry's fixed attribute
-        assert "loading-screen" in scenes[0]["data"]["prompts"][a]["prompt"].lower()               # the plan's chosen style applies everywhere
+        assert "film still" in scenes[0]["data"]["prompts"][a]["prompt"].lower()               # the plan's chosen style applies everywhere
 
 
 def test_charts_and_documents_become_plates_and_text_is_not_drawn(env):

@@ -135,6 +135,7 @@ class JsonCaller:
         self.backend = backend
         self.s = s or settings_mod.get()
         self.budget = Budget.from_settings(self.s)
+        self.last_attempt = False
 
     async def call(self, system: str, user: str, model_cls: type[BaseModel], validate=None) -> CallResult:
         est = self.budget.est
@@ -145,6 +146,7 @@ class JsonCaller:
         tin = tout = 0
         t0 = time.time()
         for attempt in range(int(self.s["retries"]) + 1):
+            self.last_attempt = attempt >= int(self.s["retries"])           # a validator may stop insisting on its last attempt
             res = await self.backend.complete(messages, self.budget.output_reserve)
             tin += res.prompt_tokens or sum(est(m["content"]) for m in messages)
             tout += res.completion_tokens or est(res.text)

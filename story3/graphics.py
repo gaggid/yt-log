@@ -26,6 +26,7 @@ SIZE = (1920, 1080)
 FONTS = {"regular": ["segoeui.ttf", "arial.ttf"], "bold": ["segoeuib.ttf", "arialbd.ttf"], "semi": ["seguisb.ttf", "segoeuib.ttf", "arialbd.ttf"]}
 COLOURS = {                                                                      # background, panel, text, muted, accent, second accent
     "gta": {"bg": (14, 18, 34), "bg2": (30, 22, 52), "panel": (28, 34, 60), "text": (248, 246, 240), "muted": (160, 170, 200), "accent": (255, 176, 40), "accent2": (40, 190, 210)},
+    "filmic": {"bg": (16, 20, 26), "bg2": (34, 36, 42), "panel": (30, 36, 44), "text": (242, 238, 228), "muted": (156, 164, 170), "accent": (230, 170, 80), "accent2": (96, 168, 176)},
     "noir": {"bg": (8, 10, 18), "bg2": (20, 22, 36), "panel": (24, 28, 44), "text": (240, 236, 226), "muted": (150, 150, 160), "accent": (226, 168, 52), "accent2": (200, 60, 50)},
     "concept": {"bg": (14, 26, 32), "bg2": (30, 44, 50), "panel": (30, 46, 54), "text": (240, 236, 224), "muted": (150, 170, 172), "accent": (232, 172, 84), "accent2": (84, 176, 170)},
 }

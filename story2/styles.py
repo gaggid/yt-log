@@ -5,14 +5,25 @@ tested on the real image models (see docs/phase3_plan.md, "Visual direction"); c
 A preset is plain, positive wording ("hand-illustrated, bold outlines"), because the image models follow what is described much more
 reliably than what is forbidden. Negative wording is kept apart and sent only where the model honours a negative prompt."""
 
-DEFAULT = "gta"
+DEFAULT = "filmic"
 # Bumped when the way scenes and characters are designed changes; a plan whose registry or storyboard was made under an older direction is told so.
-DIRECTION = "illustrated-1"
+DIRECTION = "illustrated-2"
 
 CHARACTER_RULE = ("Characters are invented composite people, each with a distinct face, hair, build and clothing right for the period, shown with clear emotion and body language. "
                   "A real, named person is never given an invented likeness: show such a person as a silhouette, from behind, in shadow or only by their hands.")
 
 PRESETS: dict[str, dict] = {
+    "filmic": {
+        "label": "Cinematic film still (painted)",
+        "description": "Painted realism that looks like a still from a feature film: natural colour grade, grounded light, shallow depth of field, real-looking people and places. No anime, no game art.",
+        "short": "cinematic painted film still",
+        "look": ("Cinematic painted film still, realistic proportions and natural faces, grounded motivated light, shallow depth of field, subtle film grain, muted natural colour grade. "
+                 "Hand-painted, not a photograph, not a 3D render, not anime or cartoon. No logos or lettering."),
+        "object_look": ("Cinematic painted film still, realistic materials, grounded motivated light, shallow depth of field, subtle film grain, muted natural colour grade. "
+                        "Hand-painted, not a photograph, not a 3D render, not anime or cartoon. No logos or lettering."),
+        "palette": "muted natural colour, one warm light source against cool shadow",
+        "linework": "soft painted edges, no outlines",
+    },
     "gta": {
         "label": "Game-art illustration (GTA-style)",
         "description": "Bold outlines, cel-shaded colour with painterly gradients, saturated cinematic colour and strong rim light, like a GTA V loading-screen painting. Expressive faces, rich detailed settings.",
@@ -48,13 +59,13 @@ PRESETS: dict[str, dict] = {
 }
 
 # What the picture must not become. Sent as the negative prompt where the model honours one, and stated as "not ..." in the prompt where it does not.
-NEGATIVE = ("photograph, photorealistic, 3D render, plain white background, empty background, flat vector icon, infographic, stock chart diagram, "
+NEGATIVE = ("anime, cartoon, floating platform, floating objects, photograph, photorealistic, 3D render, plain white background, empty background, flat vector icon, infographic, stock chart diagram, "
             "text, letters, numbers, watermark, logo, blurry, low quality, deformed hands, extra fingers, duplicate subject")
 NOT_PHOTO = "Not a photograph, not a 3D render, not a flat diagram."
 
 # LoRAs the gateway should apply for a style, per image model: {"qwen-image-2.1": {"lora-name": strength}}. Empty: the base models already
 # render all three looks (checked 2026-10-24). To add one, attach the file to the model in the gateway console, then name it here.
-LORAS: dict[str, dict[str, dict[str, float]]] = {"gta": {}, "noir": {}, "concept": {}}
+LORAS: dict[str, dict[str, dict[str, float]]] = {"filmic": {}, "gta": {}, "noir": {}, "concept": {}}
 
 
 class StyleError(ValueError):

@@ -17,6 +17,7 @@ from .voice import MediaError
 RETRIES = 1
 DEFAULT_CANDIDATES = 2
 DEFAULT_SECONDS = 60                    # until the first picture has been timed on this machine
+MIN_PROP_SCENES = 3                     # an object needs a model sheet only when it comes back often enough for its shape to matter
 MIN_SCENES = 2                          # once scenes exist, an asset shown only once needs no reference: its one scene creates it
 SIZES = {"person": (1344, 768), "narrator": (1344, 768), "place": (1344, 768), "prop": (1344, 768)}      # people and objects are sheets with several views side by side
 KINDS = ("person", "place", "prop")
@@ -51,7 +52,7 @@ def targets(plan_id: str) -> list[dict]:
             use.setdefault(a, []).append(sc)
     out = []
     for a in storyboard.get_assets(plan_id):
-        if a["kind"] in KINDS and len(use.get(a["id"], [])) >= MIN_SCENES:
+        if a["kind"] in KINDS and len(use.get(a["id"], [])) >= (MIN_PROP_SCENES if a["kind"] == "prop" else MIN_SCENES):
             out.append({"asset": a, "scenes": use[a["id"]]})
     out.sort(key=lambda t: (-len(t["scenes"]), t["asset"]["name"]))
     return out

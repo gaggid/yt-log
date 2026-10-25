@@ -286,3 +286,24 @@ def test_a_scene_with_nothing_from_the_story_is_flagged_as_unrelated(env):
     assert any(i["kind"] == "unrelated" and i["where"] == sc["id"] and i["level"] == "warn" for i in rep["issues"])
     others = [i for i in rep["issues"] if i["kind"] == "unrelated" and i["where"] != sc["id"]]
     assert not others                                               # scenes made from the story itself are not flagged
+
+
+def test_scene_that_is_only_an_idea_is_sent_back_then_accepted():
+    people = [{"name": "the trader", "kind": "person"}, {"name": "the floor", "kind": "place"}]
+    idea = SceneOut(purpose="p", subject="a rising line", location="Abstract space", assets=["style"])
+    scene = SceneOut(purpose="p", subject="the trader", location="the floor", assets=["the trader"])
+    assert storyboard.scene_problems([idea], people) and not storyboard.scene_problems([scene], people)
+    assert not storyboard.scene_problems([idea], [])                                    # no registry people or places: nothing to hold the scene to
+    chart = SceneOut(purpose="p", subject="a chart", visual_type="data_chart", location="", assets=[])
+    assert not storyboard.scene_problems([chart], people)                              # built from facts later
+
+
+def test_a_place_that_is_a_space_or_grid_is_not_drawable_and_scene_runs_are_flagged():
+    assert storyboard.not_drawable("place", "the abstract market grid", {}, "")
+    assert not storyboard.not_drawable("place", "the village square", {"type": "square"}, "")
+    assets = [{"name": n, "kind": k} for n, k in (("anu", "person"), ("ravi", "person"), ("square", "place"), ("shop", "place"))]
+    same = [SceneOut(purpose="p", subject="anu", location="square", assets=["anu", "square"]) for _ in range(4)]
+    assert any("same place" in m for m in storyboard.scene_problems(same, assets))
+    mk = lambda who, where: SceneOut(purpose="p", subject=who, location=where, assets=[who, where])      # noqa: E731
+    moved = [mk("anu", "square"), mk("ravi", "square"), mk("anu", "square"), mk("ravi", "shop")]
+    assert not storyboard.scene_problems(moved, assets)

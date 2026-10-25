@@ -177,8 +177,11 @@ def combine_scene(auto: dict, seen: dict | None, quoted: list[str], with_referen
                 flags.append(f'text differs from the quoted text "{q}" (read: "{seen.get("text_read", "").strip()[:60]}")')
                 hard = True
         if not quoted and (seen["text_visible"] or read):
-            flags.append("text or marks in the picture")
-            hard = True
+            if len(read) >= 3:
+                flags.append("text or marks in the picture")
+                hard = True
+            else:                                                    # one stray letter on a far-off sign is a blemish, not a reason to draw the scene again
+                flags.append("a stray letter or mark in the picture")
         flags += [f"looks wrong: {d}" for d in seen["defects"]]
         flags += [f"not in the brief: {x}" for x in seen.get("extras", [])]
         if seen["dims"].get("story_fit", 10) <= 4:

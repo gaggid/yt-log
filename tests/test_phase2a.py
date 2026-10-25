@@ -27,6 +27,20 @@ class P2Fake(FakeBackend):
                      for i, n in enumerate(["opening", "context", "turn", "payoff", "ending"], 1)]
             return LLMResult(json.dumps({"structure": "decision consequence", "viewer_promise": "understand what happened",
                                          "central_question": "why?", "turning_point": "the turn", "payoff": "p", "ending": "e", "beats": beats}))
+        if task == "p2_director":
+            n = int(re.search(r"Plan the film now: (\d+) segments", messages[1]["content"]).group(1))
+            self.calls.append({"task": task, "user": messages[1]["content"]})
+            secs = [float(x) for x in re.findall(r"SEGMENT \d+ \(beat \w+, (\d+) s\)", messages[1]["content"])]
+            filler = [("medium", "side", "object", "pan right"), ("extreme close", "eye level", "hands", "tilt down")]
+
+            def shots_for(n_shots):                                  # the first shot is wide/high and the middle one close/low, as the fake scenes are
+                out = []
+                for i in range(n_shots):
+                    size, angle, kind, move = (("wide", "high", "establishing", "pull back") if i == 0 else ("close", "low", "person", "push in") if i == n_shots // 2 else filler[i % 2])
+                    out.append({"focus": f"shot {i + 1}", "kind": kind, "size": size, "angle": angle, "move": move, "why": "because"})
+                return out
+            return LLMResult(json.dumps({"arc": "worry to relief", "segments": [{"segment": i, "emotion": "tense", "place": "the office", "state": "the trader is worried",
+                                                                                "shots": shots_for(max(3, round((secs[i - 1] if i <= len(secs) else 0) / 8)))} for i in range(1, n + 1)]}))
         if task == "p2_narrate":
             user = messages[1]["content"]
             self.calls.append({"task": task, "user": user, "system": system})

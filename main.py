@@ -71,7 +71,7 @@ async def plan_js():
 async def style_sample(name: str):
     name = name.removesuffix(".jpg")
     f = STATIC / "style_samples" / (name + ".jpg")
-    if name not in ("gta", "noir", "concept") or not f.is_file():
+    if name not in ("filmic", "gta", "noir", "concept") or not f.is_file():
         raise HTTPException(404, "no such sample")
     return FileResponse(f, headers={"Cache-Control": "max-age=86400"})
 

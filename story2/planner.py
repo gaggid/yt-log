@@ -3,6 +3,7 @@
 Every step writes its result before the next begins, so a restart never loses work. Approved or locked segments are never
 overwritten by regeneration or by edits to other segments.
 """
+import re
 import uuid
 
 from story import db, llm, settings as settings_mod
@@ -123,6 +124,24 @@ async def make_blueprint(plan_id: str, backend, s: dict | None = None) -> dict:
 
 # ── narration ───────────────────────────────────────────────────────────────
 
+_PUNCT = re.compile(r"[\s।,.!?;:\"'()\-–—]+")
+
+
+def _tokens(text: str) -> set[str]:
+    return {w for w in _PUNCT.split(text.lower()) if w}
+
+
+def repeated_sentences(prior: list[str], new: list[str], threshold: float = 0.75) -> list[str]:
+    """Sentences in `new` that say (nearly) the same thing, word for word, as one already spoken or as an earlier one in `new`."""
+    seen = [_tokens(p) for p in prior]
+    out = []
+    for n in new:
+        a = _tokens(n)
+        if len(a) >= 4 and any(b and len(a & b) / len(a | b) >= threshold for b in seen):
+            out.append(n)
+        seen.append(a)
+    return out
+
 def _segment_fields(sentences: list[dict], wpm: float) -> dict:
     sents = [{"text": x["text"].strip(), "emotion": svara.norm_emotion(x.get("emotion")), "pause_after_s": float(x.get("pause_after_s") or 0)}
              for x in sentences if x.get("text", "").strip()]
@@ -157,7 +176,18 @@ async def make_narration(plan_id: str, backend, s: dict | None = None, beat_ids:
     outline = "\n".join(f"{b['id']} ({b['name']}): {b['purpose']}" for b in bp["beats"])
     caller = llm.JsonCaller(backend, s)
 
+    flat_tries: list[int] = []
+    spoken: list[str] = []
+
     def check(out: NarrationOut) -> None:
+        flat_tries.append(1)
+        felt = [svara.norm_emotion(x.emotion) for seg in out.segments for x in seg.sentences]
+        if len(flat_tries) <= 2 and not caller.last_attempt and felt and all(e in ("neutral", "clear") for e in felt):          # a whole beat in one flat voice: sent back twice
+            raise ValueError("Every sentence of this beat is neutral or clear. A story told in one flat voice loses the viewer. Find the moment in this beat that is "
+                             "frightening, sad, angering or relieving and give the sentences around it that emotion (fear, sad, anger or happy), keeping one emotion within a segment.")
+        again = repeated_sentences(spoken, [x.text for seg in out.segments for x in seg.sentences])
+        if again and not caller.last_attempt:
+            raise ValueError("These sentences repeat something already spoken in the video; say something new instead: " + " | ".join(again[:4]))
         for n, seg in enumerate(out.segments, 1):
             text = " ".join(x.text for x in seg.sentences)
             bad = svara.foreign_chars(text)
@@ -178,13 +208,18 @@ async def make_narration(plan_id: str, backend, s: dict | None = None, beat_ids:
             progress(k, len(want), f"beat {k + 1} of {len(want)}: {beat['name']}")
         before = [x for x in list_segments(plan_id) if order.get(x["beat"], 99) < order[beat["id"]]]
         said = " ".join(x["plain"] for x in before)[-1200:]
+        spoken.clear()
+        spoken.extend(s_["text"] for x in list_segments(plan_id) if x["beat"] != beat["id"] for s_ in x["sentences"])       # the whole video so far, whichever beat it belongs to
+        earlier = chr(10).join(f"- {t}" for t in spoken)[-3500:]
         user = (f"STORY FACTS:\n{intake.facts_text(story['public'])}\n\nBLUEPRINT (structure: {bp['structure']}):\n"
                 f"Viewer promise: {bp['viewer_promise']}\nCentral question: {bp['central_question']}\n"
                 f"Turning point: {bp['turning_point']}\nPayoff: {bp['payoff']}\nEnding: {bp['ending']}\n\n"
                 f"ALL BEATS (for orientation):\n{outline}\n\n"
-                + (f"ALREADY NARRATED (continue from here, do not repeat it):\n{said}\n\n" if said else "This is the opening of the video.\n\n")
+                + (f"ALREADY NARRATED (continue from here, do not repeat it):\n{said}\n\nEVERY SENTENCE SPOKEN SO FAR (never say any of these again, and do not tell a fact "
+                   f"again that they already told; move the story forward):\n{earlier}\n\n" if said else "This is the opening of the video.\n\n")
                 + f"WRITE NARRATION FOR THIS BEAT ONLY ({beat['id']}, about {per_beat} words):\n"
                   f"purpose: {beat['purpose']}\nviewer takeaway: {beat['takeaway']}\nfacts: {'; '.join(beat['facts'])}")
+        flat_tries.clear()
         res = await caller.call(system, user, NarrationOut, check)
         tokens_out += res.tokens_out
         with db.tx() as c:
