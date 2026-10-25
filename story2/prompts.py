@@ -62,6 +62,18 @@ Hook and pace (viewers leave in seconds, so earn every sentence):
 - Mix very short sentences with longer ones. Speak to the viewer ("आप सोचिए"). One idea per sentence; cut every sentence that only repeats the last one.
 - Give the turning point room: short sentences, a pause, then the consequence.
 
+Tell it like a gripping storyteller, not like an explainer:
+- Show before you explain. Put the viewer inside one concrete moment with something they can see, hear or smell (the wet street, the silence, a mother at a door) before any fact about it.
+  A number lands only after a person: say who it happened to, then how many.
+- Give the story a human at its centre and say what they want and what is in the way. Stakes first, then the details. Speak to the viewer ("सोचिए आप वहाँ खड़े हैं").
+- Close one question and open a bigger one. Do not ask a question at the end of every part: use a rhetorical question at most twice in the whole video, and vary the other
+  open loops (a promise of what comes, a detail left unexplained, a ticking clock such as "सिर्फ़ तीन दिन बाद").
+- Never use the same sentence opener more than twice in the whole video. Avoid the stock phrases "मैं आपको बताता हूँ", "मैं आपको दिखाता हूँ", "पर यहाँ एक सवाल है", "पर यहाँ एक उलझन थी",
+  "यह सुनने में ... लगता है, पर": find a fresh, specific way into each sentence.
+- Use contrast and surprise: what everyone believed against what was true, a small act against a huge result. When the truth lands, say it plainly in a few short words.
+- Close the loop you opened at the start in the last part, so the ending feels earned. End on an image or a line that stays with the viewer, not on a summary.
+- Match the emotion to the story: fear for danger and dread, sad for loss, anger for injustice, happy only for real relief or triumph (never for a death or a disaster).
+
 Emotion: every sentence has one emotion from: neutral, happy, sad, anger, fear, clear.
 - "clear" is for precise, technical or numeric sentences and unfamiliar names. "neutral" is the default.
 - Choose the emotion the MOMENT needs, not the loudest one. Quiet and neutral moments are normal; do not make everything intense. But a voice that stays flat for the
@@ -199,7 +211,8 @@ Keep the viewer's eye moving. Every scene must differ from the one before it in 
 not stay in one place for more than three scenes in a row, and do not have the same person as the only subject in more than two scenes in a row: bring in
 supporting people, show their reactions, show the place without anyone, show hands or objects, then return. Move the story through the places on the
 continuity list as it progresses. Let people do different things (walk, talk, wait, hand something over, look away, argue, laugh); not "leaning forward"
-or "pointing" in every scene.
+or "pointing" in every scene. Never show the same person sitting or lying on the ground in more than one scene of a segment, and never draw the same person in the
+same posture and place twice: change what they are doing, where they stand, or show only their hands or their back.
 
 When a DIRECTOR'S SHOT LIST is given, it is the plan for the camera: every scene follows one numbered shot ("shot": its number). The scene's
 composition distance and camera_angle must be that shot's size and angle, its motion_intent that shot's camera move, and what is in front of the

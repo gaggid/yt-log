@@ -131,6 +131,26 @@ def _tokens(text: str) -> set[str]:
     return {w for w in _PUNCT.split(text.lower()) if w}
 
 
+STOCK_OPENERS = ("मैं आपको बताता", "मैं आपको दिखाता", "पर यहाँ एक सवाल", "पर यहाँ एक उलझन", "पर यहाँ एक twist")
+
+
+def overused_openers(prior: list[str], new: list[str], limit: int = 2, words: int = 3) -> list[str]:
+    """Sentence openers (the first words) that the whole video would use more than `limit` times, and the stock phrases that made earlier narration sound alike."""
+    def head(t: str) -> str:
+        return " ".join(t.split()[:words])
+    count: dict[str, int] = {}
+    for t in prior:
+        count[head(t)] = count.get(head(t), 0) + 1
+    out = []
+    for t in new:
+        h = head(t)
+        count[h] = count.get(h, 0) + 1
+        if len(h.split()) == words and count[h] > limit or any(t.startswith(s) for s in STOCK_OPENERS) and count[h] > 1:
+            if h not in out:
+                out.append(h)
+    return out
+
+
 def repeated_sentences(prior: list[str], new: list[str], threshold: float = 0.75) -> list[str]:
     """Sentences in `new` that say (nearly) the same thing, word for word, as one already spoken or as an earlier one in `new`."""
     seen = [_tokens(p) for p in prior]
@@ -188,6 +208,9 @@ async def make_narration(plan_id: str, backend, s: dict | None = None, beat_ids:
         again = repeated_sentences(spoken, [x.text for seg in out.segments for x in seg.sentences])
         if again and not caller.last_attempt:
             raise ValueError("These sentences repeat something already spoken in the video; say something new instead: " + " | ".join(again[:4]))
+        samey = overused_openers(spoken, [x.text for seg in out.segments for x in seg.sentences])
+        if samey and not caller.last_attempt:
+            raise ValueError("Too many sentences begin the same way as earlier ones (" + " | ".join(samey[:4]) + "). Start those sentences differently, with something specific to this moment.")
         for n, seg in enumerate(out.segments, 1):
             text = " ".join(x.text for x in seg.sentences)
             bad = svara.foreign_chars(text)

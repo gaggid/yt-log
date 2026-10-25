@@ -97,3 +97,11 @@ def test_references_are_made_only_for_things_the_scenes_really_use(env):
     pid, cid, be, p = boarded(env)
     names = {t["asset"]["name"]: len(t["scenes"]) for t in refs.targets(p["id"])}
     assert all(n >= refs.MIN_SCENES for n in names.values())
+
+
+def test_sentences_that_all_begin_the_same_way_are_sent_back():
+    from story2 import planner
+    prior = ["पर यहाँ एक सवाल था।", "पर यहाँ एक सवाल और आया।"]
+    assert planner.overused_openers(prior, ["पर यहाँ एक नई बात थी।"]) == ["पर यहाँ एक"]               # third time the same three words open a sentence
+    assert planner.overused_openers([], ["मैं आपको बताता हूँ यह।", "मैं आपको बताता हूँ वह।"]) == ["मैं आपको बताता"]      # a stock phrase twice
+    assert planner.overused_openers(prior[:1], ["बिल्कुल अलग शुरुआत यहाँ।"]) == []
