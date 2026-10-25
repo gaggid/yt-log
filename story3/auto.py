@@ -9,13 +9,13 @@ import re
 from story import db, llm, settings as settings_mod
 from story2 import api as plans_api, director, editorial, export, imgplan, planner, storyboard, store as plan_store
 
-from . import graphics, refs, scenes, store, video, voice
+from . import graphics, refs, scenes, store, thumbnail, video, voice
 from .voice import MediaError
 
 STAGES = [("blueprint", "Plan the story"), ("narration", "Write the narration"), ("characters", "Create characters and places"),
           ("storyboard", "Design the storyboard"), ("references", "Make and approve reference pictures"), ("prompts", "Write image prompts"), ("repeats", "Fix camera repeats"), ("approve", "Check, review and approve the plan"),
           ("export", "Export"), ("voice", "Make and approve the voice"), ("pictures", "Draw and approve the scene pictures"), ("graphics", "Build and approve the graphics"),
-          ("video", "Make the draft video")]
+          ("video", "Make the draft video"), ("thumbnail", "Make the video thumbnail")]
 
 
 class AutoStop(MediaError):
@@ -85,6 +85,8 @@ def done(plan_id: str, key: str, st: dict | None = None) -> bool:
     if key == "video":
         v = st.get("video") or video.state(plan_id)
         return bool(v["done"])
+    if key == "thumbnail":
+        return bool(thumbnail.state(plan_id)["done"])
     return False
 
 
@@ -258,6 +260,8 @@ async def run_stage(plan_id: str, key: str, be, s: dict, api_key: str, progress,
         if chk["blockers"]:
             raise AutoStop(f"{len(chk['blockers'])} thing(s) are missing for the video (see the Draft video section)")
         await asyncio.to_thread(video.build, plan_id, "draft", bool(video.available()["captions"]), False, sub)          # most people watch with the sound off: captions on whenever ffmpeg can burn them
+    elif key == "thumbnail":
+        await thumbnail.make(plan_id, be, s, api_key, sub)
     else:
         raise AutoStop(f"unknown step {key}")
 

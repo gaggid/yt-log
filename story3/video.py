@@ -36,6 +36,7 @@ PROFILES = {
     "preview": {"label": "Preview (small, fast)", "size": (640, 360), "fps": 15, "crf": 30, "preset": "veryfast", "abr": "64k", "speed": 0.15},
 }
 MOVES = ["zoom_in", "pan_right", "zoom_out", "pan_left", "drift", "pan_up", "pan_down"]          # "settle" (a director's hold) and "hold" (cards) are not in the rotation
+PLAYBACK_SPEED = 1.25                         # the finished video (picture, voice and captions together) is sped up this much; 1 leaves it as made
 ZOOM = 0.22                                   # a push in or pull back travels from 1.0 to 1.22 times
 PAN_ZOOM = 1.30                               # a pan or tilt is cropped to 1/1.3 of the picture and slides across the rest, so the scene is not shown all at once
 SUPERSAMPLE = 3                               # the still is scaled up this many times before the move, so one step of the move is a whole number of source pixels
@@ -130,7 +131,7 @@ def visual_choices(plan_id: str) -> dict[str, dict]:
             item = next((i for i in g["items"] if i["id"] == g["approved"]), None)
             if item:
                 pick |= {"path": store.path_of(store.get(item["id"])), "source": "graphic", "item": item["id"]}
-            elif g["current_item"]:
+            elif g["current_item"] and not g.get("thin"):
                 pick |= {"path": store.path_of(store.get(g["current_item"]["id"])), "source": "graphic", "item": g["current_item"]["id"], "problem": "graphic not approved"}
         if not pick["path"]:
             ap = by_id.get(r["approved"]) if r["approved"] else None
@@ -284,15 +285,16 @@ def write_ass(events: list[tuple[float, float, str]], path: Path, size: tuple[in
     path.write_text(head + body, encoding="utf-8")
 
 
-def inputs_hash(chk: dict, prof_name: str, captions: bool) -> str:
-    key = json.dumps([prof_name, captions, [(k, str(v.get("item"))) for k, v in sorted(chk["visuals"].items())], [(a["segment"], a["item"]) for a in chk["audio"]],
+def inputs_hash(chk: dict, prof_name: str, captions: bool, speed: float = 1.0) -> str:
+    key = json.dumps([prof_name, captions, speed, [(k, str(v.get("item"))) for k, v in sorted(chk["visuals"].items())], [(a["segment"], a["item"]) for a in chk["audio"]],
                       [(s["id"], s["start_s"], s["duration_s"]) for s in sorted(storyboard.get_scenes(chk["plan"]["id"]), key=lambda x: x["id"])]])
     return hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
 
 
 # ── the build ───────────────────────────────────────────────────────────────
 
-def build(plan_id: str, profile: str = "draft", captions: bool = False, allow_gaps: bool = False, progress=None) -> dict:
+def build(plan_id: str, profile: str = "draft", captions: bool = False, allow_gaps: bool = False, progress=None, speed: float | None = None) -> dict:
+    speed = PLAYBACK_SPEED if speed is None else float(speed)
     prof = PROFILES.get(profile)
     if not prof:
         raise MediaError(f"unknown profile '{profile}' (known: {', '.join(PROFILES)})")
@@ -353,10 +355,16 @@ def build(plan_id: str, profile: str = "draft", captions: bool = False, allow_ga
     name = f"video/{profile}-a{it['attempt']}.mp4"
     out = root / f"{profile}-a{it['attempt']}.mp4"
     cmd = [FFMPEG, "-y", "-hide_banner", "-loglevel", "error", "-i", joined.name, "-i", audio.name]
+    vf = []
     if captions:
         ev = caption_events(plan_id)
         write_ass(ev, work / "captions.ass", prof["size"])
-        cmd += ["-vf", f"ass=captions.ass:fontsdir='{FONTS_DIR.replace(':', chr(92) + ':')}'", "-c:v", "libx264", "-preset", prof["preset"], "-crf", str(prof["crf"]), "-pix_fmt", "yuv420p"]
+        vf.append(f"ass=captions.ass:fontsdir='{FONTS_DIR.replace(':', chr(92) + ':')}'")                 # captions are burned in before the speed-up, so they speed up with the voice
+    if speed != 1.0:
+        vf.append(f"setpts=PTS/{speed}")
+        cmd += ["-af", f"atempo={speed}"]                                                                 # the voice keeps its pitch
+    if vf:
+        cmd += ["-vf", ",".join(vf), "-r", str(prof["fps"]), "-c:v", "libx264", "-preset", prof["preset"], "-crf", str(prof["crf"]), "-pix_fmt", "yuv420p"]
     else:
         cmd += ["-c:v", "copy"]
     cmd += ["-c:a", "aac", "-b:a", prof["abr"], "-map", "0:v:0", "-map", "1:a:0", "-movflags", "+faststart", str(out)]
@@ -367,8 +375,8 @@ def build(plan_id: str, profile: str = "draft", captions: bool = False, allow_ga
         store.update(it["id"], status="failed", meta={"error": str(e)[:300]})
         raise
     store.update(it["id"], status="done", file=name, meta={"duration_s": round(secs, 2), "plan_s": chk["plan_s"], "audio_s": chk["audio_s"], "scenes": len(sc_list), "frames": frames_done,
-                                                          "size": f"{w}x{h}", "fps": prof["fps"], "captions": bool(captions), "placeholders": placeholders,
-                                                          "warnings": chk["warnings"], "moves": moves, "inputs_hash": inputs_hash(chk, profile, captions),
+                                                          "size": f"{w}x{h}", "fps": prof["fps"], "captions": bool(captions), "speed": speed, "placeholders": placeholders,
+                                                          "warnings": chk["warnings"], "moves": moves, "inputs_hash": inputs_hash(chk, profile, captions, speed),
                                                           "seconds_taken": round(time.time() - t0, 1), "bytes": out.stat().st_size})
     plan_store.log(plan_id, "video", {"profile": profile, "seconds": round(secs, 1), "placeholders": len(placeholders), "captions": bool(captions)})
     if progress:
@@ -391,7 +399,7 @@ def state(plan_id: str) -> dict:
     speed = {k: (sum(ratios[k]) / len(ratios[k]) if ratios.get(k) else p["speed"]) for k, p in PROFILES.items()}
     videos = []
     for i in items:
-        want = inputs_hash(chk, i["key"], bool(i["meta"].get("captions")))
+        want = inputs_hash(chk, i["key"], bool(i["meta"].get("captions")), float(i["meta"].get("speed") or 1.0))
         videos.append({"id": i["id"], "profile": i["key"], "attempt": i["attempt"], "url": f"/api/media/file/{plan_id}/{i['file']}", "duration_s": i["meta"]["duration_s"],
                        "size": i["meta"]["size"], "captions": i["meta"]["captions"], "placeholders": i["meta"]["placeholders"], "warnings": len(i["meta"].get("warnings", [])),
                        "current": i["meta"].get("inputs_hash") == want, "seconds_taken": i["meta"].get("seconds_taken"), "bytes": i["meta"].get("bytes"), "approved": i["approved"]})

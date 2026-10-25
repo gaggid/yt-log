@@ -106,7 +106,7 @@ async def plan(plan_id: str):
     return p
 
 
-STEP_EVENTS = ("blueprint", "narration", "registry", "references", "storyboard", "compile_prompts", "fix_repeats", "approved", "export", "voice", "scene_pictures", "graphics", "video", "auto_run")
+STEP_EVENTS = ("blueprint", "narration", "registry", "references", "storyboard", "compile_prompts", "fix_repeats", "approved", "export", "voice", "scene_pictures", "graphics", "video", "thumbnail", "auto_run")
 
 
 def step_times(plan_id: str) -> dict:

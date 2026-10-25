@@ -176,6 +176,25 @@ def explain(spec: dict, scene: dict) -> str:
     return ""
 
 
+DANGLING = {"in", "of", "the", "to", "at", "for", "and", "with", "by", "on", "a", "an", "from", "that", "was", "is", "as", "or", "who", "which"}
+
+
+def thin(spec: dict, scene: dict) -> str:
+    """Why a card would add nothing to the video, or an empty string when it is worth showing: a title card made only from a label (no figure or dated event was found),
+    or a number whose caption is cut off mid-sentence ("Snow's death in"). The scene's own picture is better than either."""
+    t = spec["template"]
+    if t == "text" and scene["data"].get("visual_type") in NEEDS_ASSET:
+        return "the facts give no figure or dated event for it, so the card is only a label"
+    labels = [i.get("label", "") for i in spec.get("items", [])] + [p.get("label", "") for p in spec.get("points", [])]
+    for lab in labels:
+        words = lab.lower().split()
+        if words and words[-1].strip(",.:;") in DANGLING:
+            return "a caption on the card is cut off in the middle of a sentence"
+        if not words and t == "stat":
+            return "the number on the card has no caption"
+    return ""
+
+
 def spec_hash(spec: dict, plan: dict) -> str:
     key = repr(sorted((k, v) for k, v in spec.items() if k not in ("wanted",))) + styles.style_id(plan["settings"])
     return hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
@@ -413,6 +432,9 @@ def approve_all(plan_id: str, include_fallbacks: bool = False) -> dict:
     for r in st["scenes"]:
         if r["approved"] or not r["current_item"]:
             continue
+        if r.get("thin"):
+            left.append({"scene": r["id"], "why": r["thin"]})              # never approved by itself: the video shows the scene's picture instead
+            continue
         if r["fallback"] and not include_fallbacks:
             left.append({"scene": r["id"], "why": r["fallback"]})
             continue
@@ -441,11 +463,11 @@ def state(plan_id: str) -> dict:
             return {"id": i["id"], "attempt": i["attempt"], "url": f"/api/media/file/{plan_id}/{i['file']}", "approved": i["approved"], "template": i["meta"].get("template"),
                     "current": i["meta"].get("spec_hash") == h, "animation": i["meta"].get("animation"), "numbers": i["meta"].get("numbers", [])}
         rows.append({"id": sc["id"], "start_s": sc["start_s"], "duration_s": sc["duration_s"], "subject": _s(sc["data"].get("subject")), "visual_type": sc["data"].get("visual_type"),
-                     "wanted": spec["wanted"] if spec else "", "template": spec["template"] if spec else "", "fallback": explain(spec, sc) if spec else "",
+                     "wanted": spec["wanted"] if spec else "", "template": spec["template"] if spec else "", "fallback": explain(spec, sc) if spec else "", "thin": thin(spec, sc) if spec else "",
                      "dropped": spec["dropped"] if spec else [], "approved": ok["id"] if ok and ok["meta"].get("spec_hash") == h else None,
                      "current_item": view(item) if item else None, "items": [view(i) for i in items if i["status"] == "done"],
                      "status": "approved" if ok and ok["meta"].get("spec_hash") == h else "needs_choice" if item else "needs_build"})
     total = len(rows)
     approved = sum(1 for r in rows if r["status"] == "approved")
     return {"total": total, "approved": approved, "needs_build": sum(1 for r in rows if r["status"] == "needs_build"), "needs_choice": sum(1 for r in rows if r["status"] == "needs_choice"),
-            "fallbacks": sum(1 for r in rows if r["fallback"]), "done": bool(total) and approved == total, "scenes": rows}
+            "fallbacks": sum(1 for r in rows if r["fallback"]), "thin": sum(1 for r in rows if r["thin"] and r["status"] != "approved"), "done": bool(total) and all(r["status"] == "approved" or (r["thin"] and r["status"] != "needs_build") for r in rows), "scenes": rows}

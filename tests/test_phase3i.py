@@ -69,7 +69,8 @@ def test_everything_ready_builds_a_video_as_long_as_the_audio(env, monkeypatch):
     path = store.path_of(it)
     assert path.is_file() and it["status"] == "done" and it["file"].startswith("video/tiny-a1")
     real = video.probe_seconds(path)
-    assert abs(real - chk["audio_s"]) < 0.5 and abs(real - chk["plan_s"]) < 0.5            # the timeline adds up to the audio
+    assert abs(real * video.PLAYBACK_SPEED - chk["audio_s"]) < 0.8 and abs(real * video.PLAYBACK_SPEED - chk["plan_s"]) < 0.8            # the timeline adds up to the audio, then the whole video plays 1.25 times faster
+    assert video.PLAYBACK_SPEED == 1.25 and it["meta"]["speed"] == 1.25 and abs(it["meta"]["duration_s"] - chk["audio_s"] / 1.25) < 0.8
     assert it["meta"]["scenes"] == len(storyboard.get_scenes(plan_id)) and not out["placeholders"]
     info = video.media_info(path)["streams"]
     assert {s["codec"] for s in info} == {"h264", "aac"}
@@ -124,7 +125,7 @@ def test_build_anyway_marks_every_gap_and_still_has_the_right_length(env, monkey
     kinds = [p["kind"] for p in out["placeholders"]]
     assert kinds.count("picture") == len(storyboard.get_scenes(plan_id)) - 1 and kinds.count("voice") == len(planner.get_plan(plan_id)["segments"]) - 1
     chk = video.checklist(plan_id)
-    assert abs(video.probe_seconds(store.path_of(out["item"])) - chk["plan_s"]) < 0.6
+    assert abs(video.probe_seconds(store.path_of(out["item"])) * video.PLAYBACK_SPEED - chk["plan_s"]) < 1.0
     assert not video.state(plan_id)["done"]                                                      # a video with placeholders is never "done"
 
 
@@ -238,3 +239,13 @@ def test_api_round_trip(tmp_path, monkeypatch):
         assert c.post(f"/api/media/{plan['id']}/video", json={"profile": "huge"}).status_code == 400
         v = c.get(f"/api/media/{plan['id']}").json()["video"]
         assert v["tools"]["ffmpeg"] and not v["ready"] and not v["done"] and set(v["profiles"]) >= {"draft", "preview"}
+
+
+def test_a_title_card_made_only_from_a_label_or_with_a_cut_off_caption_is_thin_and_the_picture_is_shown_instead():
+    from story3 import graphics
+    scene = {"data": {"visual_type": "data_chart"}}
+    assert "only a label" in graphics.thin({"template": "text", "title": "data map"}, scene)
+    assert graphics.thin({"template": "text", "title": "A sign"}, {"data": {"visual_type": "text_led"}}) == ""                    # a card the scene asked for is fine
+    assert "cut off" in graphics.thin({"template": "stat", "items": [{"label": "Snow's death in", "shown": "1858"}]}, scene)
+    assert "no caption" in graphics.thin({"template": "stat", "items": [{"label": "", "shown": "1858"}]}, scene)
+    assert graphics.thin({"template": "stat", "items": [{"label": "deaths in the first week", "shown": "616"}]}, scene) == ""

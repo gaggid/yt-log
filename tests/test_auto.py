@@ -56,6 +56,9 @@ def progress_log():
 def go(plan_id, monkeypatch, gw=None, **kw):
     gw = gw or AllGateway()
     monkeypatch.setattr(httpx, "AsyncClient", gw.client())
+    if isinstance(auto.llm.ChatBackend, type):                       # the thumbnail step asks the model for its words; tests that did not choose a fake get the standard one
+        from test_phase2b import P2BFake
+        monkeypatch.setattr(auto.llm, "ChatBackend", lambda s, k: P2BFake())
     log, prog = progress_log()
     out = asyncio.run(auto.run(plan_id, prog, {**settings_mod.get(), **SETTINGS}, "k", **kw))
     return out, gw, log
@@ -66,7 +69,7 @@ def test_a_planned_storyboard_is_taken_all_the_way_to_a_draft_video(env, monkeyp
     st = auto.state(plan_id)
     assert st["next"] == "references" and {"blueprint", "narration", "characters", "storyboard"} <= {s["key"] for s in st["stages"] if s["done"]}
     out, gw, log = go(plan_id, monkeypatch)
-    assert out["ran"][0] == "references" and out["ran"][-1] == "video"
+    assert out["ran"][0] == "references" and out["ran"][-1] == "thumbnail"
     assert auto.state(plan_id)["remaining"] == 0 and auto.state(plan_id)["next"] is None
     plan = planner.get_plan(plan_id)
     assert editorial.approval_state(plan)["state"] == "approved" and export.list_exports(plan_id)
@@ -171,7 +174,7 @@ def test_from_a_brand_new_plan_every_step_runs_including_the_model_steps(env, mo
     be = P2BFake()
     monkeypatch.setattr(auto.llm, "ChatBackend", lambda s, k: be)
     out, gw, log = go(plan_id, monkeypatch)
-    assert out["ran"][:5] == ["blueprint", "narration", "characters", "storyboard", "references"] and out["ran"][-1] == "video"
+    assert out["ran"][:5] == ["blueprint", "narration", "characters", "storyboard", "references"] and out["ran"][-1] == "thumbnail"
     assert auto.state(plan_id)["remaining"] == 0
     plan = planner.get_plan(plan_id)
     assert plan["blueprint"] and plan["segments"] and storyboard.get_scenes(plan_id) and editorial.approval_state(plan)["state"] == "approved"
@@ -208,3 +211,25 @@ def test_reference_pictures_are_skipped_when_scenes_are_drawn_plain(env, monkeyp
     out, gw, _ = go(plan_id, monkeypatch)
     assert "references" not in out["ran"] and not [r for r in gw.requests if r["body"] and "Character model sheet" in str(r["body"].get("prompt", ""))]
     assert auto.state(plan_id)["remaining"] == 0
+
+
+def test_the_thumbnail_is_made_last_from_the_plan_and_approved(env, monkeypatch, fast):
+    from story3 import thumbnail
+    plan_id = planned(env)
+    assert auto.STAGES[-1][0] == "thumbnail" and auto.state(plan_id)["stages"][-1]["done"] is False
+    out, gw, _ = go(plan_id, monkeypatch)
+    assert out["ran"][-2:] == ["video", "thumbnail"] and auto.state(plan_id)["remaining"] == 0
+    th = thumbnail.state(plan_id)
+    assert th["done"] and th["item"]["approved"] and th["item"]["text"] == "Who removed the handle?"
+    path = store.path_of(store.get(th["item"]["id"]))
+    from PIL import Image
+    assert Image.open(path).size == (1280, 720)                                                     # the size YouTube asks for
+    sent = [r for r in gw.requests if r["url"].endswith("/images/generations") and 'the words "Who removed the handle?"' in str(r["body"].get("prompt", ""))]
+    assert sent and "Movie poster" in sent[0]["body"]["prompt"] and "low-angle" in sent[0]["body"]["prompt"]       # a poster, with the words in quotes
+    from story2 import planner as pl
+    assert thumbnail.poster_prompt(pl.get_plan(plan_id), thumbnail.Option(text="Why now?", image="a street"), None, None).count('"Why now?"') == 1
+    import pytest
+    with pytest.raises(ValueError):
+        thumbnail.Option(text="One")                                                                # too short
+    with pytest.raises(ValueError):
+        thumbnail.Option(text="काहानी क्या थी")                                                       # English letters only

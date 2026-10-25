@@ -10,7 +10,7 @@ from story import llm, settings as settings_mod
 from story.pipeline import manager
 from story2 import jobs, planner
 
-from . import auto, graphics, refs, scenes, store, video, voice
+from . import auto, graphics, refs, scenes, store, thumbnail, video, voice
 
 router = APIRouter(prefix="/api/media")
 
@@ -44,7 +44,7 @@ async def media_file(plan_id: str, name: str):
 @router.get("/{plan_id}")
 async def media_state(plan_id: str):
     _guard(planner.get_plan, plan_id)
-    st = {"voice": voice.state(plan_id), "refs": refs.state(plan_id), "scenes": scenes.state(plan_id), "graphics": graphics.state(plan_id), "video": video.state(plan_id)}
+    st = {"voice": voice.state(plan_id), "refs": refs.state(plan_id), "scenes": scenes.state(plan_id), "graphics": graphics.state(plan_id), "video": video.state(plan_id), "thumbnail": thumbnail.state(plan_id)}
     return {**st, "auto": auto.state(plan_id, st)}
 
 
@@ -221,6 +221,18 @@ class VideoReq(BaseModel):
     profile: str = "draft"
     captions: bool = False
     allow_gaps: bool = False
+
+
+@router.post("/{plan_id}/thumbnail")
+async def make_thumbnail(plan_id: str):
+    plan = _guard(planner.get_plan, plan_id)
+    if not plan["blueprint"]:
+        raise HTTPException(400, "plan the story first")
+
+    async def work(progress):
+        be = llm.ChatBackend(settings_mod.get(), settings_mod.api_key())
+        await thumbnail.make(plan_id, be, settings_mod.get(), settings_mod.api_key(), progress)
+    return _start(plan_id, "thumbnail", work)
 
 
 @router.post("/{plan_id}/video")

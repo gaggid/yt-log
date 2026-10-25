@@ -28,6 +28,10 @@ class P2Fake(FakeBackend):
                      for i, n in enumerate(["opening", "context", "turn", "payoff", "ending"], 1)]
             return LLMResult(json.dumps({"structure": "decision consequence", "viewer_promise": "understand what happened",
                                          "central_question": "why?", "cold_open": "a pump handle is removed", "stakes": "a whole street", "false_answer": "bad air", "turning_point": "the turn", "payoff": "p", "ending": "e", "beats": beats}))
+        if task == "p2_thumbnail":
+            self.calls.append({"task": task, "user": messages[1]["content"]})
+            return LLMResult(json.dumps({"options": [{"text": "Who removed the handle?", "image": "a worried doctor beside an old iron pump at dusk", "why": "a mystery"},
+                                                      {"text": "Why did it work?", "image": "a street pump", "why": "curiosity"}]}))
         if task == "p2_director":
             n = int(re.search(r"Plan the film now: (\d+) segments", messages[1]["content"]).group(1))
             self.calls.append({"task": task, "user": messages[1]["content"]})

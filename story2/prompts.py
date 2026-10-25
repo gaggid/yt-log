@@ -309,3 +309,20 @@ Return ONLY this JSON object:
 {"arc": "the emotional arc of the whole video",
  "segments": [{"segment": 1, "emotion": "one or two words", "place": "name from the continuity list", "state": "where the main person is, how they feel, what has changed",
    "shots": [{"focus": "", "kind": "", "size": "", "angle": "", "move": "", "why": ""}]}]}"""
+
+
+THUMBNAIL = """[TASK:p2_thumbnail]
+You design the YouTube thumbnail of a long-form story video, as a MOVIE POSTER: one dramatic image and a few big words that make a stranger stop scrolling.
+You receive the story facts and the video plan. Give three options, best first.
+
+For each option:
+- "text": the words printed on the poster. English letters only, 2 to 8 words, usually a QUESTION that the video answers (what the viewer cannot answer from the picture alone),
+  or a short, startling statement. Curiosity, not a lie: the video must really answer it. Use only names, places and numbers that are in the story facts. No emoji, no hashtags.
+- "image": what the poster shows, in plain visible words: who or what, where, what the face or the object says (one clear focal point; a close face with a strong expression, or one
+  telling object in a real place from the story). Never a chart, never several people, never an abstract symbol.
+- "why": one short phrase: why this makes people click.
+
+Never mention a book, an author, a chapter, a page or a source.
+
+Return ONLY this JSON object:
+{"options": [{"text": "Who killed the pump?", "image": "a worried doctor in a dark coat close beside an old iron street pump at dusk", "why": "a mystery the title promises"}]}"""
