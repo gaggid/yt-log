@@ -52,7 +52,7 @@ Goal: scenes whose narration states numbers that must be read (a price series, a
 
 ### Batch I: assembly and draft video (BUILT: `story3/video.py`, `tests/test_phase3i.py`; ffmpeg 7.1.1 at `C:\Ffmpeg\bin`)
 
-What exists: a checklist of what is missing (blockers: no picture, only old pictures, no voice) and what is used but not approved (warnings); **Make the draft video** (1080p, 30 fps, H.264 + AAC) and **Make a preview** (640x360, 15 fps), run as a background job; each scene's approved graphic or picture held for exactly its length (cut points are placed on the global timeline so 50 scenes do not drift) with a slow zoom or pan chosen from the scene's motion intent, never the same move twice in a row, cards held still, a short fade-in only where the scene asks for a dissolve; the approved (else latest valid) voice of each part joined in order; optional Hinglish captions burned in with libass (Nirmala UI, bottom margin inside the safe area) from the narration sentences; finished clips are cached so a rebuild only redraws what changed; a video is marked older when a picture or the voice changed. "Build anyway" draws a labelled PICTURE MISSING card and silence where something is missing, and the video is then never counted as done. Durations are measured with `ffmpeg -i` because the `ffprobe.exe` on this machine is an empty file. Not built: animating the graphic cards (count up, line draw) from their hints, music, and a final-quality render profile beyond the draft one. The original plan follows.
+What exists: a checklist of what is missing (blockers: no picture, only old pictures, no voice) and what is used but not approved (warnings); **Make the draft video** (1080p, 30 fps, H.264 + AAC) and **Make a preview** (640x360, 15 fps), run as a background job; each scene's approved graphic or picture held for exactly its length (cut points are placed on the global timeline so 50 scenes do not drift) with a slow zoom or pan chosen from the scene's motion intent, never the same move twice in a row, cards held still, a short fade-in only where the scene asks for a dissolve; the approved (else latest valid) voice of each part joined in order; optional Hinglish captions burned in with libass (Nirmala UI, bottom margin inside the safe area) from the narration sentences; finished clips are cached so a rebuild only redraws what changed; a video is marked older when a picture or the voice changed. "Build anyway" draws a labelled PICTURE MISSING card and silence where something is missing, and the video is then never counted as done. Durations are measured with `ffmpeg -i` because the `ffprobe.exe` on this machine is an empty file. Since then: moves come from the director (eased pushes, pulls, pans, tilts, no frozen frame except cards), captions are on by default in auto-run, and the finished video plays at 1.25x. Not built: animating the graphic cards (count up, line draw) from their hints, music, and a final-quality render profile beyond the draft one. The original plan follows.
 
 Goal: a watchable 1080p MP4 and a checklist of what is missing.
 
@@ -68,7 +68,7 @@ Goal: a watchable 1080p MP4 and a checklist of what is missing.
 
 1. **Quality pass on the draft:** watch it, fix the weakest scenes (redraw, correct, retime); a "weakest scenes" view from the scores.
 2. **Music bed** from the gateway's music models (`minimax-music-3`, `yue2-3b`): a quiet instrumental per beat mood, mixed under the voice with ducking.
-3. **Title, description, chapters and tags** from the plan (the working title is marked "working"), in the narrator's voice, no source mentions; a thumbnail brief and thumbnail picture in the chosen style.
+3. **Title, description, chapters and tags** from the plan (the working title is marked "working"), in the narrator's voice, no source mentions; (the thumbnail picture is BUILT: `story3/thumbnail.py`, a movie-poster picture with a curiosity question, made as the last auto-run step).
 4. **Final render settings and a publish checklist** (fact verification, narrator name, music note).
 5. **Vertical 9:16 cut** as its own plan (composed, not cropped), shorter, captions in the lower third.
 6. **Upload and analytics** (YouTube API) and a learning loop on openings and lengths.
@@ -80,13 +80,24 @@ Goal: a watchable 1080p MP4 and a checklist of what is missing.
 - Multi-voice or multi-language versions.
 - Cost and time dashboard from the gateway metrics (`serve_metrics.db`).
 
+## Parked by the owner (do later, in this order of interest; see docs/RUN_LOG.md for the findings)
+
+1. Test sending the approved reference picture (edit mode) against plain drawing for face consistency; keep it only if faces hold.
+2. Remove FLUX (76 mentions in 15 files, plus its tests) so one image model remains.
+3. An automatic check for the same person in the same pose across scenes; cap people in scenes, not only in shots.
+4. Put `emotional_effect` in the picture prompt; brighten the filmic look.
+5. Wide pictures for pan shots; split very long storyboard segments.
+6. The leak gate and a source title that is the subject's real name (owner's call).
+
 ## Decisions already made (do not re-open without the owner)
 
-- Hinglish mixed script; Svara `hi_male` only; one steady emotion per part.
+- Hinglish mixed script (Hindi in Devanagari, English words in Latin letters, never Hindi in Latin letters); Svara `hi_male` only; one steady emotion per part; neutral is the default voice and works best.
+- One image model: Qwen Image 2.1 (FLUX is dropped; removal pending).
+- The finished video plays at 1.25x. Narration is a suspense-led telling (the blueprint plans it); facts stay exact.
 - 16:9 first; verticals separate.
 - Licences are not a blocker.
 - No source carried forward; long charts and documents are built by code from verified facts only.
-- **Illustrated story scenes** in one chosen style (default game-art illustration), faces and emotion, real named people only as silhouettes or shadows; on-screen text English only; no game or brand names in prompts.
+- **Illustrated story scenes** in one chosen style (default: filmic, a painted film still; game-art, noir and concept remain), faces and emotion, real named people only as silhouettes or shadows; on-screen text English only; no game or brand names in prompts.
 - Descriptions are literal and complete (slot by slot); the registry reads the whole narration.
 - Chat model stays `gemma4-12b-qat-uncensored-hauhaucs-balanced`; `qwen3.5-9b` and the MSFIT-9B-v8 entry were tested and rejected.
 - Small batches, each visible on the screen, each with tests.

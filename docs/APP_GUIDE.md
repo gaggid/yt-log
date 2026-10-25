@@ -74,8 +74,10 @@ story2/              PHASE 2: story to video plan                 router /api/pl
   intake.py          loads an approved story: public facts vs evidence
   planner.py         plans, blueprint, narration (Hinglish), validation
   svara.py           spoken-text rules, emotion tags, pause tags, duration estimate
-  storyboard.py      asset registry, scenes, timing, retiming to real audio, repeat fixing
-  styles.py          the visual style presets (look text, object look, palette, negative words, LoRA hook) and DIRECTION version
+  storyboard.py      asset registry, scenes, timing, retiming to real audio, repeat fixing (redraw, then a model-free sweep so one press settles every repeat)
+  director.py        the shot plan: emotion, place, size, angle and camera move for every segment, planned before any scene is drawn; scenes follow it
+  narration_audit.py a fixed rubric (questions, flat voice, repeats, stock phrases, romanised Hindi, opening length) to compare two narrations number by number
+  styles.py          the visual style presets (filmic is the default; gta, noir, concept remain), their look text, palette, negative words, LoRA hook, and the DIRECTION version
   describe.py        slot-by-slot descriptions: slots per kind, compose the description, report vague or empty slots
   providers.py       what each image model can do (capabilities, sizes, settings_for/model_for)
   imgprompts.py      Qwen and FLUX prompt compilers, validator, reference plan, overlay spec
@@ -91,6 +93,8 @@ story3/              PHASE 3: plan to media                       router /api/me
   voice.py           Batch E: Svara per segment, real length, retiming
   refs.py            Batch F: reference model sheets (people: 4 poses on white; objects: 3 views; places: one view), approval, bulk approve
   refscore.py        Batch F: measure a picture and look at it (vision) -> score, with a pose-consistency check for sheets
+  thumbnail.py       the YouTube thumbnail: a movie-poster picture with a short curiosity question on it (Qwen, words in quotes, read back, 1280x720)
+  auto.py            Auto-run: every unfinished step in order as one job (keep in step with the plan screen)
   api.py
 static/              index.html (all pages), plan.js (the plan screen), style_samples/ (three sample pictures); no build step
 tests/               pytest, fake models and fake gateways
@@ -119,29 +123,36 @@ legacy/              the old news-podcast generator (not served)
 11. **Descriptions are composed from slots** (`describe.py`); an asset with empty or vague slots is listed in `cast_gaps` on the plan response and shown with a "Fill in the gaps" button.
 12. **The registry reads the whole narration** and must list every person, place and object it needs; charts, graphs and documents are filtered out of the object list in code. "Add one" adds anything it missed.
 13. **LoRAs:** none are needed (all three looks render on the base models). `styles.LORAS` names any to send per style and model; attach the file to the model in the gateway console first.
+14. **Plan, then draw, and wire what you plan.** The director's shot plan (`story2/director.py`) is made when the storyboard is. Each scene names the shot it follows (`scene.data.direction`), the shot's size and angle are written into `composition`, the Qwen prompt opens with the camera (`imgprompts.shot_line`), and `story3/video.py` takes the camera move from `direction.move`. A new planned field must reach the scene, the prompt and the consumer; check all three.
+15. **The blueprint carries a suspense plan** (cold open, stakes, the wrong answer first, the dark moment; per beat: reveal, hold back, plant, feeling, ends on). Every beat's narration prompt gets it, plus a storyteller persona. Narration is sent back (the last attempt is always accepted, so a run never stops on style) for: Hindi in Latin letters, an opening sentence over 14 words, repeated sentences, an opener or a stock phrase used again, characters the voice cannot say. Neutral is the default voice; a flat voice is never penalised.
+16. **Step order** (auto-run and the screen): blueprint, narration, characters, storyboard, references, prompts, repeats, approve, export, voice, pictures, graphics, video, thumbnail. References come after the storyboard so only assets the scenes use get one, and are skipped when scenes are drawn plain (auto-run's default), because plain drawing never sends them.
+17. **Cards that add nothing are not shown.** A graphic made only from a label, or with a caption cut off mid-sentence (`graphics.thin`), is never approved by itself and counts as settled; the video shows the scene's own picture instead.
+18. **The finished video plays at 1.25x** (`video.PLAYBACK_SPEED`: picture, voice and burned captions together, voice pitch kept). Recorded as `meta.speed` and part of the video's hash.
+19. **Validators accept their last attempt.** `JsonCaller.last_attempt` tells a checker it is the final try; style checks send the reply back before that and let it through then, so a long run never stops on a style rule. A storyboard reply that is broken JSON is asked again up to three rounds.
 
 ## 5. Using the plan screen (the path to a video)
 
-The plan page has a **journey bar** (Story, Blueprint, Narration, Characters, References, Storyboard, Image prompts, Checked, Reviewed, Approved, Exported, Voice), a **"Next:" bar** with one button for the next step, a red/amber/green **banner**, and a **sticky side panel** of numbered steps. The page refreshes itself every 1.5 s while a job runs. A **Visual style** card (three sample pictures) and a **Characters, places and objects** card sit above the storyboard; the **Reference pictures** section follows them.
+The plan page has a **journey bar** (Story, Blueprint, Narration, Characters, Storyboard, References, Image prompts, Checked, Reviewed, Approved, Exported, Voice), a **"Next:" bar** with one button for the next step, a red/amber/green **banner**, and a **sticky side panel** of numbered steps. The page refreshes itself every 1.5 s while a job runs. A **Visual style** card (three sample pictures) and a **Characters, places and objects** card sit above the storyboard; the **Reference pictures** section follows them.
 
 | Step | What happens | Model needed |
 |---|---|---|
 | 1 Plan the story | Blueprint: structure, viewer promise, central question, beats | chat |
 | 2 Write the narration | Hinglish narration per beat, one emotion per part | chat |
 | 3 Create characters and places | Reads the whole narration; lists every person, place and object slot by slot; style asset set from the preset. "Add one" and "Fill in the gaps" complete it | chat |
-| 4 Make reference pictures | Model sheets on white (people: four poses; objects: three views; places: one view), 2 candidates each, scored; "Approve the best" or approve one by one; Skip | image + chat (vision) |
-| 5 Design the storyboard | Illustrated story scenes per part; "Redesign" replaces approved scenes too when the style changed | chat |
+| 4 Design the storyboard | The director plans the whole film as shots first, then scenes per part follow their shots (a segment that returns broken JSON is asked again); "Redesign" replaces approved scenes too when the style changed | chat |
+| 5 Make reference pictures | Model sheets on white (people: four poses; objects: three views; places: one view), only for people and places in two or more scenes and objects in three or more; 2 candidates each, scored; "Approve the best" or approve one by one; Skip. Auto-run skips this step when scenes are drawn plain | image + chat (vision) |
 | 6 Write image prompts | Qwen and FLUX prompts for every scene (instant) | none |
 | 7 Check everything | Validation of narration, scenes and prompts | none |
-| 8 Fix camera repeats | Redraw scenes that repeat the previous camera | chat |
+| 8 Fix camera repeats | Redraw scenes that repeat the previous camera, then change any that still repeat; rewrites the prompts and re-runs the checks, so one press settles it | chat |
 | 9 Review and score | Twelve scores with reasons; sign-off checklist | none |
 | 10 Approve the plan | Sign off the exact reviewed version (tied to the content hash) | none |
 | 11 Export | Versioned JSON file, schema-checked and leak-checked | none |
 | 12 Make the voice | Svara, one request per part; scenes retimed to real audio; "Approve all voice" | voice |
 | 13 Scene pictures | Three-scene trial on both models (plain and from the reference sheets), choose the way, then one picture per scene (16:9, 1344x768); Draw again, Correct this, scores, "Approve the best"; resume after a stop | image + chat (vision) |
 | 14 Graphics | Cards for chart, document, screen, map and diagram scenes, built by code from the story's facts (stat, comparison, bar or line chart, timeline, title card); approve per scene | none |
-| 15 Draft video | Checklist of what is missing or not approved; 1080p draft or small preview with slow zoom and pan over the approved voice, optional burned-in captions; placeholders only on request | none (ffmpeg) |
-| Auto-run | One button (top of the side panel, and in the Next bar) that does every unfinished step in order as one background job (`story3/auto.py`): approves the best, else first, finished outcome at each choice; scene pictures use Qwen drawn plain unless a way was already chosen; thin-fact graphics are accepted; the plan is signed off. Stops at the first thing it cannot settle (a sign-off blocker, a missing model, a failing request) and says which step; everything finished is kept and pressing it again resumes. Character-description gaps are not filled (a person must) | all |
+| 15 Draft video | Checklist of what is missing or not approved; 1080p draft or small preview with eased pushes, pulls, pans and tilts chosen by the director (no frozen frame except cards) over the approved voice, burned-in captions on by default; the finished video plays at 1.25x; placeholders only on request | none (ffmpeg) |
+| 15b Video thumbnail | A movie-poster picture with a short curiosity question on it, in the plan's style; three options written from the blueprint, Qwen draws the words in quotes, a vision check reads them back; "Make another" | chat + image |
+| Auto-run | One button (top of the side panel, and in the Next bar) that does every unfinished step in order as one background job (`story3/auto.py`): approves the best, else first, finished outcome at each choice; scene pictures use Qwen drawn plain unless a way was already chosen; thin cards are left out in favour of the scene's picture; the thumbnail is made last; the plan is signed off. Stops at the first thing it cannot settle (a sign-off blocker, a missing model, a failing request) and says which step; everything finished is kept and pressing it again resumes. Character-description gaps are not filled (a person must) | all |
 | 16 Go to the first problem | Jumps to the first thing that needs attention | none |
 
 Approval of voice and pictures is optional for the draft (the latest valid take counts), but approved items are never regenerated by "all" actions. Changing the visual style (a click on a sample) rewrites the style asset and recompiles prompts at once; the characters, sheets and scenes made for the old look are then flagged.
@@ -150,16 +161,15 @@ Approval of voice and pictures is optional for the draft (the latest valid take 
 
 - `/api/...` Phase 1: settings, projects (upload, url, text), scope, process, pause, cancel, stories (review, merge, split), export.
 - `/api/plans/...` Phase 2: `GET /styles`, `PATCH /{plan}/visual-style`, `POST /{plan}/assets` (add one), plans CRUD, `job`, `cancel`, `narrator`, `settings`, `blueprint`, `narration`, `registry`, `storyboard`, `fix-repeats`, segments and scenes (patch, move, regenerate), assets patch, `review`, `approve`, `unapprove`, `history`, `export`, `exports/{plan}/{file}`, `image-models`, `compile-prompts`, scene `prompts` and `preview`, `validate`, `providers`, `providers/probe`, `schema`.
-- `/api/media/...` Phase 3: `GET /{plan}` (voice and references state), `POST /{plan}/voice`, `POST /{plan}/references`, `.../references/score`, `.../references/approve-best`, `.../references/skip`, `PATCH /item/{id}` (approve), `GET /file/{plan}/{path}`.
+- `/api/media/...` Phase 3: `GET /{plan}` (voice, references, scenes, graphics, video, thumbnail and auto-run state), `POST /{plan}/thumbnail`, `POST /{plan}/auto`, `POST /{plan}/voice`, `POST /{plan}/references`, `.../references/score`, `.../references/approve-best`, `.../references/skip`, `PATCH /item/{id}` (approve), `GET /file/{plan}/{path}`.
 
 ## 6. Where things stand
 
-- **Code:** committed and pushed through commit 2b5905b ("Literal descriptions..."). The app must be restarted once to load it (the watcher restarts it after a pull when no job runs).
-- **Real plan:** `pl-840b02a0`, 6-minute 16:9 plan from the Knight Capital story: 8 narration parts, 50 scenes, approved, export **v003** (carries real audio lengths). **Voice made and approved** for all 8 parts (Svara, about 26 minutes). These scenes were designed under the **old chart-style direction** (12 chart scenes, 8 diagrams, abstract metaphors) and the registry has anonymous figures and chart "props", so the plan page marks the characters and storyboard as "made for another look". **No reference pictures exist yet.** The narration is still the older Devanagari-only text; its emotional-coherence score is 4 (emotion switches inside parts).
-- **Tried on a copy of the real data (nothing saved):** the new registry gave a concrete trader (35, tan skin, navy sweater, charcoal trousers, brown boots, silver watch), a trading floor and a trading desk; the new storyboard gave story scenes with no charts; three pictures showed one consistent, expressive trader. A trader model sheet scored 100 and showed four consistent poses on white.
-- **Three empty draft plans** from earlier tests (`pl-80117505`, `pl-a1b51833`, `pl-c056df3f`) can be deleted from the plan list.
+- **Code:** committed and pushed to `origin/master` (latest work: the director, camera-first Qwen prompts, the filmic default style, the suspense plan and stricter narration checks, the thumbnail, thin-card handling, 1.25x playback, the repeat-fixer loop fix). The app must be restarted to load a pull (the watcher does it when no job runs). The full suite had 290 passing tests at last count.
+- **Proof runs** (an 1854 cholera outbreak, a non-finance story, to prove any subject works): `pl-22f2f454` (6 minutes, 59 scenes, 13 of 13 steps with no human step, video 389 s) and `pl-e6535eac` (3 minutes, 36 scenes, 13 of 13, video 206 s). The line-by-line record of what was found and fixed is **`docs/RUN_LOG.md`**: read it before changing narration, the director, pictures or auto-run.
+- **What the proof runs showed:** the filmic style and camera-first prompts look much better than the old game-art look; the director removes frozen frames (13% hold against 39%); readable shop signs were the main reason pictures failed the check (fixed by quoting short sign words); the narration reads like a thriller with the suspense plan but still needs a read in Hindi by a person.
+- **Narration comparison:** `python -m story2.narration_audit plan1.json plan2.json` prints a table. Baseline, suspense v1 and v2 are in the run log; v2 (with the later fixes) is the version in use.
 - **Facts are marked "unverified"** (the user's own task); the narrator name is unset.
-- `D:\yt-log-ui` (a leftover git worktree on branch `ui-refresh`) was removed on 2026-10-24, locally and on origin; its commit was already in master.
 
 ### Keeping every picture tied to the story (any subject)
 
@@ -173,13 +183,19 @@ Limit: the checks are only as good as the chat model's reading of the story, and
 
 ## 7. Known gaps and risks
 
-- No full run of scene pictures has been judged yet. Batch G is built; its three-scene trial on the real plan is the first thing to do.
-- Edit-mode consistency is unproven: sending a reference sheet to `/v1/images/edits` to keep a character identical in a new scene has not been tested on the real models. The Batch G trial tests it against plain generation from the full character description (which already gave a consistent trader in three scenes) and keep whichever holds identity better.
-- The chat model sometimes ignores instructions (it listed "stock chart" and "earnings report" as props and invented odd metaphors); code filters now catch the chart and document case and the scene prompt forbids unrelated symbols, but read the storyboard before approving it.
+Parked by the owner (not started; details in `docs/RUN_LOG.md`):
+- Faces change between scenes because auto-run draws from the text only; sending the approved reference (edit mode) has not been tested for consistency.
+- FLUX is still in the code (76 mentions in 15 files); the owner wants one image model (Qwen).
+- No automatic check for the same person in the same pose across scenes (only a prompt rule); `emotional_effect` never reaches the picture prompt; the director caps shots that focus on a person but scenes also add people as assets, which is not capped.
+- Wide pictures for pan shots are not built (pans crop a normal frame); long storyboard segments are asked again on broken JSON but not split.
+- The leak gate refuses a source whose title is the story's real subject name; the owner decides whether to relax it.
+
+Other:
+- Frames are dark under the filmic look; brightness is not tuned.
+- The suspense lines, the thumbnail words and the 1.25x playback have been checked on test doubles and one real narration, not on a published video; watch the first ones.
 - Svara occasionally repeats or drops a word: the app flags unusual length per part; use "Make again" (new seed).
-- Hindi captions rely on the Nirmala UI font being installed. On-screen text inside pictures is English only.
-- FLUX may repeat a word in quoted text and adds unrequested crowd detail; Qwen is the default and the safer model for text.
-- One GPU, one request at a time: a full video is a long job (voice about 26 minutes, pictures about 25 to 60 seconds each on Qwen, about 2 minutes on FLUX).
+- Hindi captions rely on the Nirmala UI font being installed. On-screen text inside pictures is English only; quoted short words are drawn best.
+- One GPU, one request at a time: a 6-minute video took about 2 hours 20 minutes end to end (voice about 22 minutes, pictures about 95 minutes including redraws).
 - README.md still describes Phase 1 in detail; this guide is the current overview.
 
 ## 8. Troubleshooting
@@ -196,6 +212,7 @@ Limit: the checks are only as good as the chat model's reading of the story, and
 | A request is refused with 409 | story processing (Phase 1) is running; the model server answers one request at a time |
 | Props show a logo, a face on a screen or stray letters | a game or brand name, or the character clause of the style, is in the prompt; objects and places use the preset's `object_look`; never name a game |
 | The same character looks different between scenes | an empty or vague description slot (see "Fill in the gaps"), or no approved reference sheet |
+| The plan screen flips between "Write image prompts" and "Fix camera repeats" | fixed: the repeat fixer now settles every repeat and re-runs the checks; restart the app to load it, then press Fix camera repeats once |
 | "made for another look" on the plan page | the style or the direction changed since the characters or scenes were made: press the highlighted step |
 
 ## 9. Conventions
