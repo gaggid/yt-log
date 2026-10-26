@@ -14,7 +14,7 @@ for _s in (sys.stdout, sys.stderr):
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 import auth
 import config
@@ -57,14 +57,19 @@ app.include_router(plans_router)
 app.include_router(media_router)
 
 
+NO_STORE = {"Cache-Control": "no-store"}
+
+
 @app.get("/")
 async def root():
-    return FileResponse(STATIC / "index.html")
+    """The page names plan.js with its file time, so a browser or a proxy in front (the tunnel) can never keep serving an older script after an update."""
+    html = (STATIC / "index.html").read_text(encoding="utf-8").replace('src="/plan.js"', f'src="/plan.js?v={int((STATIC / "plan.js").stat().st_mtime)}"')
+    return HTMLResponse(html, headers=NO_STORE)
 
 
 @app.get("/plan.js")
 async def plan_js():
-    return FileResponse(STATIC / "plan.js", media_type="application/javascript", headers={"Cache-Control": "no-cache"})
+    return FileResponse(STATIC / "plan.js", media_type="application/javascript", headers=NO_STORE)
 
 
 @app.get("/style-samples/{name}")
