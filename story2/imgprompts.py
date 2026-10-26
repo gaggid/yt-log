@@ -24,6 +24,12 @@ ADAPTERS = ("qwen", "flux")
 # Descriptive geometry ("45-degree angle", "3D", "2D") is not a claim.
 _CLAIM_NUM = re.compile(r"(?:[$\u20b9\u00a3\u20ac]\s?(\d[\d,.]*)|\b(\d[\d,.]*)\s?%|\b(\d{4,})\b|\b(\d[\d,.]*)\s?-?\s?(?:percent|million|billion|crore|lakh|thousand|days?|weeks?|months?|years?|shares|dollars|rupees|points)\b)")
 _STOP = set("a an the of and or to in on at with for from by is are was were be as it its this that his her their over under into out up down".split())
+# public outdoor/transit locations where the background should feel naturally populated
+_PUBLIC_RX = re.compile(
+    r"\b(street|road|lane|chowk|bazaar|market|mela|ghat|square|plaza|crossing|intersection|"
+    r"station|bus.?stand|bus.?stop|airport|terminal|platform|"
+    r"stadium|ground|arena|"
+    r"beach|shore|promenade|park|garden|fair)\b", re.I)
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────
@@ -166,19 +172,44 @@ def person_hide(a: dict, hide: set[str]) -> set[str]:
     return hide | ({"face", "eyes", "expression"} if a["data"].get("fictionalisation") == "real_person_no_likeness" else set())
 
 
-def _subject_text(d: dict, people: list[dict], indian: bool = False) -> str:
+def _ambient_hint(location: str, layers: dict) -> str:
+    """One sentence added to the environment when the location is a public space but the background layers don't mention people or activity.
+    Prevents scenes where a busy street has vehicles but no bystanders because the narration never named them."""
+    if not location or not _PUBLIC_RX.search(location):
+        return ""
+    bg = _s(layers.get("background", ""))
+    mid = _s(layers.get("middle", ""))
+    if re.search(r"\b(people|person|crowd|pedestrians?|bystanders?|vendors?|passengers?|spectators?|activity|busy|commuters?|shoppers?)\b", bg + mid, re.I):
+        return ""
+    return "Background populated with bystanders, movement and activity natural to this kind of place."
+
+
+def _subject_text(d: dict, people: list[dict], indian: bool = False, ref_index: dict[str, int] | None = None) -> str:
     out = [_s(d.get("subject"))]
     hide = hidden_for(d)
+    ri = ref_index or {}
     for a in people:
-        if a["kind"] in ("person", "narrator"):
-            det, fixed = describe.person_view(a, indian, person_hide(a, hide))          # composed from the slots: what the frame hides is left out, the cast setting applies
-            det = _s(det)
-        else:
-            det, fixed = _s(a["data"].get("description")), a["data"].get("fixed", [])
-        extra = "; ".join(_s(x) for x in fixed if _s(x) and not covers(det, _s(x)))              # fixed details the description does not already say
+        n = ri.get(a["id"])
         fic = a["data"].get("fictionalisation", "")
-        out.append(f"Appearance of {a['name']}: {det}" if det else "")
-        out.append(f"Always the same: {extra}" if extra else "")
+        if n is not None:
+            # Reference image is being sent — use the image as the appearance source, not text, to avoid duplication.
+            # Only keep fixed (must-be-visible) details that may not be obvious from the reference sheet angle.
+            if a["kind"] in ("person", "narrator"):
+                _det, fixed = describe.person_view(a, indian, person_hide(a, hide))
+            else:
+                fixed = a["data"].get("fixed", [])
+            extra = "; ".join(_s(x) for x in fixed if _s(x))
+            out.append(f"{a['name']}: refer to Image {n} for appearance")
+            out.append(f"Always the same: {extra}" if extra else "")
+        else:
+            if a["kind"] in ("person", "narrator"):
+                det, fixed = describe.person_view(a, indian, person_hide(a, hide))          # composed from the slots: what the frame hides is left out, the cast setting applies
+                det = _s(det)
+            else:
+                det, fixed = _s(a["data"].get("description")), a["data"].get("fixed", [])
+            extra = "; ".join(_s(x) for x in fixed if _s(x) and not covers(det, _s(x)))              # fixed details the description does not already say
+            out.append(f"Appearance of {a['name']}: {det}" if det else "")
+            out.append(f"Always the same: {extra}" if extra else "")
         if fic == "real_person_no_likeness" and a["kind"] == "person":
             out.append("Shown only as a silhouette, from behind or in deep shadow, with no recognisable face; no real person's likeness is implied")
     if set(describe.LOWER) <= hide and any(a["data"].get("appearance") for a in people if a["kind"] in ("person", "narrator")):
@@ -315,6 +346,7 @@ def compile_qwen(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
     indian = describe.indian_on(plan.get("settings"))
     look = styles.for_plan(plan.get("settings"))
     use_refs = bool(refs["references"]) and (plan.get("settings") or {}).get("scene_pictures", {}).get("mode") in ("edit", "auto")
+    ref_index = {r["asset_id"]: i for i, r in enumerate(refs["references"], 1)} if use_refs else {}
     comp = d.get("composition") or {}
     sec: dict[str, str] = {}
     sec["shot"] = shot_line(comp) or "Shot: a medium shot at eye level."                      # first: the opening words steer the whole picture
@@ -322,16 +354,18 @@ def compile_qwen(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
     if plate:
         notes.append("this visual needs a verified chart, document, screen, map or diagram: the picture is the illustrated scene around it; the exact content is added later")
     if plate:
-        sec["subject"] = "Main subject: " + _sent(_s(_g(d, "feasibility", "fallback")) or _subject_text(d, people, indian),
+        sec["subject"] = "Main subject: " + _sent(_s(_g(d, "feasibility", "fallback")) or _subject_text(d, people, indian, ref_index),
                                                  ("Apart from the quoted words, any screen, paper or sign shows only abstract glowing light and shapes" if shown else
                                                   "Any screen, paper or sign in the scene shows only abstract glowing light and shapes, nothing readable"))
     else:
-        sec["subject"] = "Main subject: " + _sent(_subject_text(d, people, indian))
+        sec["subject"] = "Main subject: " + _sent(_subject_text(d, people, indian, ref_index))
     sec["action"] = "Action and moment: " + _sent(f"The single moment shown is {_lead_lower(d.get('action'))}" if _s(d.get("action")) and not plate else
                                                   "A still, held moment with no competing action")
-    env = "Environment: " + _sent(_val(_g(d, "setting", "location")), f"Period: {_val(_g(d, 'setting', 'period'))}" if _val(_g(d, "setting", "period")) else "",
+    loc = _val(_g(d, "setting", "location"))
+    env = "Environment: " + _sent(loc, f"Period: {_val(_g(d, 'setting', 'period'))}" if _val(_g(d, "setting", "period")) else "",
                                   f"Atmosphere: {_s(d.get('atmosphere'))}" if _s(d.get("atmosphere")) else "")
-    sec["environment"] = env + ("" if plate else " " + _layers(d))
+    ambient = "" if plate else _ambient_hint(loc, d.get("layers") or {})
+    sec["environment"] = env + ("" if plate else " " + _layers(d)) + (f" {ambient}" if ambient else "")
     feel = "" if plate else mood.line(feeling_texts(scene, plan), hidden_for(d), bool(people))
     if feel:
         sec["feeling"] = feel
@@ -375,15 +409,19 @@ def compile_flux(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
     comp = d.get("composition") or {}
     indian = describe.indian_on(plan.get("settings"))
     look = styles.for_plan(plan.get("settings"))
+    flux_cfg = providers.get("flux2-klein-9b")
+    ref_index = {r["asset_id"]: i for i, r in enumerate(refs["references"], 1)} if (refs["references"] and flux_cfg["edits"]) else {}
     sec: dict[str, str] = {"style": _sent(look["look"])}
     if plate:
         notes.append("this visual needs a verified chart, document, screen, map or diagram: the picture is the illustrated scene around it; the exact content is added later")
-    subject = _subject_text(d, people, indian)
+    subject = _subject_text(d, people, indian, ref_index)
     sec["subject"] = _sent(_s(_g(d, "feasibility", "fallback")) or subject, "Any screen, paper or sign shows only abstract glowing light and shapes") if plate else _sent(subject)
     sec["action"] = "" if plate else _sent(f"{_s(d.get('action'))}" if _s(d.get("action")) else "The moment is still and held")
-    where = _sent(f"The scene is set in {_run(_val(_g(d, 'setting', 'location')))}" if _val(_g(d, "setting", "location")) else "",
+    loc = _val(_g(d, "setting", "location"))
+    where = _sent(f"The scene is set in {_run(loc)}" if loc else "",
                   f"The period is {_run(_val(_g(d, 'setting', 'period')))}" if _val(_g(d, "setting", "period")) else "")
-    sec["setting"] = where + ("" if plate else " " + _layers(d))
+    ambient = "" if plate else _ambient_hint(loc, d.get("layers") or {})
+    sec["setting"] = where + ("" if plate else " " + _layers(d)) + (f" {ambient}" if ambient else "")
     feel = "" if plate else mood.line(feeling_texts(scene, plan), hidden_for(d), bool(people))
     if feel:
         sec["feeling"] = feel

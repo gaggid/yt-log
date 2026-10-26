@@ -133,7 +133,7 @@ class ScenesReq(BaseModel):
     only_missing: bool = True
     model: str | None = None
     mode: str | None = None
-    score: bool = True
+    score: bool = False
 
 
 def _need_prompts(plan_id: str) -> None:

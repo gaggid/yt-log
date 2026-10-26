@@ -312,17 +312,38 @@ Return ONLY this JSON object:
 
 
 THUMBNAIL = """[TASK:p2_thumbnail]
-You design the YouTube thumbnail of a long-form story video, as a MOVIE POSTER: one dramatic image and a few big words that make a stranger stop scrolling.
+You design the YouTube thumbnail of a long-form story video. YouTube thumbnails that get clicks are COMPOSITE images: one dramatic close-up face on the left + two or three scene panels on the right + large bold text. Think like a YouTube thumbnail designer, not a movie poster artist.
 You receive the story facts and the video plan. Give three options, best first.
 
 For each option:
-- "text": the words printed on the poster. English letters only, 2 to 8 words, usually a QUESTION that the video answers (what the viewer cannot answer from the picture alone),
-  or a short, startling statement. Curiosity, not a lie: the video must really answer it. Use only names, places and numbers that are in the story facts. No emoji, no hashtags.
-- "image": what the poster shows, in plain visible words: who or what, where, what the face or the object says (one clear focal point; a close face with a strong expression, or one
-  telling object in a real place from the story). Never a chart, never several people, never an abstract symbol.
+- "text": the words printed on the thumbnail. English letters only, 2 to 8 words, usually a QUESTION that the video answers, or a short, startling statement. Curiosity, not a lie.
+  Use only names, places and numbers that are in the story facts. No emoji, no hashtags.
+- "image": describe the composite layout in three parts, separated by " | ":
+    FACE: one person's emotional close-up on the left — their face, emotion (shock/fear/disbelief/anger), and what their hands or phone are doing.
+    PANELS: two or three small rectangular scenes stacked on the right — each one a key moment from the story. If a phone, screen or message is in the story, one panel should show it as a UI mockup (e.g. a WhatsApp notification, a bank SMS, a police alert on a screen).
+    TEXT AREA: where the large bold text sits and what colour it should be (e.g. "yellow-white bold text at the bottom, red accent on the key number").
 - "why": one short phrase: why this makes people click.
 
 Never mention a book, an author, a chapter, a page or a source.
 
 Return ONLY this JSON object:
-{"options": [{"text": "Who killed the pump?", "image": "a worried doctor in a dark coat close beside an old iron street pump at dusk", "why": "a mystery the title promises"}]}"""
+{"options": [{"text": "1 Click ₹64 Crore Gone?", "image": "FACE: middle-aged Indian man close-up, eyes wide, hand over mouth, holding phone | PANELS: top panel — hacker silhouette at dark monitor; bottom panel — police officers in tactical gear in front of cash stacks | TEXT AREA: large white-yellow bold text at the bottom with thick black stroke, red glow on the amount", "why": "the scale shocks and the face pulls you in"}]}"""
+
+
+THUMBNAIL_PROMPT_BOOST = """[TASK:p2_thumbnail_boost]
+You write image-generation prompts for Qwen Image 2.1. Your entire output is the prompt text, nothing else — no explanation, no JSON, no preamble.
+
+Turn the concept below into a single detailed image prompt that produces a professional YouTube thumbnail. Follow these rules exactly:
+
+STYLE: Photorealistic digital composite. Vivid saturated colours. High contrast. Everything is sharp. No illustration, no painting, no brushwork, no film grain.
+
+LAYOUT:
+Left 35% of the frame — one person's emotional close-up. Their face fills this area. Emotion is unmistakable (shock, fear, disbelief). Eyes wide. Warm natural light on the face. South Asian adult with realistic features; never a celebrity or named person.
+Right 65% — two or three crisp rectangular panels with thin dark borders between them. Each panel shows a different scene from the story concept. If the concept mentions a phone or screen, one panel must show a clear UI mockup: a WhatsApp notification bubble, a bank debit SMS, or a police alert — with the key number or phrase visible as small text inside the panel.
+The panels have dark moody backgrounds. Bright lit face on the left contrasts with the dark panels on the right.
+
+TEXT: The exact quoted words appear as very large all-capital bold text spanning the lower portion of the image, overlapping slightly onto panels. White letters with a thick black stroke and a red or orange drop shadow. The text is spelled exactly as given — never changed.
+
+CONSTRAINTS: No extra people beyond the face and the panel scenes. No logos or brand marks. No anime or cartoon style. No floating objects or symbols. One clear focal point in each area.
+
+Write the prompt for the concept and words given below."""

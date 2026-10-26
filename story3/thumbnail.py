@@ -13,7 +13,7 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, field_validator
 
 from story import db, llm, settings as settings_mod
 from story.schemas import Str
-from story2 import imgprompts, intake, leak, planner, prompts as P, providers, storyboard, store as plan_store, styles
+from story2 import imgprompts, intake, leak, planner, prompts as P, providers, storyboard, store as plan_store
 
 from . import refscore, scenes, store
 from .voice import MediaError
@@ -22,13 +22,6 @@ KIND = "thumbnail"
 KEY = "thumbnail"
 MAX_WORDS = 8
 OUT_SIZE = (1280, 720)
-THEMES = {                                   # one poster design per visual style: the same wording every time, so a channel's thumbnails look like a series
-    "filmic": "teal-and-orange cinematic one-sheet, a single warm light source, deep shadows, thin pale border, subtle film grain",
-    "gta": "bold game-key-art cover, saturated colour, strong rim light, thick outlines",
-    "noir": "black, red and amber noir poster, heavy ink shadows, halftone dots",
-    "concept": "painterly blockbuster poster, muted teal and amber, atmospheric haze",
-}
-
 
 def _words(v) -> str:
     return re.sub(r"\s+", " ", str(v or "")).strip().strip("\"'")
@@ -72,19 +65,34 @@ def _hero(plan_id: str) -> tuple[dict | None, dict | None]:
     return next((a for a in assets if a["kind"] == "person"), None), next((a for a in assets if a["kind"] == "place"), None)
 
 
-def poster_prompt(plan: dict, opt: Option, person: dict | None, place: dict | None) -> str:
-    look = styles.for_plan(plan["settings"])
-    who = f"Main subject: {imgprompts._s(opt.image)}." if opt.image else "Main subject: the story's main character in close-up."
-    if person and person["data"].get("fictionalisation") != "real_person_no_likeness":
-        who += f" Appearance: {imgprompts._s(person['data'].get('description'))}."
-    elif person:
-        who += " Shown only as a silhouette, from behind or in shadow, with no recognisable face."
-    parts = [f"Movie poster in a wide 16:9 frame, made as a YouTube thumbnail. {THEMES.get(look['id'], THEMES['filmic'])}. {look['look']}",
-             who, f"Setting: {imgprompts._s(place['data'].get('description'))}." if place else "",
-             "Composition: one dramatic low-angle close-up, the subject on the left third, strong rim light, high contrast, one accent colour, clear empty space on the right and top for the title.",
-             f'Exact text: the words "{opt.text}" in very large bold capital letters, white with a thick dark outline, across the right side of the poster. Written once, spelled exactly as quoted, no other text, logo or watermark anywhere.',
-             "Constraints: one clear focal point; no floating objects, no extra people, no anime or cartoon faces."]
-    return "\n".join(p for p in parts if p)
+def _fallback_prompt(opt: Option, person: dict | None) -> str:
+    """Baseline prompt used when the LLM enhancement step fails or is skipped."""
+    who = imgprompts._s(opt.image) or "the story's main character in dramatic close-up"
+    if person and person["data"].get("fictionalisation") == "real_person_no_likeness":
+        who += "; shown only as a silhouette, from behind or in shadow, no recognisable face"
+    return (f"Photorealistic YouTube thumbnail, wide 16:9 frame. Composite image: "
+            f"left third shows a dramatic emotional close-up of a South Asian adult (shock or fear, eyes wide, face fills the area); "
+            f"right two-thirds shows two stacked panels with key story scenes: {who}. "
+            f"High contrast, vivid colours, dark panel backgrounds, bright warm light on the face. "
+            f'Exact text: the words "{opt.text}" in very large bold all-capital letters, white with thick black stroke and red drop shadow, '
+            f"across the bottom of the image. Written once, spelled exactly as quoted. No other text, logo or watermark.")
+
+
+async def _enhance_prompt(opt: Option, blueprint: dict, be, s: dict) -> str:
+    """Call the text LLM to expand the composite concept into a detailed Qwen image prompt.
+    Falls back to the template prompt if the LLM call fails."""
+    user = (f"CONCEPT:\n{opt.image}\n\n"
+            f"WORDS ON THUMBNAIL: \"{opt.text}\"\n\n"
+            f"BLUEPRINT:\nPromise: {blueprint.get('viewer_promise', '')}\n"
+            f"Cold open: {blueprint.get('cold_open', '')}\nAt stake: {blueprint.get('stakes', '')}\n\n"
+            f"Write the image generation prompt now.")
+    try:
+        result = await be.complete([{"role": "system", "content": P.THUMBNAIL_PROMPT_BOOST},
+                                    {"role": "user", "content": user}], max_tokens=600)
+        enhanced = result.content.strip()
+        return enhanced if len(enhanced.split()) > 20 else ""
+    except Exception:  # noqa: BLE001 - template is the safe fallback
+        return ""
 
 
 async def make(plan_id: str, be, s: dict | None = None, key: str = "", progress=None, candidates: int = 2) -> dict:
@@ -115,7 +123,10 @@ async def make(plan_id: str, be, s: dict | None = None, key: str = "", progress=
     w, h, _ = providers.snap(1344, 768, cfg)
     out_dir = store.media_dir(plan_id, "thumbnail")
     base = s["base_url"].rstrip("/")
-    prompt = poster_prompt(plan, opt, person, place)
+    if progress:
+        progress(0, candidates, "writing the thumbnail prompt")
+    enhanced = await _enhance_prompt(opt, bp, be, s)
+    prompt = enhanced or _fallback_prompt(opt, person)
     if leak.check_many([(KEY, prompt)], prof):
         raise MediaError("the thumbnail prompt would carry source wording")
     made = []

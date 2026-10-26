@@ -98,6 +98,7 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:8px;
   <a href="#/settings">Settings</a>
   <button class="small" onclick="logout()">Sign out</button>
 </header>
+<div id="build-info" style="text-align:right;padding:3px 24px;font-size:11px;color:var(--mute);background:var(--panel);border-bottom:1px solid var(--line)"></div>
 <main id="app"></main>
 <div id="overlay"></div>
 <div id="toasts"></div>
@@ -686,6 +687,7 @@ async function testConn(btn) {
 }
 addEventListener('beforeunload', e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
 route();
+(async () => { try { const h = await api('/health'); const d = new Date(h.started_at); document.getElementById('build-info').textContent = `v${h.commit} · built ${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`; } catch {} })();
 </script>
 <button id="to-top" type="button" title="Back to the top" aria-label="Back to the top">&#8593;</button>
 <script>
