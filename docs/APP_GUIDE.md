@@ -17,7 +17,7 @@ Everything runs on this machine. The language models, image models and voice mod
 - **Nothing carried forward from the source:** no author or book mentions, no quotes, no pointers back. A leak gate checks everything that is spoken, shown or sent to a model.
 - **Narrator is first person**; the narrator's name is set later (`Narrator name` on the plan page; unset today).
 - **16:9 long-form first.** Vertical 9:16 comes later as its own plan.
-- **Voice is Svara `hi_male` only.** Narration is **Hinglish in mixed script** (Devanagari for Hindi, Latin letters for English words, numbers written as words).
+- **Voice is Veena `agastya` by default (owner decision, 2026-10-26); Svara `hi_male` stays selectable per plan.** Narration is **Hinglish in mixed script** (Devanagari for Hindi, Latin letters for English words, numbers written as words).
 - **Licences are not a blocker.** The image models are used as open-source models; every model starts "confirmed" (owner decision, 2026-10-24).
 - **Visual direction (owner decision, 2026-10-24): illustrated story scenes, not charts.** The video is a graphic novel: people, places and moments that could really have happened, drawn in one chosen style (default: game-art illustration like a GTA V loading-screen painting; also noir graphic novel and painterly concept art), with faces and emotion. Charts, documents and screens appear only when the narration states exact numbers (at most one scene in six). Characters are invented composite people; a real, named person is only a silhouette, from behind, in shadow or by the hands.
 - **On-screen text is English only** (never Devanagari). Short quoted English text is drawn correctly by both image models, so it goes into prompts exactly as written (8 words at most, words and numbers from the facts only).
@@ -44,8 +44,8 @@ start.bat                              # runs watch.py: starts the app, pulls or
 - **Gateway:** `D:\MiniMaxH3` (config `serve_models.yaml`, code `app/backend/`). OpenAI-compatible at `127.0.0.1:8810/v1`. **One concurrent request per key**; models that cannot share GPU memory take turns (a swap costs about 20 s). The app therefore runs **one job at a time** (`story2/jobs.py`) and refuses to start a second.
 - **Models in use:**
   - Chat (all writing stages): `gemma4-12b-qat-uncensored-hauhaucs-balanced`. Also has vision (used to score pictures).
-  - Voice: `svara-tts`, voice `hi_male`.
-  - Images: `qwen-image-2.1` (default) and `flux2-klein-9b`.
+  - Voice: `veena-tts` (default; `agastya` male, `kavya` `maitri` `vinaya` female) or `svara-tts` (`hi_male`). Chosen on the Voice card (`story2/voices.py`).
+  - Images: `qwen-image-2.1` (default), `flux2-klein-9b`, and every other image model the gateway lists (for example `z-image-turbo`; added as choices automatically, marked not audited). All are selectable per scene in "Redraw".
 - **Gateway settings we changed:** `svara-tts` `tts.timeout_s: 600` (the default 120 s killed every segment). Do not lower it.
 - **Tools:** ffmpeg 7.1.1 at `C:\Ffmpeg\bin` (with ffprobe), Pillow 11, font Nirmala UI (Devanagari), jsonschema.
 - **Tried and rejected:** the model entry `qwen3-8b-drama-thinking` (it actually loads `MSFIT-9B-v8`). Worse than Gemma at narration (wrong script, ignored facts), at the emotional arc (unstable) and it skips the creative-choices field. Same result for `qwen3.5-9b` on narration. Pipeline unchanged.
@@ -73,7 +73,8 @@ story/               PHASE 1: source to story candidates          router /api
 story2/              PHASE 2: story to video plan                 router /api/plans
   intake.py          loads an approved story: public facts vs evidence
   planner.py         plans, blueprint, narration (Hinglish), validation
-  svara.py           spoken-text rules, emotion tags, pause tags, duration estimate
+  svara.py           Svara spoken-text rules, emotion tags, pause tags, duration estimate
+  voices.py          voice engines (Veena default, Svara): voices, spoken text per engine, request body, the narration rules per engine
   storyboard.py      asset registry, scenes, timing, retiming to real audio, repeat fixing (redraw, then a model-free sweep so one press settles every repeat)
   director.py        the shot plan: emotion, place, size, angle and camera move for every segment, planned before any scene is drawn; scenes follow it
   narration_audit.py a fixed rubric (questions, flat voice, repeats, stock phrases, romanised Hindi, opening length) to compare two narrations number by number
@@ -128,6 +129,12 @@ legacy/              the old news-podcast generator (not served)
 16. **Step order** (auto-run and the screen): blueprint, narration, characters, storyboard, references, prompts, repeats, approve, export, voice, pictures, graphics, video, thumbnail. References come after the storyboard so only assets the scenes use get one, and are skipped when scenes are drawn plain (auto-run's default), because plain drawing never sends them.
 17. **Cards that add nothing are not shown.** A graphic made only from a label, or with a caption cut off mid-sentence (`graphics.thin`), is never approved by itself and counts as settled; the video shows the scene's own picture instead.
 18. **The finished video plays at 1.25x** (`video.PLAYBACK_SPEED`: picture, voice and burned captions together, voice pitch kept). Recorded as `meta.speed` and part of the video's hash.
+20. **Voice engine and voice live on the plan (`narrator.tts`), outside the content hash.** Picking another changes which takes count (the take hash carries `engine:voice`; Svara keeps the bare `hi_male` so older takes stay valid), never what was approved. Veena text is built from the sentences (punctuation and `[pause:Ns]`, no emotion tags); the request is sent with `Prefer: respond-async` and the job is polled (`voice._wait_job`).
+21. **A detail is only written into a prompt if the shot can see it** (`describe.hidden_slots`, `hidden_place_slots`): shoes and trousers are left out of close and medium shots and of anyone seated behind something; eyes and expression out of wide shots; the face of someone seen from behind, in silhouette or by the hands only; a place's layout, landmarks and crowd out of close shots; a place's stored light never (the scene has its own lighting line). The validator does not demand what is left out. A model told "brown loafers" draws them even if it has to lift a foot to the shoulder.
+24. **Every scene carries its feeling as visible cues** (`story2/mood.py`): the scene's `emotional_effect`, else the director's emotion for its part, becomes a "Feeling of the moment" line (face, body, light), with the face cue dropped when the face is not visible. Calm or unknown feelings add nothing. The feeling is in `source_hash` and on each compiled prompt (`feeling`).
+25. **The Qwen prompt is limited to 350 words** (`imgprompts.MAX_PROMPT_WORDS`). Over it, colour, framing, the background layers and the composition line are trimmed in that order; the validator warns on what is still over. Measured on the nine stored plans (470+ scenes): median 290 to 330 words, 1 scene at 353.
+22. **Indian cast is on by default** (`plan.settings.cast_indian`, `describe.indian_on`): an `ethnicity` slot, colouring that cannot go with it replaced at use time (`describe.indianise`), a crowd line in scene prompts, and the flag in `asset_hash` / `source_hash` / `cast_indian` on each compiled prompt. The toggle on the Characters card recompiles prompts; "write into the list" also rewrites the stored slots.
+23. **Pictures can be redone at any time, and redoing never stops the video.** A reference prompt can be edited (`refs.generate(prompts=...)`, stored on the attempt as `custom_prompt`); a scene can be redrawn with any model, plain or from the reference sheets, with the whole prompt changed (`scenes.redraw`, `POST /scenes/{id}/redraw`); the choice can be remembered per scene (`scene_pictures.per_scene`). An approved picture older than a changed reference stays in the video with a warning (`visual_choices` `stale`); a newer current picture wins over it. The video keeps `meta.used` so the screen lists "Changes since the last video"; clips are cached per picture file, so only changed scenes render again.
 19. **Validators accept their last attempt.** `JsonCaller.last_attempt` tells a checker it is the final try; style checks send the reply back before that and let it through then, so a long run never stops on a style rule. A storyboard reply that is broken JSON is asked again up to three rounds.
 
 ## 5. Using the plan screen (the path to a video)
@@ -160,8 +167,8 @@ Approval of voice and pictures is optional for the draft (the latest valid take 
 ### API (all under the same login)
 
 - `/api/...` Phase 1: settings, projects (upload, url, text), scope, process, pause, cancel, stories (review, merge, split), export.
-- `/api/plans/...` Phase 2: `GET /styles`, `PATCH /{plan}/visual-style`, `POST /{plan}/assets` (add one), plans CRUD, `job`, `cancel`, `narrator`, `settings`, `blueprint`, `narration`, `registry`, `storyboard`, `fix-repeats`, segments and scenes (patch, move, regenerate), assets patch, `review`, `approve`, `unapprove`, `history`, `export`, `exports/{plan}/{file}`, `image-models`, `compile-prompts`, scene `prompts` and `preview`, `validate`, `providers`, `providers/probe`, `schema`.
-- `/api/media/...` Phase 3: `GET /{plan}` (voice, references, scenes, graphics, video, thumbnail and auto-run state), `POST /{plan}/thumbnail`, `POST /{plan}/auto`, `POST /{plan}/voice`, `POST /{plan}/references`, `.../references/score`, `.../references/approve-best`, `.../references/skip`, `PATCH /item/{id}` (approve), `GET /file/{plan}/{path}`.
+- `/api/plans/...` Phase 2: `GET /voices`, `PATCH /{plan}/tts`, `PATCH /{plan}/cast`, `GET /styles`, `PATCH /{plan}/visual-style`, `POST /{plan}/assets` (add one), plans CRUD, `job`, `cancel`, `narrator`, `settings`, `blueprint`, `narration`, `registry`, `storyboard`, `fix-repeats`, segments and scenes (patch, move, regenerate), assets patch, `review`, `approve`, `unapprove`, `history`, `export`, `exports/{plan}/{file}`, `image-models`, `compile-prompts`, scene `prompts` and `preview`, `validate`, `providers`, `providers/probe`, `schema`.
+- `/api/media/...` Phase 3: `POST /{plan}/voice/sample`, `GET /{plan}/scenes/{scene}/options`, `POST /{plan}/scenes/{scene}/redraw`, `GET /{plan}` (voice, references, scenes, graphics, video, thumbnail and auto-run state), `POST /{plan}/thumbnail`, `POST /{plan}/auto`, `POST /{plan}/voice`, `POST /{plan}/references`, `.../references/score`, `.../references/approve-best`, `.../references/skip`, `PATCH /item/{id}` (approve), `GET /file/{plan}/{path}`.
 
 ## 6. Where things stand
 

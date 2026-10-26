@@ -11,7 +11,7 @@ from jsonschema import Draft202012Validator
 
 from story import db
 
-from . import editorial, imgprompts, leak, planner, providers, store, storyboard
+from . import editorial, imgprompts, leak, planner, providers, store, storyboard, voices
 from .export_schema import SCHEMA, SCHEMA_ID, SCHEMA_VERSION
 
 
@@ -29,6 +29,19 @@ TTS_NOTES = {
     "emotion_policy": "one steady emotion per segment; at most one change, at a real turn. Mixing emotions inside a request shifts pace and voice audibly",
     "voice": "hi_male is the only male Hindi voice Svara offers; it has no style or depth options, and its pitch cannot be changed",
     "known_gap": "narrator avatar and name are not decided yet"}
+def tts_notes(plan: dict) -> dict:
+    """Voice notes for the engine in use. The voice itself is chosen on the plan (outside the content hash), so the file names the engine and voice as of export."""
+    cur = voices.current(plan["narrator"])
+    cfg = voices.ENGINES[cur["engine"]]
+    if cur["engine"] == "svara-tts":
+        return {**TTS_NOTES, "voice_id": cur["voice"]}
+    return {"engine": cur["engine"], "voice_id": cur["voice"], "recommended_request": dict(cfg["defaults"]),
+            "input": "built from each segment's sentences: punctuation ('...' ',' '?' '—') and [pause:Ns] carry the delivery; there are no emotion tags",
+            "chunking": "one segment per request, sent with `Prefer: respond-async` and polled; the gateway splits long text at sentence ends and crossfades",
+            "measured_pace_wpm": cfg["pace_wpm"], "script": TTS_NOTES["script"], "voice": f"{cur['voice']} ({cfg['voices'][cur['voice']]})",
+            "known_gap": TTS_NOTES["known_gap"]}
+
+
 IMAGE_NOTES = {
     "defaults": "send size and prompt; leave steps, cfg, sampler and scheduler to the gateway's tuned defaults",
     "references": "edits accept at most 3 reference images and no masks; write edits as 'change X, keep Y'",
@@ -84,7 +97,7 @@ def _public_scene(sc: dict, plan: dict) -> dict:
 def _providers_public(plan: dict) -> dict:
     lic = providers.settings_for(plan["settings"])["licence_checks"]
     out = {}
-    for mid in providers.IMAGE_MODELS:
+    for mid in providers.PROVIDERS:
         m = providers.get(mid)
         out[mid] = {"label": m["label"], "adapter": m["adapter"], "adapter_version": m["adapter_version"], "variant": m["variant"], "negative_prompt": m["negative_prompt"],
                     "edits": m["edits"], "max_references": m["max_references"], "masks": m["masks"], "reliable_text": m["reliable_text"], "steps": m["steps"], "cfg": m["cfg"],
@@ -107,7 +120,7 @@ def build(plan_id: str, refresh: bool = True, export_rev: int = 0) -> dict:
     names = {b["id"]: b["name"] for b in beats}
     try:                                                                  # real voice files, when Phase 3 has made them
         from story3 import store as media
-        voice_id = plan["narrator"].get("voice") or "hi_male"
+        voice_id = media.voice_key(plan)
         audio = {s["id"]: media.chosen_voice(plan_id, s, voice_id) for s in plan["segments"]}
     except Exception:  # noqa: BLE001 - an export must never fail because media is missing
         audio = {}
@@ -137,7 +150,7 @@ def build(plan_id: str, refresh: bool = True, export_rev: int = 0) -> dict:
                     "flexible": a["data"].get("flexible", []), "period": a["data"].get("period", ""), "fictionalisation": a["data"].get("fictionalisation", "generic_reconstruction"),
                     "reference_images": a["data"].get("reference_images", []), "locked": a["locked"]} for a in plan["assets"]],
         "image_models": {"default": providers.settings_for(plan["settings"])["default"], "by_type": providers.settings_for(plan["settings"])["by_type"], "providers": _providers_public(plan)},
-        "production_notes": {"tts": {**TTS_NOTES, "voice_id": narrator.get("voice") or "hi_male"}, "images": IMAGE_NOTES,
+        "production_notes": {"tts": tts_notes(plan), "images": IMAGE_NOTES,
                              "scenes_needing_built_graphics": [sc["id"] for sc in scenes if sc["data"]["feasibility"]["level"] == "needs_asset"]},
     }
     title = ev["working_title"]

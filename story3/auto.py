@@ -227,7 +227,7 @@ async def run_stage(plan_id: str, key: str, be, s: dict, api_key: str, progress,
     elif key == "voice":
         await voice.generate(plan_id, None, True, sub, s, api_key)
         plan = planner.get_plan(plan_id)
-        vid = plan["narrator"].get("voice") or "hi_male"
+        vid = store.voice_key(plan)
         for seg in plan["segments"]:
             it = store.chosen_voice(plan_id, seg, vid)
             if it and not it["approved"]:

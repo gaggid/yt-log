@@ -27,7 +27,7 @@ No linter or build step configured. `static/plan.js` is served from disk uncache
 ## Architecture
 
 - `main.py` mounts three FastAPI routers: `story/api.py` (`/api`), `story2/api.py` (`/api/plans`), `story3/api.py` (`/api/media`). UI is plain static files (`static/index.html`, `plan.js`), no framework.
-- All models sit behind one local OpenAI-compatible gateway (default `127.0.0.1:8810/v1`): chat/vision (Gemma), voice (Svara `hi_male`), images (Qwen Image 2.1 is the one model in use; FLUX.2 Klein is still in the code and parked for removal). Gateway allows one concurrent request per key, so `story2/jobs.py` runs one background job at a time and refuses a second.
+- All models sit behind one local OpenAI-compatible gateway (default `127.0.0.1:8810/v1`): chat/vision (Gemma), voice (Veena `agastya` by default, Svara `hi_male` selectable; `story2/voices.py`), images (Qwen Image 2.1 is the default; FLUX.2 Klein and every other image model the gateway lists are selectable per scene). Gateway allows one concurrent request per key, so `story2/jobs.py` runs one background job at a time and refuses a second.
 - Data in gitignored `data/`: SQLite `story.db` (Phase 1 tables, Phase 2 `plans/segments/scenes/assets/plan_revisions`, Phase 3 `media`), plus sources, exports, previews, media files.
 - Phase 3 `media` rows are numbered attempts, never overwritten; approving one un-approves siblings (`story3/store.py`).
 - `story3/auto.py` is the "Auto-run" job that chains every unfinished step; keep it in sync when adding a step (and with the step order in `static/plan.js`: the order is blueprint, narration, characters, storyboard, references, prompts, repeats, approve, export, voice, pictures, graphics, video, thumbnail).
@@ -43,6 +43,8 @@ No linter or build step configured. `static/plan.js` is served from disk uncache
 - Style is chosen once per plan (`settings.visual_style`, presets in `story2/styles.py`) and written into style asset, every scene prompt, every reference picture. Bump `DIRECTION` when the visual direction changes so old work is flagged "made for another look".
 - Asset descriptions are composed from slots (`story2/describe.py`); the image models invent anything unspecified, so every person/place/prop needs concrete values. Never name a game or brand in a prompt.
 - Charts, tables and documents are never drawn by an image model; `story3/graphics.py` builds them from verified facts. On-screen text is English only, 8 words max.
+- People are drawn as Indian by default (`cast_indian`); a person's shoes and trousers are only written into a prompt when the shot can see them (`describe.hidden_slots`).
+- Voice engine/voice is `narrator.tts`, outside the content hash; take hashes carry the engine. Pictures and reference prompts can be redone any time (`scenes.redraw`, `refs.generate(prompts=)`) and the video lists "Changes since the last video".
 - Narration is first-person Hinglish in mixed script, numbers as words; one steady emotion per voice segment.
 - Voice and picture validity are tied to hashes of their inputs; changing wording/description invalidates old takes.
 - Context budget: a request that would exceed `context x (1 - safety)` is refused, never truncated (`story/tokens.py`, `story/llm.py`).

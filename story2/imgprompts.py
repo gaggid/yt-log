@@ -8,11 +8,11 @@ import hashlib
 import json
 import re
 
-from . import leak, providers, styles
+from . import describe, leak, mood, providers, styles
 from .scene_schemas import NEEDS_ASSET
 from .storyboard import fact_numbers
 
-MAX_PROMPT_WORDS = 300             # the image models follow short prompts far better: past this, details get ignored
+MAX_PROMPT_WORDS = 350             # the image models follow short prompts far better: past this, details get ignored (owner limit, 2026-10-26)
 MAX_PROMPT_CHARS = 2400            # conservative: the gateway caps prompt length but does not publish the number
 MAX_TEXT_WORDS = 8
 # wording that asks the model for an effect without saying what is visible (brief: say the visible details instead)
@@ -87,13 +87,17 @@ def _safe_area(fmt: str) -> str:
     return "Keep the key subject inside the central 90 percent of the frame and leave the lowest 12 percent free of important detail for captions."
 
 
-def source_hash(scene: dict, assets_used: list[dict], fmt: str) -> str:
+def source_hash(scene: dict, assets_used: list[dict], fmt: str, indian: bool = False, feeling: str = "") -> str:
     d = scene["data"]
     keep = {k: d.get(k) for k in ("visual_type", "subject", "action", "setting", "composition", "lighting", "palette", "atmosphere", "style",
                                   "layers", "text_on_screen", "facts", "exclusions", "feasibility", "narrative", "correction")}
     keep["assets"] = [(a["id"], a["rev"], a["data"].get("description"), a["data"].get("fixed"),
                        [r.get("id") for r in a["data"].get("reference_images", []) if r.get("approved")]) for a in assets_used]
     keep["fmt"] = fmt
+    if indian:
+        keep["indian"] = True
+    if feeling:
+        keep["feeling"] = feeling
     keep["shot"] = [(d.get("composition") or {}).get(k) for k in ("distance", "camera_angle", "perspective")]
     return hashlib.sha1(json.dumps(keep, sort_keys=True, default=str).encode()).hexdigest()[:12]
 
@@ -138,17 +142,49 @@ def edit_instruction(change: str, keep: list[str], refs: list[dict]) -> str:
 
 # ── shared pieces ───────────────────────────────────────────────────────────
 
-def _subject_text(d: dict, people: list[dict]) -> str:
+def shot_distance(d: dict) -> str:
+    return _s((d.get("composition") or {}).get("distance"))
+
+
+def hidden_for(d: dict) -> set[str]:
+    """Person slots (shoes, trousers, eyes, ...) the shot cannot show; see describe.hidden_slots."""
+    return describe.hidden_slots(shot_distance(d), " ".join(_s(d.get(k)) for k in ("subject", "action")))
+
+
+def feeling_texts(scene: dict, plan: dict | None) -> list[str]:
+    """What names the scene's feeling: its own emotional_effect, then the director's emotion for its part of the video."""
+    d = scene["data"]
+    out = [_s((d.get("narrative") or {}).get("emotional_effect"))]
+    by = ((plan or {}).get("settings") or {}).get("director", {}).get("by_segment", {})
+    out += [_s(v.get("emotion")) for v in by.values() if v.get("segment_id") == scene.get("segment_id")]
+    return [t for t in out if t]
+
+
+def _subject_text(d: dict, people: list[dict], indian: bool = False) -> str:
     out = [_s(d.get("subject"))]
+    hide = hidden_for(d)
     for a in people:
-        det = _s(a["data"].get("description"))
-        extra = "; ".join(_s(x) for x in a["data"].get("fixed", []) if _s(x) and not covers(det, _s(x)))       # fixed details the description does not already say
+        if a["kind"] in ("person", "narrator"):
+            mine = hide | ({"face", "eyes", "expression"} if a["data"].get("fictionalisation") == "real_person_no_likeness" else set())      # a silhouette has no face to describe
+            det, fixed = describe.person_view(a, indian, mine)          # composed from the slots: what the frame hides is left out, the cast setting applies
+            det = _s(det)
+        else:
+            det, fixed = _s(a["data"].get("description")), a["data"].get("fixed", [])
+        extra = "; ".join(_s(x) for x in fixed if _s(x) and not covers(det, _s(x)))              # fixed details the description does not already say
         fic = a["data"].get("fictionalisation", "")
         out.append(f"Appearance of {a['name']}: {det}" if det else "")
         out.append(f"Always the same: {extra}" if extra else "")
         if fic == "real_person_no_likeness" and a["kind"] == "person":
             out.append("Shown only as a silhouette, from behind or in deep shadow, with no recognisable face; no real person's likeness is implied")
+    if set(describe.LOWER) <= hide and any(a["data"].get("appearance") for a in people if a["kind"] in ("person", "narrator")):
+        out.append("The frame cuts the people off before the legs and feet: no shoes or trousers are visible")
     return _sent(*[x for x in out if x])
+
+
+def _place_fixed(a: dict, d: dict) -> list[str]:
+    """A place's fixed details, minus the ones a close shot cannot show (its layout, landmarks and crowd)."""
+    hide = describe.hidden_place_slots(shot_distance(d)) | {"light"}                   # the scene has its own lighting line; a place's stored light would fight it
+    return [x for x in a["data"].get("fixed", []) if not describe.is_hidden(_s(x), hide)] if a["kind"] == "place" else list(a["data"].get("fixed", []))
 
 
 def _layers(d: dict) -> str:
@@ -225,18 +261,22 @@ def _plate(d: dict) -> bool:
 
 # ── Qwen Image 2.1: explicit labelled brief, exclusions stated in the prompt (no negative field) ──
 
-# What goes first when a prompt is over MAX_PROMPT_WORDS: wording that repeats the style, the story's abstract role of the scene, then secondary detail.
-_DROP_ORDER = ("colour", "framing", "composition")
+# What goes first when a prompt is over MAX_PROMPT_WORDS, in this order: wording that repeats the style, the framing line, the background layers (a shorter
+# environment sentence replaces the long one), then the composition. Everything the picture is about stays.
+_STEPS = (("drop", "colour"), ("drop", "framing"), ("swap", "environment"), ("swap", "setting"), ("drop", "composition"))
 
 
-def _fit(sec: dict[str, str], sep: str) -> str:
-    """Join the sections, dropping the least useful ones (in _DROP_ORDER) until the prompt is within MAX_PROMPT_WORDS."""
+def _fit(sec: dict[str, str], sep: str, shorter: dict[str, str] | None = None) -> str:
+    """Join the sections, trimming the least useful ones (in _STEPS) until the prompt is within MAX_PROMPT_WORDS."""
     def join() -> str:
         return sep.join(v.strip() for v in sec.values() if v.strip())
-    for k in _DROP_ORDER:
+    for how, k in _STEPS:
         if len(join().split()) <= MAX_PROMPT_WORDS:
             break
-        sec.pop(k, None)
+        if how == "drop":
+            sec.pop(k, None)
+        elif shorter and k in shorter and k in sec:
+            sec[k] = shorter[k]
     return join()
 
 
@@ -267,6 +307,7 @@ def compile_qwen(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
     shown, _skipped = _exact_text(d, notes)
     must, avoid = _constraints(d)
     people = [a for a in assets_used if a["kind"] in ("person", "narrator")]
+    indian = describe.indian_on(plan.get("settings"))
     look = styles.for_plan(plan.get("settings"))
     use_refs = bool(refs["references"]) and (plan.get("settings") or {}).get("scene_pictures", {}).get("mode") in ("edit", "auto")
     comp = d.get("composition") or {}
@@ -276,19 +317,23 @@ def compile_qwen(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
     if plate:
         notes.append("this visual needs a verified chart, document, screen, map or diagram: the picture is the illustrated scene around it; the exact content is added later")
     if plate:
-        sec["subject"] = "Main subject: " + _sent(_s(_g(d, "feasibility", "fallback")) or _subject_text(d, people),
+        sec["subject"] = "Main subject: " + _sent(_s(_g(d, "feasibility", "fallback")) or _subject_text(d, people, indian),
                                                  ("Apart from the quoted words, any screen, paper or sign shows only abstract glowing light and shapes" if shown else
                                                   "Any screen, paper or sign in the scene shows only abstract glowing light and shapes, nothing readable"))
     else:
-        sec["subject"] = "Main subject: " + _sent(_subject_text(d, people))
+        sec["subject"] = "Main subject: " + _sent(_subject_text(d, people, indian))
     sec["action"] = "Action and moment: " + _sent(f"The single moment shown is {_lead_lower(d.get('action'))}" if _s(d.get("action")) and not plate else
                                                   "A still, held moment with no competing action")
-    sec["environment"] = "Environment: " + _sent(_val(_g(d, "setting", "location")), f"Period: {_val(_g(d, 'setting', 'period'))}" if _val(_g(d, "setting", "period")) else "",
-                                                 f"Atmosphere: {_s(d.get('atmosphere'))}" if _s(d.get("atmosphere")) else "") + ("" if plate else " " + _layers(d))
+    env = "Environment: " + _sent(_val(_g(d, "setting", "location")), f"Period: {_val(_g(d, 'setting', 'period'))}" if _val(_g(d, "setting", "period")) else "",
+                                  f"Atmosphere: {_s(d.get('atmosphere'))}" if _s(d.get("atmosphere")) else "")
+    sec["environment"] = env + ("" if plate else " " + _layers(d))
+    feel = "" if plate else mood.line(feeling_texts(scene, plan), hidden_for(d), bool(people))
+    if feel:
+        sec["feeling"] = feel
     sec["composition"] = "Composition: " + _sent(f"The subject sits {_s(comp.get('position'))}" if _s(comp.get("position")) else "", _positions(comp))
     sec["lighting"] = "Lighting: " + _sent(_s(d.get("lighting")) or "soft even light from a single clear direction")
     sec["colour"] = "Colour and mood: " + _sent(f"Palette: {_s(d.get('palette')) or look['palette']}", f"Mood shown through: {_s(d.get('atmosphere'))}" if _s(d.get("atmosphere")) else "")
-    fixed_lines = [f"{a['name']}: {'; '.join(_s(x) for x in a['data'].get('fixed', []))}" for a in assets_used if a["data"].get("fixed") and a["kind"] not in ("style", "person", "narrator") and not plate]
+    fixed_lines = [f"{a['name']}: {'; '.join(_s(x) for x in _place_fixed(a, d))}" for a in assets_used if _place_fixed(a, d) and a["kind"] not in ("style", "person", "narrator") and not plate]
     ref_lines = [f"Image {i}: {r['role']} ({r['name']})" for i, r in enumerate(refs["references"], 1)] if use_refs else []
     if fixed_lines or ref_lines:                                                              # reference images are named only when they are really sent
         sec["continuity"] = "Continuity: " + _sent(*(["Keep these the same as in the other pictures: " + "; ".join(fixed_lines)] if fixed_lines else []),
@@ -304,9 +349,11 @@ def compile_qwen(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
         cons.append("These must be clearly visible: " + "; ".join(must))
     if avoid:
         cons.append("These must not appear: " + "; ".join(avoid))
+    if indian and not plate:
+        cons.append("Any other person who appears is Indian too, with South Asian features and skin tone")
     cons.append("One clear focal point; " + NO_STRANGE)
     sec["constraints"] = "Constraints: " + _sent(*cons)
-    prompt = _fit(sec, chr(10))
+    prompt = _fit(sec, chr(10), {"environment": env})
     return _finish("qwen", "qwen-image-2.1", cfg, scene, prompt, "", sec, (w, h), refs, notes, plate, plan)
 
 
@@ -321,16 +368,20 @@ def compile_flux(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
     must, avoid = _constraints(d)
     people = [a for a in assets_used if a["kind"] in ("person", "narrator")]
     comp = d.get("composition") or {}
+    indian = describe.indian_on(plan.get("settings"))
     look = styles.for_plan(plan.get("settings"))
     sec: dict[str, str] = {"style": _sent(look["look"])}
     if plate:
         notes.append("this visual needs a verified chart, document, screen, map or diagram: the picture is the illustrated scene around it; the exact content is added later")
-    subject = _subject_text(d, people)
+    subject = _subject_text(d, people, indian)
     sec["subject"] = _sent(_s(_g(d, "feasibility", "fallback")) or subject, "Any screen, paper or sign shows only abstract glowing light and shapes") if plate else _sent(subject)
     sec["action"] = "" if plate else _sent(f"{_s(d.get('action'))}" if _s(d.get("action")) else "The moment is still and held")
     where = _sent(f"The scene is set in {_run(_val(_g(d, 'setting', 'location')))}" if _val(_g(d, "setting", "location")) else "",
                   f"The period is {_run(_val(_g(d, 'setting', 'period')))}" if _val(_g(d, "setting", "period")) else "")
     sec["setting"] = where + ("" if plate else " " + _layers(d))
+    feel = "" if plate else mood.line(feeling_texts(scene, plan), hidden_for(d), bool(people))
+    if feel:
+        sec["feeling"] = feel
     pos = _positions(comp)
     sec["composition"] = _sent(f"The subject is placed {_run(comp.get('position'))}" if _s(comp.get("position")) and not plate else "") + " " + ("" if plate else pos)
     sec["lighting"] = _sent(f"{_s(d.get('lighting'))}" if _s(d.get("lighting")) else "Soft even light", f"The atmosphere is {_run(d.get('atmosphere'), True)}" if _s(d.get("atmosphere")) else "",
@@ -340,7 +391,7 @@ def compile_flux(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
     style_asset = next((a for a in assets_used if a["kind"] == "style"), None)
     sec["treatment"] = _sent(f"Rendered as {look['short']}, {look['linework']}", styles.NOT_PHOTO)
     sec["camera"] = _sent(f"Camera: {_camera(comp)}" if _camera(comp) else "")
-    fixed_lines = [f"{a['name']} ({'; '.join(_s(x) for x in a['data'].get('fixed', []))})" for a in assets_used if a["data"].get("fixed") and a["kind"] not in ("style", "person", "narrator") and not plate]
+    fixed_lines = [f"{a['name']} ({'; '.join(_s(x) for x in _place_fixed(a, d))})" for a in assets_used if _place_fixed(a, d) and a["kind"] not in ("style", "person", "narrator") and not plate]
     sec["continuity"] = _sent("Consistent with the rest of the film: " + "; ".join(fixed_lines)) if fixed_lines else ""
     if refs["references"]:
         sec["references"] = _sent("; ".join(f"Image {i}: {r['role']} ({r['name']})" for i, r in enumerate(refs["references"], 1)))
@@ -349,12 +400,14 @@ def compile_flux(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
                             "Each text is written once, in clear English letters, spelled exactly as inside the quotes", "It contains no other writing")
     else:
         sec["text"] = _sent("Screens, papers and signs show no readable writing")
+    if indian and not plate:
+        sec["cast"] = _sent("Any other person who appears is Indian too, with South Asian features and skin tone")
     if must:
         sec["must"] = _sent("Clearly visible: " + "; ".join(must))
     if avoid:
         sec["avoid"] = _sent("The frame is free of " + ", ".join(avoid))        # positive-form statement; also sent as negative_prompt below
     sec["output"] = _sent(f"{w}x{h} pixels, {_aspect(fmt)} composition", _safe_area(fmt))
-    prompt = _fit(sec, " ")
+    prompt = _fit(sec, " ", {"setting": where})
     negative = ", ".join([*avoid, *FLUX_STANDARD_NEGATIVE.split(", ")]) if cfg["negative_prompt"] else ""
     return _finish("flux", "flux2-klein-9b", cfg, scene, prompt, negative, sec, (w, h), refs, notes, plate, plan)
 
@@ -370,7 +423,7 @@ def _finish(adapter: str, model: str, cfg: dict, scene: dict, prompt: str, negat
     corr = d.get("correction") or {}
     refs_ok = refs["references"][: cfg["max_references"]]
     mode = "edit" if (refs_ok and cfg["edits"]) else "generate"
-    out = {"adapter": adapter, "model": model, "adapter_version": cfg["adapter_version"], "scene_rev": scene["rev"],
+    out = {"adapter": adapter, "model": model, "adapter_version": cfg["adapter_version"], "scene_rev": scene["rev"], "cast_indian": describe.indian_on((plan or {}).get("settings")), "feeling": mood.label(feeling_texts(scene, plan)),
            "mode": "overlay_plate" if plate and mode == "generate" else mode,
            "prompt": re.sub(r"[ \t]{2,}", " ", prompt).strip(), "negative_prompt": negative,
            "size": {"width": w, "height": h}, "references": refs_ok, "missing_references": refs["missing"],
@@ -393,7 +446,7 @@ def compile_scene(scene: dict, assets: list[dict], plan: dict, first_seen: dict[
     """Both adapters, side by side, for one scene. Returns {"qwen": {...}, "flux": {...}} (each with its own validation)."""
     used = assets_for(scene, assets)
     refs = reference_plan(scene, used, first_seen or {})
-    h = source_hash(scene, used, plan["format"])
+    h = source_hash(scene, used, plan["format"], describe.indian_on(plan.get("settings")), mood.label(feeling_texts(scene, plan)))
     out = {}
     for name, fn in COMPILERS.items():
         c = fn(scene, used, plan, refs)
@@ -438,10 +491,12 @@ def validate_prompt(c: dict, scene: dict, assets: list[dict], facts: str, prof: 
     st = next((a for a in used if a["kind"] == "style"), None)
     if st and _s(st["data"].get("description")) and not covers(p, _s(st["data"]["description"]), 0.7):
         add("style", "the plan's visual style is not in the prompt")
+    hide = hidden_for(d)
     for a in used:
         if a["kind"] == "style" or plate:
             continue
-        for fx in a["data"].get("fixed", []):
+        fixed = describe.person_view(a, bool(c.get("cast_indian")), hide)[1] if a["kind"] in ("person", "narrator") else _place_fixed(a, d)   # what the prompt really carries: the cast setting and the shot's view applied
+        for fx in fixed:
             if _s(fx) and not covers(p, fx):
                 add("continuity", f"{a['name']}: “{_s(fx)}” must stay the same but is not in the prompt")
     for ex in d.get("exclusions") or []:
@@ -481,7 +536,7 @@ def validate_prompt(c: dict, scene: dict, assets: list[dict], facts: str, prof: 
     for text in (p,):
         for f in leak.check(text, prof, scene=True) if prof else []:
             add("source_leak", f"{f.kind}: {f.text}")
-    if c.get("source_hash") != source_hash(scene, used, scene["data"]["output"]["aspect_ratio"]):
+    if c.get("source_hash") != source_hash(scene, used, scene["data"]["output"]["aspect_ratio"], bool(c.get("cast_indian")), c.get("feeling", "")):
         add("stale", "the scene changed after this prompt was compiled; compile again", "warn")
     lic = providers.get(c["model"])["licence"]
     if lic["status"] != "verified":

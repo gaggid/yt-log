@@ -239,7 +239,7 @@ what is in frame. Without a shot list, vary the camera yourself.
 Vary the camera. Distances: extreme wide | wide | medium | close | extreme close. Angles: eye level | high | low | overhead | side.
 No two neighbouring scenes may share the same distance AND angle, and do not use "medium, eye level" more than once in three scenes.
 Describe only what is VISIBLE, in concrete words. Say who or what, how many, where in the frame (left, centre, right), what they
-are doing at this exact instant, camera angle and distance, light and its direction, colours. No vague words like "dramatic",
+are doing at this exact instant, camera angle and distance, light and its direction, colours. Describe a person only as far down as the camera sees them: in a close or medium shot, or when they sit behind a desk, table, counter or wheel, never mention shoes, trousers or legs (the picture model will force them into the frame). No vague words like "dramatic",
 "tense" or "epic": say which visible details create that effect. One clear focal point per scene.
 People are the continuity characters, drawn with faces and clear emotion (what the face and body show), using the same names as the
 assets. A real, named person is shown only as a silhouette, from behind, in shadow or by the hands. Clothing, devices and rooms

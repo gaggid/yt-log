@@ -22,6 +22,18 @@ def env(tmp_path, monkeypatch):
     return tmp_path
 
 
+@pytest.fixture(autouse=True)
+def no_model_discovery(monkeypatch):
+    """The gateway's model list must never change the set of image models inside a test (the dev machine's gateway may be running)."""
+    from story2 import providers
+    keep = dict(providers.PROVIDERS)
+    monkeypatch.setattr(providers, "refresh", lambda *a, **k: [])
+    yield
+    for k in list(providers.PROVIDERS):
+        if k not in keep:
+            del providers.PROVIDERS[k]
+
+
 def pytest_collection_modifyitems(config, items):
     import os
     if os.environ.get("LIVE_LLM") == "1":

@@ -37,7 +37,7 @@ PROVIDERS: dict[str, dict] = {
                             "for these exact weights and confirmed the intended use is allowed"},
     },
 }
-IMAGE_MODELS = tuple(PROVIDERS)
+IMAGE_MODELS = tuple(PROVIDERS)                     # the audited models; PROVIDERS also holds any other image model the gateway lists (see refresh)
 DEFAULT_MODEL = next(k for k, v in PROVIDERS.items() if v["default"])
 
 
@@ -53,6 +53,47 @@ def get(model: str) -> dict:
 
 def public(model: str) -> dict:
     return {"id": model, **{k: v for k, v in get(model).items()}}
+
+
+def _discovered(mid: str, caps: list[str]) -> dict:
+    """A model the gateway lists that we have not audited. It is drawn with the Qwen-style prompt (explicit labelled brief, exclusions in the text), no negative
+    prompt, and edit mode only if the listing advertises it. Everything else is a safe default; nothing here is claimed as measured."""
+    edits = "images.edits" in caps
+    return {"label": mid, "adapter": "qwen", "adapter_version": "1.0", "default": False, "discovered": True,
+            "variant": "listed by the gateway; not audited here", "workflow": "unknown", "steps": None, "cfg": None, "edit_steps": None, "edit_cfg": None,
+            "max_pixels": 2359296, "size_multiple": 16, "timeout_s": 600, "negative_prompt": False,
+            "edits": edits, "max_references": 3 if edits else 0, "masks": False, "reliable_text": False, "transparency": "not exposed by the gateway",
+            "prompt_enhancer": {"available": False, "reason": "unknown"},
+            "licence": {"weights": mid, "status": "unverified", "note": "not audited: read the model's licence before publishing"}}
+
+
+_listing = {"at": 0.0}
+
+
+def register_listing(listing: list[dict]) -> list[str]:
+    """Add every image model in a /v1/models listing that is not known yet. Audited entries are never changed. Returns the ids added."""
+    added = []
+    for m in listing or []:
+        mid, caps = m.get("id"), m.get("capabilities") or []
+        if mid and mid not in PROVIDERS and ("images.generations" in caps or m.get("type") == "image"):
+            PROVIDERS[mid] = _discovered(mid, caps)
+            added.append(mid)
+    return added
+
+
+def refresh(s: dict, key: str, ttl: float = 60.0) -> list[str]:
+    """Look at the gateway's model list (at most once per `ttl` seconds, 4 s timeout) and register any image model we do not know. Never raises: when the gateway
+    is down the audited models are still there."""
+    import time
+    if time.time() - _listing["at"] < ttl:
+        return []
+    _listing["at"] = time.time()
+    try:
+        r = httpx.get(s["base_url"].rstrip("/") + "/models", headers={"Authorization": f"Bearer {key}"}, timeout=4)
+        r.raise_for_status()
+        return register_listing(r.json().get("data", []))
+    except Exception:  # noqa: BLE001 - discovery is a convenience
+        return []
 
 
 def probe(s: dict, key: str) -> dict:

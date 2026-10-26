@@ -9,7 +9,7 @@ import time
 import httpx
 
 from story import db, settings as settings_mod
-from story2 import imgplan, imgprompts, intake, leak, planner, providers, storyboard, store as plan_store, styles
+from story2 import describe, imgplan, imgprompts, intake, leak, planner, providers, storyboard, store as plan_store, styles
 
 from . import refscore, store
 from .voice import MediaError
@@ -77,15 +77,16 @@ def _anonymous(a: dict) -> bool:
     return a["data"].get("fictionalisation") == "real_person_no_likeness"
 
 
-def build_prompt(a: dict, style: str, model: str) -> dict:
+def build_prompt(a: dict, style: str, model: str, indian: bool = False) -> dict:
     """The reference prompt for one asset, in the wording the chosen model works best with. Exclusions are stated in the prompt for Qwen (its
     negative field has no effect) and sent as a negative prompt for FLUX."""
     d = a["data"]
     kind = a["kind"]
-    parts = [_style_for(kind, style), KIND_FRAME[kind], f"Subject: {_s(a['name'])}. {_s(d.get('description'))}".strip()]
+    desc, fixed_raw = describe.person_view(a, indian) if kind in ("person", "narrator") else (d.get("description"), d.get("fixed", []))
+    parts = [_style_for(kind, style), KIND_FRAME[kind], f"Subject: {_s(a['name'])}. {_s(desc)}".strip()]
     if _s(d.get("period")):
         parts.append(f"Period: {_s(d['period'])}.")
-    fixed = [_s(x) for x in d.get("fixed", []) if _s(x)]
+    fixed = [_s(x) for x in fixed_raw if _s(x)]
     if fixed:
         parts.append("Always the same, so show clearly: " + "; ".join(fixed) + ".")
     if kind == "person" and _anonymous(a):
@@ -103,10 +104,10 @@ def build_prompt(a: dict, style: str, model: str) -> dict:
     return {"prompt": prompt, "negative_prompt": neg, "width": w, "height": h, "model": model}
 
 
-def asset_hash(a: dict, style: str, model: str) -> str:
+def asset_hash(a: dict, style: str, model: str, indian: bool = False) -> str:
     """What a picture was made from. If the asset's description or fixed details, the style or the model change, older pictures stop counting as current."""
     d = a["data"]
-    key = "|".join([model, _s(a["name"]), _s(d.get("description")), ";".join(map(_s, d.get("fixed", []))), _s(d.get("period")), d.get("fictionalisation", ""), style])
+    key = "|".join([model, _s(a["name"]), _s(d.get("description")), ";".join(map(_s, d.get("fixed", []))), _s(d.get("period")), d.get("fictionalisation", ""), style, "indian" if indian and a["kind"] in ("person", "narrator") else ""])
     return hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
 
 
@@ -129,8 +130,12 @@ def set_skip(plan_id: str, asset_id: str, on: bool) -> dict:
     return state(plan_id)
 
 
-def current_done(plan_id: str, a: dict, style: str, model: str) -> list[dict]:
-    want = asset_hash(a, style, model)
+def indian(plan: dict) -> bool:
+    return describe.indian_on(plan["settings"])
+
+
+def current_done(plan_id: str, a: dict, style: str, model: str, indian_: bool = False) -> list[dict]:
+    want = asset_hash(a, style, model, indian_)
     return [i for i in store.items(plan_id, "reference", a["id"]) if i["status"] == "done" and i["meta"].get("asset_hash") == want]
 
 
@@ -154,9 +159,11 @@ async def _draw(client: httpx.AsyncClient, base: str, key: str, body: dict) -> d
 
 
 async def generate(plan_id: str, asset_ids: list[str] | None = None, candidates: int = DEFAULT_CANDIDATES, only_missing: bool = True,
-                   model: str | None = None, progress=None, s: dict | None = None, key: str = "", score: bool = True) -> dict:
+                   model: str | None = None, progress=None, s: dict | None = None, key: str = "", score: bool = True, prompts: dict[str, str] | None = None) -> dict:
     """Make `candidates` pictures for each chosen asset. only_missing skips assets that already have an approved or current picture. When `score`
-    is on, each new picture is then measured and looked at (the chat model takes over from the image model once all pictures are drawn)."""
+    is on, each new picture is then measured and looked at (the chat model takes over from the image model once all pictures are drawn).
+    `prompts` maps an asset id to a prompt written by a person: it replaces the built prompt for that asset's new pictures only (the asset's description is
+    not touched), is checked by the leak gate like any other, and the picture still counts as current."""
     s = s or settings_mod.get()
     key = key or settings_mod.api_key()
     plan = planner.get_plan(plan_id)
@@ -164,12 +171,14 @@ async def generate(plan_id: str, asset_ids: list[str] | None = None, candidates:
         raise MediaError("list the characters and places first: references are made for the people, places and objects the story uses")
     model = model or providers.settings_for(plan["settings"])["default"]
     cfg = providers.get(model)
+    ind = indian(plan)
+    prompts = {k: v.strip() for k, v in (prompts or {}).items() if v and v.strip()}
     style = style_text(plan_id)
     story = planner._story_for(plan)
     prof = leak.profile(story["evidence"]["project_id"], story["evidence"]["passages"])
     todo = [t for t in targets(plan_id) if (not asset_ids or t["asset"]["id"] in asset_ids) and t["asset"]["id"] not in skipped(plan)]
     if only_missing:
-        todo = [t for t in todo if not current_done(plan_id, t["asset"], style, model)
+        todo = [t for t in todo if not current_done(plan_id, t["asset"], style, model, ind)
                 and not any(r.get("approved") for r in t["asset"]["data"].get("reference_images", []))]
     candidates = max(1, min(int(candidates), 4))
     jobs = [(t, n) for t in todo for n in range(candidates)]
@@ -186,9 +195,13 @@ async def generate(plan_id: str, asset_ids: list[str] | None = None, candidates:
             a = t["asset"]
             if progress:
                 progress(i, len(jobs), f"picture {i + 1} of {len(jobs)}: {a['name']}")
-            built = build_prompt(a, style, model)
-            it = store.add(plan_id, "reference", a["id"], exp, "running", {"model": model, "asset_hash": asset_hash(a, style, model), "prompt": built["prompt"],
-                                                                         "negative_prompt": built["negative_prompt"], "asset_name": a["name"], "asset_kind": a["kind"]})
+            built = build_prompt(a, style, model, ind)
+            custom = a["id"] in prompts
+            if custom:
+                built["prompt"] = prompts[a["id"]]
+            it = store.add(plan_id, "reference", a["id"], exp, "running", {"model": model, "asset_hash": asset_hash(a, style, model, ind), "prompt": built["prompt"],
+                                                                         "negative_prompt": built["negative_prompt"], "asset_name": a["name"], "asset_kind": a["kind"],
+                                                                         "custom_prompt": custom})
             hits = leak.check_many([(a["id"], built["prompt"])], prof)
             if hits:
                 err = "the prompt would carry source wording: " + "; ".join(str(h.get("text") or h)[:80] for h in hits[:2])
@@ -312,14 +325,15 @@ def state(plan_id: str) -> dict:
     plan = planner.get_plan(plan_id)
     style = style_text(plan_id)
     model = providers.settings_for(plan["settings"])["default"]
+    ind = indian(plan)
     skips = skipped(plan)
     rows, secs = [], []
     for t in targets(plan_id):
         a = t["asset"]
-        want = asset_hash(a, style, model)
+        want = asset_hash(a, style, model, ind)
         att = store.items(plan_id, "reference", a["id"])
         ok = [i for i in att if i["approved"] and i["status"] == "done"]
-        built = build_prompt(a, style, model)
+        built = build_prompt(a, style, model, ind)
         for i in att:
             if i["status"] == "done" and i["meta"].get("seconds_taken"):
                 secs.append(i["meta"]["seconds_taken"])
@@ -331,7 +345,8 @@ def state(plan_id: str) -> dict:
                      "candidates": [{"id": i["id"], "attempt": i["attempt"], "status": i["status"], "approved": i["approved"],
                                      "url": f"/api/media/file/{plan_id}/{i['file']}" if i["file"] else "", "current": i["meta"].get("asset_hash") == want,
                                      "model": i["meta"].get("model"), "seed": i["meta"].get("seed"), "seconds_taken": i["meta"].get("seconds_taken"),
-                                     "error": i["meta"].get("error", ""), "score": i["meta"].get("score")} for i in att]})
+                                     "error": i["meta"].get("error", ""), "score": i["meta"].get("score"),
+                                     "custom": bool(i["meta"].get("custom_prompt")), "prompt": i["meta"].get("prompt", "")} for i in att]})
     for r in rows:
         b = best(plan_id, r["candidates"])
         r["best"] = b["id"] if b else None
@@ -344,4 +359,4 @@ def state(plan_id: str) -> dict:
             "bulk_ready": sum(1 for r in open_rows if (lambda b: b and b["score"]["total"] >= refscore.AUTO_APPROVE_MIN and not b["score"]["hard"])(best(plan_id, r["candidates"]))),
             "min_score": refscore.AUTO_APPROVE_MIN, "without_pictures": len(need_pics), "seconds_per_picture": round(per), "default_candidates": DEFAULT_CANDIDATES,
             "eta_missing_s": round(len(need_pics) * DEFAULT_CANDIDATES * per), "scenes_using_references": edit_scenes,
-            "done": bool(rows) and not open_rows, "style": style}
+            "done": bool(rows) and not open_rows, "style": style, "indian": ind}

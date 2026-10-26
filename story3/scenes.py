@@ -33,7 +33,9 @@ def settings(plan: dict) -> dict:
     return {"mode": cur.get("mode") if cur.get("mode") in MODES else "generate",
             "model": cur.get("model") if cur.get("model") in providers.PROVIDERS else None,
             "candidates": max(1, min(int(cur.get("candidates") or 1), 4)),
-            "chosen": bool(cur.get("chosen")), "trial": list(cur.get("trial") or [])}
+            "chosen": bool(cur.get("chosen")), "trial": list(cur.get("trial") or []),
+            "per_scene": {k: {"model": v.get("model") if v.get("model") in providers.PROVIDERS else None, "mode": v.get("mode") if v.get("mode") in ("generate", "edit") else None}
+                          for k, v in (cur.get("per_scene") or {}).items() if isinstance(v, dict)}}
 
 
 def set_settings(plan_id: str, patch: dict) -> dict:
@@ -64,8 +66,24 @@ def _known(model: str) -> None:
 
 
 def model_for(scene: dict, plan: dict) -> str:
-    """The plan's scene-picture model if one was chosen, else the scene's own or the plan's image model."""
-    return settings(plan)["model"] or providers.model_for(scene["data"], plan["settings"])
+    """The model chosen for this scene by a person, else the plan's scene-picture model, else the scene's own or the plan's image model."""
+    st = settings(plan)
+    return (st["per_scene"].get(scene["id"]) or {}).get("model") or st["model"] or providers.model_for(scene["data"], plan["settings"])
+
+
+def mode_for(scene: dict, plan: dict) -> str:
+    """plain (generate) or from the reference sheets (edit/auto) for this scene: its own choice first, then the plan's."""
+    st = settings(plan)
+    return (st["per_scene"].get(scene["id"]) or {}).get("mode") or st["mode"]
+
+
+def remember_choice(plan_id: str, scene_id: str, model: str | None, mode: str | None) -> None:
+    plan = planner.get_plan(plan_id)
+    cur = {**(plan["settings"].get("scene_pictures") or {})}
+    per = {**(cur.get("per_scene") or {})}
+    per[scene_id] = {"model": model, "mode": mode}
+    cur["per_scene"] = per
+    db.ex("UPDATE plans SET settings=?, updated_at=? WHERE id=?", (db.jdump({**plan["settings"], "scene_pictures": cur}), db.now(), plan_id))
 
 
 def compiled(scene: dict, model: str) -> dict | None:
@@ -223,11 +241,12 @@ async def generate(plan_id: str, scene_ids: list[str] | None = None, candidates:
     assets = storyboard.get_assets(plan_id)
     style = next((_s(a["data"].get("description")) for a in assets if a["kind"] == "style"), "")
     candidates = max(1, min(int(candidates or st["candidates"]), 4))
+    mode_unset = not mode
     mode = mode or st["mode"]
     chosen = [sc for sc in sorted(scenes, key=lambda x: (x["start_s"], x["seq"])) if not scene_ids or sc["id"] in scene_ids]
     jobs = []                                                           # (scene, model, mode)
     for sc in chosen:
-        for v in variants or [{"model": model or model_for(sc, plan), "mode": mode}]:
+        for v in variants or [{"model": model or model_for(sc, plan), "mode": mode_for(sc, plan) if mode_unset else mode}]:
             m = v["model"]
             c = compiled(sc, m)
             if not c:
@@ -283,6 +302,96 @@ async def generate(plan_id: str, scene_ids: list[str] | None = None, candidates:
         progress(len(jobs), len(jobs), "done")
     plan_store.log(plan_id, "scene_pictures", {"made": made, "failed": len(failed), "scored": scored, "trial": bool(variants)})
     return {"made": made, "failed": failed, "scenes": len(chosen), "scored": scored}
+
+
+def options(plan_id: str, scene_id: str) -> dict:
+    """What the redraw panel offers for one scene: every image model with the prompt that model would be sent, whether it can use the reference sheets, and
+    the scene's current choice."""
+    plan = planner.get_plan(plan_id)
+    sc = storyboard.get_scene(scene_id)
+    if not sc or sc["plan_id"] != plan_id:
+        raise MediaError("no such scene")
+    out = {}
+    for m in providers.PROVIDERS:
+        c = compiled(sc, m)
+        if not c:
+            continue
+        refs = [r["name"] for r in c.get("references", []) if (store.get(r.get("image_id") or "") or {}).get("file")]
+        out[m] = {"label": providers.get(m)["label"], "prompt": c["prompt"], "negative_prompt": c.get("negative_prompt", "") if providers.get(m)["negative_prompt"] else "",
+                  "negative_used": providers.get(m)["negative_prompt"], "edits": providers.get(m)["edits"], "references": refs,
+                  "can_edit": bool(refs) and providers.get(m)["edits"], "size": f"{c['size']['width']}x{c['size']['height']}"}
+    st = settings(plan)
+    cur = model_for(sc, plan)
+    return {"scene_id": scene_id, "models": out, "model": cur, "mode": resolve_mode(mode_for(sc, plan), compiled(sc, cur) or {}),
+            "default_model": providers.DEFAULT_MODEL, "remembered": scene_id in st["per_scene"]}
+
+
+async def redraw(plan_id: str, scene_id: str, model: str, mode: str = "generate", prompt: str | None = None, negative_prompt: str | None = None,
+                 candidates: int = 1, remember: bool = False, progress=None, s: dict | None = None, key: str = "", score: bool = True) -> dict:
+    """Draw a scene again with the model, mode and prompt a person chose. `prompt` replaces the compiled prompt for these pictures only (the scene's wording
+    and its compiled prompts stay as they are); each picture is a new numbered attempt and nothing is overwritten. Mode "edit" sends the scene's approved
+    reference sheets and is refused (not silently turned into plain drawing) when the model cannot edit or the scene has none."""
+    s = s or settings_mod.get()
+    key = key or settings_mod.api_key()
+    _known(model)
+    if mode not in ("generate", "edit"):
+        raise MediaError("mode must be generate (plain) or edit (from the reference sheets)")
+    plan = planner.get_plan(plan_id)
+    sc = storyboard.get_scene(scene_id)
+    if not sc or sc["plan_id"] != plan_id:
+        raise MediaError("no such scene")
+    c = compiled(sc, model)
+    if not c:
+        raise MediaError("write the image prompts first")
+    if mode == "edit":
+        if not providers.get(model)["edits"]:
+            raise MediaError(f"{providers.get(model)['label']} cannot use reference pictures; draw plain with it or choose another model")
+        if not reference_files(c):
+            raise MediaError("this scene has no approved reference sheet: approve one first, or draw plain")
+    text = prompt.strip() if prompt and prompt.strip() else c["prompt"]
+    custom = text != c["prompt"]
+    c = {**c, "negative_prompt": negative_prompt if negative_prompt is not None else c.get("negative_prompt", "")}
+    story = planner._story_for(plan)
+    prof = leak.profile(story["evidence"]["project_id"], story["evidence"]["passages"])
+    hits = leak.check_many([(scene_id, text + " " + c["negative_prompt"])], prof)
+    if hits:
+        raise MediaError("the prompt would carry source wording: " + "; ".join(str(h.get("text") or h)[:80] for h in hits[:2]))
+    if remember:
+        remember_choice(plan_id, scene_id, model, mode)
+    exp = _export_rev(plan_id)
+    out_dir = store.media_dir(plan_id, "scenes")
+    n_pics = max(1, min(int(candidates), 4))
+    made, failed, new_ids = 0, [], []
+    async with httpx.AsyncClient(timeout=700) as client:
+        for n in range(n_pics):
+            if progress:
+                progress(n, n_pics, f"picture {n + 1} of {n_pics} ({providers.get(model)['label']}, {'from the reference sheets' if mode == 'edit' else 'plain'})")
+            it = store.add(plan_id, KIND, scene_id, exp, "running", {"model": model, "mode": mode, "source_hash": c["source_hash"], "prompt": text, "custom_prompt": custom,
+                                                                       "negative_prompt": c["negative_prompt"], "redraw": True,
+                                                                       "references": [r["name"] for r, _p in reference_files(c)] if mode == "edit" else []})
+            seed = seed_for(scene_id, it["attempt"])
+            t0 = time.time()
+            try:
+                img, req = await draw(client, s, key, model, c, mode, seed, plan, prompt=text)
+                name = f"scenes/{scene_id}-a{it['attempt']}.png"
+                (out_dir / f"{scene_id}-a{it['attempt']}.png").write_bytes(base64.b64decode(img["b64_json"]))
+                store.update(it["id"], status="done", file=name, meta={"seed": img.get("seed", seed), "width": img.get("width"), "height": img.get("height"),
+                                                                     "seconds_taken": round(time.time() - t0, 1), "request": req})
+                made += 1
+                new_ids.append(it["id"])
+            except asyncio.CancelledError:
+                store.update(it["id"], status="failed", meta={"error": "stopped before it finished"})
+                raise
+            except MediaError as e:
+                store.update(it["id"], status="failed", meta={"error": str(e)[:300], "seconds_taken": round(time.time() - t0, 1)})
+                failed.append({"scene": scene_id, "error": str(e)[:200]})
+                if "not reachable" in str(e):
+                    break
+    scored = (await score_items(plan_id, new_ids, progress, s, key))["scored"] if score and new_ids else 0
+    plan_store.log(plan_id, "scene_picture_redrawn", {"scene": scene_id, "model": model, "mode": mode, "custom": custom, "made": made})
+    if progress:
+        progress(n_pics, n_pics, "done")
+    return {"made": made, "failed": failed, "scored": scored, "items": new_ids}
 
 
 async def correct(plan_id: str, scene_id: str, change: str, keep: list[str] | None = None, base_item: str | None = None, progress=None,
@@ -479,7 +588,8 @@ def state(plan_id: str) -> dict:
             cands.append({"id": i["id"], "attempt": i["attempt"], "status": i["status"], "approved": i["approved"], "current": _current(i, c),
                           "url": f"/api/media/file/{plan_id}/{i['file']}" if i["file"] else "", "model": i["meta"].get("model"), "mode": i["meta"].get("mode"),
                           "seed": i["meta"].get("seed"), "seconds_taken": i["meta"].get("seconds_taken"), "error": i["meta"].get("error", ""), "score": i["meta"].get("score"),
-                          "references": i["meta"].get("references", []), "trial": bool(i["meta"].get("trial")), "change": i["meta"].get("change", ""), "corrects": i["meta"].get("corrects", "")})
+                          "references": i["meta"].get("references", []), "trial": bool(i["meta"].get("trial")), "custom": bool(i["meta"].get("custom_prompt")),
+                          "prompt": i["meta"].get("prompt", "") if i["meta"].get("custom_prompt") else "", "change": i["meta"].get("change", ""), "corrects": i["meta"].get("corrects", "")})
         good = [x for x in cands if x["status"] == "done" and x["current"]]
         ok = next((x for x in cands if x["approved"] and x["status"] == "done"), None)
         b = best(cands)
@@ -491,7 +601,8 @@ def state(plan_id: str) -> dict:
             counts["needs_picture"] += 1
             est += _eta(m, allitems) * st["candidates"]
         rows.append({"id": sc["id"], "start_s": sc["start_s"], "duration_s": sc["duration_s"], "subject": _s(sc["data"].get("subject")), "visual_type": sc["data"].get("visual_type"),
-                     "model": m, "mode": resolve_mode(st["mode"], c) if c else "generate", "references": [r["name"] for r in c.get("references", [])],
+                     "model": m, "mode": resolve_mode(mode_for(sc, plan), c) if c else "generate", "chosen_here": sc["id"] in st["per_scene"],
+                     "can_edit": bool(c.get("references")) and providers.get(m)["edits"], "references": [r["name"] for r in c.get("references", [])],
                      "quoted": quoted_texts(sc), "prompt": c.get("prompt", ""), "has_prompt": bool(c), "approved": ok["id"] if ok else None, "approved_current": bool(ok and ok["current"]),
                      "candidates": cands, "candidates_done": len(good), "best": b["id"] if b else None, "best_item": b,
                      "status": "approved" if ok and ok["current"] else "needs_choice" if good else "needs_picture"})
@@ -502,4 +613,6 @@ def state(plan_id: str) -> dict:
             "eta_missing_s": round(est), "done": bool(rows) and counts["approved"] == len(rows), "trial": [r["id"] for r in trial],
             "trial_done": bool(trial) and all(any(c["trial"] and c["status"] == "done" for c in r["candidates"]) for r in trial),
             "models": {m: providers.get(m)["label"] for m in providers.PROVIDERS},
+            "model_info": {m: {"label": providers.get(m)["label"], "edits": providers.get(m)["edits"], "negative_prompt": providers.get(m)["negative_prompt"],
+                               "discovered": bool(providers.get(m).get("discovered")), "default": m == providers.DEFAULT_MODEL} for m in providers.PROVIDERS},
             "seconds_per_picture": {m: round(_eta(m, allitems)) for m in providers.PROVIDERS}}

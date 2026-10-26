@@ -88,13 +88,24 @@ def wav_seconds(data: bytes | Path) -> float:
 
 # ── voice: which attempt counts, and how long it really is ──────────────────
 
-def text_hash(annotated: str, voice: str) -> str:
-    return hashlib.sha1(f"{voice}\n{annotated}".encode("utf-8")).hexdigest()[:12]
+def text_hash(text: str, voice: str) -> str:
+    """`voice` is the voice key (`voices.key`): the bare voice name for Svara, `engine:voice` otherwise."""
+    return hashlib.sha1(f"{voice}\n{text}".encode("utf-8")).hexdigest()[:12]
+
+
+def segment_hash(seg: dict, voice: str) -> str:
+    from story2 import voices
+    return text_hash(voices.text_for(voice, seg), voice)
+
+
+def voice_key(plan: dict) -> str:
+    from story2 import voices
+    return voices.key(voices.current(plan["narrator"]))
 
 
 def chosen_voice(plan_id: str, seg: dict, voice: str) -> dict | None:
     """The approved attempt for this segment, else the latest finished one, as long as it was made from the segment's current wording."""
-    want = text_hash(seg["annotated"], voice)
+    want = segment_hash(seg, voice)
     good = [i for i in items(plan_id, "voice", seg["id"]) if i["status"] == "done" and i["meta"].get("text_hash") == want]
     ok = [i for i in good if i["approved"]]
     return (ok or good[-1:] or [None])[0] if good else None
@@ -104,7 +115,7 @@ def audio_seconds(plan_id: str) -> dict[str, float]:
     """segment id -> real spoken seconds, for segments whose audio matches their current wording. Used to retime scenes to the real voice."""
     from story2 import planner
     plan = planner.get_plan(plan_id)
-    voice = plan["narrator"].get("voice") or "hi_male"
+    voice = voice_key(plan)
     out = {}
     for seg in plan["segments"]:
         it = chosen_voice(plan_id, seg, voice)

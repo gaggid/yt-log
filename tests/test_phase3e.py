@@ -1,12 +1,13 @@
 """Phase 3, batch E: voice generation from the export, real audio length, and retiming scenes to it."""
 import asyncio
+import base64
 import io
 import wave
 
 import httpx
 import pytest
 
-from story2 import editorial, export, imgplan, planner, storyboard
+from story2 import editorial, export, imgplan, planner, storyboard, voices
 from story3 import store, voice
 from test_phase2b import boarded
 
@@ -28,6 +29,7 @@ class Gateway:
 
     def __init__(self, fail_for=(), always=None):
         self.requests, self.fail_for, self.always = [], set(fail_for), always
+        self.jobs, self.polls = {}, []
 
     def client(self):
         gw = self
@@ -45,7 +47,18 @@ class Gateway:
                 if n in gw.fail_for:
                     return httpx.Response(502, text="Speech engine error")
                 words = len(json["input"].split())
-                return httpx.Response(200, content=silence(max(1.0, words / 2.0)))
+                audio = silence(max(1.0, words / 2.0))
+                if (headers or {}).get("Prefer") == "respond-async":                       # Veena: a 202 job that is polled
+                    gw.jobs[f"job_{n}"] = audio
+                    return httpx.Response(202, json={"id": f"job_{n}", "status": "queued"})
+                return httpx.Response(200, content=audio)
+
+            async def get(self, url, headers=None):
+                gw.polls.append(url)
+                jid = url.rsplit("/", 1)[1]
+                if len(gw.polls) % 2:                                                       # every job is "running" on its first check
+                    return httpx.Response(200, json={"id": jid, "status": "running"})
+                return httpx.Response(200, json={"id": jid, "status": "succeeded", "result": {"audio_b64": base64.b64encode(gw.jobs[jid]).decode()}})
         return C
 
 
@@ -56,9 +69,11 @@ def fast(monkeypatch):
     monkeypatch.setattr(voice.asyncio, "sleep", nosleep)
 
 
-def exported(env, **kw):
+def exported(env, engine="svara-tts", **kw):
+    """Most voice tests use Svara (the proven request); Veena has its own tests below."""
     pid, cid, be, p = boarded(env, **kw)
     plan_id = p["id"]
+    planner.set_narrator(plan_id, None, tts={"engine": engine, "voice": voices.ENGINES[engine]["default_voice"]})
     imgplan.compile_plan(plan_id)
     plan = planner.get_plan(plan_id)
     for s in plan["segments"]:
@@ -244,3 +259,75 @@ def test_a_later_export_carries_the_real_audio_and_still_matches_the_schema(env,
     assert not list(Draft202012Validator(SCHEMA).iter_errors(doc))
     for s in doc["public"]["narration"]["segments"]:
         assert s["audio"]["file"].startswith("voice/") and s["audio"]["duration_s"] == pytest.approx(s["duration_s"], abs=0.05)
+
+
+# ── Veena: the default engine ───────────────────────────────────────────────
+
+def test_new_plans_use_veena_agastya_and_old_ones_too(env):
+    pid, cid, be, p = boarded(env)
+    assert voices.current(planner.get_plan(p["id"])["narrator"]) == {"engine": "veena-tts", "voice": "agastya"}
+    assert voices.current({"voice": "hi_male"}) == {"engine": "veena-tts", "voice": "agastya"}          # a plan from before Veena existed
+
+
+def test_veena_request_is_async_polled_and_has_no_emotion_tags(env, monkeypatch, fast):
+    plan_id = exported(env, "veena-tts")
+    gw = Gateway()
+    out = run(plan_id, gw, monkeypatch)
+    segs = planner.get_plan(plan_id)["segments"]
+    assert out["made"] == len(segs) and not out["failed"] and gw.polls
+    r = gw.requests[0]
+    assert r["auth"]["Prefer"] == "respond-async"
+    b = r["body"]
+    assert b["model"] == "veena-tts" and b["voice"] == "agastya" and b["response_format"] == "wav"
+    assert b["temperature"] == 0.4 and b["top_p"] == 0.9 and b["repetition_penalty"] == 1.05
+    assert "<" not in b["input"] and b["input"] == voices.veena_text(segs[0])
+    assert all(store.path_of(i).is_file() for i in store.items(plan_id, "voice"))
+
+
+def test_veena_text_keeps_punctuation_and_adds_pauses():
+    seg = {"sentences": [{"text": "उसने call उठाया...", "pause_after_s": 0.8}, {"text": "क्या हुआ था", "pause_after_s": 0}, {"text": "Bank खाली था.", "pause_after_s": 0}]}
+    assert voices.veena_text(seg) == "उसने call उठाया... [pause:0.8s] क्या हुआ था। Bank खाली था."
+
+
+def test_switching_voice_makes_old_takes_stop_counting_and_back_again(env, monkeypatch, fast):
+    plan_id = exported(env, "svara-tts")
+    run(plan_id, Gateway(), monkeypatch)
+    plan = planner.get_plan(plan_id)
+    seg = plan["segments"][0]
+    assert store.chosen_voice(plan_id, seg, store.voice_key(plan))
+    planner.set_narrator(plan_id, None, tts={"engine": "veena-tts", "voice": "agastya"})
+    plan = planner.get_plan(plan_id)
+    assert store.chosen_voice(plan_id, seg, store.voice_key(plan)) is None and not store.audio_seconds(plan_id)
+    planner.set_narrator(plan_id, None, tts={"engine": "svara-tts", "voice": "hi_male"})
+    assert store.chosen_voice(plan_id, seg, store.voice_key(planner.get_plan(plan_id)))
+
+
+def test_voice_choice_does_not_change_the_approved_plan(env):
+    plan_id = exported(env, "svara-tts")
+    before = editorial.content_hash(planner.get_plan(plan_id))
+    planner.set_narrator(plan_id, None, tts={"engine": "veena-tts", "voice": "kavya"})
+    assert editorial.content_hash(planner.get_plan(plan_id)) == before
+    voice.load_export(plan_id)                                                                            # the export still describes the plan
+
+
+def test_tts_api_validates_engine_and_voice(env):
+    from fastapi import HTTPException
+    from story2 import api
+    plan_id = exported(env)
+    assert asyncio.run(api.voice_engines())["default"] == "veena-tts"
+    for bad in ({"engine": "nope"}, {"engine": "veena-tts", "voice": "hi_male"}):
+        with pytest.raises(HTTPException) as e:
+            asyncio.run(api.set_tts(plan_id, api.Tts(**bad)))
+        assert e.value.status_code == 400
+    out = asyncio.run(api.set_tts(plan_id, api.Tts(engine="veena-tts", voice="kavya")))
+    assert out["narrator"]["tts"] == {"engine": "veena-tts", "voice": "kavya"}
+
+
+def test_a_voice_sample_is_one_short_take_in_the_chosen_voice(env, monkeypatch, fast):
+    plan_id = exported(env, "veena-tts")
+    gw = Gateway()
+    monkeypatch.setattr(voice.httpx, "AsyncClient", gw.client())
+    out = asyncio.run(voice.make_sample(plan_id, s=SETTINGS, key="k"))
+    assert out["file"] == "voice/sample-veena-tts-agastya.wav" and (store.media_dir(plan_id) / out["file"]).is_file()
+    assert gw.requests[0]["body"]["voice"] == "agastya" and not store.items(plan_id, "voice")      # not a numbered take: it never counts toward the video
+    assert voice.state(plan_id)["sample"].startswith(f"/api/media/file/{plan_id}/voice/sample-veena-tts-agastya.wav")

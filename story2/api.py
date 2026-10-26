@@ -9,7 +9,7 @@ from story import db, llm, settings as settings_mod
 from story.pipeline import manager
 from fastapi.responses import FileResponse
 
-from . import describe, editorial, export, imgplan, imgprompts, intake, jobs, planner, providers, storyboard, styles
+from . import describe, editorial, export, imgplan, imgprompts, intake, jobs, planner, providers, storyboard, styles, voices
 
 router = APIRouter(prefix="/api/plans")
 
@@ -56,7 +56,7 @@ async def new_plan(body: NewPlan):
 
 @router.get("/providers")
 async def image_providers():
-    return {"providers": [providers.public(m) for m in providers.IMAGE_MODELS], "source": providers.CONFIG_SOURCE, "default": providers.DEFAULT_MODEL}
+    return {"providers": [providers.public(m) for m in providers.PROVIDERS], "source": providers.CONFIG_SOURCE, "default": providers.DEFAULT_MODEL}
 
 
 @router.get("/providers/probe")
@@ -89,6 +89,11 @@ async def preview_file(plan_id: str, name: str):
     if "/" in name or "\\" in name or ".." in name or not f.is_file():
         raise HTTPException(404, "preview not found")
     return FileResponse(f)
+
+
+@router.get("/voices")
+async def voice_engines():
+    return {"engines": voices.public(), "default": voices.DEFAULT_ENGINE}
 
 
 @router.get("/{plan_id}")
@@ -155,6 +160,24 @@ async def set_visual_style(plan_id: str, body: VisualStyle):
     return await plan(plan_id)
 
 
+class Cast(BaseModel):
+    indian: bool
+    write_into_list: bool = False
+
+
+@router.patch("/{plan_id}/cast")
+async def set_cast(plan_id: str, body: Cast):
+    """Draw the people of this video as Indian (on by default) or as the story says. Prompts are recompiled at once and reference sheets and scene pictures
+    made the other way are flagged old. `write_into_list` also rewrites the character list itself (skin, hair, eyes), which changes what was approved."""
+    p = _guard(planner.get_plan, plan_id)
+    db.ex("UPDATE plans SET settings=?, updated_at=? WHERE id=?", (db.jdump({**p["settings"], "cast_indian": body.indian}), db.now(), plan_id))
+    if body.indian and body.write_into_list:
+        storyboard.apply_cast(plan_id)
+    if storyboard.get_scenes(plan_id):
+        imgplan.compile_plan(plan_id)
+    return await plan(plan_id)
+
+
 @router.delete("/{plan_id}")
 async def delete_plan(plan_id: str):
     _guard(planner.get_plan, plan_id)
@@ -180,6 +203,22 @@ class Narrator(BaseModel):
     name: str | None = None
     voice: str | None = None
     gender: str | None = None
+
+
+class Tts(BaseModel):
+    engine: str
+    voice: str | None = None
+
+
+@router.patch("/{plan_id}/tts")
+async def set_tts(plan_id: str, body: Tts):
+    """Pick the voice engine and voice. Outside the content hash on purpose: it changes which takes count, not what was approved."""
+    plan = _guard(planner.get_plan, plan_id)
+    try:
+        narr = voices.choose(plan["narrator"], body.engine, body.voice)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return _guard(planner.set_narrator, plan_id, None, tts=narr["tts"])
 
 
 class Settings(BaseModel):

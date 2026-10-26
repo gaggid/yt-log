@@ -178,7 +178,10 @@ async def make_registry(plan_id: str, backend, s: dict | None = None) -> dict:
             + (bp.get("viewer_promise", "") + " Structure: " + bp.get("structure", "")).strip()
             + "\nNARRATION (the picture list must cover everyone and everything in it):\n" + "\n".join(x["plain"] for x in plan["segments"])[:7000]
             + "\nNarrator: a first-person guide shown as an animated avatar (do not list the narrator as an asset)."
-            + f"\nVISUAL STYLE of the whole video (the style asset is set for you; draw characters and places to fit it): {styles.for_plan(plan['settings'])['look']}")
+            + f"\nVISUAL STYLE of the whole video (the style asset is set for you; draw characters and places to fit it): {styles.for_plan(plan['settings'])['look']}"
+            + ("\nCAST: every person in this video is Indian. Fill the ethnicity slot with Indian (add the region or community only when the story names one) and give "
+               "skin, hair and eyes that fit an Indian person; use Indian names and clothes that fit the period and place. Places and objects follow the story's own setting."
+               if describe.indian_on(plan["settings"]) else ""))
     tries: list[int] = []
 
     def enough(out: RegistryOut) -> None:
@@ -203,6 +206,8 @@ async def make_registry(plan_id: str, backend, s: dict | None = None) -> dict:
             data = a.model_dump()
             data["name"] = a.name = re.sub(r"\s+style$", "", a.name.strip(), flags=re.I) or a.name           # the model sometimes tacks the word "style" onto every name
             ap = describe.clean(data.get("appearance"))
+            if ap and a.kind in ("person", "narrator") and describe.indian_on(plan["settings"]):
+                ap = describe.indianise(ap)                         # the cast setting is enforced here too, not left to the model's wording
             if ap:                                                  # the description the image model reads is composed from the slots, so no slot is dropped
                 data["appearance"] = ap
                 data["description"] = describe.describe(a.kind, ap) or data["description"]
@@ -221,6 +226,25 @@ async def make_registry(plan_id: str, backend, s: dict | None = None) -> dict:
     db.ex("UPDATE plans SET settings=?, updated_at=? WHERE id=?", (db.jdump({**planner.get_plan(plan_id)["settings"], "registry_direction": styles.DIRECTION, "registry_style": styles.style_id(plan["settings"])}), db.now(), plan_id))
     store.log(plan_id, "registry", {"assets": len(get_assets(plan_id))})
     return planner.get_plan(plan_id)
+
+
+def apply_cast(plan_id: str) -> int:
+    """Write the Indian cast into the character list: ethnicity, and colouring that cannot go with it, replaced in the slots; description and fixed details are
+    composed again. Unlocked and locked people alike (the owner chose it for every plan). Returns how many people changed."""
+    n = 0
+    for a in get_assets(plan_id):
+        ap = a["data"].get("appearance")
+        if a["kind"] not in ("person", "narrator") or not ap:
+            continue
+        new = describe.indianise(ap)
+        if new == describe.clean(ap):
+            continue
+        data = {**a["data"], "appearance": new, "description": describe.describe(a["kind"], new) or a["data"].get("description", "")}
+        data["fixed"] = describe.fixed_from(a["kind"], new) or data.get("fixed", [])
+        db.ex("UPDATE assets SET data=?, rev=rev+1, updated_at=? WHERE id=?", (db.jdump(data), db.now(), a["id"]))
+        n += 1
+    store.log(plan_id, "cast_indian", {"changed": n})
+    return n
 
 
 # ── scene construction ──────────────────────────────────────────────────────
@@ -576,8 +600,8 @@ def edit_scene(scene_id: str, patch: dict) -> dict:
             sets.append("locked=?")
             args.append(1 if v else 0)
         elif k == "model":
-            if v and v not in providers.IMAGE_MODELS:
-                raise planner.PlanError(f"unknown image model '{v}' (use one of: {', '.join(providers.IMAGE_MODELS)})")
+            if v and v not in providers.PROVIDERS:
+                raise planner.PlanError(f"unknown image model '{v}' (use one of: {', '.join(providers.PROVIDERS)})")
             data["model"] = v or ""
         elif k.split(".")[0] in protected:
             raise planner.PlanError(f"{k} is managed by the planner and cannot be edited here")

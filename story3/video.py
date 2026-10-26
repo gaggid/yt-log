@@ -135,24 +135,26 @@ def visual_choices(plan_id: str) -> dict[str, dict]:
                 pick |= {"path": store.path_of(store.get(g["current_item"]["id"])), "source": "graphic", "item": g["current_item"]["id"], "problem": "graphic not approved"}
         if not pick["path"]:
             ap = by_id.get(r["approved"]) if r["approved"] else None
+            good = [c for c in r["candidates"] if c["status"] == "done" and c["current"]]
+            b = by_id.get(r["best"]) if r["best"] else (good[-1] if good else None)
             if ap and ap["current"]:
                 pick |= {"path": store.path_of(store.get(ap["id"])), "source": "picture", "item": ap["id"]}
+            elif b:                                                    # a newer picture made after a reference or the scene changed wins over an older approved one
+                pick |= {"path": store.path_of(store.get(b["id"])), "source": "picture", "item": b["id"], "problem": "picture not approved"}
+            elif ap:                                                   # redoing a reference must not stop the video: the approved picture stays in until the scene is redrawn
+                pick |= {"path": store.path_of(store.get(ap["id"])), "source": "picture", "item": ap["id"], "stale": True,
+                         "problem": "approved picture was made before a reference or the scene changed: redraw this scene"}
+            elif any(c["status"] == "done" for c in r["candidates"]):
+                pick |= {"problem": "the only pictures are old (the scene or a reference changed)"}
             else:
-                good = [c for c in r["candidates"] if c["status"] == "done" and c["current"]]
-                b = by_id.get(r["best"]) if r["best"] else (good[-1] if good else None)
-                if b:
-                    pick |= {"path": store.path_of(store.get(b["id"])), "source": "picture", "item": b["id"], "problem": "picture not approved"}
-                elif any(c["status"] == "done" for c in r["candidates"]):
-                    pick |= {"problem": "the only pictures are old (the scene or a reference changed)"}
-                else:
-                    pick |= {"problem": "no picture yet"}
+                pick |= {"problem": "no picture yet"}
         out[r["id"]] = pick
     return out
 
 
 def audio_choices(plan_id: str) -> list[dict]:
     plan = planner.get_plan(plan_id)
-    voice = plan["narrator"].get("voice") or "hi_male"
+    voice = store.voice_key(plan)
     out = []
     for seg in plan["segments"]:
         it = store.chosen_voice(plan_id, seg, voice)
@@ -376,12 +378,38 @@ def build(plan_id: str, profile: str = "draft", captions: bool = False, allow_ga
         raise
     store.update(it["id"], status="done", file=name, meta={"duration_s": round(secs, 2), "plan_s": chk["plan_s"], "audio_s": chk["audio_s"], "scenes": len(sc_list), "frames": frames_done,
                                                           "size": f"{w}x{h}", "fps": prof["fps"], "captions": bool(captions), "speed": speed, "placeholders": placeholders,
-                                                          "warnings": chk["warnings"], "moves": moves, "inputs_hash": inputs_hash(chk, profile, captions, speed),
+                                                          "warnings": chk["warnings"], "moves": moves, "used": used_items(chk), "inputs_hash": inputs_hash(chk, profile, captions, speed),
                                                           "seconds_taken": round(time.time() - t0, 1), "bytes": out.stat().st_size})
     plan_store.log(plan_id, "video", {"profile": profile, "seconds": round(secs, 1), "placeholders": len(placeholders), "captions": bool(captions)})
     if progress:
         progress(total, total, "done")
     return {"item": store.get(it["id"]), "placeholders": placeholders}
+
+
+def used_items(chk: dict) -> dict[str, dict]:
+    """scene id -> the picture or card item the video shows for it, kept on the video so a later change can be listed."""
+    return {sid: {"item": v.get("item"), "source": v.get("source", "")} for sid, v in chk["visuals"].items() if v.get("item")}
+
+
+def _url(plan_id: str, item_id: str | None) -> str:
+    it = store.get(item_id) if item_id else None
+    return f"/api/media/file/{plan_id}/{it['file']}" if it and it["file"] else ""
+
+
+def changes_since(plan_id: str, chk: dict, last: dict | None) -> dict:
+    """What would look different if the video were built now: scenes whose picture is not the one the latest video used, with both pictures, and the scenes
+    that still show an approved picture made before a reference or the scene changed (they should be redrawn)."""
+    scenes_ = {sc["id"]: sc for sc in storyboard.get_scenes(plan_id)}
+    used = (last or {}).get("meta", {}).get("used") or {}
+    changed = []
+    for sid, v in chk["visuals"].items():
+        old = (used.get(sid) or {}).get("item")
+        if last and v.get("item") and old != v.get("item") and sid in scenes_:
+            sc = scenes_[sid]
+            changed.append({"scene": sid, "at": sc["start_s"], "subject": str(sc["data"].get("subject") or ""), "old_url": _url(plan_id, old), "new_url": _url(plan_id, v["item"]),
+                            "new_item": v["item"], "approved": not v.get("problem")})
+    stale = [{"scene": sid, "at": scenes_[sid]["start_s"], "subject": str(scenes_[sid]["data"].get("subject") or "")} for sid, v in chk["visuals"].items() if v.get("stale") and sid in scenes_]
+    return {"since_video": last["id"] if last else None, "changed": sorted(changed, key=lambda c: c["at"]), "stale": sorted(stale, key=lambda c: c["at"])}
 
 
 def state(plan_id: str) -> dict:
@@ -406,4 +434,5 @@ def state(plan_id: str) -> dict:
     drafts = [v for v in videos if v["profile"] == "draft"]
     return {"tools": tools, "blockers": chk["blockers"], "warnings": chk["warnings"], "plan_s": chk["plan_s"], "audio_s": chk["audio_s"], "length_gap_s": chk["length_gap_s"],
             "scenes": chk["scenes"], "segments": chk["segments"], "videos": videos, "ready": not chk["blockers"] and chk["scenes"] > 0, "done": bool(drafts and drafts[-1]["current"] and not drafts[-1]["placeholders"]),
+            "changes": changes_since(plan_id, chk, max(items, key=lambda i: i["updated_at"]) if items else None),
             "profiles": {k: {"label": p["label"], "size": f"{p['size'][0]}x{p['size'][1]}", "eta_s": round(chk["plan_s"] * speed[k])} for k, p in PROFILES.items()}}

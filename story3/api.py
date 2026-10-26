@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from story import llm, settings as settings_mod
 from story.pipeline import manager
-from story2 import jobs, planner
+from story2 import jobs, planner, providers
 
 from . import auto, graphics, refs, scenes, store, thumbnail, video, voice
 
@@ -44,6 +44,7 @@ async def media_file(plan_id: str, name: str):
 @router.get("/{plan_id}")
 async def media_state(plan_id: str):
     _guard(planner.get_plan, plan_id)
+    await asyncio.to_thread(providers.refresh, settings_mod.get(), settings_mod.api_key())             # image models the gateway lists become choices
     st = {"voice": voice.state(plan_id), "refs": refs.state(plan_id), "scenes": scenes.state(plan_id), "graphics": graphics.state(plan_id), "video": video.state(plan_id), "thumbnail": thumbnail.state(plan_id)}
     return {**st, "auto": auto.state(plan_id, st)}
 
@@ -63,12 +64,25 @@ async def make_voice(plan_id: str, body: VoiceReq | None = None):
     return _start(plan_id, "voice", work)
 
 
+@router.post("/{plan_id}/voice/sample")
+async def voice_sample(plan_id: str):
+    async def work(progress):
+        await voice.make_sample(plan_id, progress, settings_mod.get(), settings_mod.api_key())
+    return _start(plan_id, "voice sample", work)
+
+
 class RefsReq(BaseModel):
     asset_ids: list[str] | None = None
     candidates: int = refs.DEFAULT_CANDIDATES
     only_missing: bool = True
     model: str | None = None
     score: bool = True
+    prompts: dict[str, str] | None = None              # asset id -> a prompt written by a person, for that asset's new pictures only
+
+
+def _known_model(model: str | None) -> None:
+    if model and model not in providers.PROVIDERS:
+        raise HTTPException(400, f"unknown image model '{model}' (known: {', '.join(providers.PROVIDERS)})")
 
 
 @router.post("/{plan_id}/references")
@@ -76,9 +90,10 @@ async def make_references(plan_id: str, body: RefsReq | None = None):
     body = body or RefsReq()
     if not refs.targets(plan_id):
         raise HTTPException(400, "no person, place or object appears in two or more scenes, so no reference pictures are needed")
+    _known_model(body.model)
 
     async def work(progress):
-        await refs.generate(plan_id, body.asset_ids, body.candidates, body.only_missing, body.model, progress, settings_mod.get(), settings_mod.api_key(), score=body.score)
+        await refs.generate(plan_id, body.asset_ids, body.candidates, body.only_missing, body.model, progress, settings_mod.get(), settings_mod.api_key(), score=body.score, prompts=body.prompts)
     return _start(plan_id, "references", work)
 
 
@@ -196,6 +211,38 @@ async def correct_scene(plan_id: str, scene_id: str, body: CorrectReq):
 
     async def work(progress):
         await scenes.correct(plan_id, scene_id, body.change, body.keep, body.item_id, progress, settings_mod.get(), settings_mod.api_key())
+    return _start(plan_id, "scene picture", work)
+
+
+@router.get("/{plan_id}/scenes/{scene_id}/options")
+async def scene_options(plan_id: str, scene_id: str):
+    return _guard(scenes.options, plan_id, scene_id)
+
+
+class RedrawReq(BaseModel):
+    model: str
+    mode: str = "generate"
+    prompt: str | None = None
+    negative_prompt: str | None = None
+    candidates: int = 1
+    remember: bool = False
+
+
+@router.post("/{plan_id}/scenes/{scene_id}/redraw")
+async def redraw_scene(plan_id: str, scene_id: str, body: RedrawReq):
+    _need_prompts(plan_id)
+    _known_model(body.model)
+    if body.mode not in ("generate", "edit"):
+        raise HTTPException(400, "mode must be generate (plain) or edit (from the reference sheets)")
+    _guard(scenes.options, plan_id, scene_id)                                    # refuses an unknown scene before a job starts
+    if body.mode == "edit":
+        opt = scenes.options(plan_id, scene_id)["models"].get(body.model) or {}
+        if not opt.get("can_edit"):
+            raise HTTPException(400, "this model or scene cannot use reference sheets: " + ("the scene has no approved reference sheet" if opt.get("edits") else "the model cannot edit"))
+
+    async def work(progress):
+        await scenes.redraw(plan_id, scene_id, body.model, body.mode, body.prompt, body.negative_prompt, body.candidates, body.remember, progress,
+                            settings_mod.get(), settings_mod.api_key())
     return _start(plan_id, "scene picture", work)
 
 

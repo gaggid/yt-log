@@ -7,7 +7,7 @@ import re
 import uuid
 
 from story import db, llm, settings as settings_mod
-from . import intake, leak, prompts as P, store, svara
+from . import intake, leak, prompts as P, store, svara, voices
 from .schemas import Blueprint, NarrationOut
 
 WPM = 148                                    # spoken Hinglish words per minute, measured on real Svara hi_male audio (125 was a guess)
@@ -84,7 +84,7 @@ def create_plan(candidate_id: str, narrator_name: str = "", minutes: float = DEF
         raise PlanError("; ".join(c["text"] for c in ready["checks"] if c["level"] == "blocked"))
     pid = "pl-" + uuid.uuid4().hex[:8]
     narr = {"name": narrator_name.strip(), "person": "first", "gender": "male", "language": "hi", "script": "Devanagari",
-            "voice": "hi_male", "avatar": {"status": "to be designed"}}
+            "voice": "hi_male", "tts": {"engine": voices.DEFAULT_ENGINE, "voice": voices.ENGINES[voices.DEFAULT_ENGINE]["default_voice"]}, "avatar": {"status": "to be designed"}}
     db.ex("INSERT INTO plans(id,project_id,candidate_id,format,status,narrator,settings,readiness,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
           (pid, story["evidence"]["project_id"], candidate_id, "16:9", "draft", db.jdump(narr),
            db.jdump({"minutes": float(minutes), "wpm": WPM}), db.jdump(ready), db.now(), db.now()))

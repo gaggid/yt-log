@@ -31,12 +31,12 @@ def wav(path, seconds, rate=24000):
 def make_voice(plan_id, only=None, approve=True):
     """A finished voice take for each segment, as long as the plan expects (a short one, so tests stay quick), then retimed like the real thing."""
     plan = planner.get_plan(plan_id)
-    voice_id = plan["narrator"].get("voice") or "hi_male"
+    voice_id = store.voice_key(plan)
     for seg in plan["segments"]:
         if only and seg["id"] not in only:
             continue
         secs = max(1.0, round(seg["duration_s"] / 10, 1))
-        it = store.add(plan_id, "voice", seg["id"], 1, "running", {"text_hash": store.text_hash(seg["annotated"], voice_id)})
+        it = store.add(plan_id, "voice", seg["id"], 1, "running", {"text_hash": store.segment_hash(seg, voice_id)})
         wav(store.media_dir(plan_id, "voice") / f"{seg['id']}-a1.wav", secs)
         store.update(it["id"], status="done", file=f"voice/{seg['id']}-a1.wav", meta={"duration_s": secs})
         if approve:
@@ -144,6 +144,11 @@ def test_an_old_picture_does_not_count(env, monkeypatch):
     d["subject"] = "something else now"
     db.ex("UPDATE scenes SET data=? WHERE id=?", (db.jdump(d), sc["id"]))
     imgplan.compile_plan(plan_id)
+    chk = video.checklist(plan_id)
+    assert not chk["blockers"]                                                                   # an approved picture stays in the video, with a warning, until the scene is redrawn
+    assert any(w["kind"] == "picture" and "redraw this scene" in w["text"] for w in chk["warnings"])
+    for i in store.items(plan_id, scenes.KIND, sc["id"]):                                       # a picture nobody approved that is old has nothing to fall back on
+        store.approve(i["id"], False)
     chk = video.checklist(plan_id)
     assert any(b["kind"] == "picture" and "old" in b["text"] for b in chk["blockers"])
 
