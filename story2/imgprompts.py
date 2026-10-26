@@ -160,13 +160,18 @@ def feeling_texts(scene: dict, plan: dict | None) -> list[str]:
     return [t for t in out if t]
 
 
+def person_hide(a: dict, hide: set[str]) -> set[str]:
+    """What the shot hides of this person: the shot's own list, plus the whole face for someone drawn only as a silhouette (a real person is never given a likeness).
+    The prompt and the validator both use this, so the validator never demands a detail the prompt had to leave out."""
+    return hide | ({"face", "eyes", "expression"} if a["data"].get("fictionalisation") == "real_person_no_likeness" else set())
+
+
 def _subject_text(d: dict, people: list[dict], indian: bool = False) -> str:
     out = [_s(d.get("subject"))]
     hide = hidden_for(d)
     for a in people:
         if a["kind"] in ("person", "narrator"):
-            mine = hide | ({"face", "eyes", "expression"} if a["data"].get("fictionalisation") == "real_person_no_likeness" else set())      # a silhouette has no face to describe
-            det, fixed = describe.person_view(a, indian, mine)          # composed from the slots: what the frame hides is left out, the cast setting applies
+            det, fixed = describe.person_view(a, indian, person_hide(a, hide))          # composed from the slots: what the frame hides is left out, the cast setting applies
             det = _s(det)
         else:
             det, fixed = _s(a["data"].get("description")), a["data"].get("fixed", [])
@@ -495,7 +500,7 @@ def validate_prompt(c: dict, scene: dict, assets: list[dict], facts: str, prof: 
     for a in used:
         if a["kind"] == "style" or plate:
             continue
-        fixed = describe.person_view(a, bool(c.get("cast_indian")), hide)[1] if a["kind"] in ("person", "narrator") else _place_fixed(a, d)   # what the prompt really carries: the cast setting and the shot's view applied
+        fixed = describe.person_view(a, bool(c.get("cast_indian")), person_hide(a, hide))[1] if a["kind"] in ("person", "narrator") else _place_fixed(a, d)   # what the prompt really carries: the cast setting and the shot's view applied
         for fx in fixed:
             if _s(fx) and not covers(p, fx):
                 add("continuity", f"{a['name']}: “{_s(fx)}” must stay the same but is not in the prompt")

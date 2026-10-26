@@ -71,11 +71,13 @@ _listing = {"at": 0.0}
 
 
 def register_listing(listing: list[dict]) -> list[str]:
-    """Add every image model in a /v1/models listing that is not known yet. Audited entries are never changed. Returns the ids added."""
+    """Add every image model in a /v1/models listing that is not known yet and can edit from reference pictures. Audited entries are never changed. Returns the ids added."""
     added = []
     for m in listing or []:
         mid, caps = m.get("id"), m.get("capabilities") or []
-        if mid and mid not in PROVIDERS and ("images.generations" in caps or m.get("type") == "image"):
+        # only models that can take reference pictures: the film keeps characters the same by editing from the approved sheets, and a model that cannot (the
+        # *-turbo ones) is no use here (owner decision, 2026-10-26)
+        if mid and mid not in PROVIDERS and "images.generations" in caps and "images.edits" in caps:
             PROVIDERS[mid] = _discovered(mid, caps)
             added.append(mid)
     return added

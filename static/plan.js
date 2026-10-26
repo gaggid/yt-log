@@ -85,6 +85,11 @@ window.viewPlan = async function (id) {
   let P = null, PV = {}, MS = null, RS = null, SS = null, GS = null, VS = null, TH = null, AU = null, PF = 'open', VOPT = {captions: false, gaps: false}, sig = '', seenRun = false;
   const app = $('#app');
   const busyJob = () => P && P.job && P.job.state === 'running';
+  const errHint = e => /failed to load|model_load_failed|llama-server exited|\b503\b/i.test(e || '') ? 'The model server could not load the chat model. Most often another model worker (a voice worker) is still holding the GPU memory: end it or restart the model server, then press Try again.'
+    : /not reachable|connect/i.test(e || '') ? 'The model server is not reachable. Start it (check Settings, Test connection), then press Try again.'
+    : /timed? ?out|timeout/i.test(e || '') ? 'The model took too long. Press Try again; if it repeats, restart the model server.'
+    : /context|too long|budget/i.test(e || '') ? 'The request was too large for the model. Press Try again; if it repeats, make the plan shorter in Settings.'
+    : 'Press Try again. If it fails the same way, the message above says what is wrong.';
   const editing = () => { const a = document.activeElement; return a && a.closest && a.closest('#plan') && ['TEXTAREA', 'INPUT', 'SELECT'].includes(a.tagName); };
 
   async function load(force) {
@@ -94,7 +99,7 @@ window.viewPlan = async function (id) {
     const changed = s !== sig; P = p;
     if (changed || force) { sig = s; if (!editing() || force) render(); }
     if (p.job.state === 'running') seenRun = true;
-    if (seenRun && p.job.state !== 'running') { seenRun = false; if (p.job.state === 'error') toast('Stopped: ' + p.job.error, {bad: true}); else if (p.job.state === 'done') toast('Finished: ' + p.job.kind); }
+    if (seenRun && p.job.state !== 'running') { seenRun = false; if (p.job.state === 'error') toast('Stopped: ' + p.job.error, {bad: true}); else if (p.job.state === 'done') toast('Finished: ' + p.job.kind + (p.job.note ? ' — ' + p.job.note : '')); }
   }
   const tick = async () => { if (my !== route_id) return; try { await load(); } catch (e) { /* keep polling */ } timer = setTimeout(tick, busyJob() ? 1500 : 4000); };
 
@@ -260,6 +265,20 @@ Be concrete: colours, materials, numbers. Leave empty to skip.`); if (v === null
       if (!await confirmDlg('Redraw the scenes with old pictures?', `${ids.length} scene(s) are drawn again, one new picture each, in the way chosen for each scene. Your approved pictures stay until you approve the new ones; the video uses the new picture meanwhile.`, 'Redraw')) return;
       await run(b, `/media/${id}/scenes`, {scene_ids: ids, only_missing: false, candidates: 1});
     },
+    async resolve(b, key, fix) {
+      const r = await act(b, () => api(`/plans/${id}/resolve`, {method: 'POST', json: {key, fix}}));
+      if (!r) return;
+      window._fixNote = r.kind === 'instant' ? r.message : '';
+      toast(r.kind === 'instant' ? r.message : 'Started: it runs in the background and the result is shown here when it ends.');
+      await load(true);
+    },
+    async retry(b) {
+      const k = ((P.job && P.job.kind) || '').toLowerCase(), by = {blueprint: () => this.blueprint(b), narration: () => this.narration(b, true), registry: () => this.registry(b), storyboard: () => this.storyboard(b),
+        'fix repeats': () => this.fixRepeats(b), voice: () => this.voiceAll(b), 'scene pictures': () => this.picsAll(b), references: () => this.refsAll(b), 'auto-run': () => this.autoRun(b), video: () => this.vidBuild(b, 'draft')};
+      const f = Object.entries(by).find(([name]) => k === name || k.startsWith(name));
+      if (!f) { toast('Press the button of the step that stopped (' + (k || 'unknown') + ').', {bad: true}); return; }
+      window._fixNote = ''; await f[1]();
+    },
     async picsOne(b, sid) { await run(b, `/media/${id}/scenes`, {scene_ids: [sid], only_missing: false, candidates: 1}); toast('Drawing another picture of this scene.'); },
     async picsCorrect(b, sid, iid) {
       const change = prompt('What should change in this picture? (one clear change)'); if (!change || !change.trim()) return;
@@ -377,12 +396,12 @@ Be concrete: colours, materials, numbers. Leave empty to skip.`); if (v === null
     const stale = p.scenes.filter(s => s.stale).length;
     const checked = !!(p.validation && p.validation.storyboard);
     const blocks = [], warns = [];
-    if (!p.readiness.ready) blocks.push(p.readiness.checks.filter(c => c.level === 'blocked').map(c => c.text).join(' '));
-    if (j.state === 'error') blocks.push(`The last step stopped: ${j.error} Finished parts are kept; press its button again to continue.`);
-    if (!p.blueprint) blocks.push('The story is not planned yet. Start with “Plan the story”.');
-    else if (missingBeats.length) blocks.push(`Narration is missing for ${missingBeats.length} of ${p.blueprint.beats.length} parts.`);
-    if (p.segments.length && segNoScene.length && !missingBeats.length) blocks.push(`${segNoScene.length} narration part(s) have no scenes yet.`);
-    if (errors.length) blocks.push(`${errors.length} error(s) must be fixed before you move on: ${[...new Set(errors.map(e => e.kind.replace(/_/g, ' ')))].join(', ')}.`);
+    if (!p.readiness.ready) blocks.push({t: p.readiness.checks.filter(c => c.level === 'blocked').map(c => c.text).join(' '), hint: 'Open the story list, approve the story there, and come back; or create the plan with “allow unapproved”.'});
+    if (j.state === 'error') blocks.push({t: `The last step stopped: ${j.error} Finished parts are kept.`, hint: errHint(j.error), btn: ['Try again', '_plan.retry(this)']});
+    if (!p.blueprint) blocks.push({t: 'The story is not planned yet.', btn: ['Plan the story', '_plan.blueprint(this)']});
+    else if (missingBeats.length) blocks.push({t: `Narration is missing for ${missingBeats.length} of ${p.blueprint.beats.length} parts.`, btn: ['Write the missing narration', '_plan.narration(this,true)']});
+    if (p.segments.length && segNoScene.length && !missingBeats.length) blocks.push({t: `${segNoScene.length} narration part(s) have no scenes yet.`, btn: ['Design the storyboard', '_plan.storyboard(this)']});
+    if (errors.length) blocks.push({t: `${errors.length} error(s) must be fixed before you move on: ${[...new Set(errors.map(e => e.kind.replace(/_/g, ' ')))].join(', ')}. Each is explained below with what the app can do about it.`, btn: (p.blockers || []).length ? null : ['Check again', '_plan.validate(this)']});
     if (running) warns.push(`A step is running (${j.kind}: ${j.label}). Buttons wait until it ends.`);
     if (p.scenes.length && !checked) warns.push('Not checked since your last change. Press “Check everything”.');
     if (stale) warns.push(`${stale} scene(s) follow narration you changed: look at them, then approve.`);
@@ -447,8 +466,15 @@ Be concrete: colours, materials, numbers. Leave empty to skip.`); if (v === null
     const sd = P.steps_done || {};
     const lastKey = Object.keys(sd).filter(k => k !== 'auto_run').sort((x, y) => sd[y] - sd[x])[0];
     const lastLine = lastKey ? `<div class="small mute" style="margin:6px 0">Last step finished: <b>${esc(WHAT_LABEL[lastKey] || lastKey)}</b> ${agoSpan(sd[lastKey])} (at ${clock(sd[lastKey])})${running ? ` · now running: <b>${esc(j.kind)}</b> for ${hd(j.elapsed_s)}` : ''}</div>` : '';
-    const banner = lastLine + (blocks.length
-      ? `<div class="banner block"><b>Stopping you from moving on</b><ul class="tight">${blocks.map(b => `<li>${esc(b)}</li>`).join('')}</ul>${warns.length ? `<div class="small mt-s">Also: ${warns.map(esc).join(' · ')}</div>` : ''}</div>`
+    const fixNote = window._fixNote || (j.state === 'done' && j.note ? j.note : '');
+    const noteBox = fixNote ? `<div class="banner ${errors.length ? 'warn' : 'good'}" style="margin:6px 0"><b>What the last fix did</b><div class="small">${esc(fixNote)}</div></div>` : '';
+    const banner = lastLine + noteBox + (blocks.length
+      ? `<div class="banner block"><b>Stopping you from moving on</b><ul class="tight">${blocks.map(b => { b = typeof b === 'string' ? {t: b} : b; return `<li>${esc(b.t)}${b.btn ? ` <button class="small primary" ${dis} onclick="${b.btn[1]}">${esc(b.btn[0])}</button>` : ''}${b.hint ? `<div class="small mute">${esc(b.hint)}</div>` : ''}</li>`; }).join('')}</ul>
+        ${(p.blockers || []).map(bk => `<div class="needbox mt-s"><div class="row"><b>${esc(bk.title)}</b>${badge('error', bk.count + (bk.count > 1 ? ' places' : ' place'))}</div>
+          <div class="small">${esc(bk.why)}</div><div class="small mute mt-s">Example: ${esc(bk.sample)}${bk.when.length ? ` · scenes at ${bk.when.slice(0, 6).map(mmss).join(', ')}${bk.when.length > 6 ? ' …' : ''}` : ''}</div>
+          ${bk.note ? `<div class="small mt-s">⚠ ${esc(bk.note)}</div>` : ''}
+          <div class="row mt-s">${bk.fixes.map((f, i) => `<button class="small ${i ? '' : 'primary'}" ${dis} title="${esc(f.does)}" onclick="_plan.resolve(this,'${esc(bk.key)}','${f.id}')">${esc(f.label)}</button>`).join('')}<button class="small" onclick="_plan.go('${bk.jump}')">Go to it</button></div>
+          <div class="small mute mt-s"><b>${esc(bk.fixes[0].label)}:</b> ${esc(bk.fixes[0].does)}${bk.manual ? ` <b>If that is not enough:</b> ${esc(bk.manual)}` : ''}</div></div>`).join('')}${warns.length ? `<div class="small mt-s">Also: ${warns.map(esc).join(' · ')}</div>` : ''}</div>`
       : warns.length ? `<div class="banner warn"><b>Nothing blocks you, but note:</b><ul class="tight">${warns.map(w => `<li>${esc(w)}</li>`).join('')}</ul></div>`
       : nextKey === 'done' ? `<div class="banner good"><b>Done so far.</b> Export v${lastExp.rev} is saved and the voice is made (${mmss(MS.real_s)} of real speech). Reference pictures are approved (${RS && RS.total ? RS.approved + ' approved, ' + RS.skipped + ' skipped' : 'none needed'}). ${picsOn ? 'Scene pictures are approved (' + SS.approved + ' of ' + SS.total + '). ' : ''}${gfxOn ? 'Graphics are approved (' + GS.approved + ' of ' + GS.total + '). ' : ''}${vidOn && vidDone ? 'The draft video is made (' + mmss(VS.videos.filter(v => v.profile === 'draft').slice(-1)[0].duration_s) + '). ' : ''}Music and upload are later projects; export again later to include the references in the file. <a href="/api/plans/exports/${esc(p.id)}/${esc(lastExp.file)}" download>Download the export</a>. Listen and look below and approve what you like.</div>`
       : `<div class="banner good"><b>Nothing is blocking you.</b> Narration, storyboard and image prompts are consistent and checked.</div>`);
@@ -633,7 +659,9 @@ Be concrete: colours, materials, numbers. Leave empty to skip.`); if (v === null
         <div class="mt-s">${sc.dimensions.map(d => `<div class="dimrow" id="dim-${d.key}"><div class="row"><b style="flex:1">${esc(d.label)}</b><span class="dsc ${d.band}">${d.score}</span></div><div class="dbar"><i class="${d.band}" style="width:${d.score}%"></i></div>
           <div class="small mt-s">${esc(d.reason)}</div>${d.fixes.map(f => `<div class="fix small">→ ${esc(f.text)} ${fixLinks(f)}</div>`).join('')}</div>`).join('')}</div>`}
         <h4>Can this be approved?</h4>
-        ${!so ? '<div class="mute small">Run “Review and score” to find out.</div>' : `${so.blockers.length ? `<ul class="tight">${so.blockers.map(b => `<li class="err">✗ ${esc(b.text)} ${fixLinks({where: [], tab: b.tab})}</li>`).join('')}</ul>` : '<div class="ok">✓ Nothing blocks approval.</div>'}
+        ${!so ? '<div class="mute small">Run “Review and score” to find out.</div>' : `${so.blockers.length ? `<ul class="tight">${so.blockers.map(b => { const act_ = {blueprint: ['Plan the story', '_plan.blueprint(this)'], narration: ['Write the missing narration', '_plan.narration(this,true)'], storyboard: ['Design the storyboard', '_plan.storyboard(this)'],
+          errors: ['Show the errors and their fixes', "_plan.go('sec-top')"], prompts: ['Write the image prompts', '_plan.compile(this)'], prompts_stale: ['Write the image prompts again', '_plan.compile(this)']}[b.code];
+          return `<li class="err">✗ ${esc(b.text)} ${act_ ? `<button class="small primary" ${dis} onclick="${act_[1]}">${esc(act_[0])}</button>` : ''} ${fixLinks({where: [], tab: b.tab})}${b.code === 'unapproved' ? '<div class="small mute">Look at them, then use “Approve all” on the narration and storyboard cards: approving is your decision, so it is never done for you.</div>' : ''}</li>`; }).join('')}</ul>` : '<div class="ok">✓ Nothing blocks approval.</div>'}
         ${so.warnings.length ? `<ul class="tight mt-s">${so.warnings.map(w => `<li>⚠ ${esc(w.text)} ${fixLinks({where: [], tab: w.tab})}</li>`).join('')}</ul><div class="mute small">Warnings do not stop approval; they are recorded with it.</div>` : ''}`}
         <div class="row mt-s"><button class="primary" ${dis} ${so && so.blockers.length || !reviewed ? 'disabled' : ''} onclick="_plan.approve(this)">${approved ? 'Approved (approve again)' : 'Approve this plan'}</button>
           ${ap.state !== 'draft' ? `<button class="small" ${dis} onclick="_plan.unapprove(this)">Withdraw approval</button>` : ''}

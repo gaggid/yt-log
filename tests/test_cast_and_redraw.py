@@ -207,14 +207,15 @@ def test_a_redraw_prompt_goes_through_the_leak_gate(env, monkeypatch, fast):
 
 # ── every image model the gateway lists is a choice ─────────────────────────
 
-def test_listed_image_models_are_added_and_qwen_stays_the_default():
+def test_listed_image_models_that_can_use_references_are_added_and_qwen_stays_the_default():
     listing = [{"id": "qwen-image-2.1", "capabilities": ["images.generations", "images.edits"]}, {"id": "z-image-turbo", "type": "image", "capabilities": ["images.generations"]},
                {"id": "wan-2.2-ti2v-5b", "capabilities": ["video.generations"]}, {"id": "kokoro", "capabilities": ["audio.speech"]},
                {"id": "new-edit-model", "capabilities": ["images.generations", "images.edits"]}]
     added = providers.register_listing(listing)
-    assert added == ["z-image-turbo", "new-edit-model"] and providers.DEFAULT_MODEL == "qwen-image-2.1"
-    z, n = providers.get("z-image-turbo"), providers.get("new-edit-model")
-    assert not z["edits"] and z["max_references"] == 0 and n["edits"] and n["max_references"] == 3 and z["discovered"]
+    assert added == ["new-edit-model"] and "z-image-turbo" not in providers.PROVIDERS                  # turbo models cannot take reference pictures: no use here
+    assert providers.DEFAULT_MODEL == "qwen-image-2.1"
+    n = providers.get("new-edit-model")
+    assert n["edits"] and n["max_references"] == 3 and n["discovered"]
     assert providers.get("qwen-image-2.1").get("discovered") is None                           # audited entries are never overwritten
     assert providers.settings_for({})["default"] == "qwen-image-2.1"
     assert providers.register_listing(listing) == []

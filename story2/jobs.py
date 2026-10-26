@@ -41,7 +41,9 @@ def start(plan_id: str, kind: str, work) -> dict:
 
     async def run() -> None:
         try:
-            await work(progress)
+            res = await work(progress)
+            if isinstance(res, str):                                    # a step may answer with a plain-words summary of what it did; the screen shows it
+                job["note"] = res
             job.update(state="done", label="done", finished=time.time())
         except asyncio.CancelledError:
             job.update(state="cancelled", finished=time.time())

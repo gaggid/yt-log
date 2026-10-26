@@ -9,7 +9,7 @@ from story import db, llm, settings as settings_mod
 from story.pipeline import manager
 from fastapi.responses import FileResponse
 
-from . import describe, editorial, export, imgplan, imgprompts, intake, jobs, planner, providers, storyboard, styles, voices
+from . import describe, editorial, export, imgplan, imgprompts, intake, jobs, planner, providers, resolve, storyboard, styles, voices
 
 router = APIRouter(prefix="/api/plans")
 
@@ -29,7 +29,7 @@ def _start(plan_id: str, kind: str, step):
 
     async def work(progress):
         s = settings_mod.get()
-        await step(llm.ChatBackend(s, settings_mod.api_key()), s, progress)
+        return await step(llm.ChatBackend(s, settings_mod.api_key()), s, progress)
 
     try:
         return jobs.start(plan_id, kind, work)
@@ -105,10 +105,38 @@ async def plan(plan_id: str):
     p["exports"] = export.list_exports(plan_id)
     p["style"] = style_info(p)
     p["steps_done"] = step_times(plan_id)
+    p["blockers"] = resolve.blockers(plan_id)
     p["cast_gaps"] = [{"id": a["id"], "name": a["name"], "kind": a["kind"], "missing": describe.missing(a["kind"], a["data"].get("appearance")),
                        "hints": describe.hints(a["kind"])} for a in p["assets"] if a["kind"] in ("person", "place", "prop")
                       and describe.missing(a["kind"], a["data"].get("appearance"))]
     return p
+
+
+class ResolveReq(BaseModel):
+    key: str
+    fix: str | None = None
+
+
+@router.post("/{plan_id}/resolve")
+async def resolve_blocker(plan_id: str, body: ResolveReq):
+    """Apply one of the fixes offered for a blocking check. Instant fixes run now and answer with what happened; model fixes start the usual background job, whose
+    summary arrives as `job.note`."""
+    _guard(planner.get_plan, plan_id)
+    cur = next((b for b in resolve.blockers(plan_id) if b["key"] == body.key), None)
+    if not cur:
+        return {"kind": "instant", "message": "That check no longer blocks anything: it was already cleared.", "blockers": resolve.blockers(plan_id)}
+    fix = body.fix or cur["fixes"][0]["id"]
+    if fix not in {f["id"] for f in cur["fixes"]}:
+        raise HTTPException(400, f"'{fix}' is not an offered fix for this check")
+    if resolve.FIXES[fix]["kind"] == "instant":
+        if jobs.busy():
+            raise HTTPException(409, "a step is running; wait for it to finish")
+        msg = await asyncio.to_thread(_guard, resolve.run_instant, plan_id, fix, body.key)
+        return {"kind": "instant", "message": msg, "blockers": resolve.blockers(plan_id)}
+
+    async def step(be, s, progress):
+        return await resolve.run_job(plan_id, fix, body.key, be, s, progress)
+    return {"kind": "job", "job": _start(plan_id, "fix: " + resolve.FIXES[fix]["label"].lower(), step)}
 
 
 STEP_EVENTS = ("blueprint", "narration", "registry", "references", "storyboard", "compile_prompts", "fix_repeats", "approved", "export", "voice", "scene_pictures", "graphics", "video", "thumbnail", "auto_run")
