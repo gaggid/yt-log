@@ -183,8 +183,12 @@ async def run_stage(plan_id: str, key: str, be, s: dict, api_key: str, progress,
             raise AutoStop("the story is not planned")
         await planner.make_narration(plan_id, be, s, None, sub, bool(plan["segments"]))
     elif key == "characters":
-        if not planner.get_plan(plan_id)["segments"]:
+        pl = planner.get_plan(plan_id)
+        if not pl["segments"]:
             raise AutoStop("write the narration first")
+        from story2 import describe as _d
+        if not _d.cast_chosen(pl["settings"]) and not storyboard.get_assets(plan_id):
+            raise AutoStop("choose who appears in the pictures first: an Indian cast, or as the story says")
         await storyboard.make_registry(plan_id, be, s)
         gaps = _full(plan_id)
         from story2 import describe

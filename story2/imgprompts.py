@@ -241,7 +241,7 @@ def _camera(c: dict) -> str:
 
 def latin_only(txt: str) -> bool:
     """On-screen text is English: Latin letters, digits and ordinary punctuation only (the models do not draw Devanagari reliably)."""
-    return all(ord(ch) < 128 or ch in "\u2018\u2019\u201c\u201d\u2013\u2014\u2026\u00b0\u20b9\u00a3\u20ac" for ch in txt)
+    return all(ord(ch) < 128 or ch in "\u2018\u2019\u201c\u201d\u2013\u2014\u2026\u00b0\u00b2\u00b3\u00b5\u20b9\u00a3\u20ac" for ch in txt)
 
 
 def _exact_text(d: dict, notes: list[str]) -> tuple[str, list[dict]]:

@@ -16,6 +16,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     db.init(tmp_path / "test.db")
     from story2 import planner
+    monkeypatch.setattr(planner, "LONG_BEAT_FACTOR", 1000)                                 # the test doubles write one long beat; the length rule has its own test
     monkeypatch.setattr(planner, "MAX_FIRST_SENTENCE_WORDS", 10_000)          # the test doubles write one long sentence; the opening-length rule has its own test
     settings_mod.update({"retry_backoff_s": 0, "retries": 2, "context_limit": 32768, "output_reserve": 6000,
                          "chunk_tokens": 9000, "chunk_overlap": 600})

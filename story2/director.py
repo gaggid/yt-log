@@ -7,7 +7,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, field_validator
 
-from story import db, llm, settings as settings_mod
+from story import db, llm, settings as settings_mod, storytypes
 from story.schemas import Str
 
 from . import intake, planner, prompts as P, store, styles
@@ -147,7 +147,7 @@ async def make(plan_id: str, backend, s: dict | None = None) -> dict:
         if bad and len(tries) <= 2 and not caller.last_attempt:
             raise ValueError("The shot plan is not accepted yet:\n- " + "\n- ".join(bad))
 
-    res = await caller.call(P.DIRECTOR, user, DirectorOut, check)
+    res = await caller.call(P.DIRECTOR + storytypes.director_note(storytypes.of_plan(plan)), user, DirectorOut, check)
     by = {}
     for sg in res.value.segments:
         if 1 <= sg.segment <= len(segs) and sg.shots:

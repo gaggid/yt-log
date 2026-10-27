@@ -5,7 +5,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from story import db, llm, settings as settings_mod
+from story import db, llm, settings as settings_mod, storytypes
 from story.pipeline import manager
 from fastapi.responses import FileResponse
 
@@ -100,6 +100,9 @@ async def voice_engines():
 async def plan(plan_id: str):
     p = _guard(planner.get_plan, plan_id)
     p["job"] = jobs.status(plan_id)
+    p["story_type"] = storytypes.of_plan(p)
+    p["story_type_label"] = storytypes.STORY_TYPES[p["story_type"]]["label"]
+    p["project_story_type"] = storytypes.for_pid(p["project_id"])          # the project may have been changed since this plan was made
     p["approval"] = editorial.approval_state(p)
     p["content_hash"] = editorial.content_hash(p)
     p["exports"] = export.list_exports(plan_id)
@@ -303,6 +306,10 @@ async def fix_repeats(plan_id: str):
 
 @router.post("/{plan_id}/registry")
 async def registry(plan_id: str):
+    p = _guard(planner.get_plan, plan_id)
+    if not describe.cast_chosen(p["settings"]) and not storyboard.get_assets(plan_id):
+        raise HTTPException(400, "choose who appears in the pictures first: an Indian cast, or as the story says (the card above the character list)")
+
     async def step(be, s, progress):
         progress(0, 1, "listing recurring people, places and style")
         await storyboard.make_registry(plan_id, be, s)

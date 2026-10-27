@@ -16,7 +16,7 @@ import re
 import time
 import traceback
 
-from . import db, eta, projects, scoring, settings as settings_mod
+from . import db, eta, projects, scoring, settings as settings_mod, storytypes
 from . import prompts as P
 from .chunker import build_chunks
 from .llm import ChatBackend, JsonCaller, LLMError, ValidationFailed
@@ -129,6 +129,7 @@ def prune_ids(rows: list[dict], allowed: set[int], need_ids: bool = True) -> tup
 class Pipeline:
     def __init__(self, pid: str, backend, ctl: Control | None = None, s: dict | None = None):
         self.pid = pid
+        self.story_type = storytypes.for_pid(pid)
         self.s = s or settings_mod.get()
         self.budget = Budget.from_settings(self.s)
         self.caller = JsonCaller(backend, self.s)
@@ -287,7 +288,7 @@ class Pipeline:
         recs = done_results(self.pid, "rollup")
         idx = self._index_result()
         overview = idx.get("overview", "") if idx else ""
-        limit = self.budget.input_limit(self.est(P.DISCOVER) + self.est(overview) + 300)
+        limit = self.budget.input_limit(self.est(P.DISCOVER + storytypes.discover_note(self.story_type)) + self.est(overview) + 300)
         levels, sizes = {}, []
         for r in recs:
             for lvl in (2, 1, 0):
@@ -492,7 +493,7 @@ class Pipeline:
             allowed |= ids
         user = f"{self.src_header()}\nOVERVIEW: {idx.get('overview', '')}\n\nCHAPTER NOTES:\n\n" + "\n\n".join(parts)
         n_items = min(12, 3 * len(t["input"]["chapters"]) + 2)
-        res, usage = await self._call(P.DISCOVER.replace("{max_items}", str(n_items)), user, Discovery)
+        res, usage = await self._call((P.DISCOVER + storytypes.discover_note(self.story_type)).replace("{max_items}", str(n_items)), user, Discovery)
         stubs, dropped = prune_ids([s.model_dump() for s in res.value.candidates], allowed)
         return {"stubs": self._finish_stubs(stubs), "dropped": dropped}, usage
 
@@ -510,7 +511,7 @@ class Pipeline:
             for r in done_results(self.pid, stage):
                 existing.extend(r.get("stubs", []))
         existing.sort(key=lambda s: -s["potential"])
-        limit = self.budget.input_limit(self.est(P.DISCOVER_GLOBAL) + 300)
+        limit = self.budget.input_limit(self.est(P.DISCOVER_GLOBAL + storytypes.discover_note(self.story_type)) + 300)
         for per_chapter, with_premise in ((6, True), (3, True), (3, False), (1, False)):
             allowed: set[int] = set()
             lines = [f"OVERVIEW: {idx.get('overview', '')}", "", "CROSS-CHAPTER THREADS:"]
@@ -531,7 +532,7 @@ class Pipeline:
                 break
         else:
             raise BudgetExceeded("cross-chapter material does not fit the input budget; raise the context limit")
-        res, usage = await self._call(P.DISCOVER_GLOBAL.replace("{max_items}", "6"), user, Discovery)
+        res, usage = await self._call((P.DISCOVER_GLOBAL + storytypes.discover_note(self.story_type)).replace("{max_items}", "6"), user, Discovery)
         stubs, dropped = prune_ids([s.model_dump() for s in res.value.candidates], allowed)
         return {"stubs": self._finish_stubs(stubs), "dropped": dropped}, usage
 
@@ -546,7 +547,7 @@ class Pipeline:
         ids = sorted(i for i in stub["para_ids"] if i in paras)
         head = (f"{self.src_header()}\nSTORY LEAD: {stub['title']}\nPremise: {stub['premise']}\n"
                 f"Why it may matter: {stub.get('why', '')}\n\n")
-        limit = self.budget.input_limit(self.est(P.DRAFT) + self.est(head) + 300)
+        limit = self.budget.input_limit(self.est(P.DRAFT + storytypes.draft_note(self.story_type)) + self.est(head) + 300)
         raw_ids, left, used = [], [], 0
         for i in ids:
             cost = self.est(render_item(paras[i], 0, -1)) + 2
@@ -614,7 +615,7 @@ class Pipeline:
             if not any(set(c.para_ids) & valid_ids or c.quote for c in d.claims):
                 raise ValueError("claims must cite passage ids shown above (para_ids)")
 
-        res, usage = await self._call(P.DRAFT, user, DraftOut, validate)
+        res, usage = await self._call(P.DRAFT + storytypes.draft_note(self.story_type), user, DraftOut, validate)
         cand_id = save_candidate(self.pid, t["id"], res.value, stub, raw_text, valid_ids, warnings, self.s,
                                  provenance={"model": self.s["model"], "tokens_in": res.tokens_in, "tokens_out": res.tokens_out})
         return {"candidate_id": cand_id}, usage
@@ -753,7 +754,7 @@ def save_candidate(pid: str, task_id: int | None, d: DraftOut, stub: dict, raw_t
 
     stated = sum(1 for c in chronology if c["when_basis"] == "stated")
     nature, notes = scoring.final_nature(d.nature or stub.get("nature", ""), cited_text, len(chronology), bool(d.outcome), stated,
-                                         d.arc.model_dump())
+                                         d.arc.model_dump(), storytypes.for_pid(pid))
     for n in notes:
         flags.append({"code": "nature", "text": n})
     if span is not None and span > 40:
@@ -770,7 +771,7 @@ def save_candidate(pid: str, task_id: int | None, d: DraftOut, stub: dict, raw_t
     story = scoring.story_score({k: v["score"] for k, v in factors.items()}, s["weights"])
     shell = {"turning_point": d.turning_point, "outcome": d.outcome, "conflict": d.conflict, "stakes": d.stakes,
              "chronology": chronology}
-    comp, comp_detail = scoring.completeness(shell, nature, span)
+    comp, comp_detail = scoring.completeness(shell, nature, span, storytypes.for_pid(pid))
     prio = scoring.priority(story, ev100, s["evidence_influence"], comp, s.get("completeness_influence", 0.0))
     unverified = sum(1 for c in claims if c["quote"] and c["quote_verified"] is False)
     if unverified:

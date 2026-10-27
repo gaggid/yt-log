@@ -71,7 +71,7 @@ SCHEMA = {
                       "verification", "export_rev"], {
             "id": _STR, "project_id": _STR, "story_id": _STR, "format": {"enum": ["16:9", "9:16"]}, "target_minutes": _NUM, "duration_s": _NUM,
             "content_hash": _STR, "working_title": _STR, "title_is_working": {"const": True}, "story_nature": _STR,
-            "verification": {"enum": ["unverified", "verified"]}, "export_rev": _INT, "language": _STR}),
+            "verification": {"enum": ["unverified", "verified"]}, "export_rev": _INT, "language": _STR, "story_type": {"enum": ["incident", "biography", "documentary", "explainer", "listicle"]}}),
         "approval": _obj(["state"], {"state": {"enum": ["draft", "approved", "changed"]}, "at": _NUM, "note": _STR, "warnings": _STRS, "content_hash": _STR}),
         "ready_for_generation": _obj(["ok", "blockers", "warnings"], {"ok": {"type": "boolean"}, "blockers": _STRS, "warnings": _STRS}),
         "public": _obj(["narrator", "blueprint", "narration", "scenes", "assets", "image_models", "production_notes"], {

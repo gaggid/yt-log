@@ -9,7 +9,7 @@ from pathlib import Path
 import config
 from jsonschema import Draft202012Validator
 
-from story import db
+from story import db, storytypes
 
 from . import editorial, imgprompts, leak, planner, providers, store, storyboard, voices
 from .export_schema import SCHEMA, SCHEMA_ID, SCHEMA_VERSION
@@ -107,6 +107,12 @@ def _providers_public(plan: dict) -> dict:
     return out
 
 
+def likeness_evidence(plan_id: str) -> list[dict]:
+    """Where each photo used as a reference came from (evidence half only; story3 is imported here to keep story2 free of it at load time)."""
+    from story3 import likeness
+    return likeness.evidence(plan_id)
+
+
 def build(plan_id: str, refresh: bool = True, export_rev: int = 0) -> dict:
     """Assemble and validate the document. `refresh` re-runs every automatic check so the reports and scores inside it describe this exact content."""
     so = editorial.signoff(plan_id) if refresh else None
@@ -165,6 +171,7 @@ def build(plan_id: str, refresh: bool = True, export_rev: int = 0) -> dict:
         "scenes": {sc["id"]: {"evidence_ids": sc["data"].get("evidence_ids", []), "facts_fixed": (sc["data"].get("facts") or {}).get("fixed", [])} for sc in scenes},
         "assets": {a["id"]: {"evidence_note": a["data"].get("evidence_note", "")} for a in plan["assets"]},
         "blueprint_facts": beat_facts,
+        "likeness": likeness_evidence(plan_id),
         "research_gaps": [*pub["gaps"], *pub["uncertainties"]],
         "publishing_checklist": [{"item": t, "done": t.startswith("Image model licence")} for t in PUBLISHING_CHECKLIST],
     }
@@ -180,7 +187,7 @@ def build(plan_id: str, refresh: bool = True, export_rev: int = 0) -> dict:
         "generator": {"app": "source-to-story", "phase": 2, "adapters": {a: providers.get(m)["adapter_version"] for a, m in (("qwen", "qwen-image-2.1"), ("flux", "flux2-klein-9b"))}},
         "plan": {"id": plan["id"], "project_id": plan["project_id"], "story_id": plan["candidate_id"], "format": plan["format"], "target_minutes": plan["settings"]["minutes"],
                  "duration_s": plan["duration_s"], "content_hash": editorial.content_hash(plan), "working_title": title, "title_is_working": True,
-                 "story_nature": story["candidate"]["nature"] or "", "verification": plan["verification"], "export_rev": export_rev, "language": "hi-Deva+Latn"},
+                 "story_nature": story["candidate"]["nature"] or "", "story_type": storytypes.of_plan(plan), "verification": plan["verification"], "export_rev": export_rev, "language": "hi-Deva+Latn"},
         "approval": {k: v for k, v in ap.items() if k in ("state", "at", "note", "warnings", "content_hash")},
         "ready_for_generation": {"ok": not blockers, "blockers": blockers, "warnings": warns},
         "public": public, "evidence": evidence,

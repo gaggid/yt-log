@@ -99,3 +99,23 @@ def test_the_word_style_the_model_tacks_onto_names_is_removed_and_the_step_times
     assert {"the trader", "the desk", "style"} <= names and not any(n.endswith(" style") for n in names)
     got = asyncio.run(plans_api.plan(p["id"]))
     assert got["steps_done"]["registry"] > 0 and got["steps_done"]["blueprint"] <= got["steps_done"]["registry"] and "voice" not in got["steps_done"]
+
+
+def test_registry_prompt_follows_the_cast_choice(env):
+    pid, cid = approved_story(env)
+    seen = []
+
+    class Spy(SlotFake):
+        async def complete(self, messages, max_tokens):
+            if "[TASK:p2_registry]" in messages[0]["content"]:
+                seen.append(" ".join(m["content"] for m in messages[1:]))
+            return await super().complete(messages, max_tokens)
+    be = Spy()
+    p = written_plan(cid, be)
+    asyncio.run(storyboard.make_registry(p["id"], be))
+    on = seen[-1]
+    assert "every person in this video is Indian" in on and "do not default to any one ethnicity" not in on
+    db.ex("UPDATE plans SET settings=? WHERE id=?", (db.jdump({**p["settings"], "cast_indian": False}), p["id"]))
+    asyncio.run(storyboard.make_registry(p["id"], be))
+    off = seen[-1]
+    assert "do not default to any one ethnicity" in off and "every person in this video is Indian" not in off

@@ -173,6 +173,8 @@ def test_from_a_brand_new_plan_every_step_runs_including_the_model_steps(env, mo
     assert auto.state(plan_id)["next"] == "blueprint"
     be = P2BFake()
     monkeypatch.setattr(auto.llm, "ChatBackend", lambda s, k: be)
+    pl = planner.get_plan(plan_id)
+    db.ex("UPDATE plans SET settings=? WHERE id=?", (db.jdump({**pl["settings"], "cast_indian": True}), plan_id))                # the editor chose the cast first
     out, gw, log = go(plan_id, monkeypatch)
     assert out["ran"][:5] == ["blueprint", "narration", "characters", "storyboard", "references"] and out["ran"][-1] == "thumbnail"
     assert auto.state(plan_id)["remaining"] == 0
@@ -225,11 +227,22 @@ def test_the_thumbnail_is_made_last_from_the_plan_and_approved(env, monkeypatch,
     from PIL import Image
     assert Image.open(path).size == (1280, 720)                                                     # the size YouTube asks for
     sent = [r for r in gw.requests if r["url"].endswith("/images/generations") and 'the words "Who removed the handle?"' in str(r["body"].get("prompt", ""))]
-    assert sent and "Movie poster" in sent[0]["body"]["prompt"] and "low-angle" in sent[0]["body"]["prompt"]       # a poster, with the words in quotes
-    from story2 import planner as pl
-    assert thumbnail.poster_prompt(pl.get_plan(plan_id), thumbnail.Option(text="Why now?", image="a street"), None, None).count('"Why now?"') == 1
+    assert sent and "Composite image" in sent[0]["body"]["prompt"] and "close-up" in sent[0]["body"]["prompt"]       # a composite thumbnail, with the words in quotes
+    assert thumbnail._fallback_prompt(thumbnail.Option(text="Why now?", image="a street"), None).count('"Why now?"') == 1
     import pytest
     with pytest.raises(ValueError):
         thumbnail.Option(text="One")                                                                # too short
     with pytest.raises(ValueError):
         thumbnail.Option(text="काहानी क्या थी")                                                       # English letters only
+
+
+def test_auto_run_stops_at_the_characters_until_the_cast_is_chosen(env, monkeypatch, fast):
+    from test_phase2a import approved_story
+    from test_phase2b import P2BFake
+    pid, cid = approved_story(env)
+    plan_id = planner.create_plan(cid, minutes=2)["id"]
+    be = P2BFake()
+    monkeypatch.setattr(auto.llm, "ChatBackend", lambda s, k: be)
+    with pytest.raises(auto.AutoStop, match="choose who appears in the pictures"):
+        go(plan_id, monkeypatch)
+    assert planner.get_plan(plan_id)["segments"] and not storyboard.get_assets(plan_id)               # blueprint and narration were kept, no characters made

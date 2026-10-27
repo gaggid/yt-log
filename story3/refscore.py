@@ -129,7 +129,7 @@ async def look(path: Path | str, row: dict, style: str, s: dict | None = None, k
                                        {"type": "image_url", "image_url": {"url": "data:image/png;base64," + b64}}]}]
     async with httpx.AsyncClient(timeout=300) as c:
         r = await c.post(s["base_url"].rstrip("/") + "/chat/completions", headers={"Authorization": f"Bearer {key or settings_mod.api_key()}"},
-                         json={"model": s["model"], "messages": msg, "max_tokens": 3000, "temperature": 0})
+                         json={**llm.model_field(s), "messages": msg, "max_tokens": 3000, "temperature": 0})
     if r.status_code != 200:
         raise RuntimeError(f"the vision check was refused ({r.status_code}): {r.text[:160]}")
     j = llm.parse_json(r.json()["choices"][0]["message"].get("content") or "")

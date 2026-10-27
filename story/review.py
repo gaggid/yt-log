@@ -2,7 +2,7 @@
 Every operation keeps the source links (candidate_refs) intact."""
 import copy
 
-from . import db, figures
+from . import db, figures, storytypes
 from .pipeline import next_story_id, uniq
 
 STATUSES = ("pending", "approved", "rejected")
@@ -282,7 +282,7 @@ def _reclassify(pid: str, cid: str, d: dict) -> str:
     chron = d.get("chronology", [])
     stated = sum(1 for c in chron if c.get("when_basis") == "stated")
     nature, notes = scoring.final_nature(d.get("model_nature") or d.get("nature") or "story", texts, len(chron),
-                                         bool(d.get("outcome")), stated, d.get("arc") or None)
+                                         bool(d.get("outcome")), stated, d.get("arc") or None, storytypes.for_pid(pid))
     rank = ["story", "anecdote", "hypothetical", "explainer"]
     old = d.get("nature", "")
     if old in ("explainer", "hypothetical") or (old == "anecdote" and nature == "story"):
@@ -291,7 +291,7 @@ def _reclassify(pid: str, cid: str, d: dict) -> str:
     d["flags"] = [f for f in d.get("flags", []) if f.get("code") != "nature"] + [{"code": "nature", "text": n} for n in notes]
     comp = d.get("completeness") or {}
     shell = {k: d.get(k) for k in ("turning_point", "outcome", "conflict", "stakes", "chronology")}
-    score, detail = scoring.completeness(shell, nature, comp.get("page_span"))
+    score, detail = scoring.completeness(shell, nature, comp.get("page_span"), storytypes.for_pid(pid))
     d["completeness"] = {"score": score, **detail}
     return nature
 

@@ -50,4 +50,7 @@ No linter or build step configured. `static/plan.js` is served from disk uncache
 - Context budget: a request that would exceed `context x (1 - safety)` is refused, never truncated (`story/tokens.py`, `story/llm.py`).
 - The blueprint carries a suspense plan that every beat's narration prompt receives; narration checks (`planner.make_narration`) send back repeats, stock openers, a long opening sentence and Hindi in Latin letters. Checks accept their last attempt (`JsonCaller.last_attempt`) so a run never stops on style. Compare two narrations with `python -m story2.narration_audit`.
 - The finished video plays at 1.25x (`story3/video.py PLAYBACK_SPEED`); the thumbnail (`story3/thumbnail.py`) is the last auto-run step.
+- A project has one story type (`story/storytypes.py`: incident, biography, documentary, explainer, listicle), copied to `plan.settings.story_type`; prompts, scoring and built cards differ by type. Plan: `docs/PLAN_story_types.md`.
+- A page that blocks the plain download (403/429/503 or a bot-check page) is retried in headless Edge/Chrome (`ingest.fetch_with_fallback`); paywalls are never retried.
+- A real, named person is a silhouette unless the editor confirms a public figure and approves a photo (`story3/likeness.py`): then the character sheet is painted from that photo, which is only ever a reference. Nothing is used before approval.
 - Keep checks short: run the tests for the area you changed; the full suite takes about 5 minutes.

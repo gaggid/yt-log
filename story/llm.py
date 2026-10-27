@@ -58,6 +58,12 @@ def parse_json(text: str):
         raise ValueError(f"no JSON object in reply: {t[:200]!r}")
 
 
+def model_field(s: dict) -> dict:
+    """The chat model goes into a request only when one was set in Settings; empty means the model server's own default is used."""
+    m = (s.get("model") or "").strip()
+    return {"model": m} if m else {}
+
+
 class ChatBackend:
     """OpenAI-compatible /chat/completions. Endpoint, model and key come from settings, never hardcoded."""
 
@@ -67,7 +73,7 @@ class ChatBackend:
         self.headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
     async def complete(self, messages: list[dict], max_tokens: int) -> LLMResult:
-        payload = {"model": self.s["model"], "messages": messages, "max_tokens": max_tokens,
+        payload = {**model_field(self.s), "messages": messages, "max_tokens": max_tokens,
                    "temperature": self.s["temperature"], "stream": False}
         if self.s.get("json_mode") == "on":
             payload["response_format"] = {"type": "json_object"}
@@ -109,7 +115,7 @@ async def connection_test(s: dict, api_key: str, probe_json: bool = True) -> dic
         ids = [m.get("id") for m in models]
         out["models"] = [{"id": m.get("id"), "type": m.get("type", ""), "state": m.get("state", "")}
                          for m in models]
-        out["model_listed"] = s["model"] in ids
+        out["model_listed"] = (s["model"] in ids) if s.get("model") else None             # None: no model named, the server default answers
     except Exception as e:  # noqa: BLE001
         out["models_error"] = f"{type(e).__name__}: {e}"
     t0 = time.time()

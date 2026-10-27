@@ -191,6 +191,16 @@ def run_instant(plan_id: str, fix: str, key: str) -> str:
 
 # ── model fixes (run inside the usual job) ──────────────────────────────────
 
+def redo_note(texts: list[str]) -> str:
+    """What to tell the writing model. The wording of a failed check is never repeated back: the model copies it, and the same problem returns."""
+    asks = []
+    if any("not English" in t for t in texts):
+        asks.append("On-screen text must be plain ASCII letters and digits only: no superscripts, no symbols like ², no units written with them. Prefer no on-screen text, or a short plain phrase.")
+    if any(t.startswith("copied_wording") for t in texts):
+        asks.append("A phrase was copied from the source. Describe the idea in entirely different words, in action and facts.fixed too, and show it as a picture, not as the source's sentence.")
+    return " ".join(asks) or "Fix this problem: " + " | ".join(texts)
+
+
 async def run_job(plan_id: str, fix: str, key: str, backend, s, progress) -> str:
     where = targets(plan_id, key)
     plan = planner.get_plan(plan_id)
@@ -217,7 +227,7 @@ async def run_job(plan_id: str, fix: str, key: str, backend, s, progress) -> str
             progress(n, len(todo), f"scene {n + 1} of {len(todo)}")
             texts = [i["text"] for i in _issues(plan_id) if i["where"] == sid][:3]
             try:
-                await storyboard.regenerate_scene(sid, backend, s, "Fix this problem: " + " | ".join(texts))
+                await storyboard.regenerate_scene(sid, backend, s, redo_note(texts))
                 done += 1
             except planner.PlanError as e:
                 failed.append(str(e)[:80])

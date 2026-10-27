@@ -248,6 +248,7 @@ async function importDialog() {
   layer.innerHTML = `<div class="scrim"></div><div class="box card pad"><h2>Import a source</h2>
     <div class="tabs" style="margin-top:0"><button class="on" data-t="file">File</button><button data-t="url">Web link</button><button data-t="text">Paste text</button></div>
     <div id="imp-body">${body()}</div>
+    <label class="f mt-s">What should it become?<select id="i-type">${(window.STORY_TYPES || []).map(t => `<option value="${t.id}">${esc(t.label)}: ${esc(t.short)}</option>`).join('')}</select></label>
     <div class="grid g2 mt-s"><label class="f">Title (optional)<input id="i-title"></label><label class="f">Author or source (optional)<input id="i-author"></label></div>
     <p class="mute small">Use material you are allowed to use: public domain, openly licensed, or your own. Paywalls and DRM are never bypassed.</p>
     <div id="imp-err" class="errbox" hidden></div>
@@ -260,10 +261,10 @@ async function importDialog() {
     const btn = e.target; const err = layer.querySelector('#imp-err'); err.hidden = true;
     btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Importing… (large PDFs take a few seconds)';
     try {
-      const title = layer.querySelector('#i-title').value, author = layer.querySelector('#i-author').value; let p;
-      if (mode === 'file') { const f = layer.querySelector('#i-file').files[0]; if (!f) throw new Error('Choose a file first.'); const fd = new FormData(); fd.append('file', f); fd.append('title', title); fd.append('author', author); p = await api('/projects/upload', {method: 'POST', form: fd}); }
-      else if (mode === 'url') p = await api('/projects/url', {method: 'POST', json: {url: layer.querySelector('#i-url').value, title, author}});
-      else p = await api('/projects/text', {method: 'POST', json: {text: layer.querySelector('#i-text').value, title, author}});
+      const storyType = (layer.querySelector('#i-type') || {}).value || '', title = layer.querySelector('#i-title').value, author = layer.querySelector('#i-author').value; let p;
+      if (mode === 'file') { const f = layer.querySelector('#i-file').files[0]; if (!f) throw new Error('Choose a file first.'); const fd = new FormData(); fd.append('file', f); fd.append('title', title); fd.append('author', author); fd.append('story_type', storyType); p = await api('/projects/upload', {method: 'POST', form: fd}); }
+      else if (mode === 'url') p = await api('/projects/url', {method: 'POST', json: {url: layer.querySelector('#i-url').value, title, author, story_type: storyType}});
+      else p = await api('/projects/text', {method: 'POST', json: {text: layer.querySelector('#i-text').value, title, author, story_type: storyType}});
       close(); toast(`Imported "${p.title}": ${num(p.est_tokens)} tokens, ${p.chapter_count} chapters. Next: choose what to process.`); location.hash = '#/p/' + p.id;
     } catch (ex) { err.textContent = ex.message; err.hidden = false; btn.disabled = false; btn.textContent = 'Import'; }
   };
@@ -280,7 +281,7 @@ async function viewProject(id, tab) {
   const tabs = [['progress', 'Progress'], ['stories', 'Stories'], ['plans', 'Video plans'], ['source', 'Source'], ['structure', 'Structure']];
   $('#app').innerHTML = `
     <div class="mute small"><a href="#/">Projects</a> /</div>
-    <div class="row"><h2 style="margin:0">${esc(P.title)}</h2><button class="small" onclick="editMeta()">Rename</button><span class="sp"></span><span id="pstatus"></span></div>
+    <div class="row"><h2 style="margin:0">${esc(P.title)}</h2><button class="small" onclick="editMeta()">Rename</button><label class="small mute" title="What this source becomes. Chosen once; plans made from it follow it.">Type <select onchange="setStoryType(this.value)">${(window.STORY_TYPES || []).map(t => `<option value="${t.id}" ${t.id === P.story_type ? 'selected' : ''}>${esc(t.label)}</option>`).join('')}</select></label><span class="sp"></span><span id="pstatus"></span></div>
     <div class="mute">${esc(P.author || '')}${P.source_url ? ` · <a href="${esc(P.source_url)}" target="_blank" rel="noopener">${esc(P.source_url.slice(0, 70))}</a>` : ''}</div>
     <div class="mute small">${badge('info', P.format)} imported ${fmtDate(P.created_at)} · ${P.page_count ? P.page_count + ' pages · ' : ''}~${num(P.est_tokens)} tokens · ${P.chapter_count} chapters${P.chapters.some(c => c.skip) ? ` (${P.chapters.filter(c => c.skip).length} skipped as front/back matter)` : ''} · <a href="/api/projects/${id}/original">original file</a></div>
     ${P.warnings.map(w => `<div class="warnbox">⚠ ${esc(w)}</div>`).join('')}
@@ -296,6 +297,11 @@ async function viewProject(id, tab) {
   };
   timer = setTimeout(loop, PR.running ? 1000 : 5000);
 }
+const setStoryType = async t => {
+  if (t === P.story_type) return;
+  await act(null, async () => { await api('/projects/' + P.id + '/story-type', {method: 'PATCH', json: {story_type: t}}); return true; }, 'Type changed: new video plans follow it'); route();
+};
+const typeBadge = () => { const t = (window.STORY_TYPES || []).find(x => x.id === (P && P.story_type)); return t && t.id !== 'incident' ? badge('info', t.label) : ''; };
 const editMeta = async () => {
   const t = await textDlg('Rename source', 'Title', P.title); if (t === null || !t.trim()) return;
   const a = await textDlg('Author or source', 'Author / source', P.author || ''); if (a === null) return;
@@ -454,7 +460,7 @@ async function loadStories() {
   el.innerHTML = storyRows.map(s => `<div class="story ${storyOpen === s.id ? 'cur' : ''}" data-id="${s.id}" onclick="openStory('${s.id}')">
     <input type="checkbox" onclick="event.stopPropagation();pick('${s.id}',this.checked)" ${selected.has(s.id) ? 'checked' : ''}>
     <div><h3>${esc(s.title)}</h3><div class="mute">${esc(s.premise)}</div>
-      <div class="row small mt-s" style="gap:6px">${natBadge(s.nature)}${badge(s.status, s.status === 'pending' ? 'to review' : s.status)}${s.research ? badge('research', 'needs research') : ''}${s.edited ? badge('info', 'edited') : ''}
+      <div class="row small mt-s" style="gap:6px">${natBadge(s.nature)}${typeBadge()}${badge(s.status, s.status === 'pending' ? 'to review' : s.status)}${s.research ? badge('research', 'needs research') : ''}${s.edited ? badge('info', 'edited') : ''}
         <span class="mute">${esc(s.id)} · ${s.n_refs} passage${s.n_refs === 1 ? '' : 's'}${s.pages ? ' · p. ' + esc(s.pages) : ''}${s.kind ? ' · ' + esc(s.kind.replace(/_/g, ' ')) : ''}</span>
         ${s.warnings ? `<span style="color:var(--warn)">⚠ ${s.warnings}</span>` : ''}${s.flags ? `<span style="color:var(--warn)" title="Open the story to see what is missing or uncertain">${s.flags} to check</span>` : ''}${s.duplicates ? `<span style="color:var(--warn)">possible duplicate</span>` : ''}</div></div>
     <div class="score"><b>${Math.round(s.eff_priority)}</b><span class="mute small">priority</span>
@@ -490,7 +496,7 @@ async function openStory(sid) {
   const refs = S.refs, ro = S.status === 'superseded';
   $('#overlay').innerHTML = `<div class="scrim" onclick="closeStory()"></div><div class="drawer" id="drawer">
     <div class="dh"><div class="row"><button class="small" onclick="stepStory(-1)" ${pos <= 0 ? 'disabled' : ''}>‹ Previous</button><span class="small mute">${pos >= 0 ? `${pos + 1} of ${total}` : ''}</span><button class="small" onclick="stepStory(1)" ${pos < 0 || pos >= total - 1 ? 'disabled' : ''}>Next ›</button>
-      <span class="sp"></span><span class="mute small">${natBadge(S.nature)} ${esc(S.id)}${S.origin !== 'pipeline' ? ' · ' + esc(S.origin) : ''}</span><button class="small" onclick="closeStory()">Close ✕</button></div>
+      <span class="sp"></span><span class="mute small">${natBadge(S.nature)} ${typeBadge()} ${esc(S.id)}${S.origin !== 'pipeline' ? ' · ' + esc(S.origin) : ''}</span><button class="small" onclick="closeStory()">Close ✕</button></div>
       ${ro ? '' : `<div class="row mt-s"><button class="good" onclick="decide('approved', this)">✓ Approve &amp; next</button><button class="bad" onclick="decide('rejected', this)">✗ Reject &amp; next</button><button onclick="stepStory(1)">Skip</button>
         <button class="small" onclick="toggleResearch(this)">${S.research ? 'Clear research flag' : 'Needs research'}</button><span class="sp"></span>${badge(S.status, S.status === 'pending' ? 'to review' : S.status)}${S.research ? badge('research', 'needs research') : ''}</div>
         <div class="small mute mt-s"><kbd>a</kbd> approve · <kbd>r</kbd> reject · <kbd>j</kbd>/<kbd>k</kbd> next/previous · <kbd>Esc</kbd> close</div>`}</div>
@@ -686,7 +692,7 @@ async function testConn(btn) {
   } catch (e) { $('#conn').innerHTML = `<div class="errbox">${esc(e.message)}</div>`; } finally { btn.disabled = false; }
 }
 addEventListener('beforeunload', e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
-route();
+api('/story-types').then(r => { window.STORY_TYPES = r.types; }).catch(() => {}).finally(route);
 async function showBuild() {
   const el = document.getElementById('build-info');
   try {

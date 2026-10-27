@@ -91,6 +91,15 @@
         },
         "language": {
           "type": "string"
+        },
+        "story_type": {
+          "enum": [
+            "incident",
+            "biography",
+            "documentary",
+            "explainer",
+            "listicle"
+          ]
         }
       },
       "additionalProperties": true

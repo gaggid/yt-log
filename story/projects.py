@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 
 import config
-from . import db, ingest, settings as settings_mod
+from . import db, ingest, settings as settings_mod, storytypes
 from .tokens import estimate
 
 
@@ -142,7 +142,8 @@ async def import_url(url: str, title: str = "", author: str = "") -> str:
     try:
         html_text = ingest.decode_bytes(raw, ingest.charset_from(ctype, raw))
         ex = await asyncio.to_thread(ingest.extract_html, html_text, final, "")
-        _store(pid, ex, title=title or ex.title, author=author, fmt="article", url=final, orig=orig, sha=sha)
+        _store(pid, ex, title=title or ex.title, author=author, fmt="article", url=final, orig=orig, sha=sha,
+               extra_warnings=["The site blocked the plain download, so the page was opened in a browser and read from there. Check the text is the whole article."] if "via=browser" in ctype else None)
     except Exception as e:
         shutil.rmtree(sources_dir() / pid, onerror=_rm_ro)
         if isinstance(e, ingest.IngestError):
@@ -183,6 +184,7 @@ _SORTS = {"created": "p.created_at", "title": "LOWER(p.title)", "status": "p.sta
 def _shape(r: dict) -> dict:
     r["warnings"] = db.jload(r.get("warnings"), [])
     r["meta"] = db.jload(r.get("meta"), {})
+    r["story_type"] = storytypes.of_project(r)
     r.pop("orig_path", None)
     return r
 
@@ -215,6 +217,16 @@ def original_path(pid: str) -> Path:
     if not r or not r["orig_path"] or not Path(r["orig_path"]).exists():
         raise ProjectError("original file not found")
     return Path(r["orig_path"])
+
+
+def set_story_type(pid: str, story_type: str) -> dict:
+    """Choose what the source becomes (see `story/storytypes.py`). Stored in the project's meta; plans made later copy it."""
+    if not storytypes.valid(story_type):
+        raise ProjectError(f"unknown story type '{story_type}'")
+    r = get(pid)
+    meta = {**(r.get("meta") or {}), "story_type": story_type}
+    db.ex("UPDATE projects SET meta=?, updated_at=? WHERE id=?", (db.jdump(meta), db.now(), pid))
+    return get(pid)
 
 
 def update_meta(pid: str, title: str | None = None, author: str | None = None) -> dict:

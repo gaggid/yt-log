@@ -2,7 +2,7 @@
 jobs as Phase 2 (the model server answers one request at a time)."""
 import asyncio
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -10,7 +10,7 @@ from story import llm, settings as settings_mod
 from story.pipeline import manager
 from story2 import jobs, planner, providers
 
-from . import auto, graphics, refs, scenes, store, thumbnail, video, voice
+from . import auto, graphics, likeness, refs, scenes, store, thumbnail, video, voice
 
 router = APIRouter(prefix="/api/media")
 
@@ -45,8 +45,51 @@ async def media_file(plan_id: str, name: str):
 async def media_state(plan_id: str):
     _guard(planner.get_plan, plan_id)
     await asyncio.to_thread(providers.refresh, settings_mod.get(), settings_mod.api_key())             # image models the gateway lists become choices
-    st = {"voice": voice.state(plan_id), "refs": refs.state(plan_id), "scenes": scenes.state(plan_id), "graphics": graphics.state(plan_id), "video": video.state(plan_id), "thumbnail": thumbnail.state(plan_id)}
+    st = {"voice": voice.state(plan_id), "refs": refs.state(plan_id), "scenes": scenes.state(plan_id), "graphics": graphics.state(plan_id), "video": video.state(plan_id), "thumbnail": thumbnail.state(plan_id), "likeness": likeness.state(plan_id)}
     return {**st, "auto": auto.state(plan_id, st)}
+
+
+class LikenessMode(BaseModel):
+    mode: str
+    public_figure: bool | None = None
+
+
+class PhotoOn(BaseModel):
+    approved: bool = True
+
+
+@router.get("/{plan_id}/likeness")
+async def likeness_state(plan_id: str):
+    return _guard(likeness.state, plan_id)
+
+
+@router.post("/{plan_id}/likeness/{asset_id}/mode")
+async def likeness_mode(plan_id: str, asset_id: str, body: LikenessMode):
+    return _guard(likeness.set_mode, plan_id, asset_id, body.mode, body.public_figure)
+
+
+@router.post("/{plan_id}/likeness/{asset_id}/search")
+async def likeness_search(plan_id: str, asset_id: str):
+    return await asyncio.to_thread(_guard, likeness.find_photos, plan_id, asset_id)
+
+
+@router.post("/{plan_id}/likeness/{asset_id}/upload")
+async def likeness_upload(plan_id: str, asset_id: str, file: UploadFile = File(...)):
+    raw = await file.read()
+    if len(raw) > likeness.MAX_BYTES:
+        raise HTTPException(413, "the photo is larger than 8 MB")
+    _guard(likeness.add_photo, plan_id, asset_id, raw, {"origin": "upload", "url": file.filename or "", "licence": "supplied by the editor"})
+    return _guard(likeness.state, plan_id)
+
+
+@router.post("/{plan_id}/likeness/{asset_id}/photos/{photo_id}/approve")
+async def likeness_approve(plan_id: str, asset_id: str, photo_id: str, body: PhotoOn | None = None):
+    return _guard(likeness.approve_photo, plan_id, asset_id, photo_id, (body or PhotoOn()).approved)
+
+
+@router.post("/{plan_id}/likeness/{asset_id}/photos/{photo_id}/reject")
+async def likeness_reject(plan_id: str, asset_id: str, photo_id: str):
+    return _guard(likeness.reject_photo, plan_id, asset_id, photo_id)
 
 
 class VoiceReq(BaseModel):

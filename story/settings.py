@@ -2,9 +2,11 @@
 import config
 from . import db
 
+LEGACY_MODEL = "gemma4-12b-qat-uncensored-hauhaucs-balanced"
+
 DEFAULTS: dict = {
     "base_url": config.BASE_URL,
-    "model": config.CHAT_MODEL,
+    "model": config.CHAT_MODEL,           # "" = let the model server choose (it is never named by this app unless the owner types one in Settings)
     "context_limit": 65536,       # tokens the model is configured for (model supports more; raise after testing)
     "output_reserve": 10000,      # tokens held back for the reply (also sent as max_tokens)
     "chunk_tokens": 8000,         # source tokens per analysis chunk
@@ -44,6 +46,8 @@ def _saved() -> dict:
 def get() -> dict:
     s = {**DEFAULTS, **{k: v for k, v in _saved().items() if k in DEFAULTS}}
     s["weights"] = {**DEFAULTS["weights"], **(s.get("weights") or {})}
+    if s.get("model") == LEGACY_MODEL:
+        s["model"] = ""                  # an earlier version saved its default name into the database; the server's own default is used now
     return s
 
 

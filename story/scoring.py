@@ -95,10 +95,12 @@ def has_year(texts: list[str]) -> bool:
     return any(re.search(r"\b(?:1[5-9]|20)\d\d\b", t) for t in texts)
 
 
-def completeness(d: dict, nature: str, page_span: int | None) -> tuple[float, dict]:
+def completeness(d: dict, nature: str, page_span: int | None, story_type: str = "incident") -> tuple[float, dict]:
     """0-100: does the evidence contain a whole story? Separate from how accurate the quotes are.
     Parts present (turning point, outcome, conflict/stakes, a real chronology) plus how close the passages sit.
     The kind of piece caps it: an explainer can be perfectly quoted and still not be a story."""
+    if story_type != "incident":
+        return _completeness_other(d, nature, page_span, story_type)
     parts = {
         "turning_point": 25 if d.get("turning_point") else 0,
         "outcome": 25 if d.get("outcome") and not d.get("outcome_missing") else 0,
@@ -120,6 +122,24 @@ def completeness(d: dict, nature: str, page_span: int | None) -> tuple[float, di
     return float(min(raw, cap)), {"parts": parts, "raw": raw, "cap": cap, "nature": nature, "page_span": page_span}
 
 
+def _completeness_other(d: dict, nature: str, page_span: int | None, story_type: str) -> tuple[float, dict]:
+    """The same 0-100 for the other types: what makes the material whole differs, and pages far apart are normal (a life, an argument, a list)."""
+    chron = d.get("chronology") or []
+    if story_type == "listicle":                                  # one item: a clear point with facts; no arc or outcome needed
+        parts = {"point": 40 if (d.get("overview") or d.get("premise")) else 0, "facts": 40 if len(d.get("claims") or chron) >= 2 else 15,
+                 "why_it_matters": 20 if d.get("audience_interest") or d.get("stakes") else 0}
+    elif story_type == "explainer":
+        parts = {"answer": 35 if d.get("turning_point") else 0, "steps": 35 if len(chron) >= 3 else (15 if len(chron) >= 2 else 0),
+                 "misconception_or_stakes": 15 if (d.get("conflict") or d.get("stakes")) else 0, "context": 15 if d.get("overview") else 0}
+    else:                                                          # biography, documentary
+        parts = {"chronology": 30 if len(chron) >= 3 else (15 if len(chron) >= 2 else 0), "turning_point": 20 if d.get("turning_point") else 0,
+                 "outcome": 20 if d.get("outcome") and not d.get("outcome_missing") else 0, "conflict_or_stakes": 15 if (d.get("conflict") or d.get("stakes")) else 0,
+                 "overview": 15 if d.get("overview") else 0}
+    raw = sum(parts.values())
+    cap = NATURE_CAP.get(nature, 100)
+    return float(min(raw, cap)), {"parts": parts, "raw": raw, "cap": cap, "nature": nature, "page_span": page_span, "story_type": story_type}
+
+
 _GAP_KEEP = re.compile(r"\b(outcome|result|year|date|when|who|name|identity|cause|why|reason|how many|consequence|ended|what happened)\b", re.I)
 _HEDGE = re.compile(r"\b(unlikely|not likely|however|but the|probably not|although|may be confused|could be confused)\b", re.I)
 
@@ -138,11 +158,16 @@ def real_title_flags(flags: list[str]) -> list[str]:
 
 
 def final_nature(model_nature: str, raw_texts: list[str], chronology_n: int, has_outcome: bool,
-                 stated_dates: int | None = None, arc: dict | None = None) -> tuple[str, list[str]]:
+                 stated_dates: int | None = None, arc: dict | None = None, story_type: str = "incident") -> tuple[str, list[str]]:
     """Reconcile the model's label with evidence. Only ever downgrades (story -> anecdote/hypothetical).
     A real story is anchored in time: at least one date or period must be stated in the cited passages."""
     notes: list[str] = []
     nat = model_nature or "story"
+    if story_type != "incident":                    # the single-event rules (actor and decision, a stated date, an outcome) belong to incident stories only
+        if nat in ("story", "anecdote") and hypothetical_hits(raw_texts) >= 3 and chronology_n <= 2:
+            notes.append("Passages read like a hypothetical walkthrough, not a documented subject.")
+            nat = "hypothetical"
+        return nat, notes
     if nat == "story" and arc:
         if arc.get("form") == "concept":
             notes.append("It teaches a rule or concept; the example is an illustration, not the subject.")

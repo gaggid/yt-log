@@ -38,6 +38,7 @@ class SourceProfile:
     credits: list[str] = field(default_factory=list)
     chapter_titles: list[str] = field(default_factory=list)
     passages: list[str] = field(default_factory=list)
+    allowed_names: list[str] = field(default_factory=list)      # public figures the editor confirmed: their names may be spoken and shown, even when the source is about them
 
 
 def profile(pid: str, passages: list[str] | None = None) -> SourceProfile:
@@ -48,7 +49,12 @@ def profile(pid: str, passages: list[str] | None = None) -> SourceProfile:
             m = re.match(r"\s*([A-Za-z][\w&.\- ]{2,40}?)\s*(?:©|�|\(c\)|copyright|\d{4}|all rights)", c, re.I)
             if m:
                 credits.append(m.group(1).strip())
-    return SourceProfile(title=(p.get("title") or ""), author=(p.get("author") or ""), credits=sorted(set(credits)),
+    named = []
+    for a in db.q("SELECT a.data FROM assets a JOIN plans pl ON pl.id=a.plan_id WHERE pl.project_id=? AND a.kind='person'", (pid,)):
+        d = db.jload(a["data"], {})
+        if d.get("public_figure") and d.get("name"):
+            named.append(d["name"].strip())
+    return SourceProfile(title=(p.get("title") or ""), author=(p.get("author") or ""), credits=sorted(set(credits)), allowed_names=sorted(set(named)),
                          chapter_titles=[c["title"] for c in db.q("SELECT title FROM chapters WHERE project_id=?", (pid,))],
                          passages=passages or [])
 
@@ -77,11 +83,12 @@ def _author_names(author: str) -> list[str]:
 def check(text: str, prof: SourceProfile, ngram: int = NGRAM, scene: bool = False) -> list[Finding]:
     out: list[Finding] = []
     low = text.lower()
+    ok_names = [n.lower() for n in prof.allowed_names]
     for t in _title_variants(prof.title):
-        if t.lower() in low:
+        if t.lower() in low and not any(t.lower() in n or n in t.lower() for n in ok_names):
             out.append(Finding("title", t, "names the source book"))
     for a in _author_names(prof.author):
-        if re.search(rf"\b{re.escape(a.lower())}\b", low):
+        if re.search(rf"\b{re.escape(a.lower())}\b", low) and not any(a.lower() == n for n in ok_names):
             out.append(Finding("author", a, "names the source author"))
     for c in prof.credits:
         if c.lower() in low:

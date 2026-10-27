@@ -133,6 +133,11 @@ def fixed_from(kind: str, ap: dict | None) -> list[str]:
 
 # ── the cast ────────────────────────────────────────────────────────────────
 
+def cast_chosen(settings: dict | None) -> bool:
+    """The editor has chosen who appears in the pictures (Indian cast or as the story says). A plan that has characters already counts as chosen: it was made before the choice was asked."""
+    return "cast_indian" in (settings or {})
+
+
 def indian_on(settings: dict | None) -> bool:
     """Characters are drawn as Indian people unless the plan switches it off (owner decision 2026-10-26: on by default for all plans)."""
     return bool((settings or {}).get("cast_indian", True))

@@ -18,7 +18,7 @@ Choose the structure that fits THIS story. Do not force suspense onto a story th
 Structures: cold_open (striking moment first, then context, escalation, reveal, consequence) | mystery (clues, competing
 explanations, resolution) | decision_consequence (a decision, what followed, recovery, outcome) | problem_mechanism
 (a problem, how it works, an example, what it means) | myth_correction (belief, evidence, correction) | multi_case
-(several cases, the pattern that connects them, takeaway) | question_journey (a question that is answered step by step).
+(several cases, the pattern that connects them, takeaway) | question_journey (a question that is answered step by step) | life_arc (one person's life, phase by phase) | evidence_case (a thesis, the evidence, the counterpoint, what is proven) | numbered_list (a counted list of items).
 
 Return ONLY this JSON object:
 {
@@ -242,7 +242,8 @@ Describe only what is VISIBLE, in concrete words. Say who or what, how many, whe
 are doing at this exact instant, camera angle and distance, light and its direction, colours. Describe a person only as far down as the camera sees them: in a close or medium shot, or when they sit behind a desk, table, counter or wheel, never mention shoes, trousers or legs (the picture model will force them into the frame). No vague words like "dramatic",
 "tense" or "epic": say which visible details create that effect. One clear focal point per scene.
 People are the continuity characters, drawn with faces and clear emotion (what the face and body show), using the same names as the
-assets. A real, named person is shown only as a silhouette, from behind, in shadow or by the hands. Clothing, devices and rooms
+assets. A person listed as real_person_no_likeness is shown only as a silhouette, from behind, in shadow or by the hands; one listed as real_person_likeness or
+real_person_stylised is a painted character the editor approved and is drawn with a face like any other character. Clothing, devices and rooms
 must fit the period. No logos and no brand text. On-screen text is allowed and the picture models draw it correctly when it is short and
 quoted: a headline, a sign, a label, a big number on a sign or screen (for example "OPEN 24 HOURS"). Rules for it: English letters only (never
 Hindi on screen), 8 words at most per text, only words and numbers that are in the story facts, never a quotation from a book or person.

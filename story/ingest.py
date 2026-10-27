@@ -550,9 +550,11 @@ def _fetch_sync(url: str) -> tuple[bytes, str, str]:
                 if r.status_code in (301, 302, 303, 307, 308) and r.headers.get("location"):
                     cur = str(httpx.URL(cur).join(r.headers["location"]))
                     continue
-                if r.status_code in (401, 402, 403, 451):
+                if r.status_code in (401, 402, 451):
                     raise IngestError(f"the site refused access (HTTP {r.status_code}); it may be paywalled or "
                                       "blocked. Paste the text or upload a saved file instead.")
+                if r.status_code in BROWSER_RETRY:
+                    raise BlockedError(f"the site refused the plain download (HTTP {r.status_code})")
                 if r.status_code >= 400:
                     raise IngestError(f"the site returned HTTP {r.status_code}")
                 data = bytearray()
@@ -564,11 +566,79 @@ def _fetch_sync(url: str) -> tuple[bytes, str, str]:
     raise IngestError("too many redirects")
 
 
+class BlockedError(IngestError):
+    """The plain download was refused like a script (HTTP 403/429/503 or a bot-check page). A real browser is tried next."""
+
+
+BROWSER_RETRY = (403, 429, 503)
+_CHALLENGE = re.compile(r"just a moment|verify you are (a )?human|enable javascript and cookies|attention required|access denied|captcha", re.I)
+_BROWSERS = (r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe", r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+             r"C:\Program Files\Google\Chrome\Application\chrome.exe", r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+             "msedge", "google-chrome", "chromium", "chrome")
+
+
+def find_browser() -> str | None:
+    import shutil
+    for b in _BROWSERS:
+        if Path(b).is_file() or shutil.which(b):
+            return b
+    return None
+
+
+def looks_blocked(raw: bytes, ctype: str) -> bool:
+    """A 200 answer that is really a bot-check page: HTML that is short and carries a challenge phrase."""
+    if "html" not in ctype.lower() and raw[:5] != b"<!DOC" and raw[:5].lower() != b"<html":
+        return False
+    text = raw[:20000].decode("utf-8", "ignore")
+    return len(re.sub(r"<[^>]+>|\s+", " ", text)) < 3000 and bool(_CHALLENGE.search(text))
+
+
+def _fetch_browser(url: str) -> tuple[bytes, str, str]:
+    """Open the page in the installed Edge or Chrome (headless) and take the page as it renders. Same rules as the plain download: public hosts only, http(s)
+    only, no login, no paywall (a page that still shows a paywall or a bot check is refused with the usual message)."""
+    import subprocess
+    import tempfile
+    u = urlparse(url.strip())
+    if u.scheme not in ("http", "https") or not u.hostname:
+        raise IngestError("only http(s) URLs can be imported")
+    _check_public(u.hostname)
+    exe = find_browser()
+    if not exe:
+        raise IngestError("the site blocked the plain download and no browser (Edge or Chrome) was found to try again. Paste the text or upload a saved file instead.")
+    with tempfile.TemporaryDirectory() as prof:
+        cmd = [exe, "--headless=new", "--disable-gpu", "--no-first-run", "--disable-extensions", f"--user-data-dir={prof}",
+               "--window-size=1280,2000", "--dump-dom", url.strip()]
+        out = Path(prof) / "dom.html"                          # a file, not a pipe: the browser's helper processes keep a pipe open after it has finished
+        try:
+            with open(out, "wb") as fh:
+                r = subprocess.run(cmd, stdout=fh, stderr=subprocess.DEVNULL, timeout=75)
+        except subprocess.TimeoutExpired as e:
+            raise IngestError("the browser took too long to open the page. Paste the text or upload a saved file instead.") from e
+        raw = out.read_bytes()
+    if r.returncode != 0 or len(raw) < 500 or looks_blocked(raw, "text/html"):
+        raise IngestError("the site refused the browser too (a bot check or a paywall). Paste the text or upload a saved file instead.")
+    if len(raw) > MAX_DOWNLOAD:
+        raise IngestError("download is larger than 25 MB")
+    return raw, "text/html; charset=utf-8; via=browser", url.strip()
+
+
+def fetch_with_fallback(url: str) -> tuple[bytes, str, str]:
+    """The plain download first; a refusal that looks like bot protection (403/429/503 or a challenge page) is tried again in a real browser. Paywalls and
+    login walls (401/402/451) are not tried again."""
+    try:
+        raw, ctype, final = _fetch_sync(url)
+    except BlockedError:
+        return _fetch_browser(url)
+    if looks_blocked(raw, ctype):
+        return _fetch_browser(url)
+    return raw, ctype, final
+
+
 async def fetch_url(url: str) -> tuple[bytes, str, str]:
-    """Fetch a public page politely. Returns (bytes, content_type, final_url). Paywalled or blocked pages
-    produce a clear error; nothing is bypassed. Runs in a thread (blocking client)."""
+    """Fetch a public page politely. Returns (bytes, content_type, final_url). Bot-protection blocks are retried in a real browser; paywalled pages produce
+    a clear error and nothing else is bypassed. Runs in a thread (blocking client)."""
     import asyncio
-    return await asyncio.to_thread(_fetch_sync, url)
+    return await asyncio.to_thread(fetch_with_fallback, url)
 
 
 def charset_from(content_type: str, raw: bytes) -> str | None:

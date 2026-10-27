@@ -3,7 +3,7 @@
 The planner sees only what is needed to tell the story in our own words: facts, people, order of events. Source quotes, page
 numbers, figure credits and paragraph ids stay in the `evidence` part and never reach a narration prompt.
 """
-from story import db, review
+from story import db, review, storytypes
 
 
 class IntakeError(Exception):
@@ -57,15 +57,20 @@ def readiness(story: dict, allow_unapproved: bool = False) -> dict:
     if not pub["overview"] and not pub["chronology"]:
         add("blocked", "no_facts", "The story has no overview or events to tell.")
     nat = cand["nature"]
-    if nat in ("explainer", "hypothetical"):
+    stype = storytypes.for_pid(ev["project_id"])
+    if stype != "incident":
+        if nat in ("anecdote", "hypothetical"):
+            add("warn", "nature", f"Labelled {nat}: it is a thin base for a {storytypes.STORY_TYPES[stype]['label'].lower()}; add related material or pick a stronger lead.")
+    elif nat in ("explainer", "hypothetical"):
         add("warn", "nature", f"Labelled {nat}: it will work best as a problem-and-mechanism piece, not a suspense story.")
     elif nat == "anecdote":
         add("warn", "nature", "A short anecdote: consider a short video or combine it with related stories.")
-    if not pub["outcome"]:
+    if not pub["outcome"] and stype in ("incident", "documentary"):
         add("warn", "outcome", "The outcome is not in the source. The telling must not invent one; it can end on the open question.")
     stated = sum(1 for x in pub["chronology"] if x["when_basis"] == "stated")
     if pub["chronology"] and not stated:
-        add("warn", "dates", "No event has a date stated in the source. Do not give dates in the narration.")
+        add("warn", "dates", "No event has a date stated in the source. Do not give dates in the narration."
+            + (" A biography leans on dates: expect a thin life story." if stype == "biography" else ""))
     if len(ev["paragraph_ids"]) < 3:
         add("warn", "thin", "Only a few source passages support this story; keep the telling short.")
     if any(f.get("rights_flag") for f in ev["figures"]):

@@ -5,7 +5,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
-from . import db, eta, export, figures, guide, llm, pipeline, projects, review, settings as settings_mod
+from . import db, eta, export, figures, guide, llm, pipeline, projects, review, settings as settings_mod, storytypes
 from .pipeline import manager
 from .tokens import Budget
 
@@ -65,18 +65,24 @@ async def list_projects(q: str = "", status: str = "", format: str = "", sort: s
 
 
 @router.post("/projects/upload")
-async def upload(file: UploadFile = File(...), title: str = Form(""), author: str = Form("")):
+async def upload(file: UploadFile = File(...), title: str = Form(""), author: str = Form(""), story_type: str = Form("")):
     data = await file.read()
     if len(data) > MAX_UPLOAD:
         raise HTTPException(413, "file is larger than 200 MB")
     pid = await asyncio.to_thread(_guard, projects.import_file, file.filename or "upload", data, title, author)
-    return projects.get(pid)
+    return _with_type(pid, story_type)
+
+
+def _with_type(pid: str, story_type: str) -> dict:
+    """An import that names a story type sets it on the new project; none named leaves the default (incident)."""
+    return _guard(projects.set_story_type, pid, story_type) if story_type else projects.get(pid)
 
 
 class UrlIn(BaseModel):
     url: str
     title: str = ""
     author: str = ""
+    story_type: str = ""
 
 
 @router.post("/projects/url")
@@ -85,19 +91,20 @@ async def from_url(body: UrlIn):
         pid = await projects.import_url(body.url, body.title, body.author)
     except projects.ProjectError as e:
         raise HTTPException(400, str(e))
-    return projects.get(pid)
+    return _with_type(pid, body.story_type)
 
 
 class TextIn(BaseModel):
     text: str
     title: str = ""
     author: str = ""
+    story_type: str = ""
 
 
 @router.post("/projects/text")
 async def from_text(body: TextIn):
     pid = _guard(projects.import_text, body.text, body.title, body.author)
-    return projects.get(pid)
+    return _with_type(pid, body.story_type)
 
 
 @router.get("/projects/{pid}")
@@ -117,6 +124,21 @@ class MetaIn(BaseModel):
 async def patch_project(pid: str, body: MetaIn):
     _project_or_404(pid)
     return _guard(projects.update_meta, pid, body.title, body.author)
+
+
+class StoryTypeIn(BaseModel):
+    story_type: str
+
+
+@router.get("/story-types")
+async def story_types():
+    return {"types": storytypes.public(), "default": storytypes.DEFAULT}
+
+
+@router.patch("/projects/{pid}/story-type")
+async def patch_story_type(pid: str, body: StoryTypeIn):
+    _project_or_404(pid)
+    return _guard(projects.set_story_type, pid, body.story_type)
 
 
 @router.delete("/projects/{pid}")

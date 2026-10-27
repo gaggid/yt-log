@@ -9,7 +9,7 @@ Alignment: a scene points at a segment and a run of its sentences. Start and end
 import re
 import uuid
 
-from story import db, llm, settings as settings_mod
+from story import db, llm, settings as settings_mod, storytypes
 from . import describe, director, intake, leak, planner, prompts as P, providers, store, styles, svara
 from .scene_schemas import ASPECTS, NEEDS_ASSET, RegistryOut, SceneOut, ScenesOut
 
@@ -169,6 +169,9 @@ def _monotony(scenes: list, people: set, places: set) -> list[str]:
 
 # ── registry ────────────────────────────────────────────────────────────────
 
+LIKENESS = ("real_person_likeness", "real_person_stylised")           # set by the editor in story3/likeness.py; kept when the characters are created again
+
+
 async def make_registry(plan_id: str, backend, s: dict | None = None) -> dict:
     s = s or settings_mod.get()
     plan = planner.get_plan(plan_id)
@@ -181,7 +184,9 @@ async def make_registry(plan_id: str, backend, s: dict | None = None) -> dict:
             + f"\nVISUAL STYLE of the whole video (the style asset is set for you; draw characters and places to fit it): {styles.for_plan(plan['settings'])['look']}"
             + ("\nCAST: every person in this video is Indian. Fill the ethnicity slot with Indian (add the region or community only when the story names one) and give "
                "skin, hair and eyes that fit an Indian person; use Indian names and clothes that fit the period and place. Places and objects follow the story's own setting."
-               if describe.indian_on(plan["settings"]) else ""))
+               if describe.indian_on(plan["settings"]) else
+               "\nCAST: do not default to any one ethnicity. Choose each person's ethnicity, skin, hair, eyes, name and clothes from the story's own country, region, period and community "
+               "(use the names and places in the story facts); when the story does not say, pick what is most plausible for that place and time."))
     tries: list[int] = []
 
     def enough(out: RegistryOut) -> None:
@@ -194,6 +199,8 @@ async def make_registry(plan_id: str, backend, s: dict | None = None) -> dict:
 
     res = await llm.JsonCaller(backend, s).call(P.REGISTRY, user, RegistryOut, enough)
     kept = {a["name"].lower(): a for a in get_assets(plan_id) if a["locked"]}
+    named = {a["name"].lower(): {k: a["data"][k] for k in ("public_figure", "fictionalisation", "likeness_photos") if k in a["data"]}
+             for a in get_assets(plan_id) if a["kind"] == "person" and not a["locked"] and a["data"].get("fictionalisation") in LIKENESS}     # the editor's choices about real people
     with db.tx() as c:
         c.execute("DELETE FROM assets WHERE plan_id=? AND locked=0", (plan_id,))
         for a in res.value.assets:
@@ -212,6 +219,8 @@ async def make_registry(plan_id: str, backend, s: dict | None = None) -> dict:
                 data["appearance"] = ap
                 data["description"] = describe.describe(a.kind, ap) or data["description"]
                 data["fixed"] = describe.fixed_from(a.kind, ap) or data["fixed"]
+            if a.kind == "person" and a.name.lower() in named:
+                data.update(named[a.name.lower()])
             c.execute("INSERT INTO assets(id,plan_id,kind,name,data,updated_at) VALUES(?,?,?,?,?,?)",
                       ("as-" + uuid.uuid4().hex[:8], plan_id, a.kind, a.name, db.jdump(data), db.now()))
         if not any(a["kind"] == "style" for a in kept.values()):
@@ -402,7 +411,7 @@ async def make_storyboard(plan_id: str, backend, s: dict | None = None, segment_
         for again in range(3):                                       # a long segment can come back as broken JSON three times running: ask again before giving up
             tries.clear()
             try:
-                res = await caller.call(P.SCENES, user, ScenesOut, fix)
+                res = await caller.call(P.SCENES + storytypes.scenes_note(storytypes.of_plan(plan)), user, ScenesOut, fix)
                 break
             except llm.ValidationFailed:
                 if again == 2:
@@ -453,7 +462,7 @@ async def regenerate_scene(scene_id: str, backend, s: dict | None = None, note: 
         if len(tries) <= 2 and (bad := scene_problems(out.scenes, assets)):
             raise ValueError("This scene is not a picture of the story:\n- " + "\n- ".join(bad))
 
-    res = await llm.JsonCaller(backend, s).call(P.SCENES, user, ScenesOut, one)
+    res = await llm.JsonCaller(backend, s).call(P.SCENES + storytypes.scenes_note(storytypes.of_plan(plan)), user, ScenesOut, one)
     data, _ = build_scene(res.value.scenes[0], assets, plan, story["evidence"]["paragraph_ids"])
     db.ex("UPDATE scenes SET data=?, rev=rev+1, stale=0, status='draft', issues='[]', updated_at=? WHERE id=?",
           (db.jdump(data), db.now(), scene_id))

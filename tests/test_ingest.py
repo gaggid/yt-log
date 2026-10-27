@@ -143,3 +143,56 @@ def test_manual_correction_and_chapter_edit(env):
     assert [(c["title"], c["start_para"], c["end_para"]) for c in chs] == [("A", 1, 4), ("B", 5, n)]
     with pytest.raises(projects.ProjectError):
         projects.set_chapters(pid, [{"title": "A", "start_para": 2}])
+
+
+def test_blocked_download_is_retried_in_a_browser_but_paywall_is_not(monkeypatch):
+    html = b"<html><body>" + b"<p>Real article text here.</p>" * 40 + b"</body></html>"
+    calls = []
+
+    def blocked(url):
+        raise ingest.BlockedError("HTTP 403")
+    monkeypatch.setattr(ingest, "_fetch_sync", blocked)
+    monkeypatch.setattr(ingest, "_fetch_browser", lambda url: calls.append(url) or (html, "text/html", url))
+    assert ingest.fetch_with_fallback("https://example.com/a")[0] == html and calls == ["https://example.com/a"]
+
+    def paywall(url):
+        raise ingest.IngestError("the site refused access (HTTP 402)")
+    monkeypatch.setattr(ingest, "_fetch_sync", paywall)
+    with pytest.raises(ingest.IngestError):
+        ingest.fetch_with_fallback("https://example.com/b")
+    assert len(calls) == 1                                           # a paywall is never retried
+
+
+def test_bot_check_page_is_detected_and_retried(monkeypatch):
+    page = b"<html><head><title>Just a moment...</title></head><body>Verify you are human</body></html>"
+    assert ingest.looks_blocked(page, "text/html") and not ingest.looks_blocked(b"%PDF-1.4", "application/pdf")
+    good = b"<html><body>" + b"<p>Article.</p>" * 400 + b"</body></html>"
+    monkeypatch.setattr(ingest, "_fetch_sync", lambda url: (page, "text/html", url))
+    monkeypatch.setattr(ingest, "_fetch_browser", lambda url: (good, "text/html", url))
+    assert ingest.fetch_with_fallback("https://example.com/c")[0] == good
+
+
+def test_browser_fallback_keeps_the_private_host_guard():
+    with pytest.raises(ingest.IngestError):
+        ingest._fetch_browser("http://127.0.0.1:8905/")
+
+
+def test_a_page_read_through_the_browser_is_flagged_on_the_project(env, monkeypatch):
+    import asyncio
+    from story import projects
+    html = ("<html><head><title>Harbour news</title></head><body>" + "<p>The harbour board met on Tuesday and approved the new pier after a long debate about the cost.</p>" * 30 + "</body></html>").encode()
+
+    async def fake_fetch(url):
+        return html, "text/html; charset=utf-8; via=browser", url
+    monkeypatch.setattr(ingest, "fetch_url", fake_fetch)
+    pid = asyncio.run(projects.import_url("https://example.com/news"))
+    assert any("opened in a browser" in w for w in projects.get(pid)["warnings"])
+
+
+def test_no_chat_model_is_named_unless_the_owner_typed_one(env):
+    from story import llm, settings as settings_mod
+    assert settings_mod.get()["model"] == "" and llm.model_field(settings_mod.get()) == {}
+    settings_mod.update({"model": "gemma4-12b-qat-uncensored-hauhaucs-balanced"})                       # the old saved default counts as unset
+    assert settings_mod.get()["model"] == "" and llm.model_field(settings_mod.get()) == {}
+    settings_mod.update({"model": "my-model"})
+    assert llm.model_field(settings_mod.get()) == {"model": "my-model"}

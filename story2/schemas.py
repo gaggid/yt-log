@@ -7,7 +7,7 @@ from story import schemas as s1
 from . import svara
 
 STRUCTURES = ("cold_open", "mystery", "decision_consequence", "problem_mechanism", "myth_correction", "multi_case",
-              "question_journey")
+              "question_journey", "life_arc", "evidence_case", "numbered_list")
 
 
 def _structure(v):

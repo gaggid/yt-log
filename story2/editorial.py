@@ -59,7 +59,7 @@ def content_hash(plan: dict) -> str:
                       "pronounce": s["pronounce"], "emphasis": s["emphasis"]} for s in plan["segments"]],
         "scenes": [{"id": s["id"], "seq": s["seq"], "seg": s["segment_id"], "range": [s["s_from"], s["s_to"]],
                     "data": {k: v for k, v in s["data"].items() if k not in skip}} for s in plan["scenes"]],
-        "assets": [{"id": a["id"], "name": a["name"], "kind": a["kind"], "data": {k: v for k, v in a["data"].items() if k != "reference_images"}}
+        "assets": [{"id": a["id"], "name": a["name"], "kind": a["kind"], "data": {k: v for k, v in a["data"].items() if k not in ("reference_images", "likeness_photos")}}
                    for a in plan["assets"]],
     }
     return hashlib.sha1(json.dumps(doc, sort_keys=True, default=str, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
@@ -334,7 +334,7 @@ def continuity(c: Ctx) -> dict:
     style = any(a["kind"] == "style" for a in c.assets)
     usage = Counter(a for s in c.scenes for a in s["data"]["continuity"]["assets"])
     unused = [a for a in c.assets if a["kind"] not in ("style", "narrator") and usage[a["id"]] == 0]
-    people_bad = [a for a in c.assets if a["kind"] == "person" and a["data"].get("fictionalisation") not in ("generic_reconstruction", "source_supported", "real_person_no_likeness", "fictional")]
+    people_bad = [a for a in c.assets if a["kind"] == "person" and a["data"].get("fictionalisation") not in ("generic_reconstruction", "source_supported", "real_person_no_likeness", "real_person_likeness", "real_person_stylised", "fictional")]
     recurring = [a for a in c.assets if a["kind"] != "style" and usage[a["id"]] >= 2]
     noref = [a for a in recurring if not [r for r in a["data"].get("reference_images", []) if r.get("approved")]]
     no_assets = _pct(sum(1 for s in c.scenes if not s["data"]["continuity"]["assets"]), n) if n else 0

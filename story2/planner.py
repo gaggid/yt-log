@@ -6,12 +6,18 @@ overwritten by regeneration or by edits to other segments.
 import re
 import uuid
 
-from story import db, llm, settings as settings_mod
+from story import db, llm, projects, settings as settings_mod, storytypes
 from . import intake, leak, prompts as P, store, svara, voices
 from .schemas import Blueprint, NarrationOut
 
 WPM = 148                                    # spoken Hinglish words per minute, measured on real Svara hi_male audio (125 was a guess)
 DEFAULT_MINUTES = 8.0
+LONG_BEAT_FACTOR = 1.6                         # a beat longer than this many times its share of the target is sent back
+MIN_BEAT_WORDS = 40                            # a beat is never narrated in fewer words than this, so a short video has few beats
+
+
+def max_beats(minutes: float, wpm: float = WPM) -> int:
+    return max(3, min(9, int(minutes * wpm / MIN_BEAT_WORDS)))
 UNSET_NAME = "(not set yet: do not say a name)"
 
 
@@ -87,7 +93,7 @@ def create_plan(candidate_id: str, narrator_name: str = "", minutes: float = DEF
             "voice": "hi_male", "tts": {"engine": voices.DEFAULT_ENGINE, "voice": voices.ENGINES[voices.DEFAULT_ENGINE]["default_voice"]}, "avatar": {"status": "to be designed"}}
     db.ex("INSERT INTO plans(id,project_id,candidate_id,format,status,narrator,settings,readiness,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
           (pid, story["evidence"]["project_id"], candidate_id, "16:9", "draft", db.jdump(narr),
-           db.jdump({"minutes": float(minutes), "wpm": WPM}), db.jdump(ready), db.now(), db.now()))
+           db.jdump({"minutes": float(minutes), "wpm": WPM, "story_type": storytypes.of_project(projects.get(story["evidence"]["project_id"]))}), db.jdump(ready), db.now(), db.now()))
     store.log(pid, "created", {"candidate": candidate_id})
     return get_plan(pid)
 
@@ -112,8 +118,17 @@ async def make_blueprint(plan_id: str, backend, s: dict | None = None) -> dict:
     s = s or settings_mod.get()
     plan = get_plan(plan_id)
     story = _story_for(plan)
-    user = "STORY FACTS:\n" + intake.facts_text(story["public"]) + f"\n\nTarget length: about {plan['settings']['minutes']:g} minutes."
-    res = await llm.JsonCaller(backend, s).call(P.BLUEPRINT, user, Blueprint)
+    minutes = float(plan["settings"]["minutes"])
+    cap = max_beats(minutes, plan["settings"].get("wpm", WPM))
+    user = ("STORY FACTS:\n" + intake.facts_text(story["public"]) + f"\n\nTarget length: about {minutes:g} minutes."
+            + (f" That is short: plan AT MOST {cap} beats (this replaces the 5 to 9 beats rule), each needing about {MIN_BEAT_WORDS} spoken words, and pick only the facts that fit." if cap < 5 else ""))
+
+    caller = llm.JsonCaller(backend, s)
+
+    def fits(out: Blueprint) -> None:
+        if len(out.beats) > cap + 1 and cap < 9 and not caller.last_attempt:            # sent back with the reason, then the last attempt is accepted
+            raise ValueError(f"The plan has {len(out.beats)} beats but a {minutes:g}-minute video has room for {cap}: each beat is about {MIN_BEAT_WORDS} spoken words. Merge or drop beats.")
+    res = await caller.call(P.BLUEPRINT + storytypes.blueprint_note(storytypes.of_plan(plan)), user, Blueprint, fits)
     bp = res.value.model_dump()
     for i, b in enumerate(bp["beats"], 1):
         b["id"] = b["id"] or f"b{i}"
@@ -205,6 +220,13 @@ async def make_narration(plan_id: str, backend, s: dict | None = None, beat_ids:
         raise PlanError("make the blueprint first")
     story = _story_for(plan)
     bp = plan["blueprint"]
+    gone = [x["id"] for x in plan["segments"] if x["beat"] not in {b["id"] for b in bp["beats"]} and not x["locked"] and x["status"] != "approved"]
+    if gone:                                       # the story was planned again: narration (and scenes) of beats that no longer exist would be left over
+        with db.tx() as c:
+            for sid in gone:
+                c.execute("DELETE FROM scenes WHERE segment_id=?", (sid,))
+                c.execute("DELETE FROM segments WHERE id=?", (sid,))
+        plan = get_plan(plan_id)
     kept_beats = {x["beat"] for x in plan["segments"] if x["locked"] or x["status"] == "approved"}
     have = {x["beat"] for x in plan["segments"]}
     want = [b for b in bp["beats"] if (not beat_ids or b["id"] in beat_ids) and b["id"] not in kept_beats
@@ -214,7 +236,7 @@ async def make_narration(plan_id: str, backend, s: dict | None = None, beat_ids:
     minutes = float(plan["settings"]["minutes"])
     wpm = plan["settings"].get("wpm", WPM)
     n_beats = max(1, len(bp["beats"]))
-    per_beat = max(40, int(minutes * wpm / n_beats))
+    per_beat = max(MIN_BEAT_WORDS, int(minutes * wpm / n_beats))
     order = {b["id"]: i for i, b in enumerate(bp["beats"])}
     ev_ids = story["evidence"]["paragraph_ids"]
     outline = "\n".join(f"{b['id']} ({b['name']}): {b['purpose']}" + (f" [reveals: {b['reveal']}]" if b.get("reveal") else "") for b in bp["beats"])
@@ -228,6 +250,10 @@ async def make_narration(plan_id: str, backend, s: dict | None = None, beat_ids:
         if opening["on"] and len(first.split()) > MAX_FIRST_SENTENCE_WORDS and not caller.last_attempt:
             raise ValueError(f"The first sentence of the video has {len(first.split())} words; it must have {MAX_FIRST_SENTENCE_WORDS} or fewer. Put the single most striking moment in it "
                              "and move the date, the place and the details to the sentences after it.")
+        words = sum(len(x.text.split()) for seg in out.segments for x in seg.sentences)
+        if words > per_beat * LONG_BEAT_FACTOR and not caller.last_attempt:
+            raise ValueError(f"The narration has {words} words but this beat has room for about {per_beat} (the whole video must fit its {minutes:g} minutes). "
+                             "Keep the most striking facts and cut the rest.")
         again = repeated_sentences(spoken, [x.text for seg in out.segments for x in seg.sentences])
         if again and not caller.last_attempt:
             raise ValueError("These sentences repeat something already spoken in the video; say something new instead: " + " | ".join(again[:4]))
@@ -248,7 +274,7 @@ async def make_narration(plan_id: str, backend, s: dict | None = None, beat_ids:
                 raise ValueError(f"segment {n} glues English letters to Hindi letters in one word: {' '.join(mixed)}. "
                                  "Write the English word on its own, with a space before the Hindi particle (stock को, not stockको).")
 
-    system = (P.NARRATE.replace("{narrator}", plan["narrator"].get("name") or UNSET_NAME)
+    system = ((P.NARRATE + storytypes.narrate_note(storytypes.of_plan(plan))).replace("{narrator}", plan["narrator"].get("name") or UNSET_NAME)
               .replace("{minutes}", f"{minutes / n_beats:.1f}").replace("{words}", str(per_beat))
               .replace("{per_beat}", str(per_beat)).replace("{min_beat}", str(int(per_beat * 0.7))))
     tokens_out = 0

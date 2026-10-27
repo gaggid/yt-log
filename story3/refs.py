@@ -11,7 +11,7 @@ import httpx
 from story import db, settings as settings_mod
 from story2 import describe, imgplan, imgprompts, intake, leak, planner, providers, storyboard, store as plan_store, styles
 
-from . import refscore, store
+from . import likeness, refscore, store
 from .voice import MediaError
 
 RETRIES = 1
@@ -91,6 +91,8 @@ def build_prompt(a: dict, style: str, model: str, indian: bool = False) -> dict:
         parts.append("Always the same, so show clearly: " + "; ".join(fixed) + ".")
     if kind == "person" and _anonymous(a):
         parts.append("A real person is never given an invented likeness: draw only a silhouette seen from behind, in deep shadow, with no recognisable face.")
+    elif kind == "person" and d.get("fictionalisation") == "real_person_stylised":
+        parts.append("A painted character who resembles a real public figure in age, build and general features, drawn from the description; stylised, not a portrait of the real face.")
     cfg = providers.get(model)
     if cfg["negative_prompt"]:
         parts.append(NO_TEXT)
@@ -107,7 +109,7 @@ def build_prompt(a: dict, style: str, model: str, indian: bool = False) -> dict:
 def asset_hash(a: dict, style: str, model: str, indian: bool = False) -> str:
     """What a picture was made from. If the asset's description or fixed details, the style or the model change, older pictures stop counting as current."""
     d = a["data"]
-    key = "|".join([model, _s(a["name"]), _s(d.get("description")), ";".join(map(_s, d.get("fixed", []))), _s(d.get("period")), d.get("fictionalisation", ""), style, "indian" if indian and a["kind"] in ("person", "narrator") else ""])
+    key = "|".join([model, _s(a["name"]), _s(d.get("description")), ";".join(map(_s, d.get("fixed", []))), _s(d.get("period")), d.get("fictionalisation", ""), "photo" if likeness.approved_photo(a) else "", style, "indian" if indian and a["kind"] in ("person", "narrator") else ""])
     return hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
 
 
@@ -156,6 +158,14 @@ async def _draw(client: httpx.AsyncClient, base: str, key: str, body: dict) -> d
                 break
         await asyncio.sleep(4 * (n + 1))
     raise MediaError(last or "no answer from the model server")
+
+
+async def _draw_from_photo(client: httpx.AsyncClient, base: str, key: str, body: dict, photo) -> dict:
+    """The edit endpoint with the approved photo as the one reference picture (the same multipart shape the scenes use)."""
+    from . import scenes
+    w, h = body["size"].split("x")
+    data = {"model": body["model"], "prompt": body["prompt"], "size": body["size"], "width": w, "height": h, "seed": str(body["seed"]), "n": "1", "response_format": "b64_json"}
+    return await scenes._post(client, base.rstrip("/") + "/images/edits", key, data=data, files=[("image", (photo.name, photo.read_bytes(), "image/png"))])
 
 
 async def generate(plan_id: str, asset_ids: list[str] | None = None, candidates: int = DEFAULT_CANDIDATES, only_missing: bool = True,
@@ -209,6 +219,10 @@ async def generate(plan_id: str, asset_ids: list[str] | None = None, candidates:
                 failed.append({"asset": a["id"], "error": err})
                 continue
             seed = seed_for(a["id"], it["attempt"])
+            photo = likeness.approved_path(plan_id, a) if a["kind"] == "person" and a["data"].get("fictionalisation") == "real_person_likeness" and cfg["edits"] else None
+            if photo:                                   # a painted character from the editor's approved photo: the photo is the reference, the style is the plan's
+                built["prompt"] = (built["prompt"] + " Paint this person from the reference photo as an illustrated character in the style above: keep the face, hair, age and build recognisable, "
+                                   "and change the clothes and pose as the sheet describes. The photo's background is not used.")
             body = {"model": model, "prompt": built["prompt"], "size": f"{built['width']}x{built['height']}", "n": 1, "seed": seed, "response_format": "b64_json"}
             if built["negative_prompt"]:
                 body["negative_prompt"] = built["negative_prompt"]
@@ -216,7 +230,7 @@ async def generate(plan_id: str, asset_ids: list[str] | None = None, candidates:
                 body["lora"] = styles.loras_for(model, plan["settings"])
             t0 = time.time()
             try:
-                img = await _draw(client, s["base_url"], key, body)
+                img = await (_draw_from_photo(client, s["base_url"], key, body, photo) if photo else _draw(client, s["base_url"], key, body))
                 name = f"refs/{a['id']}-a{it['attempt']}.png"
                 (store.media_dir(plan_id, "refs") / f"{a['id']}-a{it['attempt']}.png").write_bytes(base64.b64decode(img["b64_json"]))
                 store.update(it["id"], status="done", file=name, meta={"seed": img.get("seed", seed), "width": img.get("width"), "height": img.get("height"),

@@ -45,7 +45,7 @@ DATA_DIR = Path(os.environ.get("DATA_DIR") or Path(__file__).with_name("data"))
 HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8905"))
 
-CHAT_MODEL = os.environ.get("CHAT_MODEL", "gemma4-12b-qat-uncensored-hauhaucs-balanced")
+CHAT_MODEL = os.environ.get("CHAT_MODEL", "")      # empty: no model is named in chat requests and the model server uses its own default
 
 # ── legacy video pipeline constants (used only by legacy/) ──
 IMAGE_MODEL = "z-image-turbo"
