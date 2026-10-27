@@ -95,10 +95,10 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:8px;
 <header class="top">
   <h1><a href="#/" style="color:inherit">Source to Story</a></h1>
   <span class="sp"></span>
+  <span id="build-info" class="small mute" style="margin-right:12px"></span>
   <a href="#/settings">Settings</a>
   <button class="small" onclick="logout()">Sign out</button>
 </header>
-<div id="build-info" style="text-align:right;padding:3px 24px;font-size:11px;color:var(--mute);background:var(--panel);border-bottom:1px solid var(--line)"></div>
 <main id="app"></main>
 <div id="overlay"></div>
 <div id="toasts"></div>
@@ -687,7 +687,17 @@ async function testConn(btn) {
 }
 addEventListener('beforeunload', e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
 route();
-(async () => { try { const h = await api('/health'); const d = new Date(h.started_at); document.getElementById('build-info').textContent = `v${h.commit} · built ${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`; } catch {} })();
+async function showBuild() {
+  const el = document.getElementById('build-info');
+  try {
+    const h = await (await fetch('/health', {cache: 'no-store'})).json();
+    const d = new Date(h.started_at), when = `${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`;
+    el.textContent = `v${h.commit} · restarted ${when}` + (h.behind ? ` · ${h.behind} update(s) waiting${h.busy ? ': it installs when the running step ends' : ''}` : '');
+    el.title = h.subject || '';
+    el.style.color = h.behind ? 'var(--warn, #b7791f)' : '';
+  } catch { el.textContent = ''; }
+}
+showBuild(); setInterval(showBuild, 60000);
 </script>
 <button id="to-top" type="button" title="Back to the top" aria-label="Back to the top">&#8593;</button>
 <script>

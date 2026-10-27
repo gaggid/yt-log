@@ -81,10 +81,20 @@ async def style_sample(name: str):
     return FileResponse(f, headers={"Cache-Control": "max-age=86400"})
 
 
+def _commits_behind() -> int:
+    """How many commits on origin are not deployed here yet (watch.py fetches every minute; this only reads what it fetched). 0 when unknown."""
+    try:
+        r = subprocess.run(["git", "rev-list", "--count", "HEAD..origin/master"], capture_output=True, text=True, cwd=Path(__file__).parent, timeout=5)
+        return int(r.stdout.strip() or 0)
+    except Exception:
+        return 0
+
+
 @app.get("/health")
 async def health():
+    from story2 import jobs
     return {"started_at": _STARTED_AT.isoformat(), "uptime_s": (datetime.now() - _STARTED_AT).total_seconds(),
-            "commit": _GIT["commit"], "subject": _GIT["subject"]}
+            "commit": _GIT["commit"], "subject": _GIT["subject"], "behind": _commits_behind(), "busy": manager.busy() or jobs.busy()}
 
 
 @app.get("/internal/busy")
