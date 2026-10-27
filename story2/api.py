@@ -112,6 +112,7 @@ async def plan(plan_id: str):
     p["cast_gaps"] = [{"id": a["id"], "name": a["name"], "kind": a["kind"], "missing": describe.missing(a["kind"], a["data"].get("appearance")),
                        "hints": describe.hints(a["kind"])} for a in p["assets"] if a["kind"] in ("person", "place", "prop")
                       and describe.missing(a["kind"], a["data"].get("appearance"))]
+    p["working_title"] = intake.load(p["candidate_id"])["evidence"]["working_title"]
     return p
 
 
@@ -194,6 +195,20 @@ async def set_visual_style(plan_id: str, body: VisualStyle):
 class Cast(BaseModel):
     indian: bool
     write_into_list: bool = False
+
+
+class VideoTitle(BaseModel):
+    title: str
+
+
+@router.post("/{plan_id}/title")
+async def set_video_title(plan_id: str, body: VideoTitle):
+    t = body.title.strip()
+    if not t:
+        raise HTTPException(400, "title cannot be empty")
+    p = _guard(planner.get_plan, plan_id)
+    db.ex("UPDATE plans SET settings=?, updated_at=? WHERE id=?", (db.jdump({**p["settings"], "video_title": t}), db.now(), plan_id))
+    return {"video_title": t}
 
 
 @router.patch("/{plan_id}/cast")

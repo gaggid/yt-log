@@ -345,6 +345,7 @@ Be concrete: colours, materials, numbers. Leave empty to skip.`); if (v === null
     async refsSkip(aid, on) { await act(null, () => api(`/media/${id}/references/skip`, {method: 'POST', json: {asset_id: aid, skip: on}}), on ? 'Skipped: no reference for this one' : 'Back on the list'); await load(true); },
     async voiceApprove(iid, on) { await act(null, () => api(`/media/item/${iid}`, {method: 'PATCH', json: {approved: on}}), on ? 'Recording approved' : 'Approval removed'); await load(true); },
     async validate(b) { const r = await act(b, () => api(`/plans/${id}/validate`, {method: 'POST'})); if (r) { await load(true); toast(r.ok ? 'No blocking problems found' : 'Some problems need attention'); } },
+    async setTitle(el) { if (!el.value.trim()) return; await act(null, () => api(`/plans/${id}/title`, {method: 'POST', json: {title: el.value.trim()}}), 'Video title saved'); },
     async narrator(el) { await act(null, () => api(`/plans/${id}/narrator`, {method: 'PATCH', json: {name: el.value}}), 'Narrator name saved'); await load(true); },
     async minutes(el) { await act(null, () => api(`/plans/${id}/settings`, {method: 'PATCH', json: {minutes: +el.value}}), 'Target length saved'); await load(true); },
     async delPlan() { if (!await confirmDlg('Delete this plan?', 'The story itself is not touched. Narration and storyboard of this plan are removed.', 'Delete', true)) return; await act(null, () => api(`/plans/${id}`, {method: 'DELETE'}), 'Plan deleted'); location.hash = '#/p/' + P.project_id + '/stories'; },
@@ -535,7 +536,8 @@ Be concrete: colours, materials, numbers. Leave empty to skip.`); if (v === null
       <div class="plan-steps">${steps.map(([l, ok], i) => `<span class="${ok ? 'done' : i === firstOpen ? 'on' : ''}">${ok ? '✓ ' : ''}${l}</span>`).join('')}</div>
       ${nextBar}${banner}
       <div class="plan-grid"><div class="plan-main">
-      <div class="card pad"><div class="row"><label class="f" style="min-width:230px">Narrator name (first person; set later)<input id="nname" value="${esc(p.narrator.name || '')}" placeholder="not set yet" onchange="_plan.narrator(this)"></label>
+      <div class="card pad"><div class="row" style="margin-bottom:8px"><label class="f" style="flex:1">Video title (your own — not the article headline)<input id="vtitle" value="${esc(p.settings.video_title || '')}" placeholder="${esc(p.working_title || 'e.g. How one click lost ₹64 crore')}" onchange="_plan.setTitle(this)"></label></div>
+      <div class="row"><label class="f" style="min-width:230px">Narrator name (first person; set later)<input id="nname" value="${esc(p.narrator.name || '')}" placeholder="not set yet" onchange="_plan.narrator(this)"></label>
         <label class="f" style="width:150px">Target length (min)<input type="number" min="1" max="40" step="0.5" value="${p.settings.minutes}" onchange="_plan.minutes(this)"></label>
         <span class="mute small" style="flex:1;min-width:240px">The narrator is a guide: "I" shows and reacts, and never claims to have been there. Nothing refers to a book, an author or a source, and nothing is quoted.</span></div></div>
 

@@ -159,7 +159,7 @@ def build(plan_id: str, refresh: bool = True, export_rev: int = 0) -> dict:
         "production_notes": {"tts": tts_notes(plan), "images": IMAGE_NOTES,
                              "scenes_needing_built_graphics": [sc["id"] for sc in scenes if sc["data"]["feasibility"]["level"] == "needs_asset"]},
     }
-    title = ev["working_title"]
+    title = plan["settings"].get("video_title") or ev["working_title"]
     gate = leak_scan(public, prof, title)
     if not gate["ok"]:
         raise ExportError("the public part still points back to the source or copies it: " + "; ".join(f"{f['where']}: {f['kind']} “{f['text']}”" for f in gate["findings"][:5]))
