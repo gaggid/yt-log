@@ -121,9 +121,19 @@ DIRECTOR_NOTE = {
     "biography": "\n\nPROJECT TYPE: BIOGRAPHY. Show the person in each phase (age, place and clothes change with the period) and the places that shaped them. Use establishing shots at every "
                  "change of period. A person with a real name is only ever drawn as the registry describes them.",
     "documentary": "\n\nPROJECT TYPE: DOCUMENTARY. Favour places, objects, documents-as-shown-on-a-desk and wide establishing shots over faces; the evidence is the subject. "
-                   "Plan a data moment (kind object or establishing) where the narration quotes numbers; the numbers themselves are added later as a built graphic.",
+                   "Plan a data moment (kind object or establishing) where the narration quotes numbers; the numbers themselves are added later as a built graphic. "
+                   "VISUAL DEVICE TOOLKIT — when the blueprint beat has an unfilmable concept, plan one of these devices (name it in the shot focus): "
+                   "scale plate (a real place or object shown at the concept's scale — a galaxy dwarfing a city, a virus beside a red blood cell); "
+                   "graphic overlay on a real desk or wall (a chart or diagram printed and lying on a surface); "
+                   "object metaphor (a physical stand-in that makes scale or probability concrete, e.g. a single grain of sand in a handful); "
+                   "before/after of the same place. Never place a microscopic or cosmic object at human scale unless the blueprint's visual_device says so.",
     "explainer": "\n\nPROJECT TYPE: EXPLAINER. Show the thing being explained in a real setting where it happens (a workshop, a lab, a street), close on the parts a learner must see. "
-                 "Keep one steady place per idea; move the camera to show size and relation (a pull back for the whole, a push in for the detail).",
+                 "Keep one steady place per idea; move the camera to show size and relation (a pull back for the whole, a push in for the detail). "
+                 "VISUAL DEVICE TOOLKIT — when the blueprint beat has an unfilmable concept, plan one of these devices (name it in the shot focus): "
+                 "scale plate (the concept shown at its true scale beside something familiar); "
+                 "close detail (extreme close of the real object where the mechanism lives, e.g. a transistor gate under magnification); "
+                 "diagram on a real surface (a hand-drawn or printed diagram lying on a desk or whiteboard, shot as an object in a real place); "
+                 "step reveal (a wide shot of the system, then a push-in to the part that changes). Never place a microscopic or cosmic object at human scale unless the blueprint's visual_device says so.",
     "listicle": "\n\nPROJECT TYPE: LISTICLE. Give each item its own place and look so the items feel separate; begin each item with an establishing shot of where it happens. "
                 "The number card for each item is added later as a built graphic.",
 }

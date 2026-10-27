@@ -121,6 +121,34 @@ def current(plan: dict) -> bool:
     return bool(d and d.get("by_segment") and d.get("direction") == styles.DIRECTION and d.get("narration") == narration_key(sorted(plan["segments"], key=lambda x: x["seq"])))
 
 
+def _hook_brief(bp: dict) -> str:
+    """Mandatory first-shot instruction from the blueprint's hook_scene_brief field."""
+    h = (bp.get("hook_scene_brief") or "").strip()
+    return f"\n\nHOOK (first shot of segment 1 — mandatory): {h}" if h else ""
+
+
+def _beat_visual_brief(bp: dict, segs: list[dict]) -> str:
+    """One line per segment that has a visual brief in its beat. Empty string when the blueprint has none."""
+    beats = {b["id"]: b for b in (bp.get("beats") or [])}
+    lines = []
+    for i, sg in enumerate(segs, 1):
+        b = beats.get(sg["beat"], {})
+        pv = (b.get("primary_visual") or "").strip()
+        unf = [x for x in (b.get("unfilmable") or []) if x]
+        vd = (b.get("visual_device") or "").strip()
+        rh = (b.get("retention_hook") or "").strip()
+        if pv or unf or rh:
+            line = f"  Segment {i} (beat {sg['beat']}): show first — {pv}."
+            if unf:
+                line += f" Cannot film directly: {'; '.join(unf)}."
+            if vd:
+                line += f" Visual device: {vd}."
+            if rh:
+                line += f" Retention hook: {rh}."
+            lines.append(line)
+    return ("\n\nVISUAL BRIEF (what each segment must show — plan shots that deliver this before character reaction shots):\n" + "\n".join(lines)) if lines else ""
+
+
 async def make(plan_id: str, backend, s: dict | None = None) -> dict:
     from . import storyboard
     s = s or settings_mod.get()
@@ -136,6 +164,8 @@ async def make(plan_id: str, backend, s: dict | None = None) -> dict:
     narration = "\n".join(f"SEGMENT {i} (beat {sg['beat']}, {secs[i]:.0f} s): {sg['plain']}" for i, sg in enumerate(segs, 1))
     user = ("STORY FACTS:\n" + intake.facts_text(story["public"]) + "\n\nVIDEO PLAN: " + (bp.get("viewer_promise", "") + " Structure: " + bp.get("structure", "")).strip()
             + "\n\nCONTINUITY (use these place names):\n" + storyboard._asset_lines(storyboard.get_assets(plan_id)) + f"\n\nNARRATION:\n{narration}"
+            + _beat_visual_brief(bp, segs)
+            + _hook_brief(bp)
             + f"\n\nVISUAL STYLE: {styles.for_plan(plan['settings'])['short']}.\nPlan the film now: {len(segs)} segments.")
     tries: list[int] = []
     caller = llm.JsonCaller(backend, s)

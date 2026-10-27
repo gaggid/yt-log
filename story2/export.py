@@ -124,6 +124,7 @@ def build(plan_id: str, refresh: bool = True, export_rev: int = 0) -> dict:
     ev, pub = story["evidence"], story["public"]
     beats = plan["blueprint"]["beats"]
     names = {b["id"]: b["name"] for b in beats}
+    beat_titles = {b["id"]: b.get("chapter_title", "") for b in beats}
     try:                                                                  # real voice files, when Phase 3 has made them
         from story3 import store as media
         voice_id = media.voice_key(plan)
@@ -137,6 +138,13 @@ def build(plan_id: str, refresh: bool = True, export_rev: int = 0) -> dict:
     narr = dict(plan["validation"] or {})
     storyboard_rep, prompts_rep = narr.pop("storyboard", None) or {}, narr.pop("prompts", None) or {}
     narr.pop("scores", None)
+    # chapters: first scene start_s for each beat that has a chapter_title
+    _first_seg_for_beat = {}
+    for s in segs:
+        _first_seg_for_beat.setdefault(s["beat"], s["id"])
+    _first_scene_start = {sc["segment_id"]: sc["start_s"] for sc in reversed(scenes)}  # reversed so first scene wins
+    chapters = [{"beat_id": b["id"], "title": beat_titles[b["id"]], "start_s": _first_scene_start.get(_first_seg_for_beat.get(b["id"], ""), 0.0)}
+                for b in beats if beat_titles.get(b["id"])]
     blueprint = json.loads(json.dumps(plan["blueprint"]))
     beat_facts = {b["id"]: b.pop("facts", []) for b in blueprint["beats"]}          # which facts a beat leans on is the evidence trail, not public text
     narrator = {k: v for k, v in plan["narrator"].items()}
@@ -158,6 +166,11 @@ def build(plan_id: str, refresh: bool = True, export_rev: int = 0) -> dict:
         "image_models": {"default": providers.settings_for(plan["settings"])["default"], "by_type": providers.settings_for(plan["settings"])["by_type"], "providers": _providers_public(plan)},
         "production_notes": {"tts": tts_notes(plan), "images": IMAGE_NOTES,
                              "scenes_needing_built_graphics": [sc["id"] for sc in scenes if sc["data"]["feasibility"]["level"] == "needs_asset"]},
+        "chapters": chapters,
+        "engagement": {
+            "series_placement": plan["blueprint"].get("series_placement") or "",
+            "music_brief": plan["blueprint"].get("music_brief") or "",
+        },
     }
     title = plan["settings"].get("video_title") or ev["working_title"]
     gate = leak_scan(public, prof, title)

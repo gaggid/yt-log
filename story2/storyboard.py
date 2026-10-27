@@ -54,6 +54,24 @@ def _scene_row(r: dict) -> dict:
     return r
 
 
+def _beat_visual_brief_text(blueprint: dict | None, beat_id: str) -> str:
+    """The visual brief for one beat, formatted as a storyboard instruction block. Empty string when no brief exists."""
+    b = next((x for x in ((blueprint or {}).get("beats") or []) if x.get("id") == beat_id), {})
+    pv = (b.get("primary_visual") or "").strip()
+    unf = [x for x in (b.get("unfilmable") or []) if x]
+    vd = (b.get("visual_device") or "").strip()
+    if not pv and not unf:
+        return ""
+    parts = []
+    if pv:
+        parts.append(f"Show first in this beat: {pv}. Plan at least one scene whose subject IS this — not a character reacting to it.")
+    if unf:
+        parts.append(f"Concepts that cannot be filmed directly: {'; '.join(unf)}.")
+    if vd:
+        parts.append(f"Decided visual device: {vd}. Use this device; do not invent another.")
+    return "BEAT VISUAL BRIEF:\n" + " ".join(parts) + "\n\n"
+
+
 def get_scenes(plan_id: str) -> list[dict]:
     store.ensure()
     rows = db.q("SELECT * FROM scenes WHERE plan_id=? ORDER BY seq, id", (plan_id,))
@@ -385,13 +403,15 @@ async def make_storyboard(plan_id: str, backend, s: dict | None = None, segment_
         idx = next(i for i, x in enumerate(ordered_segs, 1) if x["id"] == seg["id"])
         shots = director.shots_for(plan, idx)
         nxt = ordered_segs[idx]["sentences"][0]["text"][:160] if idx < len(ordered_segs) and ordered_segs[idx]["sentences"] else "the video ends."
+        beat_brief = _beat_visual_brief_text(plan["blueprint"], seg["beat"])
         user = (f"STORY FACTS:\n{facts}\n\nVISUAL STYLE (every scene is drawn in it): {look['short']}. {look['look']}\n\n"
                 f"CONTINUITY ASSETS (use these names in \"assets\"):\n{_asset_lines(assets)}\n\n"
                 f"STORY MAP (>> is this segment):\n{director.story_map(plan, idx)}\n\n"
                 f"DIRECTOR'S SHOT LIST for this segment (follow it):\n{director.shot_list(plan, idx)}\n\n"
                 f"WHAT COMES NEXT: {nxt}\n\n"
                 f"PREVIOUS SCENES (do not repeat their composition):\n{_prev_summary(prior)}\n\n"
-                f"THIS SEGMENT (beat {seg['beat']}), {n} sentence(s), {sum(secs):.1f} s:\n{lines}\n\n"
+                + beat_brief
+                + f"THIS SEGMENT (beat {seg['beat']}), {n} sentence(s), {sum(secs):.1f} s:\n{lines}\n\n"
                 "Design the scenes for this segment now.")
 
         def fix(out: ScenesOut, n=n, shots=shots) -> None:

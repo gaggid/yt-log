@@ -27,6 +27,12 @@ Return ONLY this JSON object:
   "viewer_promise": "what the viewer will get from watching, stated honestly",
   "central_question": "the question that keeps the viewer watching, or empty",
   "cold_open": "the most striking moment, told first without its explanation",
+  "hook_scene_brief": "the concrete camera image for seconds 0-5: one sentence describing what is on screen before the viewer has any context — not what is said, what is SEEN (a place, an object, an action, a face in shadow)",
+  "cold_open_visual": "what the camera shows before context is established: the thing, place or action as a storyboard note, not a narration line",
+  "next_hook": "one sentence the narrator delivers at the very end of the video to plant the next story — a question or premise, not a title or announcement; empty if this is a standalone story",
+  "series_placement": "series name (3-5 words) and 2 to 3 related story premises from the same source that could follow this video; empty if this story stands alone",
+  "music_brief": "overall emotional register for the soundtrack (e.g. 'low sparse piano, tense') and 2 to 3 specific moments where the music should shift and why",
+  "indian_hook": "one or two sentences: what specifically resonates with Indian youth about this story — a cultural parallel, a shared anxiety, a figure they know or an institution they trust or distrust",
   "stakes": "who or what is at risk, and the clock if there is one",
   "false_answer": "the obvious explanation the story first leans on that turns out wrong, or empty",
   "dark_moment": "where it looks lost just before the turn, or empty",
@@ -34,8 +40,18 @@ Return ONLY this JSON object:
   "turning_point": "the decisive moment", "payoff": "what is revealed or understood", "ending": "how it closes",
   "beats": [{"id": "b1", "name": "opening", "purpose": "why this beat exists", "takeaway": "what the viewer understands or feels after it", "facts": ["fact used, in plain words"],
              "reveal": "the one thing this beat lets the viewer learn", "hold_back": "what this beat deliberately does not say yet, and the beat that will say it",
-             "plant": "a small detail told here that pays off later, or empty", "feeling": "fear | sad | anger | happy | neutral: what the viewer should feel in this beat", "ends_on": "the question, promise or clock this beat ends on"}]
+             "plant": "a small detail told here that pays off later, or empty", "feeling": "fear | sad | anger | happy | neutral: what the viewer should feel in this beat", "ends_on": "the question, promise or clock this beat ends on",
+             "chapter_title": "5 to 8 words, curiosity-gap YouTube chapter title for this beat — no spoilers, no generic labels like 'Introduction' or 'Conclusion'",
+             "retention_hook": "the visual or narrative re-engagement moment for this beat — a reveal, a surprise object, a ticking clock or a contrast that makes the viewer lean back in at the 60-90 second mark",
+             "primary_visual": "what the camera MUST show in this beat — the place, object or phenomenon itself, not a character reacting to it; a concrete filmable image",
+             "unfilmable": ["each concept in this beat that cannot be directly filmed: invisible phenomena, microscopic or cosmic scale, statistics, time spans; leave empty if nothing qualifies"],
+             "visual_device": "for every item in unfilmable, the decided visual representation that makes it concrete and filmable (e.g. 'show dark matter as the lightless gap around a visible galaxy cluster'; 'show 2.6 sigma as a progress gauge with the discovery line at 5'); empty if unfilmable is empty"}]
 }
+Visual brief rules:
+- primary_visual is the FIRST visual job of the beat. It is the thing the story needs the viewer to SEE and understand, independent of the narration. It is never 'a character reacts' — it is the place, object, scale or phenomenon being described.
+- unfilmable lists what cannot be photographed or filmed directly: dark matter, a subatomic particle, a 220-day time span, a probability. Each item is one concept, not a sentence.
+- visual_device decides how each unfilmable item will be represented BEFORE the storyboard. Commit to one device per item. The storyboard model will execute it; decide it here.
+- A prop labelled microscopic, cosmic or abstract in unfilmable must NOT be placed in a character's hand or at human scale unless the visual_device explicitly describes a metaphor for doing so.
 Rules:
 - HOLD A VIEWER WHO LEAVES IN SECONDS. The first beat is a hook, not an introduction: it starts at the most surprising or highest-stakes moment of THIS story (an outcome,
   a number, a decision, a question the viewer cannot answer yet) and raises the central question inside the first 15 seconds. Give every beat after it a reason to
@@ -139,7 +155,7 @@ SLOTS (fill every one, with concrete values; the picture model draws exactly wha
 - place: type | signature (the 3 to 5 things that make THIS place recognisable as itself at a glance, with counts, specific to the story's world and period; a
   generic room with furniture is wrong: ask what a visitor would see first that tells them where they are) | architecture (structure and layout) | materials (main materials and their colours) | light (sources, direction, time of day) |
   objects (key furniture and objects, with counts) | size (size and how crowded)
-- prop: type | shape (shape and size) | material | colour (exact colours) | condition (new, worn, damaged) | markings (lettering or marks, or the word none)
+- prop: type | shape (shape and size) | material | colour (exact colours) | condition (new, worn, damaged) | markings (lettering or marks, or the word none) | scale (microscopic / human / room / building / geographic / cosmic — the real-world scale of THIS object) | depiction (how the prop may appear in a scene: actual-size / on-screen / diagram / metaphor / graphic — choose the one that does not violate the scale)
 Write colours as colours ("navy blue", "charcoal grey"), materials as materials ("brushed steel", "worn oak"), numbers as numbers. Never write
 "nice", "typical", "generic", "casual", "business attire", "various", "etc" or "and so on": say which items, which colours, how many.
 Rules:
@@ -248,6 +264,7 @@ must fit the period. No logos and no brand text. On-screen text is allowed and t
 quoted: a headline, a sign, a label, a big number on a sign or screen (for example "OPEN 24 HOURS"). Rules for it: English letters only (never
 Hindi on screen), 8 words at most per text, only words and numbers that are in the story facts, never a quotation from a book or person.
 Screens and papers without such text show abstract light or marks only. A sign, shop front or notice board that is visible must carry short quoted words in text_on_screen (a place name from the continuity list or the story facts, in capitals, such as "BREWERY"): the picture model draws quoted words correctly and draws gibberish on a sign that has none. Any sign without such words must be blank or turned away from the camera.
+PROP SCALE: Every continuity prop carries a scale and a depiction. A prop whose scale is microscopic, geographic or cosmic must never appear at human scale unless its depiction is "actual-size" or "metaphor". Follow the depiction: show it on-screen, as a diagram on a real surface, or as a physical metaphor — never in a character's hand unless the depiction explicitly permits it.
 
 Return ONLY this JSON object:
 {"scenes": [{
@@ -303,7 +320,7 @@ Rules of the craft:
 - People are not in every shot. At most 4 shots in 10 are of a person's face or body (kind person or reaction). The rest are hands, objects, places, establishing
   shots and the world around the people. Give the places and things of the story room to be seen.
 - Keep the sense of one world: the same places come back, shown from new angles.
-- Never plan a diagram, a symbol, a floating object or an abstract shape. Every shot is something that could be filmed in that place and period.
+- For incident and biography stories: never plan a diagram, a symbol, a floating object or an abstract shape. Every shot is something that could be filmed in that place and period. For documentary and explainer stories, the type note below names permitted visual devices for things that cannot be filmed directly.
 - Never mention a book, an author, a chapter, a page or a source.
 
 Return ONLY this JSON object:

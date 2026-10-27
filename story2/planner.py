@@ -274,7 +274,10 @@ async def make_narration(plan_id: str, backend, s: dict | None = None, beat_ids:
                 raise ValueError(f"segment {n} glues English letters to Hindi letters in one word: {' '.join(mixed)}. "
                                  "Write the English word on its own, with a space before the Hindi particle (stock को, not stockको).")
 
-    system = ((P.NARRATE + storytypes.narrate_note(storytypes.of_plan(plan))).replace("{narrator}", plan["narrator"].get("name") or UNSET_NAME)
+    _indian_hook = (bp.get("indian_hook") or "").strip()
+    system = ((P.NARRATE + storytypes.narrate_note(storytypes.of_plan(plan))
+               + (f"\n\nCULTURAL CONTEXT FOR THIS AUDIENCE: {_indian_hook}" if _indian_hook else ""))
+              .replace("{narrator}", plan["narrator"].get("name") or UNSET_NAME)
               .replace("{minutes}", f"{minutes / n_beats:.1f}").replace("{words}", str(per_beat))
               .replace("{per_beat}", str(per_beat)).replace("{min_beat}", str(int(per_beat * 0.7))))
     tokens_out = 0
@@ -295,7 +298,9 @@ async def make_narration(plan_id: str, backend, s: dict | None = None, beat_ids:
                 + (f"ALREADY NARRATED (continue from here, do not repeat it):\n{said}\n\nEVERY SENTENCE SPOKEN SO FAR (never say any of these again, and do not tell a fact "
                    f"again that they already told; move the story forward):\n{earlier}\n\n" if said else "This is the opening of the video.\n\n")
                 + f"WRITE NARRATION FOR THIS BEAT ONLY ({beat['id']}, about {per_beat} words):\n"
-                  f"purpose: {beat['purpose']}\nviewer takeaway: {beat['takeaway']}\nfacts: {'; '.join(beat['facts'])}")
+                  f"purpose: {beat['purpose']}\nviewer takeaway: {beat['takeaway']}\nfacts: {'; '.join(beat['facts'])}"
+                + (f"\n\nNEXT VIDEO HOOK: End this beat with the following sentence (or a natural variation of it) as the very last line: {bp['next_hook']}"
+                   if beat["id"] == want[-1]["id"] and bp.get("next_hook") else ""))
         res = await caller.call(system, user, NarrationOut, check)
         tokens_out += res.tokens_out
         with db.tx() as c:

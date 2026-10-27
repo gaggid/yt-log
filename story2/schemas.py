@@ -48,6 +48,11 @@ class Beat(M):
     plant: Str = ""                     # a small detail told here that pays off later (empty if none)
     feeling: Str = ""                   # the one feeling of this beat: fear, sad, anger, happy or neutral
     ends_on: Str = ""                   # the question, promise or ticking clock this beat ends on, so the viewer needs the next beat
+    chapter_title: Str = ""             # YouTube chapter title: curiosity-gap, 5-8 words, no spoilers
+    retention_hook: Str = ""            # re-engagement moment for the 60-90s retention pulse in this beat
+    primary_visual: Str = ""            # what the camera MUST show in this beat — the concept or object itself, not a character reacting to it
+    unfilmable: StrList = []            # concepts in this beat that cannot be directly filmed (invisible, microscopic, cosmic, statistical)
+    visual_device: Str = ""             # for each item in unfilmable, the decided visual representation (empty if nothing is unfilmable)
 
 
 class Blueprint(M):
@@ -56,6 +61,12 @@ class Blueprint(M):
     viewer_promise: Str
     central_question: Str = ""
     cold_open: Str = ""                 # the single most striking moment, shown first, before any background
+    hook_scene_brief: Str = ""          # the concrete camera image for seconds 0-5: what is on screen before any context
+    cold_open_visual: Str = ""          # what the camera shows before context is established — the thing, place or action
+    next_hook: Str = ""                 # one sentence the narrator says at the end to plant the next video
+    series_placement: Str = ""          # series name + 2-3 related story premises this could belong to
+    music_brief: Str = ""               # overall mood + 2-3 moments where music shifts
+    indian_hook: Str = ""               # what specifically resonates with Indian youth about this story
     stakes: Str = ""                    # who or what is at risk, and the clock if there is one
     false_answer: Str = ""              # the obvious explanation the story first leans on, which turns out wrong (empty if none)
     dark_moment: Str = ""               # the point where it looks lost, just before the turn (empty if none)
