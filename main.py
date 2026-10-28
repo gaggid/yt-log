@@ -72,6 +72,19 @@ async def plan_js():
     return FileResponse(STATIC / "plan.js", media_type="application/javascript", headers=NO_STORE)
 
 
+@app.get("/nxt")
+async def nxt():
+    html = (STATIC / "nxt.html").read_text(encoding="utf-8").replace(
+        'src="/nxt.js"', f'src="/nxt.js?v={int((STATIC / "nxt.js").stat().st_mtime)}"'
+    )
+    return HTMLResponse(html, headers=NO_STORE)
+
+
+@app.get("/nxt.js")
+async def nxt_js():
+    return FileResponse(STATIC / "nxt.js", media_type="application/javascript", headers=NO_STORE)
+
+
 @app.get("/style-samples/{name}")
 async def style_sample(name: str):
     name = name.removesuffix(".jpg")

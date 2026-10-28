@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NXT Studio</title>
+<style>
+/* ── TOKENS ─────────────────────────────────────────────────────────── */
+:root {
+  --nb:#0e1117; --ns:#161b25; --ns2:#1d2333; --nborder:#2a3040;
+  --nink:#e2e6f0; --nmute:#7b87a0; --nacc:#4f80ff;
+  --nok:#34c77b; --nwarn:#f5c842; --nbad:#f06060; --ninfo:#60b4f0;
+  --nok-bg:rgba(52,199,123,.12); --nbad-bg:rgba(240,96,96,.12);
+  --nwarn-bg:rgba(245,200,66,.10); --ninfo-bg:rgba(96,180,240,.12);
+  --tl-h:180px;
+}
+@media (prefers-color-scheme:light) {
+  :root {
+    --nb:#f4f6fb; --ns:#ffffff; --ns2:#f0f3fa; --nborder:#dde2ed;
+    --nink:#1b2130; --nmute:#667085;
+  }
+}
+*{box-sizing:border-box;margin:0;padding:0}
+[hidden]{display:none!important}
+html,body{height:100%;overflow:hidden}
+body{
+  display:grid;
+  grid-template-rows:48px 1fr var(--tl-h);
+  background:var(--nb);color:var(--nink);
+  font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+a{color:var(--nacc);text-decoration:none}
+:focus-visible{outline:2px solid var(--nacc);outline-offset:2px}
+
+/* ── HEADER ─────────────────────────────────────────────────────────── */
+#nxt-header{
+  display:flex;align-items:center;gap:10px;
+  padding:0 18px;
+  background:var(--ns);border-bottom:1px solid var(--nborder);
+  z-index:10;
+}
+.nxt-logo{font-weight:700;font-size:15px;letter-spacing:.02em;color:var(--nacc);white-space:nowrap}
+.nxt-bc{font-size:13px;color:var(--nmute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px}
+.nxt-bc::before{content:'›';margin:0 6px;color:var(--nborder)}
+.sp{flex:1}
+#nxt-job-badge{font-size:12px;padding:3px 10px;border-radius:99px;background:var(--ninfo-bg);color:var(--ninfo);white-space:nowrap}
+#nxt-cancel-btn{font-size:11px;padding:2px 8px;border-radius:6px;background:none;border:1px solid var(--nbad);color:var(--nbad);cursor:pointer}
+.nxt-hbtn{font-size:12px;padding:4px 10px;border-radius:6px;border:1px solid var(--nborder);color:var(--nmute);cursor:pointer;background:none;white-space:nowrap;text-decoration:none}
+.nxt-hbtn:hover{border-color:var(--nacc);color:var(--nink)}
+
+/* ── BODY (three-column) ─────────────────────────────────────────────── */
+#nxt-body{display:grid;grid-template-columns:220px 1fr 320px;overflow:hidden;height:100%}
+
+/* ── LEFT RAIL ───────────────────────────────────────────────────────── */
+#nxt-rail{
+  display:flex;flex-direction:column;
+  background:var(--ns);border-right:1px solid var(--nborder);
+  overflow-y:auto;overflow-x:hidden;
+}
+.rail-section{padding:10px 0;border-bottom:1px solid var(--nborder)}
+.rail-section.rail-bottom{margin-top:auto;border-bottom:none;padding:10px 0 14px}
+.rail-head{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--nmute);padding:4px 14px 6px}
+.rail-btn{
+  display:block;width:100%;text-align:left;
+  padding:7px 14px;font:inherit;font-size:13px;
+  border:none;background:none;color:var(--nmute);cursor:pointer;
+  border-left:3px solid transparent;
+}
+.rail-btn:hover{background:var(--ns2);color:var(--nink)}
+.rail-btn.on{color:var(--nink);background:var(--ns2);border-left-color:var(--nacc)}
+.rail-proj{
+  display:block;width:100%;text-align:left;
+  padding:8px 14px;font:inherit;font-size:13px;
+  border:none;background:none;color:var(--nink);cursor:pointer;
+  border-left:3px solid transparent;
+}
+.rail-proj:hover{background:var(--ns2)}
+.rail-proj.on{background:color-mix(in srgb,var(--nacc) 12%,transparent);border-left-color:var(--nacc)}
+.rail-proj-title{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+.rail-proj-sub{font-size:11px;color:var(--nmute)}
+
+/* ── CENTER ──────────────────────────────────────────────────────────── */
+#nxt-center{overflow-y:auto;background:var(--nb)}
+#nxt-center-content{padding:20px;min-height:100%}
+
+.nxt-empty{text-align:center;padding:80px 20px;color:var(--nmute)}
+.nxt-empty-icon{font-size:40px;margin-bottom:12px;opacity:.3}
+
+/* plan selector */
+.plan-card{
+  background:var(--ns);border:1px solid var(--nborder);border-radius:10px;
+  padding:14px 16px;margin-bottom:10px;cursor:pointer;
+  border-left:4px solid var(--nborder);transition:border-color .12s;
+}
+.plan-card:hover{border-left-color:var(--nacc)}
+.plan-card.on{border-left-color:var(--nacc);background:color-mix(in srgb,var(--nacc) 6%,var(--ns))}
+.plan-card-title{font-weight:600;font-size:15px;margin-bottom:4px}
+.plan-card-meta{font-size:12px;color:var(--nmute)}
+
+/* step pipeline */
+.step-pipeline{display:flex;flex-direction:column;gap:4px;margin:16px 0}
+.step-row{
+  display:flex;align-items:center;gap:10px;
+  padding:8px 12px;border-radius:8px;cursor:pointer;
+  background:var(--ns);border:1px solid var(--nborder);
+  transition:border-color .12s;
+}
+.step-row:hover{border-color:var(--nacc)}
+.step-row.on{border-color:var(--nacc);background:color-mix(in srgb,var(--nacc) 8%,var(--ns))}
+.step-dot{
+  width:22px;height:22px;border-radius:50%;
+  display:grid;place-items:center;font-size:11px;
+  flex:none;
+}
+.step-dot.done{background:var(--nok);color:#000}
+.step-dot.running{background:var(--ninfo);color:#000;animation:pulse 1s infinite}
+.step-dot.next{background:color-mix(in srgb,var(--nacc) 30%,transparent);border:2px solid var(--nacc);color:var(--nacc)}
+.step-dot.blocked{background:var(--nbad-bg);border:2px solid var(--nbad);color:var(--nbad)}
+.step-dot.pending{background:var(--ns2);color:var(--nmute);border:1px solid var(--nborder)}
+.step-label{font-size:13px;flex:1}
+.step-time{font-size:11px;color:var(--nmute)}
+@keyframes pulse{50%{opacity:.4}}
+
+/* media cards */
+.media-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin:16px 0}
+.media-card{background:var(--ns);border:1px solid var(--nborder);border-radius:10px;padding:14px;cursor:pointer}
+.media-card:hover{border-color:var(--nacc)}
+.media-card-label{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--nmute);margin-bottom:6px}
+.media-card-count{font-size:24px;font-weight:700;line-height:1}
+.media-card-sub{font-size:12px;color:var(--nmute);margin-top:4px}
+.media-card-btn{
+  margin-top:10px;width:100%;padding:5px 0;font:inherit;font-size:12px;
+  border:1px solid var(--nacc);border-radius:6px;color:var(--nacc);
+  background:none;cursor:pointer;
+}
+.media-card-btn:hover{background:color-mix(in srgb,var(--nacc) 12%,transparent)}
+.media-card-btn:disabled{opacity:.4;cursor:default}
+
+/* scene grid */
+.scene-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin:16px 0}
+.scene-thumb{
+  background:var(--ns2);border:1px solid var(--nborder);border-radius:8px;
+  overflow:hidden;cursor:pointer;aspect-ratio:16/9;position:relative;
+}
+.scene-thumb:hover{border-color:var(--nacc)}
+.scene-thumb.on{border-color:var(--nacc);box-shadow:0 0 0 2px var(--nacc)}
+.scene-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.scene-thumb-overlay{
+  position:absolute;bottom:0;left:0;right:0;
+  background:linear-gradient(transparent,rgba(0,0,0,.75));
+  padding:4px 6px;font-size:10px;color:#fff;
+}
+.scene-ph{
+  width:100%;height:100%;display:grid;place-items:center;
+  font-size:20px;color:var(--nmute);
+}
+
+/* section heading */
+.nxt-h2{font-size:16px;font-weight:700;margin:20px 0 10px}
+.nxt-h3{font-size:13px;font-weight:600;color:var(--nmute);text-transform:uppercase;letter-spacing:.06em;margin:16px 0 8px}
+.plan-actions{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+
+/* ── RIGHT INSPECTOR ────────────────────────────────────────────────── */
+#nxt-inspector{
+  background:var(--ns);border-left:1px solid var(--nborder);
+  overflow-y:auto;
+}
+#nxt-inspector-content{padding:16px}
+.ins-empty{color:var(--nmute);font-size:13px;padding:40px 0;text-align:center}
+.ins-section{margin-bottom:18px}
+.ins-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--nmute);margin-bottom:6px}
+.ins-img{width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:8px;background:var(--ns2);display:block;margin-bottom:10px}
+.ins-img-ph{width:100%;aspect-ratio:16/9;background:var(--ns2);border-radius:8px;display:grid;place-items:center;font-size:30px;color:var(--nmute);margin-bottom:10px}
+.ins-title{font-size:15px;font-weight:700;margin-bottom:6px;line-height:1.3}
+.ins-meta{font-size:12px;color:var(--nmute);margin-bottom:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.ins-desc{font-size:13px;color:var(--nmute);margin-bottom:12px;line-height:1.6;max-height:80px;overflow:hidden}
+.ins-actions{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px}
+.ins-btn{
+  padding:5px 12px;font:inherit;font-size:12px;border-radius:6px;cursor:pointer;
+  border:1px solid var(--nborder);background:none;color:var(--nink);
+}
+.ins-btn:hover{border-color:var(--nacc)}
+.ins-btn.primary{background:var(--nacc);color:#000;border-color:var(--nacc);font-weight:600}
+.ins-btn.ok{background:var(--nok);color:#000;border-color:var(--nok)}
+.ins-btn.bad{color:var(--nbad);border-color:var(--nbad)}
+.ins-btn:disabled{opacity:.4;cursor:default}
+.ins-badge{display:inline-block;padding:1px 8px;border-radius:99px;font-size:11px;font-weight:600}
+.ins-badge.done{background:var(--nok-bg);color:var(--nok)}
+.ins-badge.running{background:var(--ninfo-bg);color:var(--ninfo)}
+.ins-badge.blocked{background:var(--nbad-bg);color:var(--nbad)}
+.ins-badge.pending{background:var(--ns2);color:var(--nmute)}
+.ins-badge.next{background:color-mix(in srgb,var(--nacc) 15%,transparent);color:var(--nacc)}
+.ins-blocker{background:var(--nbad-bg);color:var(--nbad);padding:8px 10px;border-radius:6px;font-size:12px;margin-bottom:10px}
+.ins-prog{height:6px;border-radius:3px;background:var(--ns2);overflow:hidden;margin:6px 0}
+.ins-prog i{display:block;height:100%;background:var(--nacc);transition:width .3s}
+.ins-log{font-size:12px;color:var(--nmute);margin-top:8px;max-height:80px;overflow-y:auto}
+.ins-take{display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--nborder);font-size:12px}
+.ins-take:last-child{border-bottom:none}
+.ins-take audio{height:28px;flex:1;min-width:0}
+.ins-text{font-size:13px;line-height:1.6;color:var(--nink);margin-bottom:8px;white-space:pre-wrap}
+
+/* ── TIMELINE ────────────────────────────────────────────────────────── */
+#nxt-timeline{
+  background:var(--ns);border-top:1px solid var(--nborder);
+  display:flex;flex-direction:column;overflow:hidden;
+  position:relative;
+}
+.tl-resize-handle{
+  height:6px;cursor:row-resize;background:var(--nborder);
+  flex:none;
+}
+.tl-resize-handle:hover{background:var(--nacc)}
+.tl-tracks{flex:1;overflow:hidden;display:flex;flex-direction:column}
+.tl-row{display:flex;height:38px;border-bottom:1px solid var(--nborder);flex:none}
+.tl-label{
+  width:62px;flex:none;
+  font-size:10px;font-weight:600;text-transform:uppercase;
+  color:var(--nmute);letter-spacing:.04em;
+  display:flex;align-items:center;padding:0 8px;
+  border-right:1px solid var(--nborder);
+  white-space:nowrap;
+}
+.tl-track{flex:1;position:relative;overflow:hidden}
+.tl-block{
+  position:absolute;top:4px;height:28px;border-radius:4px;
+  min-width:4px;cursor:pointer;opacity:.85;
+  font-size:9px;color:#fff;overflow:hidden;
+  white-space:nowrap;text-overflow:ellipsis;
+  padding:0 4px;line-height:28px;
+  transition:opacity .1s;
+}
+.tl-block:hover{opacity:1;z-index:2}
+.tl-block.on{outline:2px solid #fff;z-index:3;opacity:1}
+.tl-ruler-row{display:flex;height:22px;flex:none;background:var(--nb)}
+.tl-label-spacer{width:62px;flex:none;border-right:1px solid var(--nborder)}
+.tl-ruler{flex:1;position:relative;overflow:hidden;font-size:9px;color:var(--nmute)}
+.tl-ruler-tick{position:absolute;top:0;height:100%;border-left:1px solid var(--nborder);padding-left:3px;line-height:22px}
+.tl-zoom-btns{display:flex;align-items:center;padding:0 6px;gap:4px;flex:none}
+.tl-zoom-btns button{
+  width:20px;height:20px;padding:0;font-size:14px;line-height:1;
+  border:1px solid var(--nborder);border-radius:4px;
+  background:none;color:var(--nmute);cursor:pointer;
+}
+.tl-zoom-btns button:hover{border-color:var(--nacc);color:var(--nacc)}
+.tl-playhead{
+  position:absolute;top:0;bottom:0;width:2px;
+  background:var(--nbad);pointer-events:none;z-index:5;
+}
+
+/* ── COMMAND PALETTE ──────────────────────────────────────────────── */
+#nxt-palette{position:fixed;inset:0;z-index:100;display:flex;align-items:flex-start;justify-content:center;padding-top:80px}
+.pal-scrim{position:absolute;inset:0;background:rgba(0,0,0,.6)}
+.pal-box{
+  position:relative;z-index:1;
+  width:min(560px,94vw);
+  background:var(--ns);border:1px solid var(--nborder);border-radius:12px;
+  box-shadow:0 20px 60px rgba(0,0,0,.5);overflow:hidden;
+}
+#pal-input{
+  width:100%;padding:14px 18px;font:inherit;font-size:15px;
+  background:transparent;border:none;border-bottom:1px solid var(--nborder);
+  color:var(--nink);outline:none;
+}
+#pal-list{list-style:none;max-height:400px;overflow-y:auto}
+.pal-group{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--nmute);padding:10px 16px 4px}
+.pal-item{
+  padding:9px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;
+  font-size:13px;color:var(--nink);
+}
+.pal-item:hover,.pal-item.on{background:color-mix(in srgb,var(--nacc) 10%,transparent)}
+.pal-item-label{flex:1}
+.pal-item-group{font-size:11px;color:var(--nmute)}
+
+/* ── BUTTONS (general) ────────────────────────────────────────────── */
+.nxt-btn{
+  padding:7px 14px;font:inherit;font-size:13px;border-radius:7px;cursor:pointer;
+  border:1px solid var(--nborder);background:none;color:var(--nink);
+}
+.nxt-btn:hover{border-color:var(--nacc)}
+.nxt-btn.primary{background:var(--nacc);color:#000;border-color:var(--nacc);font-weight:600}
+.nxt-btn.primary:hover{filter:brightness(1.1)}
+.nxt-btn.ok{background:var(--nok);color:#000;border-color:var(--nok)}
+.nxt-btn:disabled{opacity:.4;cursor:default}
+.nxt-spin{display:inline-block;width:11px;height:11px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite;vertical-align:-1px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── TOASTS ──────────────────────────────────────────────────────── */
+#nxt-toasts{position:fixed;bottom:200px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;gap:8px;z-index:200;align-items:center;width:min(480px,92vw);pointer-events:none}
+.nxt-toast{background:var(--nink);color:var(--nb);padding:9px 16px;border-radius:10px;font-size:13px;animation:toastin .15s;pointer-events:auto}
+.nxt-toast.err{background:var(--nbad);color:#fff}
+@keyframes toastin{from{opacity:0;transform:translateY(8px)}}
+
+/* ── SKELETON ────────────────────────────────────────────────────── */
+.nxt-skel{background:linear-gradient(90deg,var(--nborder),color-mix(in srgb,var(--nborder) 40%,var(--ns)),var(--nborder));background-size:200% 100%;animation:skel 1.2s infinite;border-radius:6px;height:36px;margin:6px 10px}
+@keyframes skel{to{background-position:-200% 0}}
+
+/* ── RESPONSIVE ──────────────────────────────────────────────────── */
+@media (max-width:1200px) {
+  #nxt-body { grid-template-columns: 220px 1fr 0px; }
+  #nxt-inspector { display:none; }
+}
+@media (max-width:900px) {
+  #nxt-body { grid-template-columns: 44px 1fr; }
+  .rail-section .rail-head, .rail-proj-title, .rail-proj-sub, .rail-btn span { display:none; }
+  .rail-btn, .rail-proj { padding:10px; text-align:center; font-size:16px; }
+  #rail-phases .rail-btn { font-size:13px; }
+}
+@media (max-width:700px) {
+  body { grid-template-rows: 48px 1fr 60px; }
+  .tl-row:not(:first-child) { display:none; }
+}
+</style>
+</head>
+<body>
+
+<header id="nxt-header">
+  <span class="nxt-logo">◈ NXT</span>
+  <span id="nxt-breadcrumb-proj" class="nxt-bc" style="display:none"></span>
+  <span id="nxt-breadcrumb-plan" class="nxt-bc" style="display:none"></span>
+  <div class="sp"></div>
+  <span id="nxt-job-badge" hidden></span>
+  <button id="nxt-cancel-btn" hidden onclick="doCancel()">✕ Cancel</button>
+  <a href="/" class="nxt-hbtn" title="Back to classic UI">← Classic</a>
+</header>
+
+<div id="nxt-body">
+
+  <nav id="nxt-rail">
+    <div class="rail-section">
+      <div class="rail-head">Projects</div>
+      <div id="rail-projects"><div class="nxt-skel"></div><div class="nxt-skel"></div><div class="nxt-skel"></div></div>
+    </div>
+    <div class="rail-section" id="rail-phases" hidden>
+      <div class="rail-head">Phase</div>
+      <button class="rail-btn" id="phase-plan-btn" onclick="setPhase('plan')">▶ Plan</button>
+      <button class="rail-btn" id="phase-media-btn" onclick="setPhase('media')">◈ Media</button>
+    </div>
+    <div class="rail-section rail-bottom">
+      <button class="rail-btn" onclick="openPalette()">⌘ Commands</button>
+    </div>
+  </nav>
+
+  <main id="nxt-center">
+    <div id="nxt-center-content">
+      <div class="nxt-empty">
+        <div class="nxt-empty-icon">◈</div>
+        Select a project to begin
+      </div>
+    </div>
+  </main>
+
+  <aside id="nxt-inspector">
+    <div id="nxt-inspector-content">
+      <div class="ins-empty">Select a step, scene<br>or segment to inspect</div>
+    </div>
+  </aside>
+
+</div>
+
+<div id="nxt-timeline">
+  <div class="tl-resize-handle" id="tl-resize"></div>
+  <div class="tl-tracks" id="tl-tracks">
+    <div class="tl-row">
+      <div class="tl-label">▶ Video</div>
+      <div class="tl-track" id="tl-video"></div>
+    </div>
+    <div class="tl-row">
+      <div class="tl-label">♪ Audio</div>
+      <div class="tl-track" id="tl-audio"></div>
+    </div>
+    <div class="tl-row">
+      <div class="tl-label">◈ GFX</div>
+      <div class="tl-track" id="tl-graphics"></div>
+    </div>
+    <div class="tl-ruler-row">
+      <div class="tl-label-spacer"></div>
+      <div class="tl-ruler" id="tl-ruler"></div>
+      <div class="tl-zoom-btns">
+        <button id="tl-zoom-in" title="Zoom in (+)">+</button>
+        <button id="tl-zoom-out" title="Zoom out (-)">−</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="nxt-palette" hidden>
+  <div class="pal-scrim" onclick="closePalette()"></div>
+  <div class="pal-box">
+    <input id="pal-input" placeholder="Type a command or step name…" autocomplete="off" spellcheck="false">
+    <ul id="pal-list"></ul>
+  </div>
+</div>
+
+<div id="nxt-toasts"></div>
+<script src="/nxt.js"></script>
+</body>
+</html>
