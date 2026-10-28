@@ -130,7 +130,7 @@ window.viewPlan = async function (id) {
   const run = (btn, path, json, label) => act(btn, async () => { const r = await api(path, {method: 'POST', json: json || {}}); await load(true); return r; });
   window._plan = {
     async blueprint(b) { if (P.blueprint && P.segments.length && !await confirmDlg('Plan the story again?', 'The new plan can change the beats. Narration you approved or locked is kept; the rest is replaced when you write it again.', 'Plan again')) return; await run(b, `/plans/${id}/blueprint`); },
-    async narration(b, missing) { if (!missing && P.segments.length && !await confirmDlg('Rewrite all narration?', 'Parts you approved or locked are kept; everything else is written again, and its scenes are removed.', 'Rewrite')) return; await run(b, `/plans/${id}/narration`, {only_missing: !!missing}); },
+    async narration(b, missing) { if (!missing && P.segments.length && !await confirmDlg('Rewrite all narration?', 'Approved parts are unapproved and rewritten. Locked parts are kept. Scenes for rewritten parts are removed.', 'Rewrite')) return; await run(b, `/plans/${id}/narration`, {only_missing: !!missing}); },
     async beat(b, beat) { await run(b, `/plans/${id}/narration`, {beat_ids: [beat]}); },
     async registry(b) { if (P.assets.length && !await confirmDlg('Create the characters and places again?', 'The list is rewritten for the chosen style. Items you locked are kept. Reference pictures of the old items are no longer used.', 'Create again')) return; await run(b, `/plans/${id}/registry`); },
     async likeMode(b, assetId, mode, pub) {

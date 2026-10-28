@@ -239,6 +239,12 @@ async def make_narration(plan_id: str, backend, s: dict | None = None, beat_ids:
                 c.execute("DELETE FROM scenes WHERE segment_id=?", (sid,))
                 c.execute("DELETE FROM segments WHERE id=?", (sid,))
         plan = get_plan(plan_id)
+    # A full rewrite (not only_missing, no specific beat_ids) should not be silently blocked by the auto-run approval step.
+    # Reset approved-but-not-locked segments to draft so the rewrite can proceed.
+    if not only_missing and not beat_ids:
+        with db.tx() as c:
+            c.execute("UPDATE segments SET status='draft', updated_at=? WHERE plan_id=? AND status='approved' AND locked=0", (db.now(), plan_id))
+        plan = get_plan(plan_id)
     kept_beats = {x["beat"] for x in plan["segments"] if x["locked"] or x["status"] == "approved"}
     have = {x["beat"] for x in plan["segments"]}
     want = [b for b in bp["beats"] if (not beat_ids or b["id"] in beat_ids) and b["id"] not in kept_beats
