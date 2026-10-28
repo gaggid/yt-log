@@ -516,13 +516,20 @@ def approve_best(plan_id: str, min_score: int = refscore.AUTO_APPROVE_MIN) -> di
 
 
 def approve_all(plan_id: str) -> dict:
-    """Approve the best available picture for every open scene, regardless of score."""
+    """Approve the best available picture for every open scene, regardless of score.
+    Falls back to the latest done candidate when no scored picture exists."""
     st = state(plan_id)
     chosen = []
     for r in st["scenes"]:
-        if r["approved"] or not r["best_item"]:
+        if r["approved"]:
             continue
-        chosen.append(r["best_item"]["id"])
+        pick = r["best_item"]
+        if not pick:
+            # no scored candidate — use the latest done one
+            done = [c for c in r["candidates"] if c["status"] == "done"]
+            pick = done[-1] if done else None
+        if pick:
+            chosen.append(pick["id"])
     for iid in chosen:
         store.approve(iid, True)
         plan_store.log(plan_id, "scene_picture_approved", {"item": iid, "bulk": True})
