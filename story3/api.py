@@ -419,6 +419,21 @@ async def clips_generate(plan_id: str):
     return _start(plan_id, "clips", work)
 
 
+class ClipSceneGenerate(BaseModel):
+    item_id: str | None = None
+
+
+@router.post("/{plan_id}/clips/scene/{scene_id}/generate")
+async def clips_scene_generate(plan_id: str, scene_id: str, body: ClipSceneGenerate | None = None):
+    _guard(planner.get_plan, plan_id)
+    s, api_key = settings_mod.get(), settings_mod.api_key()
+    item_id = body.item_id if body else None
+
+    async def work(progress):
+        await clips.generate_scene(plan_id, scene_id, item_id, progress, s, api_key)
+    return _start(plan_id, "clips", work)
+
+
 @router.post("/{plan_id}/clips/{item_id}/approve")
 async def clip_approve(plan_id: str, item_id: str):
     _guard(planner.get_plan, plan_id)

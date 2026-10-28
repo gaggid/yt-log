@@ -74,19 +74,18 @@ def _clip_prompt(scene: dict) -> str:
 
 # ── image helper ──────────────────────────────────────────────────────────────
 
-def _approved_image_b64(plan_id: str, scene_id: str) -> str | None:
-    """Base64 JPEG of the approved scene picture, or None if none is approved."""
-    sc_state = scenes.state(plan_id)
-    row = next((r for r in sc_state["scenes"] if r["id"] == scene_id), None)
-    if not row or not row.get("approved"):
-        return None
-    it = store.get(row["approved"])
+def _image_b64(plan_id: str, scene_id: str, item_id: str | None = None) -> str | None:
+    """Base64 JPEG of a scene picture. Uses item_id if given, else latest done picture."""
+    if item_id:
+        it = store.get(item_id)
+    else:
+        done = [i for i in store.items(plan_id, scenes.KIND, scene_id)
+                if i["status"] == "done" and i["file"]]
+        it = done[-1] if done else None
     if not it or not it["file"]:
         return None
     p = store.path_of(it)
-    if not p.is_file():
-        return None
-    return base64.b64encode(p.read_bytes()).decode()
+    return base64.b64encode(p.read_bytes()).decode() if p.is_file() else None
 
 
 # ── state ─────────────────────────────────────────────────────────────────────
@@ -137,7 +136,7 @@ def approved_clips(plan_id: str) -> dict[str, dict]:
 
 async def generate(plan_id: str, scene_ids: list[str] | None,
                    progress, s: dict | None = None, api_key: str = "") -> None:
-    """Generate one clip per opted-in scene that has an approved picture but no clip."""
+    """Generate one clip per opted-in scene (auto-run path)."""
     s       = s or settings_mod.get()
     api_key = api_key or settings_mod.api_key()
     plan    = planner.get_plan(plan_id)
@@ -154,9 +153,9 @@ async def generate(plan_id: str, scene_ids: list[str] | None,
         if progress:
             progress(n, len(targets),
                      f"clip {n + 1} of {len(targets)}: {sc['data'].get('subject', '')[:40]}")
-        img_b64 = _approved_image_b64(plan_id, sc["id"])
+        img_b64 = _image_b64(plan_id, sc["id"])
         if not img_b64:
-            continue  # no approved picture yet — skip silently
+            continue  # no picture yet — skip silently
 
         prompt   = _clip_prompt(sc)
         duration = max(MIN_DURATION, min(MAX_DURATION, float(sc.get("duration_s") or MAX_DURATION)))
@@ -199,6 +198,53 @@ async def generate(plan_id: str, scene_ids: list[str] | None,
         store.update(it["id"], status="done", file=fname,
                      meta={"job_id": job_id, "prompt": prompt,
                            "duration_s": duration, "source_scene": sc["id"]})
+
+
+async def generate_scene(plan_id: str, scene_id: str, item_id: str | None,
+                         progress, s: dict | None = None, api_key: str = "") -> None:
+    """Generate a clip for one scene from a specific image (or latest done one). No enabled/eligible check — manual trigger."""
+    s       = s or settings_mod.get()
+    api_key = api_key or settings_mod.api_key()
+    sc_list = storyboard.get_scenes(plan_id)
+    sc      = next((sc for sc in sc_list if sc["id"] == scene_id), None)
+    if not sc:
+        raise MediaError(f"scene {scene_id} not found")
+    img_b64 = _image_b64(plan_id, scene_id, item_id)
+    if not img_b64:
+        raise MediaError("no picture available for this scene yet")
+    base_url = s.get("base_url", "http://127.0.0.1:8810/v1").rstrip("/")
+    headers  = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    if progress:
+        progress(0, 1, f"animating: {sc['data'].get('subject', '')[:40]}")
+    prompt   = _clip_prompt(sc)
+    duration = max(MIN_DURATION, min(MAX_DURATION, float(sc.get("duration_s") or MAX_DURATION)))
+    payload  = {
+        "model": "wan-2.2-ti2v-5b",
+        "image": f"data:image/jpeg;base64,{img_b64}",
+        "prompt": prompt, "negative_prompt": NEGATIVE,
+        "size": "832x480", "duration": round(duration, 1),
+        "fps": 24, "steps": 25, "guidance": 6,
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(f"{base_url}/video/generations", headers=headers, json=payload)
+    if r.status_code not in (200, 202):
+        raise MediaError(f"clip job failed: HTTP {r.status_code}: {r.text[:200]}")
+    job    = r.json()
+    job_id = job.get("id") or job.get("job_id")
+    if not job_id:
+        raise MediaError(f"no job id in clip response: {r.text[:200]}")
+    it      = store.add(plan_id, KIND, scene_id, meta={"job_id": job_id, "prompt": prompt, "source_item": item_id})
+    mp4_url = await _poll(job_id, base_url, headers)
+    async with httpx.AsyncClient(timeout=120) as client:
+        dl = await client.get(mp4_url)
+    dl.raise_for_status()
+    fname = f"clip/{scene_id}-a{it['attempt']}.mp4"
+    out   = store.media_dir(plan_id) / fname
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(dl.content)
+    store.update(it["id"], status="done", file=fname,
+                 meta={"job_id": job_id, "prompt": prompt,
+                       "duration_s": duration, "source_scene": scene_id, "source_item": item_id})
 
 
 async def _poll(job_id: str, base_url: str, headers: dict, timeout: int = 300) -> str:
