@@ -605,6 +605,7 @@ def state(plan_id: str) -> dict:
                      "can_edit": bool(c.get("references")) and providers.get(m)["edits"], "references": [r["name"] for r in c.get("references", [])],
                      "quoted": quoted_texts(sc), "prompt": c.get("prompt", ""), "has_prompt": bool(c), "approved": ok["id"] if ok else None, "approved_current": bool(ok and ok["current"]),
                      "candidates": cands, "candidates_done": len(good), "best": b["id"] if b else None, "best_item": b,
+                     "motion_clip": bool(sc["data"].get("motion_clip")),
                      "status": "approved" if ok and ok["current"] else "needs_choice" if good else "needs_picture"})
     unscored = sum(1 for i in allitems if i["status"] == "done" and not i["meta"].get("score"))
     bulk = sum(1 for r in rows if not r["approved"] and r["best_item"] and r["best_item"]["score"]["total"] >= refscore.AUTO_APPROVE_MIN and not r["best_item"]["score"]["hard"])
