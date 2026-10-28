@@ -503,14 +503,30 @@ def approve_best(plan_id: str, min_score: int = refscore.AUTO_APPROVE_MIN) -> di
         if r["approved"]:
             continue
         b = r["best_item"]
-        if b and b["score"]["total"] >= min_score and not b["score"]["hard"]:
+        sc = b["score"] if b else None
+        if b and sc and sc.get("total", 0) >= min_score and not sc.get("hard"):
             chosen.append(b["id"])
         elif r["candidates_done"]:
-            left.append({"scene": r["id"], "at": r["start_s"], "why": "no picture scored yet" if not b else "best picture has a problem" if b["score"]["hard"] else f"best score {b['score']['total']} is under {min_score}"})
+            why = "not scored yet" if not sc else ("has a hard problem" if sc.get("hard") else f"score {sc.get('total', 0)} < {min_score}")
+            left.append({"scene": r["id"], "at": r["start_s"], "why": why})
     for iid in chosen:
         store.approve(iid, True)
         plan_store.log(plan_id, "scene_picture_approved", {"item": iid, "bulk": True})
     return {"approved": len(chosen), "left": left, "state": state(plan_id)}
+
+
+def approve_all(plan_id: str) -> dict:
+    """Approve the best available picture for every open scene, regardless of score."""
+    st = state(plan_id)
+    chosen = []
+    for r in st["scenes"]:
+        if r["approved"] or not r["best_item"]:
+            continue
+        chosen.append(r["best_item"]["id"])
+    for iid in chosen:
+        store.approve(iid, True)
+        plan_store.log(plan_id, "scene_picture_approved", {"item": iid, "bulk": True})
+    return {"approved": len(chosen), "state": state(plan_id)}
 
 
 # ── the trial ───────────────────────────────────────────────────────────────

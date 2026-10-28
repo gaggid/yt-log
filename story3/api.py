@@ -219,6 +219,11 @@ async def approve_best_scenes(plan_id: str, body: BestReq | None = None):
     return _guard(scenes.approve_best, plan_id, (body or BestReq()).min_score)
 
 
+@router.post("/{plan_id}/scenes/approve-all")
+async def approve_all_scenes(plan_id: str):
+    return _guard(scenes.approve_all, plan_id)
+
+
 class SceneSettings(BaseModel):
     model: str | None = None
     mode: str | None = None
