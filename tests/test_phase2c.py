@@ -121,6 +121,8 @@ def test_reference_images_are_capped_at_three_and_switch_to_edit_mode(env):
     extra = [{**assets[1], "id": f"extra{i}", "name": f"extra{i}", "kind": "prop", "data": dict(assets[1]["data"])} for i in range(4)]
     sc = scenes[0]
     sc["data"]["continuity"]["assets"] = [a["id"] for a in assets[1:]] + [e["id"] for e in extra]
+    from story3 import scenes as sc3
+    sc3.set_settings(pid, {"mode": "edit"})                                         # plan must be in edit mode for compiled mode to be "edit"
     plan = planner.get_plan(pid)
     out = imgprompts.compile_scene(sc, assets + extra, plan, imgprompts.first_appearances(scenes))
     for a in ("qwen", "flux"):
@@ -128,6 +130,28 @@ def test_reference_images_are_capped_at_three_and_switch_to_edit_mode(env):
     assert any("only three reference images" in n for n in out["qwen"]["notes"])
     ins = imgprompts.edit_instruction("make the sky stormy", ["the building", "camera angle"], out["qwen"]["references"])
     assert ins.startswith("Change only this: make the sky stormy.") and "Keep unchanged: the building; camera angle." in ins
+
+
+def test_per_scene_mode_override_respected_at_compile_time(env):
+    """A scene with per_scene mode="generate" on a plan set to "edit" must not include
+    reference-image lines in its compiled prompt — the per-scene override wins."""
+    pid, scenes, _ = compiled(env)
+    assets = storyboard.get_assets(pid)
+    for a in assets:
+        a["data"]["reference_images"] = [{"id": f"img-{a['name']}", "file": "x.png", "approved": True}]
+    from story3 import scenes as sc3
+    sc3.set_settings(pid, {"mode": "edit"})                      # plan default: edit
+    sid = scenes[0]["id"]
+    sc3.remember_choice(pid, sid, None, "generate")              # this scene: generate
+    plan = planner.get_plan(pid)
+    out = imgprompts.compile_scene(scenes[0], assets, plan, imgprompts.first_appearances(scenes),
+                                   effective_mode="generate")    # what _effective_mode returns for this scene
+    # no reference section in the prompt, mode stored as generate, ref_index empty → full appearance text
+    assert out["qwen"]["mode"] == "generate"
+    assert "Reference images" not in out["qwen"]["prompt"]
+    assert "refer to Image" not in out["qwen"]["prompt"]
+    assert out["flux"]["mode"] == "generate"
+    assert "Image 1:" not in out["flux"]["prompt"]
 
 
 def test_assets_without_reference_images_are_listed_and_first_appearance_creates_them(env):

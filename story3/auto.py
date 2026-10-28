@@ -9,12 +9,12 @@ import re
 from story import db, llm, settings as settings_mod
 from story2 import api as plans_api, director, editorial, export, imgplan, planner, storyboard, store as plan_store, voicetags, voices
 
-from . import graphics, refs, scenes, store, thumbnail, video, voice
+from . import clips, graphics, refs, scenes, store, thumbnail, video, voice
 from .voice import MediaError
 
 STAGES = [("blueprint", "Plan the story"), ("narration", "Write the narration"), ("characters", "Create characters and places"),
           ("storyboard", "Design the storyboard"), ("voicetags", "Direct the narrator's voice"), ("references", "Make and approve reference pictures"), ("prompts", "Write image prompts"), ("repeats", "Fix camera repeats"), ("approve", "Check, review and approve the plan"),
-          ("export", "Export"), ("voice", "Make and approve the voice"), ("pictures", "Draw and approve the scene pictures"), ("graphics", "Build and approve the graphics"),
+          ("export", "Export"), ("voice", "Make and approve the voice"), ("pictures", "Draw and approve the scene pictures"), ("clips", "Animate scene clips"), ("graphics", "Build and approve the graphics"),
           ("video", "Make the draft video"), ("thumbnail", "Make the video thumbnail")]
 
 
@@ -84,6 +84,11 @@ def done(plan_id: str, key: str, st: dict | None = None) -> bool:
     if key == "pictures":
         s = st.get("scenes") or scenes.state(plan_id)
         return bool(s["done"] or not s["total"])
+    if key == "clips":
+        cl = st.get("clips") or clips.state(plan_id)
+        if not cl["enabled"] or cl["total"] == 0:
+            return True
+        return bool(cl["done"])
     if key == "graphics":
         g = st.get("graphics") or graphics.state(plan_id)
         return bool(g["done"] or not g["total"])
@@ -249,8 +254,8 @@ async def run_stage(plan_id: str, key: str, be, s: dict, api_key: str, progress,
     elif key == "pictures":
         plan = planner.get_plan(plan_id)
         if not scenes.settings(plan)["chosen"]:
-            scenes.set_settings(plan_id, {"model": "qwen-image-2.1", "mode": "generate", "chosen": True})
-            notes.append("scene pictures use Qwen, drawn plain from each scene's prompt (run the three-scene trial yourself to try the reference-sheet mode)")
+            scenes.set_settings(plan_id, {"model": "qwen-image-2.1", "mode": "edit", "chosen": True})
+            notes.append("scene pictures use Qwen with reference sheets (falls back to plain generation when no reference pictures are approved)")
         await scenes.generate(plan_id, None, 1, True, None, None, sub, s, api_key, True)
         weak = [r["id"] for r in scenes.state(plan_id)["scenes"] if not r["approved_current"] and _weak(r["candidates"], r["best"])]
         if weak:                                                    # one more try for each picture with a hard problem or a poor score
@@ -262,6 +267,21 @@ async def run_stage(plan_id: str, key: str, be, s: dict, api_key: str, progress,
         st = scenes.state(plan_id)
         if not st["done"]:
             raise AutoStop(f"{st['needs_picture'] + st['needs_choice']} scene(s) still have no approved picture (see Scene pictures)")
+    elif key == "clips":
+        plan = planner.get_plan(plan_id)
+        if not clips.settings(plan)["enabled"]:
+            notes.append("motion clips are off — skipped")
+            return
+        cl = clips.state(plan_id)
+        if cl["total"] == 0:
+            notes.append("no scenes opted in for motion clips — skipped")
+            return
+        await clips.generate(plan_id, None, sub, s, api_key)
+        clips.approve_best(plan_id)
+        cl2 = clips.state(plan_id)
+        if not cl2["done"]:
+            n_left = cl2["total"] - cl2["approved"]
+            raise AutoStop(f"{n_left} scene clip(s) have no approved take (see Scene clips)")
     elif key == "graphics":
         if graphics.state(plan_id)["total"]:
             await asyncio.to_thread(graphics.build, plan_id)

@@ -269,15 +269,33 @@ def canvas(style: str) -> tuple[Image.Image, ImageDraw.ImageDraw, dict]:
 
 
 def draw_stat(spec: dict, style: str) -> Image.Image:
+    """Left-aligned documentary lower-third: strong accent band, big numeral left-anchored,
+    label in spaced caps below — matches BBC/Netflix infographic conventions."""
     im, d, c = canvas(style)
     it = spec["items"][0]
-    f, ls, lh = fitted(d, it["shown"], "bold", 1500, 360, 300, 90, 1)
-    y = 250
-    y = centred(d, ls, f, lh, SIZE[0] / 2, y, c["accent"])
-    d.rectangle((SIZE[0] / 2 - 120, y + 20, SIZE[0] / 2 + 120, y + 28), fill=c["accent2"])
+    # layout anchors
+    band_x  = 96          # left margin for text (accent band drawn by canvas at x=0..14, we add a wider block)
+    num_y   = 220
+    label_y_gap = 28
+    # wider accent band for cinematic feel (overrides the thin 14px one from canvas)
+    d.rectangle((0, 0, 22, SIZE[1]), fill=c["accent"])
+    # large numeral, left-aligned
+    f, ls, lh = fitted(d, it["shown"], "bold", SIZE[0] - band_x - 80, 380, 280, 90, 1)
+    y = num_y
+    for ln in ls:
+        d.text((band_x, y), ln, font=f, fill=c["accent"])
+        y += lh
+    # thin separator line
+    sep_y = y + 18
+    d.rectangle((band_x, sep_y, band_x + 280, sep_y + 6), fill=c["accent2"])
+    # label in semi-bold, spaced caps
     if it["label"]:
-        f2, l2, h2 = fitted(d, it["label"], "semi", 1400, 260, 72, 30, 3)
-        centred(d, l2, f2, h2, SIZE[0] / 2, y + 70, c["text"])
+        label = it["label"].upper()
+        f2, l2, h2 = fitted(d, label, "semi", SIZE[0] - band_x - 80, 220, 60, 26, 3)
+        y2 = sep_y + label_y_gap
+        for ln in l2:
+            d.text((band_x, y2), ln, font=f2, fill=c["text"])
+            y2 += h2
     return im
 
 

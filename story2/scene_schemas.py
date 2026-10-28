@@ -141,6 +141,7 @@ class SceneOut(M):
     exclusions: StrList = []
     needs_asset: Str = ""                            # for charts, documents, screens, maps: what verified asset is required
     fallback: Str = ""
+    motion_clip: bool = False                        # user opted this scene into Wan 2.2 animation
 
     @field_validator("purpose", "subject")
     @classmethod

@@ -10,7 +10,7 @@ from story import llm, settings as settings_mod
 from story.pipeline import manager
 from story2 import jobs, planner, providers
 
-from . import auto, graphics, likeness, refs, scenes, store, thumbnail, video, voice
+from . import auto, clips, graphics, likeness, refs, scenes, store, thumbnail, video, voice
 
 router = APIRouter(prefix="/api/media")
 
@@ -45,7 +45,7 @@ async def media_file(plan_id: str, name: str):
 async def media_state(plan_id: str):
     _guard(planner.get_plan, plan_id)
     await asyncio.to_thread(providers.refresh, settings_mod.get(), settings_mod.api_key())             # image models the gateway lists become choices
-    st = {"voice": voice.state(plan_id), "refs": refs.state(plan_id), "scenes": scenes.state(plan_id), "graphics": graphics.state(plan_id), "video": video.state(plan_id), "thumbnail": thumbnail.state(plan_id), "likeness": likeness.state(plan_id)}
+    st = {"voice": voice.state(plan_id), "refs": refs.state(plan_id), "scenes": scenes.state(plan_id), "clips": clips.state(plan_id), "graphics": graphics.state(plan_id), "video": video.state(plan_id), "thumbnail": thumbnail.state(plan_id), "likeness": likeness.state(plan_id)}
     return {**st, "auto": auto.state(plan_id, st)}
 
 
@@ -386,4 +386,46 @@ async def patch_item(item_id: str, body: ItemPatch):
     return {"item": store.get(item_id), "voice": voice.state(it["plan_id"]) if it["kind"] == "voice" else None,
             "refs": refs.state(it["plan_id"]) if it["kind"] == "reference" else None,
             "scenes": scenes.state(it["plan_id"]) if it["kind"] == "scene_image" else None,
+            "clips": clips.state(it["plan_id"]) if it["kind"] == "clip" else None,
             "graphics": graphics.state(it["plan_id"]) if it["kind"] == "graphic" else None}
+
+
+# ── motion clips ──────────────────────────────────────────────────────────────
+
+class ClipsSettings(BaseModel):
+    enabled: bool
+
+
+@router.get("/{plan_id}/clips")
+async def clips_state(plan_id: str):
+    _guard(planner.get_plan, plan_id)
+    return _guard(clips.state, plan_id)
+
+
+@router.post("/{plan_id}/clips/settings")
+async def clips_settings(plan_id: str, body: ClipsSettings):
+    _guard(planner.get_plan, plan_id)
+    _guard(clips.set_settings, plan_id, {"enabled": body.enabled})
+    return _guard(clips.state, plan_id)
+
+
+@router.post("/{plan_id}/clips/generate")
+async def clips_generate(plan_id: str):
+    _guard(planner.get_plan, plan_id)
+    s, api_key = settings_mod.get(), settings_mod.api_key()
+
+    async def work(progress):
+        await clips.generate(plan_id, None, progress, s, api_key)
+    return _start(plan_id, "clips", work)
+
+
+@router.post("/{plan_id}/clips/{item_id}/approve")
+async def clip_approve(plan_id: str, item_id: str):
+    _guard(planner.get_plan, plan_id)
+    return _guard(clips.approve, item_id)
+
+
+@router.post("/{plan_id}/clips/{item_id}/unapprove")
+async def clip_unapprove(plan_id: str, item_id: str):
+    _guard(planner.get_plan, plan_id)
+    return _guard(clips.unapprove, item_id)

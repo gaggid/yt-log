@@ -16,7 +16,7 @@ from story import db
 from story2 import planner, storyboard, store as plan_store
 from story2.scene_schemas import NEEDS_ASSET
 
-from . import graphics, scenes, store
+from . import clips as clips_mod, graphics, scenes, store
 from .voice import MediaError
 
 KIND = "video"
@@ -117,26 +117,34 @@ def wants_dissolve(sc: dict) -> bool:
 
 
 def visual_choices(plan_id: str) -> dict[str, dict]:
-    """Per scene: the file to show, where it came from, and what is wrong with it. A scene that needs a card uses its approved graphic; any scene
-    falls back to its approved picture, then to the best finished current picture (listed as not approved), then to nothing."""
-    sst = scenes.state(plan_id)
-    gst = graphics.state(plan_id)
+    """Per scene: the file to show, where it came from, and what is wrong with it.
+    Priority: approved graphic → approved motion clip → approved picture → best picture → nothing."""
+    sst   = scenes.state(plan_id)
+    gst   = graphics.state(plan_id)
+    cl    = clips_mod.approved_clips(plan_id)      # scene_id -> approved clip row
     grows = {r["id"]: r for r in gst["scenes"]}
-    out = {}
+    out   = {}
     for r in sst["scenes"]:
-        pick = {"scene": r["id"], "path": None, "source": "", "problem": ""}
-        g = grows.get(r["id"])
+        pick  = {"scene": r["id"], "path": None, "source": "", "problem": ""}
+        g     = grows.get(r["id"])
         by_id = {c["id"]: c for c in r["candidates"]}
+        # 1. approved graphic (chart / doc / map)
         if g:
             item = next((i for i in g["items"] if i["id"] == g["approved"]), None)
             if item:
                 pick |= {"path": store.path_of(store.get(item["id"])), "source": "graphic", "item": item["id"]}
             elif g["current_item"] and not g.get("thin"):
                 pick |= {"path": store.path_of(store.get(g["current_item"]["id"])), "source": "graphic", "item": g["current_item"]["id"], "problem": "graphic not approved"}
+        # 2. approved motion clip
         if not pick["path"]:
-            ap = by_id.get(r["approved"]) if r["approved"] else None
+            clit = cl.get(r["id"])
+            if clit and clit.get("file") and store.path_of(clit).is_file():
+                pick |= {"path": store.path_of(clit), "source": "clip", "item": clit["id"]}
+        # 3. static picture (original logic unchanged)
+        if not pick["path"]:
+            ap   = by_id.get(r["approved"]) if r["approved"] else None
             good = [c for c in r["candidates"] if c["status"] == "done" and c["current"]]
-            b = by_id.get(r["best"]) if r["best"] else (good[-1] if good else None)
+            b    = by_id.get(r["best"]) if r["best"] else (good[-1] if good else None)
             if ap and ap["current"]:
                 pick |= {"path": store.path_of(store.get(ap["id"])), "source": "picture", "item": ap["id"]}
             elif b:                                                    # a newer picture made after a reference or the scene changed wins over an older approved one
@@ -238,6 +246,22 @@ def render_clip(img: Path, out: Path, frames: int, move: str, prof: dict, fade: 
           "-c:v", "libx264", "-preset", prof["preset"], "-crf", str(prof["crf"]), "-pix_fmt", "yuv420p", "-an", str(out)])
 
 
+def _render_video_clip(src: Path, out: Path, frames: int, prof: dict) -> None:
+    """Trim a Wan 2.2 MP4 to the scene's frame count and scale to output size."""
+    w, h = prof["size"]
+    fps  = prof["fps"]
+    secs = frames / fps
+    _run([FFMPEG, "-y", "-hide_banner", "-loglevel", "error",
+          "-i", str(src),
+          "-t", f"{secs:.3f}",
+          "-vf", f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+                 f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
+          "-frames:v", str(frames),
+          "-r", str(fps),
+          "-c:v", "libx264", "-preset", prof["preset"], "-crf", str(prof["crf"]),
+          "-pix_fmt", "yuv420p", "-an", str(out)])
+
+
 def render_audio(parts: list[dict], out: Path, work: Path) -> None:
     """Every part as 24 kHz mono, in plan order; a part without audio is silence of its expected length (only reachable with "build anyway")."""
     files = []
@@ -314,8 +338,8 @@ def build(plan_id: str, profile: str = "draft", captions: bool = False, allow_ga
     exp = 0
     root = store.media_dir(plan_id, "video")
     work = root / "work"
-    clips = work / f"clips-{profile}"
-    clips.mkdir(parents=True, exist_ok=True)
+    clips_dir = work / f"clips-{profile}"
+    clips_dir.mkdir(parents=True, exist_ok=True)
     w, h = prof["size"]
     moves = pick_moves(sc_list)
     placeholders, cum, frames_done, lines = [], 0.0, 0, []
@@ -326,16 +350,21 @@ def build(plan_id: str, profile: str = "draft", captions: bool = False, allow_ga
         end = cum + sc["duration_s"]
         frames = max(1, round(end * prof["fps"]) - round(cum * prof["fps"]))                 # cut points on the exact timeline: no drift over 50 scenes
         cum = end
-        v = chk["visuals"].get(sc["id"]) or {"path": None}
-        img = v["path"]
+        v      = chk["visuals"].get(sc["id"]) or {"path": None}
+        source = v.get("source", "")
+        img    = v["path"]
         if not img:
-            img = placeholder(work / f"missing-{sc['id']}.png", (w, h), "PICTURE MISSING")
+            img    = str(placeholder(work / f"missing-{sc['id']}.png", (w, h), "PICTURE MISSING"))
+            source = "placeholder"
             placeholders.append({"kind": "picture", "scene": sc["id"], "at": sc["start_s"]})
-        fade = wants_dissolve(sc) and n > 0
-        key = hashlib.sha1(f"{img}|{Path(img).stat().st_mtime_ns}|{frames}|{move}|{prof['size']}|{prof['fps']}|{prof['crf']}|{fade}".encode()).hexdigest()[:10]
-        clip = clips / f"{n:03d}-{key}.mp4"
+        fade  = wants_dissolve(sc) and n > 0
+        key   = hashlib.sha1(f"{img}|{Path(img).stat().st_mtime_ns}|{frames}|{move}|{prof['size']}|{prof['fps']}|{prof['crf']}|{fade}|{source}".encode()).hexdigest()[:10]
+        clip  = clips_dir / f"{n:03d}-{key}.mp4"
         if not clip.is_file():
-            render_clip(Path(img), clip, frames, move, prof, fade)
+            if source == "clip":
+                _render_video_clip(Path(img), clip, frames, prof)
+            else:
+                render_clip(Path(img), clip, frames, move, prof, fade)
         lines.append(clip)
         frames_done += frames
     if progress:

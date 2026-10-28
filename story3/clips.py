@@ -1,0 +1,242 @@
+"""Batch G-ext: scene motion clips. Wan 2.2 image-to-video animation of approved scene
+pictures. One approved MP4 per opted-in scene; nothing is overwritten; approval picks
+the one that counts. Off by default — the user enables the feature globally then toggles
+per scene."""
+import asyncio
+import base64
+import time
+
+import httpx
+
+from story import db, settings as settings_mod
+from story2 import planner, storyboard, store as plan_store
+from story2.scene_schemas import NEEDS_ASSET
+
+from . import scenes, store
+from .voice import MediaError
+
+KIND = "clip"
+DEFAULT_SECONDS = 60          # estimated wall time per clip (~40-60s observed)
+MAX_DURATION = 5.0
+MIN_DURATION = 2.0
+
+CLIP_CAMERA = {
+    "zoom_in":   "slow dolly-in",
+    "zoom_out":  "slow dolly-out, drone pullback",
+    "pan_right": "slow pan right",
+    "pan_left":  "slow pan left",
+    "pan_up":    "slow tilt upward",
+    "pan_down":  "slow tilt downward",
+    "drift":     "subtle camera drift, nearly static",
+    "hold":      "static camera",
+    "settle":    "static camera",
+}
+
+NEGATIVE = "flickering, face warp, warped hands, artifacts, blur, jumpcut, distortion"
+
+
+# ── settings ─────────────────────────────────────────────────────────────────
+
+def settings(plan: dict) -> dict:
+    cur = plan["settings"].get("motion_clips") or {}
+    return {"enabled": bool(cur.get("enabled", False))}
+
+
+def set_settings(plan_id: str, patch: dict) -> None:
+    plan = planner.get_plan(plan_id)
+    cur = {**(plan["settings"].get("motion_clips") or {})}
+    if "enabled" in patch:
+        cur["enabled"] = bool(patch["enabled"])
+    db.ex("UPDATE plans SET settings=?, updated_at=? WHERE id=?",
+          (db.jdump({**plan["settings"], "motion_clips": cur}), db.now(), plan_id))
+    plan_store.log(plan_id, "motion_clips_settings", dict(patch))
+
+
+# ── eligibility ───────────────────────────────────────────────────────────────
+
+def eligible(scene: dict) -> bool:
+    """True when the user opted this scene in AND it is not a card/asset type."""
+    return bool(scene["data"].get("motion_clip")) and \
+           scene["data"].get("visual_type") not in NEEDS_ASSET
+
+
+# ── prompt construction ───────────────────────────────────────────────────────
+
+def _clip_prompt(scene: dict) -> str:
+    d = scene["data"]
+    subject = (d.get("subject") or "").strip()
+    action  = (d.get("action") or "").strip()
+    move    = ((d.get("direction") or {}).get("move") or "").strip()
+    cam     = CLIP_CAMERA.get(move, "slow camera movement")
+    parts   = [p for p in [subject, action, cam] if p]
+    return ". ".join(parts) + ". Slow motion, cinematic, preserve original look."
+
+
+# ── image helper ──────────────────────────────────────────────────────────────
+
+def _approved_image_b64(plan_id: str, scene_id: str) -> str | None:
+    """Base64 JPEG of the approved scene picture, or None if none is approved."""
+    sc_state = scenes.state(plan_id)
+    row = next((r for r in sc_state["scenes"] if r["id"] == scene_id), None)
+    if not row or not row.get("approved"):
+        return None
+    it = store.get(row["approved"])
+    if not it or not it["file"]:
+        return None
+    p = store.path_of(it)
+    if not p.is_file():
+        return None
+    return base64.b64encode(p.read_bytes()).decode()
+
+
+# ── state ─────────────────────────────────────────────────────────────────────
+
+def state(plan_id: str) -> dict:
+    """All opted-in scenes with their clip attempts, best, approved, and done flag."""
+    plan    = planner.get_plan(plan_id)
+    sc_list = storyboard.get_scenes(plan_id)
+    opted   = [sc for sc in sc_list if eligible(sc)]
+    rows    = []
+    for sc in opted:
+        its      = store.items(plan_id, KIND, sc["id"])
+        done_its = [i for i in its if i["status"] == "done" and i["file"]]
+        approved = next((i["id"] for i in its if i["approved"] and i["status"] == "done"), None)
+        best     = done_its[-1]["id"] if done_its else None
+        rows.append({
+            "id": sc["id"],
+            "seq": sc["seq"],
+            "candidates": its,
+            "best": best,
+            "approved": approved,
+            "approved_current": bool(approved),
+        })
+    total = len(rows)
+    appr  = sum(1 for r in rows if r["approved_current"])
+    return {
+        "scenes": rows,
+        "total": total,
+        "have": sum(1 for r in rows if r["best"]),
+        "approved": appr,
+        "done": total > 0 and appr == total,
+        "enabled": settings(plan)["enabled"],
+    }
+
+
+def approved_clips(plan_id: str) -> dict[str, dict]:
+    """scene_id -> approved clip media row. Used by video.visual_choices()."""
+    out = {}
+    for row in state(plan_id)["scenes"]:
+        if row["approved_current"]:
+            it = store.get(row["approved"])
+            if it:
+                out[row["id"]] = it
+    return out
+
+
+# ── generation ────────────────────────────────────────────────────────────────
+
+async def generate(plan_id: str, scene_ids: list[str] | None,
+                   progress, s: dict | None = None, api_key: str = "") -> None:
+    """Generate one clip per opted-in scene that has an approved picture but no clip."""
+    s       = s or settings_mod.get()
+    api_key = api_key or settings_mod.api_key()
+    plan    = planner.get_plan(plan_id)
+    if not settings(plan)["enabled"]:
+        return
+    sc_list = storyboard.get_scenes(plan_id)
+    targets = [sc for sc in sc_list
+               if eligible(sc) and (scene_ids is None or sc["id"] in scene_ids)]
+
+    base_url = s.get("base_url", "http://127.0.0.1:8810/v1").rstrip("/")
+    headers  = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+    for n, sc in enumerate(targets):
+        if progress:
+            progress(n, len(targets),
+                     f"clip {n + 1} of {len(targets)}: {sc['data'].get('subject', '')[:40]}")
+        img_b64 = _approved_image_b64(plan_id, sc["id"])
+        if not img_b64:
+            continue  # no approved picture yet — skip silently
+
+        prompt   = _clip_prompt(sc)
+        duration = max(MIN_DURATION, min(MAX_DURATION, float(sc.get("duration_s") or MAX_DURATION)))
+        payload  = {
+            "model": "wan-2.2-ti2v-5b",
+            "image": f"data:image/jpeg;base64,{img_b64}",
+            "prompt": prompt,
+            "negative_prompt": NEGATIVE,
+            "size": "832x480",
+            "duration": round(duration, 1),
+            "fps": 24,
+            "steps": 25,
+            "guidance": 6,
+        }
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.post(f"{base_url}/video/generations",
+                                  headers=headers, json=payload)
+        if r.status_code not in (200, 202):
+            raise MediaError(
+                f"clip job failed for scene {sc['id']}: HTTP {r.status_code}: {r.text[:200]}")
+
+        job    = r.json()
+        job_id = job.get("id") or job.get("job_id")
+        if not job_id:
+            raise MediaError(f"no job id in clip response: {r.text[:200]}")
+
+        it     = store.add(plan_id, KIND, sc["id"],
+                           meta={"job_id": job_id, "prompt": prompt})
+        mp4_url = await _poll(job_id, base_url, headers)
+
+        async with httpx.AsyncClient(timeout=120) as client:
+            dl = await client.get(mp4_url)
+        dl.raise_for_status()
+
+        fname = f"clip/{sc['id']}-a{it['attempt']}.mp4"
+        out   = store.media_dir(plan_id) / fname
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(dl.content)
+        store.update(it["id"], status="done", file=fname,
+                     meta={"job_id": job_id, "prompt": prompt,
+                           "duration_s": duration, "source_scene": sc["id"]})
+
+
+async def _poll(job_id: str, base_url: str, headers: dict, timeout: int = 300) -> str:
+    """Poll GET /v1/jobs/{job_id} until succeeded; return the video URL."""
+    deadline = time.time() + timeout
+    async with httpx.AsyncClient(timeout=15) as client:
+        while time.time() < deadline:
+            r = await client.get(f"{base_url}/jobs/{job_id}", headers=headers)
+            r.raise_for_status()
+            j      = r.json()
+            status = j.get("status", "")
+            if status == "succeeded":
+                url = j.get("url") or (j.get("result") or {}).get("url")
+                if not url:
+                    raise MediaError(f"job {job_id} succeeded but no URL in response")
+                return url
+            if status in ("failed", "cancelled"):
+                raise MediaError(f"clip job {job_id} {status}: {j.get('error', '')}")
+            retry = float(r.headers.get("Retry-After", 5))
+            await asyncio.sleep(retry)
+    raise MediaError(f"clip job {job_id} timed out after {timeout}s")
+
+
+# ── approval ──────────────────────────────────────────────────────────────────
+
+def approve(item_id: str) -> dict:
+    return store.approve(item_id, True)
+
+
+def unapprove(item_id: str) -> dict:
+    return store.approve(item_id, False)
+
+
+def approve_best(plan_id: str) -> int:
+    """Approve the latest done clip for every opted-in scene with no approved clip."""
+    n = 0
+    for row in state(plan_id)["scenes"]:
+        if not row["approved_current"] and row["best"]:
+            store.approve(row["best"], True)
+            n += 1
+    return n

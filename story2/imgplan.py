@@ -18,6 +18,14 @@ def _plan_ctx(plan_id: str):
     return plan, story, storyboard.get_scenes(plan_id), storyboard.get_assets(plan_id)
 
 
+def _effective_mode(plan: dict, scene_id: str) -> str:
+    """The mode that will actually be used at draw time for this scene: per-scene override first, then plan level, then generate."""
+    sp  = (plan["settings"].get("scene_pictures") or {})
+    per = (sp.get("per_scene") or {}).get(scene_id) or {}
+    m   = per.get("mode") or sp.get("mode") or "generate"
+    return m if m in ("generate", "edit", "auto") else "generate"
+
+
 def compile_plan(plan_id: str) -> dict:
     """Compile every scene for both adapters and save the prompts on the scene. Scene content is never touched; approved and locked scenes
     keep their wording, only the derived prompts are refreshed."""
@@ -26,7 +34,8 @@ def compile_plan(plan_id: str) -> dict:
         raise planner.PlanError("design the storyboard first")
     first = imgprompts.first_appearances(scenes)
     for sc in scenes:
-        comp = imgprompts.compile_scene(sc, assets, plan, first)
+        em   = _effective_mode(plan, sc["id"])
+        comp = imgprompts.compile_scene(sc, assets, plan, first, effective_mode=em)
         data = sc["data"]
         data["prompts"] = comp
         data["adapters"] = {a: {"version": c["adapter_version"], "model": c["model"], "scene_rev": c["scene_rev"], "source_hash": c["source_hash"]}

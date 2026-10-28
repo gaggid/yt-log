@@ -50,7 +50,7 @@ def content_hash(plan: dict) -> str:
     """Identity of what would be exported: wording, scenes, prompts, registry and the settings that change them. Approval state, previews,
     ratings, issue lists, revision counters and timings are left out: timings are derived from the narration and, later, from the real audio,
     and prompts and reference pictures are derived from the plan and made after approval, so making media must not make an approved plan look changed."""
-    skip = {"previews", "issues", "prompts", "adapters", "voice_tag"}                   # prompts are derived from the scenes and the approved reference pictures
+    skip = {"previews", "issues", "prompts", "adapters", "voice_tag", "motion_clip"}                   # prompts are derived from the scenes and the approved reference pictures
     doc = {
         "format": plan["format"], "blueprint": plan["blueprint"],
         "narrator": {k: plan["narrator"].get(k) for k in ("name", "voice", "gender", "person", "language")},

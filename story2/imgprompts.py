@@ -282,6 +282,22 @@ def _constraints(d: dict) -> tuple[list[str], list[str]]:
     return list(dict.fromkeys(must)), list(dict.fromkeys(avoid))
 
 
+_HUMAN_RE = re.compile(r"\b(human|person|people|figure|man|woman|character|body|face)\b", re.I)
+_ABSTRACT_TYPES = {"atmospheric", "metaphor", "transition", "minimalist"}
+
+
+def _cast_needed(avoid: list[str], people: list, visual_type: str) -> bool:
+    """True only when the cast boilerplate should be included.
+    False when: the exclusion list already bans humans (contradictory), or no person
+    assets are planned for an abstract/atmospheric scene (the line would invite a figure
+    that nobody planned)."""
+    if any(_HUMAN_RE.search(x) for x in avoid):
+        return False                                # explicit exclusion — cast line contradicts it
+    if not people and visual_type in _ABSTRACT_TYPES:
+        return False                                # no one in this scene; "any other person" makes no sense
+    return True
+
+
 _LEAD = {"the", "a", "an", "his", "her", "their", "its", "this", "these", "those", "one", "two", "three", "four", "five", "some", "each"}
 
 
@@ -346,7 +362,7 @@ def shot_line(comp: dict) -> str:
 _ENV_LED = frozenset(("atmospheric", "metaphor", "transition"))   # visual types where the environment IS the subject
 
 
-def compile_qwen(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -> dict:
+def compile_qwen(scene: dict, assets_used: list[dict], plan: dict, refs: dict, effective_mode: str | None = None) -> dict:
     d, cfg, notes = scene["data"], providers.get("qwen-image-2.1"), []
     fmt = plan["format"]
     w, h = d["output"]["width"], d["output"]["height"]
@@ -356,7 +372,8 @@ def compile_qwen(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
     people = [a for a in assets_used if a["kind"] in ("person", "narrator")]
     indian = describe.indian_on(plan.get("settings"))
     look = styles.for_plan(plan.get("settings"))
-    use_refs = bool(refs["references"]) and (plan.get("settings") or {}).get("scene_pictures", {}).get("mode") in ("edit", "auto")
+    _mode = effective_mode or (plan.get("settings") or {}).get("scene_pictures", {}).get("mode") or "generate"
+    use_refs = bool(refs["references"]) and _mode in ("edit", "auto")
     ref_index = {r["asset_id"]: i for i, r in enumerate(refs["references"], 1)} if use_refs else {}
     comp = d.get("composition") or {}
 
@@ -427,17 +444,21 @@ def compile_qwen(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
         cons.append("These must be clearly visible: " + "; ".join(must))
     if avoid:
         cons.append("These must not appear: " + "; ".join(avoid))
-    if indian and not plate:
+    if indian and not plate and _cast_needed(avoid, people, d.get("visual_type", "")):
         cons.append("Any other person who appears is Indian too, with South Asian features and skin tone")
+    if people and not plate:
+        n = len(people)
+        names = " and ".join(a["name"] for a in people)
+        cons.append(f"Exactly {n} {'person' if n == 1 else 'people'} in the frame: {names}; no duplicates, no extra figures")
     cons.append("One clear focal point; " + NO_STRANGE)
     sec["constraints"] = "Constraints: " + _sent(*cons)
     prompt = _fit(sec, chr(10), {"environment": env})
-    return _finish("qwen", "qwen-image-2.1", cfg, scene, prompt, "", sec, (w, h), refs, notes, plate, plan)
+    return _finish("qwen", "qwen-image-2.1", cfg, scene, prompt, "", sec, (w, h), refs, notes, plate, plan, effective_mode)
 
 
 # ── FLUX.2 Klein: natural prose, exclusions as positive statements plus the supported negative_prompt ──
 
-def compile_flux(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -> dict:
+def compile_flux(scene: dict, assets_used: list[dict], plan: dict, refs: dict, effective_mode: str | None = None) -> dict:
     d, cfg, notes = scene["data"], providers.get("flux2-klein-9b"), []
     fmt = plan["format"]
     w, h = d["output"]["width"], d["output"]["height"]
@@ -449,7 +470,9 @@ def compile_flux(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
     indian = describe.indian_on(plan.get("settings"))
     look = styles.for_plan(plan.get("settings"))
     flux_cfg = providers.get("flux2-klein-9b")
-    ref_index = {r["asset_id"]: i for i, r in enumerate(refs["references"], 1)} if (refs["references"] and flux_cfg["edits"]) else {}
+    _mode = effective_mode or (plan.get("settings") or {}).get("scene_pictures", {}).get("mode") or "generate"
+    use_refs = bool(refs["references"]) and _mode in ("edit", "auto")
+    ref_index = {r["asset_id"]: i for i, r in enumerate(refs["references"], 1)} if use_refs else {}
     sec: dict[str, str] = {"style": _sent(look["look"])}
     if plate:
         notes.append("this visual needs a verified chart, document, screen, map or diagram: the picture is the illustrated scene around it; the exact content is added later")
@@ -475,15 +498,19 @@ def compile_flux(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
     sec["camera"] = _sent(f"Camera: {_camera(comp)}" if _camera(comp) else "")
     fixed_lines = [f"{a['name']} ({'; '.join(_s(x) for x in _place_fixed(a, d))})" for a in assets_used if _place_fixed(a, d) and a["kind"] not in ("style", "person", "narrator") and not plate]
     sec["continuity"] = _sent("Consistent with the rest of the film: " + "; ".join(fixed_lines)) if fixed_lines else ""
-    if refs["references"]:
+    if use_refs:
         sec["references"] = _sent("; ".join(f"Image {i}: {r['role']} ({r['name']})" for i, r in enumerate(refs["references"], 1)))
     if shown:
         sec["text"] = _sent("The image contains exactly this text: " + "; ".join(f'"{_s(t["text"])}"' + (f" {_s(t['placement'])}" if _s(t.get("placement")) else "") for t in shown),
                             "Each text is written once, in clear English letters, spelled exactly as inside the quotes", "It contains no other writing")
     else:
         sec["text"] = _sent("Screens, papers and signs show no readable writing")
-    if indian and not plate:
+    if indian and not plate and _cast_needed(avoid, people, d.get("visual_type", "")):
         sec["cast"] = _sent("Any other person who appears is Indian too, with South Asian features and skin tone")
+    if people and not plate:
+        n = len(people)
+        names = " and ".join(a["name"] for a in people)
+        sec["count"] = _sent(f"Exactly {n} {'person' if n == 1 else 'people'}: {names}. No duplicates, no extra figures.")
     if must:
         sec["must"] = _sent("Clearly visible: " + "; ".join(must))
     if avoid:
@@ -491,11 +518,12 @@ def compile_flux(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
     sec["output"] = _sent(f"{w}x{h} pixels, {_aspect(fmt)} composition", _safe_area(fmt))
     prompt = _fit(sec, " ", {"setting": where})
     negative = ", ".join([*avoid, *FLUX_STANDARD_NEGATIVE.split(", ")]) if cfg["negative_prompt"] else ""
-    return _finish("flux", "flux2-klein-9b", cfg, scene, prompt, negative, sec, (w, h), refs, notes, plate, plan)
+    return _finish("flux", "flux2-klein-9b", cfg, scene, prompt, negative, sec, (w, h), refs, notes, plate, plan, effective_mode)
 
 
 def _finish(adapter: str, model: str, cfg: dict, scene: dict, prompt: str, negative: str, sections: dict, size: tuple[int, int],
-            refs: dict, notes: list[str], plate: bool, plan: dict | None = None) -> dict:
+            refs: dict, notes: list[str], plate: bool, plan: dict | None = None,
+            effective_mode: str | None = None) -> dict:
     w, h, changed = providers.snap(size[0], size[1], cfg)
     if changed:
         notes.append(f"size {size[0]}x{size[1]} was snapped to {w}x{h} for this model")
@@ -504,7 +532,8 @@ def _finish(adapter: str, model: str, cfg: dict, scene: dict, prompt: str, negat
     d = scene["data"]
     corr = d.get("correction") or {}
     refs_ok = refs["references"][: cfg["max_references"]]
-    mode = "edit" if (refs_ok and cfg["edits"]) else "generate"
+    plan_mode = effective_mode or ((plan or {}).get("settings") or {}).get("scene_pictures", {}).get("mode") or "generate"
+    mode = "edit" if (refs_ok and cfg["edits"] and plan_mode in ("edit", "auto")) else "generate"
     out = {"adapter": adapter, "model": model, "adapter_version": cfg["adapter_version"], "scene_rev": scene["rev"], "cast_indian": describe.indian_on((plan or {}).get("settings")), "feeling": mood.label(feeling_texts(scene, plan)),
            "mode": "overlay_plate" if plate and mode == "generate" else mode,
            "prompt": re.sub(r"[ \t]{2,}", " ", prompt).strip(), "negative_prompt": negative,
@@ -524,14 +553,16 @@ def _finish(adapter: str, model: str, cfg: dict, scene: dict, prompt: str, negat
 COMPILERS = {"qwen": compile_qwen, "flux": compile_flux}
 
 
-def compile_scene(scene: dict, assets: list[dict], plan: dict, first_seen: dict[str, str] | None = None) -> dict:
-    """Both adapters, side by side, for one scene. Returns {"qwen": {...}, "flux": {...}} (each with its own validation)."""
+def compile_scene(scene: dict, assets: list[dict], plan: dict, first_seen: dict[str, str] | None = None,
+                  effective_mode: str | None = None) -> dict:
+    """Both adapters, side by side, for one scene. Returns {"qwen": {...}, "flux": {...}} (each with its own validation).
+    effective_mode overrides the plan-level scene_pictures.mode for this scene specifically (per-scene override)."""
     used = assets_for(scene, assets)
     refs = reference_plan(scene, used, first_seen or {})
     h = source_hash(scene, used, plan["format"], describe.indian_on(plan.get("settings")), mood.label(feeling_texts(scene, plan)))
     out = {}
     for name, fn in COMPILERS.items():
-        c = fn(scene, used, plan, refs)
+        c = fn(scene, used, plan, refs, effective_mode=effective_mode)
         c["source_hash"] = h
         out[name] = c
     return out

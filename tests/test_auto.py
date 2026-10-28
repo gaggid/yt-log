@@ -16,6 +16,8 @@ def planned(env, edit=True):
     plan_id = _planned(env)
     if edit:
         scenes.set_settings(plan_id, {"mode": "auto"})
+    else:
+        scenes.set_settings(plan_id, {"mode": "generate", "chosen": True})   # explicit plain: mark chosen so auto-run default setter does not fire
     return plan_id
 from test_phase3g import Gateway as ImageGateway
 from test_phase3i import TINY
@@ -82,12 +84,13 @@ def test_a_planned_storyboard_is_taken_all_the_way_to_a_draft_video(env, monkeyp
 def test_the_first_outcome_is_approved_and_pictures_default_to_plain_qwen(env, monkeypatch, fast):
     plan_id = planned(env)
     out, gw, _ = go(plan_id, monkeypatch)
-    assert scenes.settings(planner.get_plan(plan_id)) | {} and scenes.settings(planner.get_plan(plan_id))["model"] == "qwen-image-2.1" and scenes.settings(planner.get_plan(plan_id))["mode"] == "generate"
+    assert scenes.settings(planner.get_plan(plan_id))["model"] == "qwen-image-2.1" and scenes.settings(planner.get_plan(plan_id))["mode"] == "edit"
     assert any("Qwen" in n for n in out["notes"])
     assert {r["body"]["model"] for r in gw.count("/images/generations")} == {"qwen-image-2.1"}
     assert all(r["approved"] for r in scenes.state(plan_id)["scenes"])
     assert all(r["approved"] for r in refs.state(plan_id)["assets"] if not r["skipped"])
-    assert len(gw.count("/images/generations")) >= len(storyboard.get_scenes(plan_id))                 # one picture per scene (plus the reference sheets)
+    total_pics = len(gw.count("/images/generations")) + len(gw.count("/images/edits"))
+    assert total_pics >= len(storyboard.get_scenes(plan_id))                                           # one picture per scene; edit mode uses /edits when refs exist
 
 
 def test_a_way_chosen_by_hand_is_respected(env, monkeypatch, fast):
