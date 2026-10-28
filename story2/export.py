@@ -35,6 +35,15 @@ def tts_notes(plan: dict) -> dict:
     cfg = voices.ENGINES[cur["engine"]]
     if cur["engine"] == "svara-tts":
         return {**TTS_NOTES, "voice_id": cur["voice"]}
+    if cur["engine"] == "maya-tts":
+        return {"engine": cur["engine"], "voice_id": cur["voice"], "recommended_request": dict(cfg["defaults"]),
+                "input": "built from each segment's sentences: each sentence's `tag` (suggested per scene at storyboard time) becomes an inline Maya tag such as [whispers] "
+                         "before the words it colours; style tags last until the next tag (the build adds [calm] to return to plain speech); [pause:Ns] carries pauses",
+                "chunking": "one segment per request (the gateway accepts 1500 characters; longer segments are split at sentence ends and joined with a 150 ms gap), "
+                            "sent with `Prefer: respond-async` and polled",
+                "measured_pace_wpm": cfg["pace_wpm"], "script": TTS_NOTES["script"], "language": "hi is sent explicitly because the script is mixed",
+                "emotion_policy": "tags are best effort: few, short, at real turns; one steady tag across neighbouring sentences of the same feeling",
+                "voice": f"{cur['voice']} ({cfg['voices'][cur['voice']]})", "known_gap": TTS_NOTES["known_gap"]}
     return {"engine": cur["engine"], "voice_id": cur["voice"], "recommended_request": dict(cfg["defaults"]),
             "input": "built from each segment's sentences: punctuation ('...' ',' '?' '—') and [pause:Ns] carry the delivery; there are no emotion tags",
             "chunking": "one segment per request, sent with `Prefer: respond-async` and polled; the gateway splits long text at sentence ends and crossfades",
@@ -76,7 +85,9 @@ def leak_scan(public: dict, prof: leak.SourceProfile, title: str) -> dict:
     for path, text in _strings(public):
         if any(path.startswith(s) for s in skip) or len(text.split()) < 2:
             continue
-        for f in leak.check(text, prof, scene=not path.startswith("narration")):
+        # blueprint lines are short planning notes of facts ("200 times the mass of a proton"): a fact is not a quotation, so only long runs count there
+        ngram = leak.NGRAM + 4 if path.startswith("blueprint") else leak.NGRAM
+        for f in leak.check(text, prof, ngram=ngram, scene=not path.startswith("narration")):
             findings.append({"where": path, **f.as_dict()})
     for f in leak.check(title, prof):
         findings.append({"where": "plan.working_title", **f.as_dict()})

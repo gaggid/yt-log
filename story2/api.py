@@ -9,7 +9,7 @@ from story import db, llm, settings as settings_mod, storytypes
 from story.pipeline import manager
 from fastapi.responses import FileResponse
 
-from . import describe, editorial, export, imgplan, imgprompts, intake, jobs, planner, providers, resolve, storyboard, styles, voices
+from . import describe, editorial, export, imgplan, imgprompts, intake, jobs, planner, providers, resolve, storyboard, styles, voicetags, voices
 
 router = APIRouter(prefix="/api/plans")
 
@@ -143,7 +143,7 @@ async def resolve_blocker(plan_id: str, body: ResolveReq):
     return {"kind": "job", "job": _start(plan_id, "fix: " + resolve.FIXES[fix]["label"].lower(), step)}
 
 
-STEP_EVENTS = ("blueprint", "narration", "registry", "references", "storyboard", "compile_prompts", "fix_repeats", "approved", "export", "voice", "scene_pictures", "graphics", "video", "thumbnail", "auto_run")
+STEP_EVENTS = ("blueprint", "narration", "registry", "references", "storyboard", "voicetags", "compile_prompts", "fix_repeats", "approved", "export", "voice", "scene_pictures", "graphics", "video", "thumbnail", "auto_run")
 
 
 def step_times(plan_id: str) -> dict:
@@ -346,6 +346,22 @@ async def make_storyboard(plan_id: str, body: StoryboardReq | None = None):
     async def step(be, s, progress):
         await storyboard.make_storyboard(plan_id, be, s, body.segment_ids if body else None, progress, bool(body and body.replace_approved))
     return _start(plan_id, "storyboard", step)
+
+
+class VoiceTagsReq(BaseModel):
+    segment_ids: list[str] | None = None
+
+
+@router.post("/{plan_id}/voicetags")
+async def voice_tags(plan_id: str, body: VoiceTagsReq | None = None):
+    """Ask the model to direct the narrator's voice: one Maya tag per sentence, from the story's arc and the scenes."""
+    p = _guard(planner.get_plan, plan_id)
+    if not p["segments"]:
+        raise HTTPException(400, "write the narration first")
+
+    async def step(be, s, progress):
+        await voicetags.suggest(plan_id, be, s, body.segment_ids if body else None, progress)
+    return _start(plan_id, "voicetags", step)
 
 
 class SegmentPatch(BaseModel):

@@ -5,6 +5,8 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, field_validator
 
 from story import schemas as s1
 
+from . import maya
+
 Str, StrList = s1.Str, s1.StrList
 
 VISUAL_TYPES = (
@@ -115,6 +117,7 @@ class SceneOut(M):
     new_information: Str = ""                        # what the viewer learns, notices or feels that the previous visual did not give
     takeaway: Str = ""
     emotional_effect: Str = ""
+    voice_tag: Annotated[str, BeforeValidator(maya.norm_tag)] = ""   # how the narrator should sound over this scene (Maya tag, or neutral)
     visual_type: Annotated[str, BeforeValidator(norm_visual_type)] = "atmospheric"
     subject: Str
     action: Str = ""

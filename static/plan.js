@@ -44,6 +44,10 @@ const VT_LABEL = {reconstruction: 'Reconstruction', establishing: 'Establishing'
   comparison: 'Comparison', text_led: 'Text-led', minimalist: 'Minimalist', atmospheric: 'Atmospheric', transition: 'Transition'};
 const vtColor = t => `hsl(${(VT.indexOf(t) * 47 + 200) % 360} 45% 38%)`;
 const EMO = ['neutral', 'happy', 'sad', 'anger', 'fear', 'clear'];
+// Maya voice tags (same lists as story2/maya.py; a test keeps them equal). '' = not chosen yet, 'neutral' = plain speech on purpose.
+const MAYA_STYLE = ['whispers', 'softly', 'loudly', 'shouting', 'sad', 'crying', 'excited', 'happy', 'cheerful', 'angry', 'frustrated', 'annoyed', 'sarcastic', 'curious', 'confused', 'nervous', 'scared', 'fearful', 'worried', 'panicked', 'calm', 'serious', 'surprised', 'amazed', 'tired', 'sleepy', 'disgusted'];
+const MAYA_SOUND = ['laughs', 'sighs', 'clears throat'];
+const tagOptions = cur => `<option value="" ${cur ? '' : 'selected'}>tag: none yet</option><option value="neutral" ${cur === 'neutral' ? 'selected' : ''}>neutral (plain)</option><optgroup label="How it sounds">${MAYA_STYLE.map(t => `<option ${t === cur ? 'selected' : ''}>${t}</option>`).join('')}</optgroup><optgroup label="A sound">${MAYA_SOUND.map(t => `<option ${t === cur ? 'selected' : ''}>${t}</option>`).join('')}</optgroup>`;
 const mmss = s => { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
 const A = {done: 'done', running: 'running'};
 
@@ -118,7 +122,7 @@ window.viewPlan = async function (id) {
   const tick = async () => { if (my !== route_id) return; try { await load(); } catch (e) { /* keep polling */ } timer = setTimeout(tick, busyJob() ? 1500 : 4000); };
 
   const STEP_WHAT = {1: 'blueprint', 2: 'narration', 3: 'registry', 4: 'storyboard', 5: 'references', 6: 'compile_prompts', 8: 'fix_repeats', 10: 'approved', 11: 'export', 12: 'voice', 13: 'scene_pictures', 14: 'graphics', 15: 'video'};
-  const WHAT_LABEL = {blueprint: 'Plan the story', narration: 'Write the narration', registry: 'Create characters and places', references: 'Make reference pictures', storyboard: 'Design the storyboard', compile_prompts: 'Write image prompts', fix_repeats: 'Fix camera repeats', approved: 'Approve the plan', export: 'Export', voice: 'Make the voice', scene_pictures: 'Scene pictures', graphics: 'Graphics', video: 'Draft video', auto_run: 'Automatic run'};
+  const WHAT_LABEL = {blueprint: 'Plan the story', narration: 'Write the narration', registry: 'Create characters and places', references: 'Make reference pictures', storyboard: 'Design the storyboard', voicetags: "Direct the narrator's voice", compile_prompts: 'Write image prompts', fix_repeats: 'Fix camera repeats', approved: 'Approve the plan', export: 'Export', voice: 'Make the voice', scene_pictures: 'Scene pictures', graphics: 'Graphics', video: 'Draft video', auto_run: 'Automatic run'};
   const agoText = ts => { const s = Math.max(0, Math.round(Date.now() / 1000 - ts)); return s < 10 ? 'just now' : s < 60 ? s + 's ago' : s < 3600 ? Math.floor(s / 60) + ' min ' + String(s % 60).padStart(2, '0') + 's ago' : s < 86400 ? Math.floor(s / 3600) + 'h ' + String(Math.floor(s % 3600 / 60)).padStart(2, '0') + 'm ago' : new Date(ts * 1000).toLocaleString(); };
   const clock = ts => new Date(ts * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'});
   const agoSpan = ts => `<span data-ago="${ts}" title="${esc(new Date(ts * 1000).toLocaleString())}">${agoText(ts)}</span>`;
@@ -167,6 +171,8 @@ Be concrete: colours, materials, numbers. Leave empty to skip.`); if (v === null
     async imageModels(f) { await act(null, () => api(`/plans/${id}/image-models`, {method: 'PATCH', json: f}), 'Saved'); await load(true); },
     async byType(t, m) { const bt = {...(P.settings.image_models || {}).by_type}; if (m) bt[t] = m; else delete bt[t]; await window._plan.imageModels({by_type: bt}); },
     async licence(m, on) { await window._plan.imageModels({licence_checks: {...(P.settings.image_models || {}).licence_checks, [m]: on}}); },
+    async sceneTag(sid, t) { await act(null, () => api(`/plans/scenes/${sid}`, {method: 'PATCH', json: {voice_tag: t}}), 'Voice tag set for this scene'); await load(true); },
+    async voiceTags(b) { if (P.segments.some(x => x.sentences.some(y => y.tag)) && !await confirmDlg('Suggest the voice tags again?', 'Every tag you set by hand is replaced for parts that are not locked. Wording is never changed.', 'Suggest')) return; await run(b, `/plans/${id}/voicetags`, {}); },
     async sceneModel(sid, m) { await act(null, () => api(`/plans/scenes/${sid}`, {method: 'PATCH', json: {model: m}}), 'Image model set'); await load(true); },
     async prompts(sid) {
       const r = await api(`/plans/scenes/${sid}/prompts`);
@@ -301,7 +307,7 @@ Be concrete: colours, materials, numbers. Leave empty to skip.`); if (v === null
       await load(true);
     },
     async retry(b) {
-      const k = ((P.job && P.job.kind) || '').toLowerCase(), by = {blueprint: () => this.blueprint(b), narration: () => this.narration(b, true), registry: () => this.registry(b), storyboard: () => this.storyboard(b),
+      const k = ((P.job && P.job.kind) || '').toLowerCase(), by = {blueprint: () => this.blueprint(b), narration: () => this.narration(b, true), registry: () => this.registry(b), storyboard: () => this.storyboard(b), voicetags: () => this.voiceTags(b),
         'fix repeats': () => this.fixRepeats(b), voice: () => this.voiceAll(b), 'scene pictures': () => this.picsAll(b), references: () => this.refsAll(b), 'auto-run': () => this.autoRun(b), video: () => this.vidBuild(b, 'draft')};
       const f = Object.entries(by).find(([name]) => k === name || k.startsWith(name));
       if (!f) { toast('Press the button of the step that stopped (' + (k || 'unknown') + ').', {bad: true}); return; }
@@ -351,11 +357,11 @@ Be concrete: colours, materials, numbers. Leave empty to skip.`); if (v === null
     async delPlan() { if (!await confirmDlg('Delete this plan?', 'The story itself is not touched. Narration and storyboard of this plan are removed.', 'Delete', true)) return; await act(null, () => api(`/plans/${id}`, {method: 'DELETE'}), 'Plan deleted'); location.hash = '#/p/' + P.project_id + '/stories'; },
     async segSave(sid) {
       const box = document.querySelector(`[data-seg="${sid}"]`);
-      const sentences = [...box.querySelectorAll('.sent')].map(r => ({text: r.querySelector('textarea').value.trim(), emotion: r.querySelector('select').value, pause_after_s: +r.querySelector('input').value || 0})).filter(x => x.text);
+      const sentences = [...box.querySelectorAll('.sent')].map(r => ({text: r.querySelector('textarea').value.trim(), emotion: r.querySelector('select.emo').value, tag: (r.querySelector('select.tag') || {}).value || '', pause_after_s: +r.querySelector('input').value || 0})).filter(x => x.text);
       if (!sentences.length) return toast('A segment needs at least one sentence', {bad: true});
       await act(null, () => api(`/plans/segments/${sid}`, {method: 'PATCH', json: {sentences}}), 'Saved. Scenes for this part were kept and spread over the new sentences; check them.'); await load(true);
     },
-    async segAddSentence(sid) { const box = document.querySelector(`[data-seg="${sid}"] .sents`); box.insertAdjacentHTML('beforeend', sentRow({text: '', emotion: 'neutral', pause_after_s: 0}, sid)); box.lastElementChild.querySelector('textarea').focus(); },
+    async segAddSentence(sid) { const box = document.querySelector(`[data-seg="${sid}"] .sents`); box.insertAdjacentHTML('beforeend', sentRow({text: '', emotion: 'neutral', tag: '', pause_after_s: 0}, sid)); box.lastElementChild.querySelector('textarea').focus(); },
     async segRemoveSentence(btn, sid) { btn.closest('.sent').remove(); await window._plan.segSave(sid); },
     async segSet(sid, f) { await act(null, () => api(`/plans/segments/${sid}`, {method: 'PATCH', json: f})); await load(true); },
     async segMove(sid, d) { await act(null, () => api(`/plans/segments/${sid}/move`, {method: 'POST', json: {direction: d}})); await load(true); },
@@ -398,8 +404,12 @@ Be concrete: colours, materials, numbers. Leave empty to skip.`); if (v === null
     jump(sid) { const e = document.getElementById('sc-' + sid); if (e) e.scrollIntoView({behavior: 'smooth', block: 'center'}); },
   };
 
+  // what Maya will be sent, as a preview (the server builds the real text: story2/maya.py)
+  const mayaPreview = seg => { let act = ''; return seg.sentences.map(x => { const t = x.tag; let pre = ''; if (MAYA_STYLE.includes(t)) { if (t !== act) { pre = `[${t}] `; act = t; } } else if (MAYA_SOUND.includes(t)) pre = `[${t}] `; else if (act) { pre = '[calm] '; act = ''; } return pre + x.text; }).join(' '); };
+  const isMaya = () => ((P.narrator && P.narrator.tts) || {}).engine === 'maya-tts';
   const sentRow = (x, sid) => `<div class="sent"><textarea lang="hi" oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'" onchange="_plan.segSave('${sid}')">${esc(x.text)}</textarea>
-    <select onchange="_plan.segSave('${sid}')" title="How this sentence is spoken">${EMO.map(e => `<option ${e === x.emotion ? 'selected' : ''}>${e}</option>`).join('')}</select>
+    ${isMaya() ? `<select class="tag" onchange="_plan.segSave('${sid}')" title="Voice tag: how Maya sounds from this sentence on (a style lasts until the next one)">${tagOptions(x.tag)}</select>` : ''}
+    <select class="emo" onchange="_plan.segSave('${sid}')" title="How this sentence is spoken (used by Svara; Maya uses the voice tag)" ${isMaya() ? 'hidden' : ''}>${EMO.map(e => `<option ${e === x.emotion ? 'selected' : ''}>${e}</option>`).join('')}</select>
     <input type="number" min="0" max="10" step="0.2" value="${x.pause_after_s || 0}" onchange="_plan.segSave('${sid}')" title="Pause after the sentence, in seconds">
     <button class="small" title="Remove this sentence" onclick="_plan.segRemoveSentence(this,'${sid}')">×</button></div>`;
 
@@ -548,7 +558,7 @@ Be concrete: colours, materials, numbers. Leave empty to skip.`); if (v === null
         <div class="mt-s"><b>Viewer promise:</b> ${esc(p.blueprint.viewer_promise)}</div><div><b>Central question:</b> ${esc(p.blueprint.central_question)}</div><div class="mute small">${esc(p.blueprint.why_structure)}</div>${p.blueprint.cold_open ? `<div><b>Cold open:</b> ${esc(p.blueprint.cold_open)}</div>` : ''}${p.blueprint.stakes ? `<div><b>At stake:</b> ${esc(p.blueprint.stakes)}</div>` : ''}${p.blueprint.false_answer ? `<div><b>The wrong answer first:</b> ${esc(p.blueprint.false_answer)}</div>` : ''}
         <div class="mt-s">${p.blueprint.beats.map(b => `<div class="beatrow"><b>${esc(b.id)}</b><span>${esc(b.name)}</span><span>${esc(b.purpose)}</span><span class="mute">${esc(b.takeaway)}</span></div>`).join('')}</div></div>` : ''}
 
-      ${p.segments.length ? `<div class="mt" id="sec-narration"><div class="row"><h3 style="margin:0">Narration (Hindi)</h3><span class="mute">${mmss(p.duration_s)} spoken · target ${mmss(p.settings.minutes * 60)}</span></div>
+      ${p.segments.length ? `<div class="mt" id="sec-narration"><div class="row"><h3 style="margin:0">Narration (Hindi)</h3><span class="mute">${mmss(p.duration_s)} spoken · target ${mmss(p.settings.minutes * 60)}</span>${isMaya() ? `<span class="sp"></span><button class="small" ${dis} title="The model directs the narrator's voice: one Maya tag per sentence, from the story's arc and the scenes" onclick="_plan.voiceTags(this)">Suggest voice tags</button>` : ''}</div>
         ${p.segments.map((s, i) => `<div class="seg ${s.locked ? 'locked' : s.status === 'approved' ? 'approved' : ''}" data-seg="${s.id}" id="seg-${s.id}">
           <div class="row"><b>${esc(segName(s.id))}</b><span class="mute small">${mmss(s.duration_s)} · ${s.sentences.length} sentences</span>${badge(s.status === 'approved' ? 'approved' : s.status === 'edited' ? 'info' : 'queued', s.status)}${s.locked ? badge('info', 'locked') : ''}<span class="sp"></span>
             <button class="small" ${i ? '' : 'disabled'} title="Move earlier" onclick="_plan.segMove('${s.id}',-1)">↑</button><button class="small" ${i < p.segments.length - 1 ? '' : 'disabled'} title="Move later" onclick="_plan.segMove('${s.id}',1)">↓</button>
@@ -556,8 +566,8 @@ Be concrete: colours, materials, numbers. Leave empty to skip.`); if (v === null
             <button class="small" onclick="_plan.segSet('${s.id}',{status:'${s.status === 'approved' ? 'draft' : 'approved'}'})">${s.status === 'approved' ? 'Unapprove' : 'Approve'}</button>
             <button class="small" onclick="_plan.segSet('${s.id}',{locked:${!s.locked}})">${s.locked ? 'Unlock' : 'Lock'}</button></div>
           <div class="sents mt-s">${s.sentences.map(x => sentRow(x, s.id)).join('')}</div>
-          <div class="row mt-s"><button class="small" onclick="_plan.segAddSentence('${s.id}')">+ sentence</button><span class="mute small">emotion and pause are how it is spoken; change the words freely, the scenes follow.</span></div>
-          <details class="mt-s"><summary class="small mute">Text with emotion tags (used by Svara; Veena speaks the plain sentences)</summary><div class="passage small" lang="hi">${esc(s.annotated)}</div></details>
+          <div class="row mt-s"><button class="small" onclick="_plan.segAddSentence('${s.id}')">+ sentence</button><span class="mute small">${isMaya() ? 'the voice tag and pause are how it is spoken (a style tag lasts until the next one)' : 'emotion and pause are how it is spoken'}; change the words freely, the scenes follow.</span></div>
+          <details class="mt-s"><summary class="small mute">Text as the voice receives it: Svara reads its emotion tags, Maya reads its voice tags (shown in the boxes above), Veena reads the plain sentences</summary><div class="passage small" lang="hi">${esc(isMaya() ? mayaPreview(s) : s.annotated)}</div></details>
           ${(s.issues || []).map(i => `<div class="iss ${i.kind === 'svara' || i.kind === 'script' ? 'error' : 'warn'}">⚠ ${esc(i.kind.replace(/_/g, ' '))}: ${esc(i.text)}</div>`).join('')}</div>`).join('')}</div>` : ''}
 
       ${p.segments.length ? `<div class="card pad mt" id="sec-style"><div class="row"><h3 style="margin:0">Visual style</h3>${sty.registry_stale || sbStale ? badge('warn', 'characters or scenes were made for another look') : badge('good', 'in use: ' + esc(sty.short || ''))}</div>
@@ -675,7 +685,7 @@ Be concrete: colours, materials, numbers. Leave empty to skip.`); if (v === null
           <div class="tm"><b>${mmss(s.start_s)}–${mmss(s.end_s)}</b><div class="mute">${s.duration_s.toFixed(1)}s</div><div class="mute small">${esc(segName(s.segment_id))} · s${s.s_from}${s.s_to > s.s_from ? '–' + s.s_to : ''}</div></div>
           <div><div class="row"><span class="vt" style="background:${vtColor(d.visual_type)}">${VT_LABEL[d.visual_type]}</span>${s.stale ? badge('warn', 'narration changed: check') : ''}${s.status === 'approved' ? badge('approved', 'approved') : ''}${s.locked ? badge('info', 'locked') : ''}${d.feasibility.level === 'needs_asset' ? badge('info', 'needs a real asset') : ''}<span class="sp"></span>
               <button class="small" onclick="_plan.sceneSet('${s.id}',{status:'${s.status === 'approved' ? 'draft' : 'approved'}'})">${s.status === 'approved' ? 'Unapprove' : 'Approve'}</button><button class="small" onclick="_plan.sceneSet('${s.id}',{locked:${!s.locked}})">${s.locked ? 'Unlock' : 'Lock'}</button>
-              <select class="small" title="Image model for this scene" onchange="_plan.sceneModel('${s.id}',this.value)"><option value="" ${d.model ? '' : 'selected'}>model: ${esc(modelFor(d).split('-')[0])} (plan)</option>${(PV.providers || []).map(m => `<option value="${m.id}" ${d.model === m.id ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}</select><button class="small" onclick="_plan.prompts('${s.id}')">Prompts</button><button class="small" ${s.locked ? 'disabled' : ''} onclick="_plan.sceneEdit('${s.id}')">Edit</button><button class="small" ${s.locked || running ? 'disabled' : ''} onclick="_plan.sceneRedraw(this,'${s.id}')">Redraw</button></div>
+              ${isMaya() ? `<select class="small" title="How the narrator sounds over this scene (Maya voice tag)" onchange="_plan.sceneTag('${s.id}',this.value)">${tagOptions(d.voice_tag)}</select>` : ''}<select class="small" title="Image model for this scene" onchange="_plan.sceneModel('${s.id}',this.value)"><option value="" ${d.model ? '' : 'selected'}>model: ${esc(modelFor(d).split('-')[0])} (plan)</option>${(PV.providers || []).map(m => `<option value="${m.id}" ${d.model === m.id ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}</select><button class="small" onclick="_plan.prompts('${s.id}')">Prompts</button><button class="small" ${s.locked ? 'disabled' : ''} onclick="_plan.sceneEdit('${s.id}')">Edit</button><button class="small" ${s.locked || running ? 'disabled' : ''} onclick="_plan.sceneRedraw(this,'${s.id}')">Redraw</button></div>
             <div class="mt-s"><b>${esc(d.subject)}</b> — ${esc(d.action)}</div>
             <div class="mute small mt-s">Why: ${esc(d.narrative.purpose)} · New: ${esc(d.narrative.new_information)}</div>
             <div class="small mt-s">${[d.setting.location, c.position && 'subject ' + c.position, c.distance, c.camera_angle, d.lighting, d.palette].filter(Boolean).map(esc).join(' · ')}</div>

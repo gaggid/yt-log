@@ -7,7 +7,7 @@ import time
 import httpx
 
 from story import db, settings as settings_mod
-from story2 import editorial, export, planner, storyboard, store as plan_store, svara, voices
+from story2 import editorial, export, maya, planner, storyboard, store as plan_store, svara, voices
 
 from . import store
 
@@ -32,13 +32,21 @@ def load_export(plan_id: str) -> tuple[dict, dict]:
     return latest, doc
 
 
-def tts_request(plan: dict, seg: dict, attempt: int, doc: dict | None = None) -> dict:
-    """The speech request for one segment, in the engine and voice the plan uses now. The export's recommended request only overrides Svara's defaults:
-    it was written for Svara."""
+def tts_requests(plan: dict, seg: dict, attempt: int, doc: dict | None = None) -> list[dict]:
+    """The speech requests for one segment (one, or several when Maya's text is longer than a request may be), in the engine and voice the plan uses
+    now. The export's recommended request only overrides Svara's defaults: it was written for Svara."""
     cur = voices.current(plan["narrator"])
     k = voices.key(cur)
     rec = ((doc or {}).get("public", {}).get("production_notes", {}).get("tts", {}).get("recommended_request")) if cur["engine"] == "svara-tts" else None
-    return voices.request_body(cur, voices.text_for(k, seg), attempt, rec)
+    return [voices.request_body(cur, t, attempt, rec) for t in voices.texts_for(k, seg)]
+
+
+async def _speak_all(client: httpx.AsyncClient, base: str, key: str, bodies: list[dict]) -> bytes:
+    parts = [await _speak(client, base, key, b) for b in bodies]
+    try:
+        return maya.join_wavs(parts)
+    except ValueError as e:
+        raise MediaError(str(e)) from e
 
 
 def apply_timing(plan_id: str) -> float:
@@ -121,11 +129,13 @@ async def generate(plan_id: str, segment_ids: list[str] | None = None, only_miss
         for i, seg in enumerate(todo):
             if progress:
                 progress(i, len(todo), f"part {i + 1} of {len(todo)}: making the voice")
-            it = store.add(plan_id, "voice", seg["id"], latest["rev"], "running", {"text_hash": store.segment_hash(seg, voice)})
-            body = tts_request(plan, seg, it["attempt"], doc)
+            now = cur[seg["id"]]                          # the plan's own sentences: voice tags can change after an export without changing what was approved
+            it = store.add(plan_id, "voice", seg["id"], latest["rev"], "running", {"text_hash": store.segment_hash(now, voice)})
+            bodies = tts_requests(plan, now, it["attempt"], doc)
+            body = bodies[0]
             t0 = time.time()
             try:
-                audio = await _speak(client, s["base_url"], key, body)
+                audio = await _speak_all(client, s["base_url"], key, bodies)
                 name = f"voice/{seg['id']}-a{it['attempt']}.wav"
                 path = store.media_dir(plan_id, "voice") / f"{seg['id']}-a{it['attempt']}.wav"
                 path.write_bytes(audio)
@@ -136,8 +146,8 @@ async def generate(plan_id: str, segment_ids: list[str] | None = None, only_miss
                 if ratio < 0.6 or ratio > 1.6:
                     flags.append(f"unusual length: {secs:.0f}s of audio for about {est:.0f}s expected; listen for skipped or repeated words")
                 store.update(it["id"], status="done", file=name, meta={"duration_s": round(secs, 2), "expected_s": round(est, 1), "seconds_taken": round(time.time() - t0, 1),
-                                                                         "voice": body["voice"], "seed": body["seed"], "temperature": body["temperature"],
-                                                                         "repetition_penalty": body["repetition_penalty"], "flags": flags, "model": body["model"]})
+                                                                         "voice": body["voice"], "seed": body["seed"], "temperature": body.get("temperature"),
+                                                                         "repetition_penalty": body.get("repetition_penalty"), "pieces": len(bodies), "flags": flags, "model": body["model"]})
                 apply_timing(plan_id)
                 made += 1
             except asyncio.CancelledError:
@@ -173,11 +183,11 @@ async def make_sample(plan_id: str, progress=None, s: dict | None = None, key: s
         raise MediaError("write the narration first: the sample reads its first sentence")
     cur = voices.current(plan["narrator"])
     one = {**seg, "sentences": seg["sentences"][:2], "annotated": svara.serialise(seg["sentences"][:2])}
-    body = voices.request_body(cur, voices.text_for(voices.key(cur), one), 1)
+    bodies = [voices.request_body(cur, t, 1) for t in voices.texts_for(voices.key(cur), one)]
     if progress:
         progress(0, 1, f"a sample in {voices.ENGINES[cur['engine']]['label']} / {cur['voice']}")
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_S) as client:
-        audio = await _speak(client, s["base_url"], key, body)
+        audio = await _speak_all(client, s["base_url"], key, bodies)
     (store.media_dir(plan_id, "voice") / f"sample-{cur['engine']}-{cur['voice']}.wav").write_bytes(audio)
     if progress:
         progress(1, 1, "done")

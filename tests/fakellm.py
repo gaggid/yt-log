@@ -32,6 +32,9 @@ class FakeBackend:
         if self.bad_json.get(task, 0) > 0:
             self.bad_json[task] -= 1
             return LLMResult("Sure! here you go: {not valid")
+        if task == "p2_voice_tags":                       # the first sentence of a segment is curious, the rest plain
+            n = len(re.findall(r"^\d+\. ", user.split("THE SEGMENT")[-1], re.M))
+            return LLMResult(json.dumps({"sentences": [{"n": i, "tag": "curious" if i == 1 else "neutral", "why": "test"} for i in range(1, n + 1)]}))
         main = user.split("CONTEXT (end of")[0]
         if task == "analyze_chunk":
             ids = [int(i) for i in re.findall(r"\[P(\d+)\]", main)]

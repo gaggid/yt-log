@@ -263,9 +263,9 @@ def test_a_later_export_carries_the_real_audio_and_still_matches_the_schema(env,
 
 # ── Veena: the default engine ───────────────────────────────────────────────
 
-def test_new_plans_use_veena_agastya_and_old_ones_too(env):
+def test_new_plans_use_maya_and_old_ones_keep_veena(env):
     pid, cid, be, p = boarded(env)
-    assert voices.current(planner.get_plan(p["id"])["narrator"]) == {"engine": "veena-tts", "voice": "agastya"}
+    assert voices.current(planner.get_plan(p["id"])["narrator"]) == {"engine": "maya-tts", "voice": "Siddhant"}
     assert voices.current({"voice": "hi_male"}) == {"engine": "veena-tts", "voice": "agastya"}          # a plan from before Veena existed
 
 
@@ -314,7 +314,7 @@ def test_tts_api_validates_engine_and_voice(env):
     from fastapi import HTTPException
     from story2 import api
     plan_id = exported(env)
-    assert asyncio.run(api.voice_engines())["default"] == "veena-tts"
+    assert asyncio.run(api.voice_engines())["default"] == "maya-tts"
     for bad in ({"engine": "nope"}, {"engine": "veena-tts", "voice": "hi_male"}):
         with pytest.raises(HTTPException) as e:
             asyncio.run(api.set_tts(plan_id, api.Tts(**bad)))
@@ -331,3 +331,113 @@ def test_a_voice_sample_is_one_short_take_in_the_chosen_voice(env, monkeypatch, 
     assert out["file"] == "voice/sample-veena-tts-agastya.wav" and (store.media_dir(plan_id) / out["file"]).is_file()
     assert gw.requests[0]["body"]["voice"] == "agastya" and not store.items(plan_id, "voice")      # not a numbered take: it never counts toward the video
     assert voice.state(plan_id)["sample"].startswith(f"/api/media/file/{plan_id}/voice/sample-veena-tts-agastya.wav")
+
+
+def test_maya_text_carries_tags_resets_and_splits_long_segments():
+    from story2 import maya
+    sents = [{"text": "वो रात थी", "tag": "whispers"}, {"text": "कोई नहीं जानता था", "tag": "whispers"}, {"text": "फिर सब बदल गया", "tag": ""},
+             {"text": "उसने गहरी साँस ली", "tag": "sighs"}, {"text": "सब ठीक है", "tag": "neutral", "emotion": "fear"}]
+    t = maya.chunks(sents)
+    assert t == ["[whispers] वो रात थी। कोई नहीं जानता था। [calm] फिर सब बदल गया। [sighs] उसने गहरी साँस ली। सब ठीक है।"]
+    assert maya.chunks([{"text": "यह क्या था", "emotion": "fear"}]) == ["[fearful] यह क्या था।"]               # a Svara emotion still sounds like something
+    assert maya.norm_tag("[Whisper]") == "whispers" and maya.norm_tag("made up") == ""
+    long = [{"text": "यह एक लंबा वाक्य है " * 6, "tag": "sad"} for _ in range(30)]
+    parts = maya.chunks(long)
+    assert len(parts) > 1 and all(len(p) <= 1500 for p in parts) and all(p.startswith("[sad]") for p in parts)
+
+
+def test_maya_request_and_scene_tags_reach_the_sentences(env, monkeypatch, fast):
+    from story2 import storyboard
+    plan_id = exported(env, "maya-tts")
+    plan = planner.get_plan(plan_id)
+    seg = plan["segments"][0]
+    sc = [x for x in plan["scenes"] if x["segment_id"] == seg["id"]][0]
+    data = {**sc["data"], "voice_tag": "worried"}
+    from story import db
+    db.ex("UPDATE scenes SET data=? WHERE id=?", (db.jdump(data), sc["id"]))
+    storyboard.apply_voice_tags(seg["id"])
+    seg = next(x for x in planner.get_plan(plan_id)["segments"] if x["id"] == seg["id"])
+    assert seg["sentences"][sc["s_from"] - 1]["tag"] == "worried"
+    body = voices.request_body({"engine": "maya-tts", "voice": "Siddhant"}, voices.text_for("maya-tts:Siddhant", seg), 1)
+    assert body["model"] == "maya-tts" and body["language"] == "hi" and "temperature" not in body and body["input"].startswith("[worried]")
+
+
+def test_voice_tags_do_not_change_what_was_approved(env):
+    from story import db
+    from story2 import storyboard
+    plan_id = exported(env, "maya-tts")
+    before = editorial.content_hash(planner.get_plan(plan_id))
+    plan = planner.get_plan(plan_id)
+    sc = plan["scenes"][0]
+    db.ex("UPDATE scenes SET data=? WHERE id=?", (db.jdump({**sc["data"], "voice_tag": "serious"}), sc["id"]))
+    storyboard.apply_voice_tags(sc["segment_id"])
+    assert editorial.content_hash(planner.get_plan(plan_id)) == before
+
+
+def test_ai_voice_direction_writes_tags_onto_sentences_and_keeps_the_plan_approved(env):
+    import json
+    import re
+    from story import db
+    from story.llm import LLMResult
+    from story2 import voicetags
+    pid, cid, be, p = boarded(env)
+    plan_id = p["id"]
+    before = editorial.content_hash(planner.get_plan(plan_id))
+    orig, seen = be.complete, []
+
+    async def complete(messages, max_tokens):
+        if "[TASK:p2_voice_tags]" in messages[0]["content"]:
+            n = len(re.findall(r"^\d+\. ", messages[1]["content"].split("THE SEGMENT")[1], re.M))
+            seen.append(messages[1]["content"])
+            return LLMResult(json.dumps({"sentences": [{"n": i, "tag": "Curious" if i == 1 else "sighs" if i == 2 else "", "why": "x"} for i in range(1, n + 1)]}))
+        return await orig(messages, max_tokens)
+    be.complete = complete
+    out = asyncio.run(voicetags.suggest(plan_id, be, {"retries": 1, "context_limit": 65536, "output_reserve": 2000, "safety_margin": 0.1, "chars_per_token": 3.5}))
+    plan = planner.get_plan(plan_id)
+    assert out["segments"] == len(plan["segments"]) == len(seen) and "THE WHOLE VIDEO" in seen[0] and "WHAT IS ON SCREEN" in seen[0]
+    for seg in plan["segments"]:
+        tags = [x["tag"] for x in seg["sentences"]]
+        assert tags[0] == "curious" and all(t in ("curious", "sighs", "neutral") for t in tags) and (len(tags) < 3 or tags[2] == "neutral")
+    assert editorial.content_hash(plan) == before
+    text = voices.text_for("maya-tts:Siddhant", plan["segments"][0])
+    assert text.startswith("[curious] ") and "[sighs] " in text
+
+
+def test_tag_checks_and_the_ui_lists_match_the_server():
+    import re
+    from pathlib import Path
+    from story2 import maya, voicetags
+    assert voicetags.problems(["curious", "sad", "angry", "calm", "neutral"])                                   # changes too often
+    assert voicetags.problems(["sighs", "laughs", "neutral", "neutral", "neutral"])                              # two sounds
+    assert not voicetags.problems(["curious", "curious", "neutral", "neutral", "serious", "serious"])
+    js = (Path(__file__).resolve().parent.parent / "static" / "plan.js").read_text(encoding="utf-8")
+    for name, want in (("MAYA_STYLE", maya.STYLE_TAGS), ("MAYA_SOUND", maya.SOUND_TAGS)):
+        got = re.search(rf"const {name} = \[(.*?)\];", js).group(1)
+        assert [x.strip().strip("'") for x in got.split(",")] == list(want)
+
+
+def test_scene_voice_tag_edit_is_a_production_setting(env):
+    pid, cid, be, p = boarded(env)
+    plan_id = p["id"]
+    plan = planner.get_plan(plan_id)
+    sc = plan["scenes"][0]
+    before = editorial.content_hash(plan)
+    out = storyboard.edit_scene(sc["id"], {"voice_tag": "Whisper"})
+    assert out["data"]["voice_tag"] == "whispers" and out["status"] == sc["status"]
+    seg = next(x for x in planner.get_plan(plan_id)["segments"] if x["id"] == sc["segment_id"])
+    assert seg["sentences"][sc["s_from"] - 1]["tag"] == "whispers"
+    assert editorial.content_hash(planner.get_plan(plan_id)) == before
+    storyboard.edit_scene(sc["id"], {"locked": True})
+    storyboard.edit_scene(sc["id"], {"voice_tag": "sad"})                                                   # allowed on a locked scene
+
+
+def test_auto_run_has_a_voice_direction_step_only_maya_needs(env):
+    from story3 import auto
+    pid, cid, be, p = boarded(env)
+    plan_id = p["id"]
+    keys = [k for k, _ in auto.STAGES]
+    assert keys.index("voicetags") == keys.index("storyboard") + 1
+    assert auto.done(plan_id, "voicetags") is False                                    # new plans use Maya and nobody has directed the voice yet
+    narr = voices.choose(planner.get_plan(plan_id)["narrator"], "veena-tts")
+    planner.set_narrator(plan_id, None, tts=narr["tts"])
+    assert auto.done(plan_id, "voicetags") is True

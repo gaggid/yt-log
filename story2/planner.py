@@ -7,7 +7,7 @@ import re
 import uuid
 
 from story import db, llm, projects, settings as settings_mod, storytypes
-from . import intake, leak, prompts as P, store, svara, voices
+from . import intake, leak, maya, prompts as P, store, svara, voices
 from .schemas import Blueprint, NarrationOut
 
 WPM = 148                                    # spoken Hinglish words per minute, measured on real Svara hi_male audio (125 was a guess)
@@ -201,8 +201,20 @@ def repeated_sentences(prior: list[str], new: list[str], threshold: float = 0.75
         seen.append(a)
     return out
 
+def set_sentence_tags(seg_id: str, tags: list[str]) -> None:
+    """Write Maya voice tags onto a segment's sentences, in order. Nothing else changes: tags are outside the content hash."""
+    row = db.one("SELECT sentences FROM segments WHERE id=?", (seg_id,))
+    if not row:
+        raise PlanError("segment not found")
+    sents = db.jload(row["sentences"], [])
+    for x, t in zip(sents, tags):
+        x["tag"] = maya.norm_tag(t)
+    db.ex("UPDATE segments SET sentences=? WHERE id=?", (db.jdump(sents), seg_id))
+
+
 def _segment_fields(sentences: list[dict], wpm: float) -> dict:
-    sents = [{"text": x["text"].strip(), "emotion": svara.norm_emotion(x.get("emotion")), "pause_after_s": float(x.get("pause_after_s") or 0)}
+    sents = [{"text": x["text"].strip(), "emotion": svara.norm_emotion(x.get("emotion")), "tag": maya.norm_tag(x.get("tag")),
+              "pause_after_s": float(x.get("pause_after_s") or 0)}
              for x in sentences if x.get("text", "").strip()]
     plain = " ".join(x["text"] for x in sents)
     annotated = svara.serialise(sents)
@@ -276,7 +288,8 @@ async def make_narration(plan_id: str, backend, s: dict | None = None, beat_ids:
 
     _indian_hook = (bp.get("indian_hook") or "").strip()
     system = ((P.NARRATE + storytypes.narrate_note(storytypes.of_plan(plan))
-               + (f"\n\nCULTURAL CONTEXT FOR THIS AUDIENCE: {_indian_hook}" if _indian_hook else ""))
+               + (f"\n\nCULTURAL CONTEXT FOR THIS AUDIENCE: {_indian_hook}" if _indian_hook else "")
+               + ("\n\n" + voices.narration_rules(voices.current(plan["narrator"])["engine"])).rstrip())
               .replace("{narrator}", plan["narrator"].get("name") or UNSET_NAME)
               .replace("{minutes}", f"{minutes / n_beats:.1f}").replace("{words}", str(per_beat))
               .replace("{per_beat}", str(per_beat)).replace("{min_beat}", str(int(per_beat * 0.7))))
@@ -334,7 +347,7 @@ def edit_segment(seg_id: str, sentences: list[dict] | None = None, text: str | N
     old = db.jload(seg["sentences"], [])
     if sentences is None and text is not None:
         parts = [t.strip() for t in __import__("re").split(r"(?<=[।.!?])\s+", text.strip()) if t.strip()]
-        sentences = [{"text": t, "emotion": old[i]["emotion"] if len(old) == len(parts) else "neutral",
+        sentences = [{"text": t, "emotion": old[i]["emotion"] if len(old) == len(parts) else "neutral", "tag": old[i].get("tag", "") if len(old) == len(parts) else "",
                       "pause_after_s": old[i]["pause_after_s"] if len(old) == len(parts) else 0} for i, t in enumerate(parts)]
     sets, args = [], []
     if sentences is not None:

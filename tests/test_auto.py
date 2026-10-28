@@ -67,9 +67,9 @@ def go(plan_id, monkeypatch, gw=None, **kw):
 def test_a_planned_storyboard_is_taken_all_the_way_to_a_draft_video(env, monkeypatch, fast):
     plan_id = planned(env)
     st = auto.state(plan_id)
-    assert st["next"] == "references" and {"blueprint", "narration", "characters", "storyboard"} <= {s["key"] for s in st["stages"] if s["done"]}
+    assert st["next"] == "voicetags" and {"blueprint", "narration", "characters", "storyboard"} <= {s["key"] for s in st["stages"] if s["done"]}
     out, gw, log = go(plan_id, monkeypatch)
-    assert out["ran"][0] == "references" and out["ran"][-1] == "thumbnail"
+    assert out["ran"][0] == "voicetags" and out["ran"][1] == "references" and out["ran"][-1] == "thumbnail"
     assert auto.state(plan_id)["remaining"] == 0 and auto.state(plan_id)["next"] is None
     plan = planner.get_plan(plan_id)
     assert editorial.approval_state(plan)["state"] == "approved" and export.list_exports(plan_id)
@@ -176,7 +176,7 @@ def test_from_a_brand_new_plan_every_step_runs_including_the_model_steps(env, mo
     pl = planner.get_plan(plan_id)
     db.ex("UPDATE plans SET settings=? WHERE id=?", (db.jdump({**pl["settings"], "cast_indian": True}), plan_id))                # the editor chose the cast first
     out, gw, log = go(plan_id, monkeypatch)
-    assert out["ran"][:5] == ["blueprint", "narration", "characters", "storyboard", "references"] and out["ran"][-1] == "thumbnail"
+    assert out["ran"][:6] == ["blueprint", "narration", "characters", "storyboard", "voicetags", "references"] and out["ran"][-1] == "thumbnail"
     assert auto.state(plan_id)["remaining"] == 0
     plan = planner.get_plan(plan_id)
     assert plan["blueprint"] and plan["segments"] and storyboard.get_scenes(plan_id) and editorial.approval_state(plan)["state"] == "approved"
@@ -209,7 +209,7 @@ def test_weak_means_hard_problem_low_score_or_nothing_yet():
 
 def test_reference_pictures_are_skipped_when_scenes_are_drawn_plain(env, monkeypatch, fast):
     plan_id = planned(env, edit=False)                              # plain drawing never sends a reference picture, so none is made
-    assert auto.done(plan_id, "references") and auto.state(plan_id)["next"] in ("prompts", "repeats")
+    assert auto.done(plan_id, "references") and auto.state(plan_id)["next"] in ("voicetags", "prompts", "repeats")
     out, gw, _ = go(plan_id, monkeypatch)
     assert "references" not in out["ran"] and not [r for r in gw.requests if r["body"] and "Character model sheet" in str(r["body"].get("prompt", ""))]
     assert auto.state(plan_id)["remaining"] == 0

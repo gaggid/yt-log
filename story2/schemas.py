@@ -4,7 +4,7 @@ from typing import Annotated
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
 from story import schemas as s1
-from . import svara
+from . import maya, svara
 
 STRUCTURES = ("cold_open", "mystery", "decision_consequence", "problem_mechanism", "myth_correction", "multi_case",
               "question_journey", "life_arc", "evidence_case", "numbered_list")
@@ -89,6 +89,7 @@ class Blueprint(M):
 class Sentence(M):
     text: Str
     emotion: Annotated[str, BeforeValidator(_emotion)] = "neutral"
+    tag: Annotated[str, BeforeValidator(maya.norm_tag)] = ""            # Maya voice tag; the storyboard fills it, narration does not
     pause_after_s: Annotated[float, BeforeValidator(_secs)] = 0.0
 
     @field_validator("text")

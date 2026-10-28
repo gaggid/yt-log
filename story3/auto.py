@@ -7,13 +7,13 @@ import asyncio
 import re
 
 from story import db, llm, settings as settings_mod
-from story2 import api as plans_api, director, editorial, export, imgplan, planner, storyboard, store as plan_store
+from story2 import api as plans_api, director, editorial, export, imgplan, planner, storyboard, store as plan_store, voicetags, voices
 
 from . import graphics, refs, scenes, store, thumbnail, video, voice
 from .voice import MediaError
 
 STAGES = [("blueprint", "Plan the story"), ("narration", "Write the narration"), ("characters", "Create characters and places"),
-          ("storyboard", "Design the storyboard"), ("references", "Make and approve reference pictures"), ("prompts", "Write image prompts"), ("repeats", "Fix camera repeats"), ("approve", "Check, review and approve the plan"),
+          ("storyboard", "Design the storyboard"), ("voicetags", "Direct the narrator's voice"), ("references", "Make and approve reference pictures"), ("prompts", "Write image prompts"), ("repeats", "Fix camera repeats"), ("approve", "Check, review and approve the plan"),
           ("export", "Export"), ("voice", "Make and approve the voice"), ("pictures", "Draw and approve the scene pictures"), ("graphics", "Build and approve the graphics"),
           ("video", "Make the draft video"), ("thumbnail", "Make the video thumbnail")]
 
@@ -63,6 +63,11 @@ def done(plan_id: str, key: str, st: dict | None = None) -> bool:
         return bool(r["done"] or r["total"] == 0)
     if key == "storyboard":
         return bool(plan["scenes"]) and not _uncovered(plan) and not plans_api.style_info(plan)["storyboard_stale"] and director.current(plan)
+    if key == "voicetags":
+        if voices.current(plan["narrator"])["engine"] != "maya-tts":
+            return True                                         # only Maya acts on tags
+        t = plans_api.step_times(plan_id)
+        return bool(plan["segments"]) and t.get("voicetags", 0) >= max(t.get("narration", 0), t.get("storyboard", 0))
     if key == "prompts":
         return _compiled(plan) and not any(i["kind"] in ("stale", "not_compiled") for i in imgplan.validate_prompts(plan_id)["issues"])
     if key == "repeats":
@@ -212,6 +217,8 @@ async def run_stage(plan_id: str, key: str, be, s: dict, api_key: str, progress,
     elif key == "storyboard":
         stale = plans_api.style_info(_full(plan_id))["storyboard_stale"]
         await storyboard.make_storyboard(plan_id, be, s, None, sub, bool(stale))
+    elif key == "voicetags":
+        await voicetags.suggest(plan_id, be, s, None, sub)
     elif key == "prompts":
         await asyncio.to_thread(imgplan.compile_plan, plan_id)
     elif key == "repeats":

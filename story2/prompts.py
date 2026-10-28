@@ -264,6 +264,8 @@ must fit the period. No logos and no brand text. On-screen text is allowed and t
 quoted: a headline, a sign, a label, a big number on a sign or screen (for example "OPEN 24 HOURS"). Rules for it: English letters only (never
 Hindi on screen), 8 words at most per text, only words and numbers that are in the story facts, never a quotation from a book or person.
 Screens and papers without such text show abstract light or marks only. A sign, shop front or notice board that is visible must carry short quoted words in text_on_screen (a place name from the continuity list or the story facts, in capitals, such as "BREWERY"): the picture model draws quoted words correctly and draws gibberish on a sign that has none. Any sign without such words must be blank or turned away from the camera.
+VOICE TAGS: also decide how the narrator sounds while this scene is on screen (voice_tag). The voice reads the tag as an acting note, so use it only where a person telling this story would really change tone: the turn, the dark moment, a danger, a loss, a reveal, a quiet aside. Allowed words: whispers, softly, loudly, shouting, sad, crying, excited, happy, cheerful, angry, frustrated, annoyed, sarcastic, curious, confused, nervous, scared, fearful, worried, panicked, calm, serious, surprised, amazed, tired, sleepy, disgusted; and the single sounds laughs, sighs, clears throat (a sound, not a mood: use rarely, for one real beat). Rules: "neutral" is the default and right for most scenes, explanation and evidence; a tag lasts until the next scene changes it, so keep one steady tag across neighbouring scenes of the same feeling and change it only at a real turn; match the story (fearful/worried/serious for danger, sad for loss, curious/amazed for a discovery, never cheerful for a death or a disaster); the tag follows the narration's meaning, not the picture.
+
 PROP SCALE: Every continuity prop carries a scale and a depiction. A prop whose scale is microscopic, geographic or cosmic must never appear at human scale unless its depiction is "actual-size" or "metaphor". Follow the depiction: show it on-screen, as a diagram on a real surface, or as a physical metaphor — never in a character's hand unless the depiction explicitly permits it.
 
 Return ONLY this JSON object:
@@ -276,6 +278,7 @@ Return ONLY this JSON object:
   "new_information": "what is new for the viewer compared with the previous scene",
   "takeaway": "what the viewer understands or feels after it",
   "emotional_effect": "the intended feeling, one short phrase",
+  "voice_tag": "how the narrator sounds over this scene: one word from the VOICE TAGS list, or \"neutral\"",
   "visual_type": "one of the types above",
   "subject": "the main subject, precisely",
   "action": "the exact visible action at this instant",
@@ -365,3 +368,31 @@ TEXT: The exact quoted words appear as very large all-capital bold text spanning
 CONSTRAINTS: No extra people beyond the face and the panel scenes. No logos or brand marks. No anime or cartoon style. No floating objects or symbols. One clear focal point in each area.
 
 Write the prompt for the concept and words given below."""
+
+
+VOICE_TAGS = """[TASK:p2_voice_tags]
+You are the voice director of a long-form Hindi (Hinglish) storytelling video told by ONE first-person narrator. A text-to-speech voice (Maya) reads the
+narration and obeys inline acting tags written in square brackets before the words they colour, like "[whispers] Come closer." Your job is to decide, for
+each sentence of ONE narration segment, how the narrator sounds, so the delivery holds a viewer's attention from the first second to the last.
+
+How the voice reads tags: a style tag colours every sentence after it until another style tag; a sound tag is a single sound at that point. Tags are best
+effort, so use few, and only where a person telling this story aloud would really change their voice.
+
+Allowed STYLE tags: whispers, softly, loudly, shouting, sad, crying, excited, happy, cheerful, angry, frustrated, annoyed, sarcastic, curious, confused,
+nervous, scared, fearful, worried, panicked, calm, serious, surprised, amazed, tired, sleepy, disgusted.
+Allowed SOUND tags: laughs, sighs, clears throat. Use "neutral" for plain speech with no tag.
+
+Think like a storyteller before you choose:
+- Find the one line of this segment that carries the turn, the reveal or the sting. That is where the voice changes. Everywhere else the voice stays steady.
+- The opening line of the whole video and the first line after a cliffhanger are where attention is won: give the opening a clear, confident colour (curious, serious or hushed
+  whispers), never a flat read.
+- Questions raised to the viewer sound curious; a hidden detail sounds softly or whispers; danger and a looming loss sound worried, nervous or fearful; a wrong turn the viewer
+  should feel sounds serious; a payoff sounds calm and certain; real relief or triumph may be happy. Never cheerful or excited for a death, a loss or a disaster.
+- Keep ONE tag across neighbouring sentences of the same feeling (repeat the same word; the voice keeps it). Change at most twice in a segment, and only at a real turn.
+- Explanation, evidence, numbers and names are "neutral" or "calm": clarity first.
+- A sound tag (sighs, laughs, clears throat) is at most once in a segment, and only where the sentence itself is a human moment (a sigh before bad news).
+- The same tags work for Hindi and English words.
+- You only choose tags. Do not change or repeat the words.
+
+Return ONLY this JSON object, one entry per sentence number, in order:
+{"sentences": [{"n": 1, "tag": "one allowed word or neutral", "why": "five words at most"}]}"""

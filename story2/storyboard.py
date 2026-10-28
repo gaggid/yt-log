@@ -10,7 +10,7 @@ import re
 import uuid
 
 from story import db, llm, settings as settings_mod, storytypes
-from . import describe, director, intake, leak, planner, prompts as P, providers, store, styles, svara
+from . import describe, director, intake, leak, maya, planner, prompts as P, providers, store, styles, svara
 from .scene_schemas import ASPECTS, NEEDS_ASSET, RegistryOut, SceneOut, ScenesOut
 
 MIN_SCENE_S, MAX_SCENE_S = 2.0, 20.0
@@ -331,6 +331,7 @@ def build_scene(sc: SceneOut, assets: list[dict], plan: dict, evidence_ids: list
     d = {
         "narrative": {"purpose": sc.purpose, "new_information": sc.new_information, "takeaway": sc.takeaway,
                       "emotional_effect": sc.emotional_effect},
+        "voice_tag": sc.voice_tag,
         "visual_type": sc.visual_type, "subject": sc.subject, "action": sc.action,
         "setting": {"location": sc.location, "period": sc.period, "props": sc.props},
         "composition": sc.composition.model_dump(), "lighting": sc.lighting, "palette": sc.palette, "atmosphere": sc.atmosphere,
@@ -350,6 +351,19 @@ def build_scene(sc: SceneOut, assets: list[dict], plan: dict, evidence_ids: list
         "notes": "an image model must not draw this content; build it deterministically from verified facts" if needs else ""}
     d["generation_intent"] = _compose_intent(d)
     return d, unknown
+
+
+def apply_voice_tags(seg_id: str) -> None:
+    """Copy each scene's suggested voice tag onto the narration sentences it covers. The tag is what Maya is told; nothing else about the wording changes."""
+    row = db.one("SELECT sentences FROM segments WHERE id=?", (seg_id,))
+    if not row:
+        return
+    sents = db.jload(row["sentences"], [])
+    for r in db.q("SELECT s_from, s_to, data FROM scenes WHERE segment_id=?", (seg_id,)):
+        tag = db.jload(r["data"], {}).get("voice_tag") or ""
+        for i in range(r["s_from"], min(r["s_to"], len(sents)) + 1):
+            sents[i - 1]["tag"] = tag
+    db.ex("UPDATE segments SET sentences=? WHERE id=?", (db.jdump(sents), seg_id))
 
 
 def _insert_scene(c, plan_id: str, seg: dict, n: int, rng: list[int], data: dict) -> str:
@@ -441,6 +455,7 @@ async def make_storyboard(plan_id: str, backend, s: dict | None = None, segment_
             for k, sc in enumerate(res.value.scenes):
                 data, _ = build_scene(sc, assets, plan, ev)
                 _insert_scene(c, plan_id, seg, k, sc.sentences, data)
+        apply_voice_tags(seg["id"])
         retime(plan_id)
     if progress:
         progress(len(todo), len(todo), "done")
@@ -486,6 +501,7 @@ async def regenerate_scene(scene_id: str, backend, s: dict | None = None, note: 
     data, _ = build_scene(res.value.scenes[0], assets, plan, story["evidence"]["paragraph_ids"])
     db.ex("UPDATE scenes SET data=?, rev=rev+1, stale=0, status='draft', issues='[]', updated_at=? WHERE id=?",
           (db.jdump(data), db.now(), scene_id))
+    apply_voice_tags(seg["id"])
     store.log(plan["id"], "scene_regenerated", {"id": scene_id, "note": note})
     return get_scene(scene_id)
 
@@ -613,7 +629,7 @@ def _deep_set(d: dict, path: str, value) -> None:
 def edit_scene(scene_id: str, patch: dict) -> dict:
     """patch keys: dotted paths into the scene record (e.g. "composition.distance", "subject"), plus status, locked."""
     sc = get_scene(scene_id)
-    if sc["locked"] and patch.keys() - {"locked", "model"}:
+    if sc["locked"] and patch.keys() - {"locked", "model", "voice_tag"}:
         raise planner.PlanError("this scene is locked; unlock it first")
     data, sets, args = sc["data"], [], []
     protected = {"prompts", "adapters", "previews", "output", "evidence_ids", "continuity"}
@@ -632,12 +648,14 @@ def edit_scene(scene_id: str, patch: dict) -> dict:
             if v and v not in providers.PROVIDERS:
                 raise planner.PlanError(f"unknown image model '{v}' (use one of: {', '.join(providers.PROVIDERS)})")
             data["model"] = v or ""
+        elif k == "voice_tag":
+            data["voice_tag"] = maya.norm_tag(v)
         elif k.split(".")[0] in protected:
             raise planner.PlanError(f"{k} is managed by the planner and cannot be edited here")
         else:
             _deep_set(data, k, v)
-    if set(patch) == {"model"}:
-        sets += ["data=?"]                                          # choosing the image model is a production setting, not an edit of the scene
+    if set(patch) <= {"model", "voice_tag"}:
+        sets += ["data=?"]                                          # the image model and the voice tag are production settings, not an edit of the scene
         args.append(db.jdump(data))
     elif set(patch) - {"status", "locked"}:
         data["generation_intent"] = _compose_intent(data)
@@ -648,6 +666,8 @@ def edit_scene(scene_id: str, patch: dict) -> dict:
         if "status" not in patch:
             sets.append("status='edited'")
     db.ex(f"UPDATE scenes SET {', '.join(sets)}, rev=rev+1, issues='[]', updated_at=? WHERE id=?", [*args, db.now(), scene_id])
+    if "voice_tag" in patch:
+        apply_voice_tags(sc["segment_id"])
     store.log(sc["plan_id"], "scene", {"id": scene_id, "fields": list(patch)})
     return get_scene(scene_id)
 

@@ -80,6 +80,19 @@ def _author_names(author: str) -> list[str]:
     return names
 
 
+_GENERIC_TITLES = {"introduction", "conclusion", "preface", "foreword", "prologue", "epilogue", "afterword", "overview", "summary", "background",
+                   "acknowledgements", "acknowledgments", "appendix", "bibliography", "references", "notes", "contents", "index", "abstract", "discussion", "results", "methods"}
+
+
+def _distinctive_title(ch: str) -> bool:
+    """A chapter title worth flagging: long enough and not one ordinary word ("Introduction" appears in any story's own wording)."""
+    c = ch.strip().lower()
+    if len(c) < 12 or c.startswith(("front", "contents", "index")):
+        return False
+    words = re.findall(r"\w+", c)
+    return len(words) >= 2 and not all(w in _GENERIC_TITLES for w in words)
+
+
 def check(text: str, prof: SourceProfile, ngram: int = NGRAM, scene: bool = False) -> list[Finding]:
     out: list[Finding] = []
     low = text.lower()
@@ -94,7 +107,7 @@ def check(text: str, prof: SourceProfile, ngram: int = NGRAM, scene: bool = Fals
         if c.lower() in low:
             out.append(Finding("credit", c, "a credit line printed in the source"))
     for ch in prof.chapter_titles:
-        if len(ch) >= 12 and ch.lower() in low and not ch.lower().startswith(("front", "contents", "index")):
+        if _distinctive_title(ch) and re.search(rf"(?<!\w){re.escape(ch.lower())}(?!\w)", low):
             out.append(Finding("part_title", ch, "a section title of the source"))
     for m in _SELF_REF.finditer(text):
         if scene and m.group(0).lower().split()[-1] in ("text", "passage", "excerpt"):
