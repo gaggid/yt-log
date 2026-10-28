@@ -15,7 +15,7 @@ from . import intake, planner, prompts as P, store, styles
 SIZES = ("extreme wide", "wide", "medium", "close", "extreme close")
 ANGLES = ("eye level", "low", "high", "overhead", "side", "over the shoulder")
 MOVES = ("push in", "pull back", "pan right", "pan left", "tilt up", "tilt down", "drift", "hold")
-KINDS = ("person", "reaction", "hands", "object", "place", "establishing")
+KINDS = ("person", "reaction", "hands", "object", "place", "establishing", "texture")
 PEOPLE_KINDS = ("person", "reaction")
 MAX_PEOPLE_SHARE = 0.45
 MAX_HOLD_SHARE = 0.15
@@ -95,6 +95,13 @@ def problems(shots: list[dict], n_segments: int, planned: set[int], seconds: dic
         share = sum(1 for x in shots if x["kind"] in PEOPLE_KINDS) / len(shots)
         if share > MAX_PEOPLE_SHARE:
             out.append(f"{round(share * 100)}% of the shots are a person's face or body (limit {round(MAX_PEOPLE_SHARE * 100)}%): make more of them hands, objects, places, establishing shots")
+    # per-segment check: a segment where every shot is a person is visually suffocating
+    seg_shots: dict[int, list[dict]] = {}
+    for x in shots:
+        seg_shots.setdefault(x["segment"], []).append(x)
+    for seg_i, seg_s in seg_shots.items():
+        if len(seg_s) >= 3 and all(x["kind"] in PEOPLE_KINDS for x in seg_s):
+            out.append(f"segment {seg_i}: all {len(seg_s)} shots are a person's face or body; add at least one place, hands, object or texture shot")
     held = sum(1 for x in shots if x["move"] == "hold")
     if shots and held / len(shots) > MAX_HOLD_SHARE:
         out.append(f"{held} of {len(shots)} shots are \"hold\" (a still frame); at most {round(MAX_HOLD_SHARE * 100)}% may be. Give most shots a push in, pull back, pan, tilt or drift")

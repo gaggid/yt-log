@@ -118,10 +118,18 @@ def assets_for(scene: dict, assets: list[dict]) -> list[dict]:
 
 def reference_plan(scene: dict, assets_used: list[dict], first_seen: dict[str, str]) -> dict:
     """Which registry assets would be sent as reference images (at most three) and in what role. An asset without an approved reference image
-    yet is listed as `missing`: this scene creates it when it is the asset's first appearance."""
+    yet is listed as `missing`: this scene creates it when it is the asset's first appearance.
+
+    If `continuity.use_ref_assets` is set, only those asset IDs are eligible for reference images. This separates
+    narrative continuity (asset is in the scene's world) from visual continuity (asset's reference sheet helps the image model).
+    Key absent → include all refs (backwards compat for scenes made before this field existed)."""
     order = {"person": 0, "narrator": 0, "place": 1, "prop": 2, "style": 3}
+    use_ids = _g(scene["data"], "continuity", "use_ref_assets", default=None)   # None = absent (old scene) → no filter
     refs, missing = [], []
     for a in sorted(assets_used, key=lambda x: order.get(x["kind"], 4)):
+        # use_ids present → only listed IDs may contribute reference images (style assets always allowed)
+        if use_ids is not None and a["kind"] != "style" and a["id"] not in use_ids:
+            continue
         imgs = [r for r in a["data"].get("reference_images", []) if r.get("approved")]
         if imgs:
             refs.append({"asset_id": a["id"], "name": a["name"], "kind": a["kind"], "image_id": imgs[0].get("id"), "role": _role(a)})
@@ -335,6 +343,9 @@ def shot_line(comp: dict) -> str:
     return _sent("Shot: " + head, how, lens, f"{_s(comp.get('perspective'))} perspective" if _s(comp.get("perspective")) else "")
 
 
+_ENV_LED = frozenset(("atmospheric", "metaphor", "transition"))   # visual types where the environment IS the subject
+
+
 def compile_qwen(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -> dict:
     d, cfg, notes = scene["data"], providers.get("qwen-image-2.1"), []
     fmt = plan["format"]
@@ -348,30 +359,58 @@ def compile_qwen(scene: dict, assets_used: list[dict], plan: dict, refs: dict) -
     use_refs = bool(refs["references"]) and (plan.get("settings") or {}).get("scene_pictures", {}).get("mode") in ("edit", "auto")
     ref_index = {r["asset_id"]: i for i, r in enumerate(refs["references"], 1)} if use_refs else {}
     comp = d.get("composition") or {}
+
+    # environment-led: atmospheric/metaphor/transition, or an establishing shot with no visible character.
+    # These scenes lead with the world, not the person — promote environment/lighting/colour above subject/action.
+    env_led = (d.get("visual_type") in _ENV_LED) or (d.get("visual_type") == "establishing" and not people and not plate)
+
     sec: dict[str, str] = {}
     sec["shot"] = shot_line(comp) or "Shot: a medium shot at eye level."                      # first: the opening words steer the whole picture
-    sec["style"] = "Visual style: " + _sent(look["look"])
+    style_line = look["look"]
+    if env_led:
+        boost = _s(look.get("atmosphere_boost", ""))
+        if boost:
+            style_line = style_line.rstrip(".") + f", {boost}."
+    sec["style"] = "Visual style: " + _sent(style_line)
     if plate:
         notes.append("this visual needs a verified chart, document, screen, map or diagram: the picture is the illustrated scene around it; the exact content is added later")
-    if plate:
-        sec["subject"] = "Main subject: " + _sent(_s(_g(d, "feasibility", "fallback")) or _subject_text(d, people, indian, ref_index),
-                                                 ("Apart from the quoted words, any screen, paper or sign shows only abstract glowing light and shapes" if shown else
-                                                  "Any screen, paper or sign in the scene shows only abstract glowing light and shapes, nothing readable"))
-    else:
-        sec["subject"] = "Main subject: " + _sent(_subject_text(d, people, indian, ref_index))
-    sec["action"] = "Action and moment: " + _sent(f"The single moment shown is {_lead_lower(d.get('action'))}" if _s(d.get("action")) and not plate else
-                                                  "A still, held moment with no competing action")
+
     loc = _val(_g(d, "setting", "location"))
     env = "Environment: " + _sent(loc, f"Period: {_val(_g(d, 'setting', 'period'))}" if _val(_g(d, "setting", "period")) else "",
                                   f"Atmosphere: {_s(d.get('atmosphere'))}" if _s(d.get("atmosphere")) else "")
     ambient = "" if plate else _ambient_hint(loc, d.get("layers") or {})
-    sec["environment"] = env + ("" if plate else " " + _layers(d)) + (f" {ambient}" if ambient else "")
-    feel = "" if plate else mood.line(feeling_texts(scene, plan), hidden_for(d), bool(people))
-    if feel:
-        sec["feeling"] = feel
-    sec["composition"] = "Composition: " + _sent(f"The subject sits {_s(comp.get('position'))}" if _s(comp.get("position")) else "", _positions(comp))
-    sec["lighting"] = "Lighting: " + _sent(_s(d.get("lighting")) or "soft even light from a single clear direction")
-    sec["colour"] = "Colour and mood: " + _sent(f"Palette: {_s(d.get('palette')) or look['palette']}", f"Mood shown through: {_s(d.get('atmosphere'))}" if _s(d.get("atmosphere")) else "")
+    env_full = env + ("" if plate else " " + _layers(d)) + (f" {ambient}" if ambient else "")
+
+    if env_led and not plate:
+        # environment-led order: world first, subject/action after
+        sec["environment"] = env_full
+        sec["lighting"] = "Lighting: " + _sent(_s(d.get("lighting")) or "soft even light from a single clear direction")
+        sec["colour"] = "Colour and mood: " + _sent(f"Palette: {_s(d.get('palette')) or look['palette']}", f"Mood shown through: {_s(d.get('atmosphere'))}" if _s(d.get("atmosphere")) else "")
+        feel = mood.line(feeling_texts(scene, plan), hidden_for(d), bool(people))
+        if feel:
+            sec["feeling"] = feel
+        sec["subject"] = "Main subject: " + _sent(_subject_text(d, people, indian, ref_index))
+        sec["action"] = "Action and moment: " + _sent(f"The single moment shown is {_lead_lower(d.get('action'))}" if _s(d.get("action")) else
+                                                      "A still, held moment with no competing action")
+        sec["composition"] = "Composition: " + _sent(f"The subject sits {_s(comp.get('position'))}" if _s(comp.get("position")) else "", _positions(comp))
+    else:
+        # character-led / standard order: subject and action first
+        if plate:
+            sec["subject"] = "Main subject: " + _sent(_s(_g(d, "feasibility", "fallback")) or _subject_text(d, people, indian, ref_index),
+                                                     ("Apart from the quoted words, any screen, paper or sign shows only abstract glowing light and shapes" if shown else
+                                                      "Any screen, paper or sign in the scene shows only abstract glowing light and shapes, nothing readable"))
+        else:
+            sec["subject"] = "Main subject: " + _sent(_subject_text(d, people, indian, ref_index))
+        sec["action"] = "Action and moment: " + _sent(f"The single moment shown is {_lead_lower(d.get('action'))}" if _s(d.get("action")) and not plate else
+                                                      "A still, held moment with no competing action")
+        sec["environment"] = env_full
+        feel = "" if plate else mood.line(feeling_texts(scene, plan), hidden_for(d), bool(people))
+        if feel:
+            sec["feeling"] = feel
+        sec["composition"] = "Composition: " + _sent(f"The subject sits {_s(comp.get('position'))}" if _s(comp.get("position")) else "", _positions(comp))
+        sec["lighting"] = "Lighting: " + _sent(_s(d.get("lighting")) or "soft even light from a single clear direction")
+        sec["colour"] = "Colour and mood: " + _sent(f"Palette: {_s(d.get('palette')) or look['palette']}", f"Mood shown through: {_s(d.get('atmosphere'))}" if _s(d.get("atmosphere")) else "")
+
     fixed_lines = [f"{a['name']}: {'; '.join(_s(x) for x in _place_fixed(a, d))}" for a in assets_used if _place_fixed(a, d) and a["kind"] not in ("style", "person", "narrator") and not plate]
     ref_lines = [f"Image {i}: {r['role']} ({r['name']})" for i, r in enumerate(refs["references"], 1)] if use_refs else []
     if fixed_lines or ref_lines:                                                              # reference images are named only when they are really sent

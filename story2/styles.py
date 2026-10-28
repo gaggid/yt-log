@@ -23,6 +23,8 @@ PRESETS: dict[str, dict] = {
                         "Hand-painted, not a photograph, not a 3D render, not anime or cartoon. No logos or lettering."),
         "palette": "muted natural colour, one warm light source against cool shadow",
         "linework": "soft painted edges, no outlines",
+        # appended to the style section for atmospheric/establishing/metaphor/transition scenes only — boosts immersive quality
+        "atmosphere_boost": "anamorphic lens, volumetric light rays, deep focus with soft foreground bokeh, fine cinematic grain, rich tonal depth",
     },
     "gta": {
         "label": "Game-art illustration (GTA-style)",
@@ -35,6 +37,7 @@ PRESETS: dict[str, dict] = {
                         "saturated cinematic colour, strong rim light, richly detailed materials, slightly gritty finish. Hand-illustrated, not a photograph and not a 3D render. No logos, emblems or lettering anywhere."),
         "palette": "saturated cinematic colour, warm highlights against cool shadows",
         "linework": "confident bold outlines",
+        "atmosphere_boost": "dramatic wide establishing composition, saturated atmospheric haze, strong rim lighting, deep shadow pools, richly textured environment detail",
     },
     "noir": {
         "label": "Noir graphic novel",
@@ -45,6 +48,7 @@ PRESETS: dict[str, dict] = {
         "object_look": "A graphic-novel illustration drawn in heavy black ink linework with crosshatching and halftone dots, flat colour washes in deep blue, red and amber, gritty noir tone. Hand-inked, not a photograph and not a 3D render. No logos or lettering.",
         "palette": "deep blue, red and amber on black",
         "linework": "heavy black ink with crosshatching",
+        "atmosphere_boost": "extreme chiaroscuro, deep black voids, single hard light source cutting through darkness, heavy crosshatch texture, dense atmospheric shadow",
     },
     "concept": {
         "label": "Painterly game concept art",
@@ -55,6 +59,7 @@ PRESETS: dict[str, dict] = {
         "object_look": "Painterly video-game concept art illustration, moody cinematic lighting, visible brush texture, richly detailed materials. Hand-painted, not a photograph and not a 3D render. No logos or lettering.",
         "palette": "muted teal and amber with deep shadows",
         "linework": "soft painted edges",
+        "atmosphere_boost": "sweeping painterly environment, layered atmospheric haze, dramatic backlighting, visible loose brushwork on the sky and distance, sense of vast scale",
     },
 }
 

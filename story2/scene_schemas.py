@@ -135,6 +135,7 @@ class SceneOut(M):
     motion_intent: Str = ""
     text_on_screen: list[OnScreen] = []
     assets: StrList = []                             # names of registry assets used
+    use_ref_assets: StrList = []                     # subset whose reference images should be sent; empty = use all (omit place/prop refs for atmospheric/abstract scenes)
     fixed_by_facts: StrList = []                     # visual details that come from the story's facts
     creative_choices: StrList = []                   # details that are our creative decisions
     exclusions: StrList = []

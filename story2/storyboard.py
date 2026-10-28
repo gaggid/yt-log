@@ -148,12 +148,20 @@ def scene_problems(scenes: list, assets: list[dict]) -> list[str]:
     places = {a["name"].lower() for a in assets if a["kind"] == "place"}
     if not people and not places:
         return []                                                   # no registry to hold the scene to
+    # atmospheric, metaphor and transition scenes may stand alone as 2-3 second visual punctuation with no continuity anchor
+    _FREE_TYPES = frozenset(("atmospheric", "metaphor", "transition"))
     out = []
     for i, sc in enumerate(scenes, 1):
         if sc.visual_type in NEEDS_ASSET:
             continue                                                # built from verified facts later, with a full illustrated fallback
         used = {n.lower() for n in sc.assets}
         where = f"scene {i} ({sc.subject[:50]})"
+        if sc.visual_type in _FREE_TYPES:
+            # still reject explicitly abstract/unreal locations (void, limbo, "Abstract space") but allow
+            # an empty location — atmospheric shots with no specific anchor are fine
+            if _NOWHERE.search(sc.location or ""):
+                out.append(f"{where}: the location is '{sc.location}'. Even atmospheric scenes happen somewhere real (leave location empty if it is pure visual atmosphere).")
+            continue                                                # no requirement to name a continuity person or place
         if _NOWHERE.search(sc.location or "") or (not (sc.location or "").strip() and not used & places):
             out.append(f"{where}: the location is '{sc.location}'. Every picture happens in a real place of the story's world (use a place from the list).")
         if not (used & people or used & places):
@@ -338,7 +346,11 @@ def build_scene(sc: SceneOut, assets: list[dict], plan: dict, evidence_ids: list
         "style": sc.style, "layers": {"foreground": sc.foreground, "middle": sc.middle, "background": sc.background},
         "motion_intent": sc.motion_intent, "direction": {"shot": sc.shot, "move": director._move(sc.motion_intent)}, "text_on_screen": [t.model_dump() for t in sc.text_on_screen],
         "facts": {"fixed": sc.fixed_by_facts, "creative": sc.creative_choices},
-        "evidence_ids": evidence_ids, "continuity": {"assets": ids, "unknown": unknown},
+        "evidence_ids": evidence_ids, "continuity": {
+            "assets": ids, "unknown": unknown,
+            # only stored when explicitly set; absent = no filter (all eligible refs used)
+            **( {"use_ref_assets": [by_name[n.lower()] for n in sc.use_ref_assets if n.lower() in by_name]} if sc.use_ref_assets else {} )
+        },
         "output": {"aspect_ratio": plan["format"], "width": w, "height": h},
         "exclusions": sc.exclusions, "prompts": {}, "adapters": {},
         "translation": {"idea": sc.idea, "moment": sc.translation},

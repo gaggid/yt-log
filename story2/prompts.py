@@ -291,11 +291,13 @@ Return ONLY this JSON object:
   "motion_intent": "how it could move later (slow push in, pan, static hold)",
   "text_on_screen": [{"text": "exact words", "placement": "where"}],
   "assets": ["names of continuity assets used"],
+  "use_ref_assets": ["subset of asset names from 'assets' whose reference images should be sent to the image model — see rule below"],
   "fixed_by_facts": ["visual details that come from the story's facts"],
   "creative_choices": ["details that are our creative decisions"],
   "exclusions": ["things that must not appear"],
   "needs_asset": "", "fallback": ""
 }]}
+use_ref_assets rule: Include a person's name when they are a clearly visible subject in this scene (face, body, hands). Include a place's name only when the scene directly shows that place's recognizable physical features — its materials, layout, or equipment. Omit the place when the visual is dominated by something that overrides the location's look: a cosmic or abstract atmosphere, metaphorical scale, an ethereal overlay, a macro detail, or anything that makes the room/cave/building invisible or irrelevant. An empty list means no reference images are sent and the image model is free. Omit from the JSON entirely (do not write the key) when all assets in 'assets' should send their reference images — only write the key when you are restricting.
 Never mention a book, an author, a chapter, a page or a source. Use only facts given; do not invent names, numbers or outcomes."""
 
 
@@ -310,7 +312,7 @@ Think like a film director:
   main person is, how they feel, what they wear or hold, what has changed since the segment before.
 - Then list the shots of that segment, in order. Plan about one shot for every 4 to 6 seconds of the segment. For each shot say:
   - "focus": what the camera is on, in plain visible words (a person's face, hands on a table, the street from above, a door closing, a crowd's backs)
-  - "kind": person | reaction | hands | object | place | establishing
+  - "kind": person | reaction | hands | object | place | establishing | texture (texture: a macro shot of a surface, material or detail with no character — water, metal, stone, light through dust — used as a 2-3 second visual exhale between dense scenes)
   - "size": extreme wide | wide | medium | close | extreme close
   - "angle": eye level | low | high | overhead | side | over the shoulder
   - "move": push in | pull back | pan right | pan left | tilt up | tilt down | drift | hold. A push in for a realisation or a growing worry, a pull back
@@ -322,6 +324,8 @@ Rules of the craft:
 - Vary the size and angle from shot to shot. Never three shots of the same size in a row. Never two shots in a row with the same size and angle.
 - People are not in every shot. At most 4 shots in 10 are of a person's face or body (kind person or reaction). The rest are hands, objects, places, establishing
   shots and the world around the people. Give the places and things of the story room to be seen.
+- Every segment longer than 12 seconds must have at least one breathing-room shot: a texture, establishing, or atmospheric shot with no characters, lasting 2-4 seconds, where the viewer's eye resets. These are not filler — they are the cinematic exhale that makes the next character moment land harder. A segment where every shot shows a person's face is visually exhausting.
+- Texture shots (kind: texture) are macro or extreme-close material shots — water surface, dust in a shaft of light, a rough wall, condensation on metal — cut for 2-3 seconds. Use at least one per 30 seconds of total video time, at the moments of highest emotional density.
 - Keep the sense of one world: the same places come back, shown from new angles.
 - For incident and biography stories: never plan a diagram, a symbol, a floating object or an abstract shape. Every shot is something that could be filmed in that place and period. For documentary and explainer stories, the type note below names permitted visual devices for things that cannot be filmed directly.
 - Never mention a book, an author, a chapter, a page or a source.
