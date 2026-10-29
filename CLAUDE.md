@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Source-to-Story: turns a book (PDF) or article into a 16:9 long-form video through three stages with a human checkpoint each: Phase 1 `story/` (source to story candidates), Phase 2 `story2/` (story to video plan), Phase 3 `story3/` (plan to voice, pictures, graphics, ffmpeg draft video). `legacy/` is the old news-podcast generator, not served; leave it alone.
 
-Read [docs/RUN_LOG.md](docs/RUN_LOG.md) for what the latest end-to-end runs found and fixed, and [docs/APP_GUIDE.md](docs/APP_GUIDE.md) first (owner rules, measured model facts, invariants, plan-screen flow) and [docs/ROADMAP.md](docs/ROADMAP.md) for what remains.
+The active quality plan (audit, tasks, status of each) is [docs/TASKS_quality_overhaul.md](docs/TASKS_quality_overhaul.md): read it before changing narration, scenes or prompts, and tick tasks there as they land. Read [docs/RUN_LOG.md](docs/RUN_LOG.md) for what the latest end-to-end runs found and fixed, and [docs/APP_GUIDE.md](docs/APP_GUIDE.md) first (owner rules, measured model facts, invariants, plan-screen flow) and [docs/ROADMAP.md](docs/ROADMAP.md) for what remains.
 
 ## Commands
 

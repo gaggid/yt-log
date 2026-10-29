@@ -236,3 +236,24 @@ Other:
 - Add tests with each batch (fake gateways, no real models); run the whole suite before committing.
 - Small batches, each connected to the screen (journey step, "Next:" prompt, side-panel step, section) so the user can follow the whole process.
 - Commit messages describe the batch; the watcher deploys `origin/master`.
+
+## 8c. Quality overhaul (pipeline "q2"), added 2026-10-29
+
+The plan and its progress are in [TASKS_quality_overhaul.md](TASKS_quality_overhaul.md); the reasons are in [AUDIT_2026-10-29.md](AUDIT_2026-10-29.md). What exists and the rules to keep:
+
+- **Measure first.** `python -m story2.audit pl-xxxx [--audio]` (and the "Audit scorecard" card) reports narration, world, pace, prompt and audio metrics against targets and a per-30-second "boredom map"; `python -m story2.bench` runs the three bench stories and compares runs. Run both after any change to narration, storyboard or prompts.
+- **Sampling per task** (`story/settings.SAMPLING`, `settings.sampling(task)`): creative writing is warmer than JSON extraction; top_p and penalties are sent only after the connection test found the server accepts them. `JsonCaller` and `TextCaller` pick the task from the `[TASK:...]` tag.
+- **Pipeline version** (`story2/version.py`): `PIPELINE` stays "q1" until the material-based chain is proven on the real model; plans and stages are stamped, `style_info` reports "older pipeline". New planning data lives in `plan.settings` and scene data outside `editorial.content_hash`.
+- **Material Pack** (`story2/material.py`): 30 to 40 paraphrased, leak-checked details from the source passages; it is the only place the passages are read. Blueprint beats name the details they use (`use`, `show`, `turn`, `reward`).
+- **Narration v2** (`story2/narrate2.py`): draft, edit and tag passes; checks in code (banned phrases `story2/lexicon.py`, question budget, details told, attribution, script rules, repeats, new-word share, dead stretches, audience profile). Runs when a plan has a pack and a blueprint that names details; other plans keep the one-call path.
+- **Events** (`story2/events.py`): what the camera sees, one filmable moment per run of sentences, grounded in pack ids. The registry lists the places and people the events need, the director plans one shot per event, the storyboard one scene per event (`scene.data.event`), `storyboard.split_long` keeps scenes under about 8 s, and `imgprompts.compile_qwen_v2` writes the picture prompt as one positive paragraph (no "must not appear" list).
+- **Safety in code** (`story2/safety.py`): no cheerful voice or smile over a death or injury; private victims and not-yet-convicted people are renamed through `plan.settings.name_map`; crimes are stated as what police allege.
+- **Audio** (`story3/audiofix.py`, `video.LOUDNORM`): dead air is trimmed from every voice take (`voice.retrim` for old takes), the video is levelled to -14 LUFS.
+
+## 8d. Quality overhaul, second build (2026-10-29)
+
+- **Pipeline q2 is the default.** A new plan collects a Material Pack, plans the story from it, writes the narration in three passes, plans visual events, and draws event pictures from one-paragraph prompts. Plans made earlier keep their old path and show "made with an older method".
+- **Auto-run order:** material, blueprint, narration (quality gate), events, characters, storyboard (cards, cutaways, quality gate), voice tags, references, prompts, repeats, approve, export, voice, pictures (corrections use the judge's reasons), clips, graphics, video, title, thumbnail, publish pack. `plan.settings.gates.mode` is `strict` (stop with the metric named) or `warn`.
+- **The finished video** plays at `plan.settings.speed` (1.25 default), has phrase captions in the film's accent colour, a quiet sound bed ducked under the voice (`settings.audio`), chapter flashes, a year label and a colour grade at jumps in time, and a 4-second end card (`settings.structure.end_card`). The thumbnail headline is written in code. The publish pack is written to `media/<plan>/publish/` and never uploads.
+- **Where things live:** `story2/gates.py` (gates, safety and cultural rules), `judges.py` (rubric judges, persona panel), `region.py` + `data/regions.json`, `inserts.py`, `era.py`, `worldfix.py`, `variety.py` (the per-film signature), `story3/cards.py` (evidence cards and the route map), `audio.py`, `publish.py`, `dupes.py`, `story/reach.py` (Phase 1 chips).
+- **Known soft spots:** the gates' thresholds are first values (task 8.2 needs real films); pictures, voice and music were not run on real models in this build; see `docs/TASKS_quality_overhaul.md` for each task's status.
