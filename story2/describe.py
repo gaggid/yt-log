@@ -173,9 +173,34 @@ def indian_prefix(description: str) -> str:
     return f"Indian {d[0].lower() + d[1:]}" if m else f"Indian person: {d}"
 
 
-def person_view(a: dict, indian: bool, hide=frozenset()) -> tuple[str, list[str]]:
+def stage_for(a: dict, year: int | None) -> dict | None:
+    """The life stage of a person for a year (a person shown at 27 in 1991 and at 62 now has two): the stage whose years contain it, the last stage for "now" (year 9999)."""
+    stages = [s for s in (a["data"].get("life_stages") or []) if isinstance(s, dict)]
+    if not stages or year is None:
+        return None
+
+    def num(v, default):
+        try:
+            return int(str(v).strip()[:4])
+        except (TypeError, ValueError):
+            return default
+    ordered = sorted(stages, key=lambda s: num(s.get("from_year"), 0))
+    for s in ordered:
+        if num(s.get("from_year"), 0) <= year <= num(s.get("to_year"), 9999):
+            return s
+    return ordered[0] if year < num(ordered[0].get("from_year"), 0) else ordered[-1]
+
+
+def person_view(a: dict, indian: bool, hide=frozenset(), year: int | None = None) -> tuple[str, list[str]]:
     """The description and fixed details of a person as they go into a picture prompt: composed from the slots (so hidden ones are left out and the cast
-    setting applies), or the stored text when the person has no slots."""
+    setting applies), or the stored text when the person has no slots. For a person with life stages, the stage of the scene's `year` sets the age and adds what looks different."""
+    stage = stage_for(a, year)
+    if stage and a["data"].get("appearance"):
+        ap = clean({**a["data"]["appearance"], "age": str(stage.get("age") or a["data"]["appearance"].get("age", ""))})
+        ap = indianise(ap) if indian else ap
+        change = str(stage.get("look_changes") or "").strip()
+        det = describe(a["kind"], ap, hide).strip()
+        return (det + (f" At this age: {change.rstrip('.')}." if change else "")).strip(), [f for f in fixed_from(a["kind"], ap) if not is_hidden(f, hide)]
     d = a["data"]
     ap = d.get("appearance")
     if ap and (indian or hide):

@@ -24,6 +24,13 @@ def env(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_voice_retakes(monkeypatch):
+    """The fake speech gateway answers with silence, which would count as a take with dead air; tests that check the retake turn it back on."""
+    from story3 import voice
+    monkeypatch.setattr(voice, "RETAKES", 0)
+
+
+@pytest.fixture(autouse=True)
 def no_model_discovery(monkeypatch):
     """The gateway's model list must never change the set of image models inside a test (the dev machine's gateway may be running)."""
     from story2 import providers

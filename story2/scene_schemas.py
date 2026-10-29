@@ -79,6 +79,7 @@ class AssetOut(M):
     fictionalisation: Annotated[str, BeforeValidator(_fict)] = "generic_reconstruction"
     evidence_note: Str = ""                          # what in the story supports it, in our words
     literal: bool = True                             # false when it is an idea, a figure of speech, a chart feature or a group rather than one thing in the scene
+    life_stages: list[dict] = []                     # a person shown at more than one age: [{from_year, to_year, age, look_changes}]
 
 
 class RegistryOut(M):
@@ -112,6 +113,7 @@ class SceneOut(M):
     sentences: Annotated[list[int], BeforeValidator(_range)] = []
     idea: Str = ""                                   # what the narration MEANS here, in plain words (the thing to carry, not the words to draw)
     translation: Str = ""                            # the concrete moment in the story's world (who, where, doing what) that carries that idea
+    event: Str = ""                                  # the visual event (story2/events.py) this scene shows; empty for scenes planned without events
     shot: Annotated[int, BeforeValidator(_shot)] = 0                                    # the number of the director's shot this scene follows (0: none)
     purpose: Str
     new_information: Str = ""                        # what the viewer learns, notices or feels that the previous visual did not give
@@ -141,6 +143,7 @@ class SceneOut(M):
     exclusions: StrList = []
     needs_asset: Str = ""                            # for charts, documents, screens, maps: what verified asset is required
     fallback: Str = ""
+    pov: dict = {}                                   # set by the director's plan, never by the model: {"through": "a phone screen", "of": "who looks"}
     motion_clip: bool = False                        # user opted this scene into Wan 2.2 animation
 
     @field_validator("purpose", "subject")

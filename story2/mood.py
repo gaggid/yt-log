@@ -28,13 +28,18 @@ CUES: list[tuple[str, str, str, str, str]] = [
 FACE = {"face", "eyes", "expression"}
 
 
+GRAVE_MARK = "#grave"          # added by imgprompts.feeling_texts when the scene's narration is about a death or an injury (story2/safety.py)
+
+
 def label(texts: list[str]) -> str:
-    """The feeling named by the first text that matches a row (the scene's own phrase first, then the director's emotion for its part). "" for calm or unknown."""
+    """The feeling named by the first text that matches a row (the scene's own phrase first, then the director's emotion for its part). "" for calm or unknown.
+    Over narration about a death or an injury a glad or hopeful feeling becomes sorrow: a victim is never drawn smiling."""
+    grave = GRAVE_MARK in texts
     for t in texts:
         t = (t or "").lower()
         for lab, rx, *_ in CUES:
-            if re.search(rx, t):
-                return lab
+            if t != GRAVE_MARK and re.search(rx, t):
+                return "sorrow" if grave and lab in ("joy", "hope") else lab
     return ""
 
 

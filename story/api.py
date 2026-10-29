@@ -38,6 +38,7 @@ async def get_settings():
         "effective_chunk_tokens": b.chunk_target(s["chunk_tokens"], 1500),
         "warnings": b.warnings(s["chunk_tokens"], 1500),
     }
+    s["sampling_defaults"] = settings_mod.SAMPLING
     return s
 
 
@@ -51,6 +52,8 @@ async def put_settings(patch: dict):
 async def llm_test():
     s = settings_mod.get()
     res = await llm.connection_test(s, settings_mod.api_key())
+    if res.get("ok") and res.get("sampling_supported") is not None:
+        _guard(settings_mod.update, {"sampling_probe": res["sampling_supported"]})              # remembered: top_p and the penalties are sent only when the server took them
     if res.get("ok") and "json_mode_supported" in res:
         res["note"] = ("JSON mode is supported; enable it in Settings if replies keep failing validation."
                        if res["json_mode_supported"] else "JSON mode is not supported; prompts alone enforce the format.")
@@ -375,6 +378,12 @@ class MergeIn(BaseModel):
     ids: list[str]
     title: str = ""
     premise: str = ""
+
+
+@router.get("/projects/{pid}/merge-suggestions")
+async def merge_suggestions(pid: str):
+    """Pending stories that are mostly the same passages, with the title of the strongest: the review screen offers to merge them into one richer story."""
+    return {"suggestions": _guard(review.merge_suggestions, pid)}
 
 
 @router.post("/stories/merge")

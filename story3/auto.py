@@ -7,15 +7,16 @@ import asyncio
 import re
 
 from story import db, llm, settings as settings_mod
-from story2 import api as plans_api, director, editorial, export, imgplan, planner, storyboard, store as plan_store, voicetags, voices
+from story2 import api as plans_api, director, editorial, events, export, gates, imgplan, material, planner, storyboard, store as plan_store, titles, version, voicetags, voices
 
-from . import clips, graphics, refs, scenes, store, thumbnail, video, voice
+from . import cards, clips, dupes, graphics, publish, refs, scenes, store, thumbnail, video, voice
 from .voice import MediaError
 
-STAGES = [("blueprint", "Plan the story"), ("narration", "Write the narration"), ("characters", "Create characters and places"),
+STAGES = [("material", "Collect the story's material"), ("blueprint", "Plan the story"), ("narration", "Write the narration"), ("events", "Plan what the camera sees"), ("characters", "Create characters and places"),
           ("storyboard", "Design the storyboard"), ("voicetags", "Direct the narrator's voice"), ("references", "Make and approve reference pictures"), ("prompts", "Write image prompts"), ("repeats", "Fix camera repeats"), ("approve", "Check, review and approve the plan"),
           ("export", "Export"), ("voice", "Make and approve the voice"), ("pictures", "Draw and approve the scene pictures"), ("clips", "Animate scene clips"), ("graphics", "Build and approve the graphics"),
-          ("video", "Make the draft video"), ("thumbnail", "Make the video thumbnail")]
+          ("video", "Make the draft video"), ("title", "Choose the video title"), ("thumbnail", "Make the video thumbnail"),
+          ("publish", "Write the publish pack")]
 
 
 class AutoStop(MediaError):
@@ -50,10 +51,14 @@ def done(plan_id: str, key: str, st: dict | None = None) -> bool:
     """Is this stage already finished? `st` may hold the media states the screen has just computed (refs, scenes, graphics, video)."""
     st = st or {}
     plan = _full(plan_id)
+    if key == "material":
+        return not version.at_least(plan["settings"], "q2") or material.has(plan)           # a plan made before the Material Pack does not need one
     if key == "blueprint":
         return bool(plan["blueprint"])
     if key == "narration":
         return bool(plan["blueprint"]) and bool(plan["segments"]) and not _beats_missing(plan)
+    if key == "events":
+        return not material.has(plan) or events.current(plan)                              # a plan without a Material Pack plans its scenes the older way
     if key == "characters":
         return bool(plan["assets"]) and not plans_api.style_info(plan)["registry_stale"]
     if key == "references":
@@ -95,8 +100,13 @@ def done(plan_id: str, key: str, st: dict | None = None) -> bool:
     if key == "video":
         v = st.get("video") or video.state(plan_id)
         return bool(v["done"])
+    if key == "title":
+        return bool((plan["settings"].get("video_title") or "").strip())
     if key == "thumbnail":
         return bool(thumbnail.state(plan_id)["done"])
+    if key == "publish":
+        pk = publish.state(plan_id)
+        return bool(pk) and pk.get("title") == (plan["settings"].get("video_title") or "").strip()
     return False
 
 
@@ -109,7 +119,13 @@ def state(plan_id: str, st: dict | None = None) -> dict:
     except Exception as e:  # noqa: BLE001 - the screen still shows the button
         return {"stages": rows, "next": None, "remaining": 0, "error": str(e)[:200]}
     todo = [r for r in rows if not r["done"]]
-    return {"stages": rows, "next": todo[0]["key"] if todo else None, "remaining": len(todo)}
+    out = {"stages": rows, "next": todo[0]["key"] if todo else None, "remaining": len(todo)}
+    if any(r["key"] == "pictures" and not r["done"] for r in rows):
+        try:
+            out["pictures_eta_s"] = int(scenes.state(plan_id)["eta_missing_s"])           # shown on the Auto-run button: the pictures are the longest step (task 4.7)
+        except Exception:                                                              # noqa: BLE001 - an estimate is never worth a failure
+            pass
+    return out
 
 
 # ── the stages ──────────────────────────────────────────────────────────────
@@ -185,13 +201,18 @@ async def _repair_scenes(plan_id: str, be, s: dict, sub, notes: list[str]) -> No
 
 async def run_stage(plan_id: str, key: str, be, s: dict, api_key: str, progress, notes: list[str]) -> None:
     sub = lambda d, t, label="": progress(None, None, label)          # noqa: E731 - stage progress shown as the label only
-    if key == "blueprint":
+    if key == "material":
+        await material.make_material(plan_id, be, s)
+    elif key == "blueprint":
         await planner.make_blueprint(plan_id, be, s)
     elif key == "narration":
         plan = planner.get_plan(plan_id)
         if not plan["blueprint"]:
             raise AutoStop("the story is not planned")
         await planner.make_narration(plan_id, be, s, None, sub, bool(plan["segments"]))
+        await _gate(plan_id, "narration", be, s, notes)
+    elif key == "events":
+        await events.make_events(plan_id, be, s, None, sub)
     elif key == "characters":
         pl = planner.get_plan(plan_id)
         if not pl["segments"]:
@@ -222,6 +243,8 @@ async def run_stage(plan_id: str, key: str, be, s: dict, api_key: str, progress,
     elif key == "storyboard":
         stale = plans_api.style_info(_full(plan_id))["storyboard_stale"]
         await storyboard.make_storyboard(plan_id, be, s, None, sub, bool(stale))
+        await asyncio.to_thread(cards.plan, plan_id)                  # a chat, a call list, a report or a route in the story is built as a card, not drawn (inert without events)
+        await _gate(plan_id, "storyboard", be, s, notes)
     elif key == "voicetags":
         await voicetags.suggest(plan_id, be, s, None, sub)
     elif key == "prompts":
@@ -253,13 +276,33 @@ async def run_stage(plan_id: str, key: str, be, s: dict, api_key: str, progress,
             raise AutoStop("some narration parts have no voice (see the Voice section)")
     elif key == "pictures":
         plan = planner.get_plan(plan_id)
-        if not scenes.settings(plan)["chosen"]:
-            scenes.set_settings(plan_id, {"model": "qwen-image-2.1", "mode": "edit", "chosen": True})
-            notes.append("scene pictures use Qwen with reference sheets (falls back to plain generation when no reference pictures are approved)")
+        cfg = scenes.settings(plan)
+        if not cfg["chosen"]:
+            # Nothing was chosen, and the references stage is skipped unless the mode asks for sheets, so there are none: say "plain" instead of promising "from the sheets"
+            scenes.set_settings(plan_id, {"model": "qwen-image-2.1", "mode": "generate", "chosen": True})
+            notes.append("scene pictures are drawn plain with Qwen (no reference sheets): a person's face can differ between scenes. Choose \"from the reference sheets\" on the Scene pictures card to keep faces the same")
+        elif cfg["mode"] != "generate" and refs.targets(plan_id) and not refs.state(plan_id)["done"]:
+            await run_stage(plan_id, "references", be, s, api_key, progress, notes)               # the owner asked for sheets: make them first, never draw without them in silence
+            if not any(r["approved"] for r in refs.state(plan_id)["assets"]):
+                notes.append("the reference sheets could not be made: the scenes are drawn plain")
         await scenes.generate(plan_id, None, 1, True, None, None, sub, s, api_key, True)
-        weak = [r["id"] for r in scenes.state(plan_id)["scenes"] if not r["approved_current"] and _weak(r["candidates"], r["best"])]
-        if weak:                                                    # one more try for each picture with a hard problem or a poor score
-            await scenes.generate(plan_id, weak, 1, False, None, None, sub, s, api_key, True)
+        for _round in range(scenes.MAX_FIXES):                      # a picture with a hard problem or a poor score is corrected using what the judge saw, not just drawn again with another seed
+            rows = [r for r in scenes.state(plan_id)["scenes"] if not r["approved_current"] and _weak(r["candidates"], r["best"])
+                    and not ((r.get("best_item") or {}).get("score") or {}).get("event_fit", 0) >= scenes.GOOD_ENOUGH]
+            if not rows:
+                break
+            redraw = []
+            for r in rows:
+                change = scenes.change_for(r, dupes.note_for(plan_id, r["id"]))
+                if change and r.get("best_item"):
+                    try:
+                        await scenes.correct(plan_id, r["id"], change, None, r["best_item"]["id"], sub, s, api_key, True)
+                        continue
+                    except MediaError:
+                        pass
+                redraw.append(r["id"])
+            if redraw:
+                await scenes.generate(plan_id, redraw, 1, False, None, None, sub, s, api_key, True)
         _approve_first(plan_id, "scenes")
         n_left = sum(1 for r in scenes.state(plan_id)["scenes"] if r["approved_current"] and _weak(r["candidates"], r["best"], approved=r["approved"]))
         if n_left:
@@ -272,6 +315,7 @@ async def run_stage(plan_id: str, key: str, be, s: dict, api_key: str, progress,
         if not clips.settings(plan)["enabled"]:
             notes.append("motion clips are off — skipped")
             return
+        await asyncio.to_thread(clips.choose_scenes, plan_id)          # the hook, the reveals and the last picture get a moving clip (within the budget)
         cl = clips.state(plan_id)
         if cl["total"] == 0:
             notes.append("no scenes opted in for motion clips — skipped")
@@ -291,10 +335,25 @@ async def run_stage(plan_id: str, key: str, be, s: dict, api_key: str, progress,
         if chk["blockers"]:
             raise AutoStop(f"{len(chk['blockers'])} thing(s) are missing for the video (see the Draft video section)")
         await asyncio.to_thread(video.build, plan_id, "draft", bool(video.available()["captions"]), False, sub)          # most people watch with the sound off: captions on whenever ffmpeg can burn them
+    elif key == "title":
+        await titles.make(plan_id, be, s)
+        if not (planner.get_plan(plan_id)["settings"].get("video_title") or "").strip():
+            raise AutoStop("no title passed the checks against the film (see the title options); type one on the plan screen")
     elif key == "thumbnail":
         await thumbnail.make(plan_id, be, s, api_key, sub)
+    elif key == "publish":
+        await publish.build(plan_id, be, s)
     else:
         raise AutoStop(f"unknown step {key}")
+
+
+async def _gate(plan_id: str, stage: str, be, s: dict, notes: list[str]) -> None:
+    """The automatic quality gate of a stage (story2/gates.py): measured, repaired once, and in strict mode a stop that names the metric. Plans made before the material chain are
+    measured too but only their hard defects stop the run."""
+    try:
+        await gates.run(plan_id, stage, be, s, notes)
+    except gates.GateStop as e:
+        raise AutoStop(str(e))
 
 
 async def run(plan_id: str, progress, s: dict | None = None, api_key: str = "", only: list[str] | None = None) -> dict:

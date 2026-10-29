@@ -445,3 +445,23 @@ def test_the_vision_check_is_told_the_story_and_a_picture_from_another_world_is_
     scores = [r["candidates"][0]["score"] for r in scenes.state(plan_id)["scenes"]]                 # which scene is scored first depends on the item ids
     flagged = [s_ for s_ in scores if s_["hard"]]
     assert len(flagged) == 1 and flagged[0]["total"] <= 49 and any("does not belong to this story" in f for f in flagged[0]["flags"])
+
+
+def test_a_second_angle_scene_is_drawn_from_the_picture_of_the_scene_it_continues(env, monkeypatch, fast):
+    """Task 3.5: a scene that is a variant of another follows that scene's picture (same moment, other camera) once the first one is drawn."""
+    from story import db
+    plan_id = ready(env)
+    sc = sorted(storyboard.get_scenes(plan_id), key=lambda x: (x["start_s"], x["seq"]))
+    base, var = sc[0], sc[1]
+    d = dict(var["data"])
+    d["variant_of"] = base["id"]
+    db.ex("UPDATE scenes SET data=? WHERE id=?", (db.jdump(d), var["id"]))
+    gw = Gateway()
+    out = run(plan_id, gw, monkeypatch)
+    assert out["made"] == len(sc) and not out["failed"]
+    edits = gw.count("/images/edits")
+    assert len(edits) == 1                                                                   # only the second angle goes through the edit endpoint, with the first picture as Image 1
+    assert "same moment seen from another distance and angle" in str(edits[0]["body"].get("prompt", edits[0]["body"]))
+    assert len(gw.count("/images/generations")) == len(sc) - 1
+    item = [i for i in store.items(plan_id, scenes.KIND, var["id"]) if i["status"] == "done"][0]
+    assert item["meta"]["request"]["second_angle_of"] == base["id"]

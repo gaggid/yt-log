@@ -1,6 +1,7 @@
 """Model access: an OpenAI-compatible chat backend plus a JSON caller that enforces the context budget,
 validates replies against a schema, retries a bounded number of times, and keeps failed replies."""
 import asyncio
+import inspect
 import json
 import re
 import time
@@ -72,9 +73,9 @@ class ChatBackend:
         self.base = s["base_url"].rstrip("/")
         self.headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
-    async def complete(self, messages: list[dict], max_tokens: int) -> LLMResult:
+    async def complete(self, messages: list[dict], max_tokens: int, params: dict | None = None) -> LLMResult:
         payload = {**model_field(self.s), "messages": messages, "max_tokens": max_tokens,
-                   "temperature": self.s["temperature"], "stream": False}
+                   "temperature": self.s["temperature"], "stream": False, **(params or {})}
         if self.s.get("json_mode") == "on":
             payload["response_format"] = {"type": "json_object"}
         tries = max(1, int(self.s["transport_retries"]))
@@ -133,7 +134,24 @@ async def connection_test(s: dict, api_key: str, probe_json: bool = True) -> dic
             out["json_mode_supported"] = True
         except Exception:  # noqa: BLE001
             out["json_mode_supported"] = False
+    out["sampling_supported"] = {}
+    for field, value in (("top_p", 0.95), ("frequency_penalty", 0.3), ("presence_penalty", 0.1)):        # optional fields: sent later only when the server took them
+        try:
+            await ChatBackend({**s, "transport_retries": 1, "json_mode": "off"}, api_key).complete([{"role": "user", "content": "Reply with the single word: ok"}], 8, {field: value})
+            out["sampling_supported"][field] = True
+        except Exception:  # noqa: BLE001
+            out["sampling_supported"][field] = False
     return out
+
+
+_TASK_RE = re.compile(r"^\[TASK:(\w+)\]")
+
+
+def _takes_params(backend) -> bool:
+    try:
+        return "params" in inspect.signature(backend.complete).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 class JsonCaller:
@@ -142,18 +160,22 @@ class JsonCaller:
         self.s = s or settings_mod.get()
         self.budget = Budget.from_settings(self.s)
         self.last_attempt = False
+        self.sampling: dict = {}                      # the fields sent with the last call (for tests and logs)
 
     async def call(self, system: str, user: str, model_cls: type[BaseModel], validate=None) -> CallResult:
         est = self.budget.est
         base = [{"role": "system", "content": system}, {"role": "user", "content": user}]
         self.budget.check(est(system) + est(user))          # raises BudgetExceeded: never silently truncate
         messages = list(base)
+        m = _TASK_RE.match(system)
+        self.sampling = settings_mod.sampling(m.group(1), self.s) if m else {}
+        extra = {"params": self.sampling} if self.sampling and _takes_params(self.backend) else {}      # test doubles that do not take params are called as before
         raws: list[dict] = []
         tin = tout = 0
         t0 = time.time()
         for attempt in range(int(self.s["retries"]) + 1):
             self.last_attempt = attempt >= int(self.s["retries"])           # a validator may stop insisting on its last attempt
-            res = await self.backend.complete(messages, self.budget.output_reserve)
+            res = await self.backend.complete(messages, self.budget.output_reserve, **extra)
             tin += res.prompt_tokens or sum(est(m["content"]) for m in messages)
             tout += res.completion_tokens or est(res.text)
             if res.finish_reason == "length":
@@ -172,6 +194,61 @@ class JsonCaller:
                                                 "Reply again with ONLY the corrected JSON object."}]
                 try:
                     self.budget.check(sum(est(m["content"]) for m in messages))
+                except BudgetExceeded:
+                    break
+        raise ValidationFailed(f"no valid reply after {len(raws)} attempts: {raws[-1]['error'][:300]}", raws)
+
+
+class TextCaller:
+    """Like JsonCaller, for a reply that is plain prose. The reply is stripped of code fences and a leading label; `validate(text)` may raise ValueError, and the reply is then sent
+    back with the reason (the same bounded retries, and `last_attempt` on the final try)."""
+
+    def __init__(self, backend, s: dict | None = None):
+        self.backend = backend
+        self.s = s or settings_mod.get()
+        self.budget = Budget.from_settings(self.s)
+        self.last_attempt = False
+        self.sampling: dict = {}
+        self.override: dict = {}                    # sampling fields for this caller only (for example a warmer temperature for a second draft), over the task's own
+
+    @staticmethod
+    def clean(text: str) -> str:
+        t = _THINK_RE.sub("", text or "").strip()
+        t = re.sub(r"^```[a-z]*\s*|\s*```$", "", t, flags=re.I).strip()
+        return re.sub(r"^(?:revised prose|prose|narration|script|output)\s*:\s*", "", t, flags=re.I).strip()
+
+    async def call(self, system: str, user: str, validate=None) -> CallResult:
+        est = self.budget.est
+        base = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+        self.budget.check(est(system) + est(user))
+        m = _TASK_RE.match(system)
+        self.sampling = {**(settings_mod.sampling(m.group(1), self.s) if m else {}), **self.override}
+        extra = {"params": self.sampling} if self.sampling and _takes_params(self.backend) else {}
+        messages = list(base)
+        raws: list[dict] = []
+        tin = tout = 0
+        t0 = time.time()
+        for attempt in range(int(self.s["retries"]) + 1):
+            self.last_attempt = attempt >= int(self.s["retries"])
+            res = await self.backend.complete(messages, self.budget.output_reserve, **extra)
+            tin += res.prompt_tokens or sum(est(x["content"]) for x in messages)
+            tout += res.completion_tokens or est(res.text)
+            if res.finish_reason == "length":
+                raws.append({"response": res.text[:20000], "error": "reply cut off at the output limit"})
+                raise ValidationFailed("reply was cut off at the output token limit", raws, truncated=True)
+            text = self.clean(res.text)
+            try:
+                if not text:
+                    raise ValueError("the reply was empty")
+                if validate:
+                    validate(text)
+                return CallResult(text, tin, tout, int((time.time() - t0) * 1000), attempt + 1, raws)             # type: ignore[arg-type]  (the value is a str here)
+            except ValueError as e:
+                raws.append({"response": text[:20000], "error": str(e)[:1500]})
+                messages = base + [{"role": "assistant", "content": text[:6000]},
+                                   {"role": "user", "content": f"That reply is not right: {str(e)[:700]}\nReply again with ONLY the corrected text."}]
+                try:
+                    self.budget.check(sum(est(x["content"]) for x in messages))
                 except BudgetExceeded:
                     break
         raise ValidationFailed(f"no valid reply after {len(raws)} attempts: {raws[-1]['error'][:300]}", raws)

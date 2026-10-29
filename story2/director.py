@@ -21,6 +21,10 @@ MAX_PEOPLE_SHARE = 0.45
 MAX_HOLD_SHARE = 0.15
 
 
+# what kind of shot an event is (the event decides it, the director decides how it is shot)
+EVENT_KIND = {"place": "place", "person": "person", "reaction": "reaction", "hands": "hands", "object": "object", "document": "object", "map": "object", "crowd": "place", "texture": "texture", "phone": "object"}
+
+
 def _pick(v, options, default, aliases=()):
     t = re.sub(r"[-_]+", " ", str(v or "")).lower().strip()
     for a, b in aliases:
@@ -38,6 +42,68 @@ def _size(v):
 
 def _angle(v):
     return _pick(v, ANGLES, "eye level", (("bird", "overhead"), ("top", "overhead"), ("worm", "low"), ("shoulder", "over the shoulder"), ("profile", "side")))
+
+
+# ── act-level camera language and point-of-view shots (task 3.14) ─────────────────────────────────────────────────────────────────────────────────────────
+# The film is told in three acts and the camera behaves differently in each: calm and locked while the world is set up, closer and moving while it tightens, decisive in the last act.
+ACT_MOVES = {1: ("hold", "push in", "pan right", "pan left", "drift"), 2: ("drift", "pan right", "pan left", "push in", "tilt up", "tilt down"), 3: ("push in", "pull back", "tilt up", "hold")}
+ACT_EDGES = (0.25, 0.75)                      # shares of the running time where act 2 and act 3 begin
+POV_THROUGH = (("phone", "a phone screen"), ("screen", "a phone screen"), ("car window", "a car window"), ("bus window", "a bus window"), ("window", "a window"), ("door", "a doorway"), ("cctv", "a CCTV camera"), ("camera", "a CCTV camera"),
+               ("binocular", "binoculars"), ("car", "a car window"), ("keyhole", "a keyhole"), ("bus", "a bus window"))
+MAX_POV = 8
+
+
+def act_of(index: int, total: int) -> int:
+    """The act (1 to 3) of segment `index` (1-based) out of `total`."""
+    pos = (index - 0.5) / max(1, total)
+    return 1 if pos < ACT_EDGES[0] else 2 if pos < ACT_EDGES[1] else 3
+
+
+def apply_acts(by: dict, total: int) -> None:
+    """Give every segment its act and bring each shot's camera move into the grammar of that act (a shot keeps its move when the act allows it; otherwise it takes the act's moves
+    in turn, never the same twice in a row). The very last shot of the film pulls back. Reveal shots in act 3 push in."""
+    last = None
+    for key in sorted(by, key=int):
+        seg = by[key]
+        act = act_of(int(key), total)
+        seg["act"] = act
+        for sh in seg["shots"]:
+            sh["act"] = act
+            allowed = ACT_MOVES[act]
+            if sh.get("move") not in allowed:
+                pool = [m for m in allowed if m != last] or list(allowed)
+                sh["move"] = pool[(int(key) + seg["shots"].index(sh)) % len(pool)]
+            elif sh["move"] == last:
+                sh["move"] = next((m for m in allowed if m != last), sh["move"])
+            last = sh["move"]
+    if by:
+        final = by[max(by, key=int)]["shots"]
+        if final:
+            final[-1]["move"] = "pull back"
+
+
+def mark_pov(by: dict, evs: list[dict]) -> int:
+    """Mark up to MAX_POV shots as seen through an object (a phone screen, a window, a CCTV camera...) when their event is about one, spread over the film. Returns how many."""
+    by_event = {e["id"]: e for e in evs}
+    cands = []
+    for key in sorted(by, key=int):
+        for sh in by[key]["shots"]:
+            e = by_event.get(sh.get("event", ""))
+            if not e or e.get("reveal"):
+                continue
+            text = f"{e.get('key_object', '')} {e.get('doing', '')}".lower()
+            through = next((v for k, v in POV_THROUGH if k in text), "")
+            if through and sh.get("kind") in ("object", "hands", "person", "reaction", "place"):
+                cands.append((sh, through, e))
+    if not cands:
+        return 0
+    step = max(1, len(cands) // MAX_POV)
+    n = 0
+    for sh, through, e in cands[::step][:MAX_POV]:
+        who = (e.get("who") or ["someone"])[0] if isinstance(e.get("who"), list) else str(e.get("who") or "someone")
+        sh["pov"] = {"through": through, "of": who}
+        n += 1
+    return n
 
 
 def _move(v):
@@ -60,6 +126,7 @@ class ShotOut(M):
     angle: Annotated[str, BeforeValidator(_angle)] = "eye level"
     move: Annotated[str, BeforeValidator(_move)] = "drift"
     why: Str = ""
+    event: Str = ""                                          # the visual event this shot shows (story2/events.py); empty for shots planned without events
 
 
 class DirSegOut(M):
@@ -82,13 +149,18 @@ class DirectorOut(M):
         return v
 
 
-def problems(shots: list[dict], n_segments: int, planned: set[int], seconds: dict[int, float]) -> list[str]:
-    """What a director would not accept: missing segments, too few shots, a face in every frame, the same frame twice in a row."""
+def problems(shots: list[dict], n_segments: int, planned: set[int], seconds: dict[int, float], events: dict[int, int] | None = None) -> list[str]:
+    """What a director would not accept: missing segments, too few shots, a face in every frame, the same frame twice in a row. With events planned, a segment has exactly
+    one shot per event."""
     out = []
     missing = [i for i in range(1, n_segments + 1) if i not in planned]
     if missing:
         out.append(f"segments {', '.join(map(str, missing))} have no shots: plan every segment from 1 to {n_segments}")
-    thin = [i for i, s in seconds.items() if i in planned and sum(1 for x in shots if x["segment"] == i) < max(1, round(s / 8))]
+    if events:
+        off = [f"segment {i} has {sum(1 for x in shots if x['segment'] == i)} shot(s) for {k} events" for i, k in events.items() if i in planned and sum(1 for x in shots if x["segment"] == i) != k]
+        if off:
+            out.append("plan exactly one shot for each event: " + "; ".join(off))
+    thin = [] if events else [i for i, s in seconds.items() if i in planned and sum(1 for x in shots if x["segment"] == i) < max(1, round(s / 8))]
     if thin:
         out.append(f"too few shots in segment(s) {', '.join(map(str, thin))}: plan about one shot per 4 to 6 seconds")
     if shots:
@@ -125,7 +197,9 @@ def narration_key(segs: list[dict]) -> str:
 def current(plan: dict) -> bool:
     """Is there a shot plan, made for this narration and this visual direction?"""
     d = (plan["settings"] or {}).get("director")
-    return bool(d and d.get("by_segment") and d.get("direction") == styles.DIRECTION and d.get("narration") == narration_key(sorted(plan["segments"], key=lambda x: x["seq"])))
+    from . import events as events_mod                                       # late import: events builds on this module
+    ev_ok = (d or {}).get("events", "") == (events_mod.key(plan) if events_mod.current(plan) else "")        # a shot plan made for other events (or none) is not this plan's
+    return bool(d and d.get("by_segment") and d.get("direction") == styles.DIRECTION and d.get("narration") == narration_key(sorted(plan["segments"], key=lambda x: x["seq"])) and ev_ok)
 
 
 def _hook_brief(bp: dict) -> str:
@@ -169,6 +243,12 @@ async def make(plan_id: str, backend, s: dict | None = None) -> dict:
     secs = {i: sum(storyboard.sentence_seconds(sg, wpm, real.get(sg["id"]))) for i, sg in enumerate(segs, 1)}
     bp = plan["blueprint"] or {}
     narration = "\n".join(f"SEGMENT {i} (beat {sg['beat']}, {secs[i]:.0f} s): {sg['plain']}" for i, sg in enumerate(segs, 1))
+    from . import events as events_mod                                       # late import: events builds on this module
+    ev_by_seg = {i: events_mod.for_segment(plan, sg["id"]) for i, sg in enumerate(segs, 1)} if events_mod.current(plan) else {}
+    counts = {i: len(v) for i, v in ev_by_seg.items() if v}
+    if counts:
+        narration += "\n\nTHE EVENTS OF EACH SEGMENT (one shot for each, in order):\n" + "\n".join(
+            f"SEGMENT {i}: " + " || ".join(f"{e['id']} [{e['kind']}] {e['where']}: {e['doing']}" + (" (REVEAL)" if e["reveal"] else "") for e in evs) for i, evs in ev_by_seg.items() if evs)
     user = ("STORY FACTS:\n" + intake.facts_text(story["public"]) + "\n\nVIDEO PLAN: " + (bp.get("viewer_promise", "") + " Structure: " + bp.get("structure", "")).strip()
             + "\n\nCONTINUITY (use these place names):\n" + storyboard._asset_lines(storyboard.get_assets(plan_id)) + f"\n\nNARRATION:\n{narration}"
             + _beat_visual_brief(bp, segs)
@@ -180,20 +260,26 @@ async def make(plan_id: str, backend, s: dict | None = None) -> dict:
     def check(out: DirectorOut) -> None:
         tries.append(1)
         rows = [dict(sh.model_dump(), segment=sg.segment) for sg in sorted(out.segments, key=lambda x: x.segment) for sh in sg.shots]
-        bad = problems(rows, len(segs), {sg.segment for sg in out.segments if sg.shots}, secs)
+        bad = problems(rows, len(segs), {sg.segment for sg in out.segments if sg.shots}, secs, counts or None)
         if bad and len(tries) <= 2 and not caller.last_attempt:
             raise ValueError("The shot plan is not accepted yet:\n- " + "\n- ".join(bad))
 
-    res = await caller.call(P.DIRECTOR + storytypes.director_note(storytypes.of_plan(plan)), user, DirectorOut, check)
+    res = await caller.call(P.DIRECTOR + (P.DIRECTOR_EVENTS if counts else "") + storytypes.director_note(storytypes.of_plan(plan)), user, DirectorOut, check)
     by = {}
     for sg in res.value.segments:
         if 1 <= sg.segment <= len(segs) and sg.shots:
-            by[str(sg.segment)] = {"segment_id": segs[sg.segment - 1]["id"], "emotion": sg.emotion, "place": sg.place, "state": sg.state,
-                                   "shots": [x.model_dump() for x in sg.shots]}
+            shots = [x.model_dump() for x in sg.shots]
+            evs = ev_by_seg.get(sg.segment) or []
+            if evs and len(shots) == len(evs):                              # one shot per event: the shot carries the event's id, and what the event is decides the kind of shot
+                for shot, e in zip(shots, evs):
+                    shot["event"], shot["kind"] = e["id"], EVENT_KIND.get(e["kind"], shot["kind"])
+            by[str(sg.segment)] = {"segment_id": segs[sg.segment - 1]["id"], "emotion": sg.emotion, "place": sg.place, "state": sg.state, "shots": shots}
+    apply_acts(by, len(segs))
+    pov = mark_pov(by, events_mod.of(plan)) if counts else 0
     plan = planner.get_plan(plan_id)
     db.ex("UPDATE plans SET settings=?, updated_at=? WHERE id=?",
-          (db.jdump({**plan["settings"], "director": {"arc": res.value.arc, "by_segment": by, "direction": styles.DIRECTION, "narration": narration_key(segs)}}), db.now(), plan_id))
-    store.log(plan_id, "director", {"segments": len(by), "shots": sum(len(v["shots"]) for v in by.values())})
+          (db.jdump({**plan["settings"], "director": {"arc": res.value.arc, "by_segment": by, "direction": styles.DIRECTION, "narration": narration_key(segs), "events": events_mod.key(plan) if counts else ""}}), db.now(), plan_id))
+    store.log(plan_id, "director", {"segments": len(by), "shots": sum(len(v["shots"]) for v in by.values()), "pov": pov})
     return planner.get_plan(plan_id)
 
 

@@ -80,14 +80,28 @@ _ROMAN_HINDI = {"ke", "ki", "ka", "ko", "se", "ne", "ye", "yeh", "woh", "wo", "t
                 "sab", "ek", "nahi", "nahin", "jab", "tab", "lekin", "magar", "sawal", "pani", "shehar", "baat", "kaise", "bahut", "ganda", "andar", "upar", "niche", "hua", "gaya", "raha"}
 
 
+_ROMAN_HINDI_MORE = {"adrishya", "tatva", "brahmand", "lagbhag", "hissa", "isi", "bana", "cheez", "cheezon", "sabse", "zyada", "jagah", "hamari", "hamare", "aankhon", "chupi", "chupa", "hum",
+                     "aksar", "dhyan", "dete", "chamakti", "unhe", "dekhte", "saaf", "dikhte", "dikhta", "asli", "sach", "hi", "yahi", "wahi", "sirf", "chota", "rehta", "hota", "karte", "liye",
+                     "bhi", "iss", "unka", "uska", "iska", "jo", "jahan", "yahan", "wahan", "kaun", "kyun", "kyunki", "phir", "abhi", "kabhi", "sirph", "wale", "wali", "karna", "kiya", "diya"}
+
+
+_AMBIGUOUS = {"the", "to", "main", "par", "pe", "hi", "is", "iss", "so", "tha", "the", "sab", "jo", "kar", "bana", "hum", "sach", "wo"}      # also English words: not counted alone
+
+
 def romanised_hindi(text: str) -> bool:
-    """Hindi written in Latin letters ("Par sawal ye tha ki ..."): the voice reads it as English. A sentence with several such words next to each other is a slip."""
-    words = [w.lower() for w in re.findall(r"[A-Za-z]+", plain_text(text))]
+    """Hindi written in Latin letters ("Par sawal ye tha ki ..."): the voice reads it as English. Three such words in a row is a slip, and so is a sentence written wholly in Latin
+    letters that has two of them (Gemma writes "Dark matter ek adrishya tatva hai" when it forgets the script)."""
+    plain = plain_text(text)
+    words = [w.lower() for w in re.findall(r"[A-Za-z]+", plain)]
     run = best = 0
     for w in words:
         run = run + 1 if w in _ROMAN_HINDI else 0
         best = max(best, run)
-    return best >= 3
+    if best >= 3:
+        return True
+    if not _DEV.search(plain):
+        return len({w for w in words if (w in _ROMAN_HINDI or w in _ROMAN_HINDI_MORE) and w not in _AMBIGUOUS}) >= 2
+    return False
 
 
 def mixed_words(text: str) -> list[str]:

@@ -463,12 +463,20 @@ async function loadStories() {
     <div><h3>${esc(s.title)}</h3><div class="mute">${esc(s.premise)}</div>
       <div class="row small mt-s" style="gap:6px">${natBadge(s.nature)}${typeBadge()}${badge(s.status, s.status === 'pending' ? 'to review' : s.status)}${s.research ? badge('research', 'needs research') : ''}${s.edited ? badge('info', 'edited') : ''}
         <span class="mute">${esc(s.id)} · ${s.n_refs} passage${s.n_refs === 1 ? '' : 's'}${s.pages ? ' · p. ' + esc(s.pages) : ''}${s.kind ? ' · ' + esc(s.kind.replace(/_/g, ' ')) : ''}</span>
-        ${s.warnings ? `<span style="color:var(--warn)">⚠ ${s.warnings}</span>` : ''}${s.flags ? `<span style="color:var(--warn)" title="Open the story to see what is missing or uncertain">${s.flags} to check</span>` : ''}${s.duplicates ? `<span style="color:var(--warn)">possible duplicate</span>` : ''}</div></div>
+        ${s.reach ? reachChips(s.reach) : ''}${s.warnings ? `<span style="color:var(--warn)">⚠ ${s.warnings}</span>` : ''}${s.flags ? `<span style="color:var(--warn)" title="Open the story to see what is missing or uncertain">${s.flags} to check</span>` : ''}${s.duplicates ? `<span style="color:var(--warn)">possible duplicate</span>` : ''}</div></div>
     <div class="score"><b>${Math.round(s.eff_priority)}</b><span class="mute small">priority</span>
       <div class="mt-s small" title="How compelling the story is">story ${Math.round(s.eff_story)}</div>${bar(s.eff_story)}
       <div class="small" title="How accurately the source supports it">evidence ${Math.round(s.evidence_score)}</div>${bar(s.evidence_score, 'ev')}
       <div class="small" title="How much of a whole story (turning point, outcome, passages close together) the source holds">complete ${Math.round(s.completeness)}</div>${bar(s.completeness)}</div></div>`).join('');
   scrollTo(0, y);
+}
+function reachChips(r) {
+  const chip = (txt, tip, warn) => `<span class="badge" title="${esc(tip)}" style="${warn ? 'color:var(--warn)' : ''}">${esc(txt)}</span>`;
+  const out = [chip('visual ' + r.visual, 'How much there is to film: events, people, places, things', false), chip('hook ' + r.packaging, 'Whether a curiosity title can be written from the facts', false)];
+  if (r.safety.flags.length) out.push(chip('check: ' + r.safety.flags.slice(0, 2).join(', '), 'Flags a careful editor looks at before making this film: ' + r.safety.flags.join('; '), true));
+  out.push(r.region.covered ? chip('region: ' + r.region.ids.join(', '), 'Regions named in the story; the region table gives local clothing, streets and cutaways', false) : chip('no region', r.region.note, true));
+  if (r.sensitivity.terms.length) out.push(chip('community terms', 'The story names: ' + r.sensitivity.terms.join(', ') + '. Titles and thumbnails must not use them.', true));
+  return out.join(' ');
 }
 function clearFilters() { sf = {status: '', q: '', min: '', research: false, sort: 'priority', type: 'all'}; LS.set('sf:' + P.id, sf); tabStories(P.id); }
 function storiesFreshness() {
@@ -665,6 +673,9 @@ async function viewSettings() {
       <div id="derived" class="mt-s small mute"></div></div>
     <div class="card pad mt"><h4 style="margin-top:0">Reliability</h4>
       <div class="grid g3">${n('concurrency', 'Concurrency', 1, 'Parallel requests; the gateway serves one at a time.')}${n('retries', 'Invalid-reply retries')}${n('transport_retries', 'Connection retries')}${n('retry_backoff_s', 'Retry backoff (s)', 1)}${n('timeout_s', 'Request timeout (s)', 10)}${n('temperature', 'Temperature', 0.05)}</div></div>
+    <div class="card pad mt"><h4 style="margin-top:0">Writing temperature per task</h4>
+      <div class="mute small">Prose needs a warmer temperature than data extraction. A task shows its built-in value; change a box to override it, clear it to go back. Extra fields (top_p, penalties) are sent only when the connection test found the server takes them.</div>
+      <div class="grid g3 mt-s">${Object.entries(s.sampling_defaults || {}).map(([task, d]) => { const o = ((s.sampling || {})[task] || {}).temperature; return `<label class="f">${esc(task)}<input type="number" step="0.05" min="0" max="2" data-t="${esc(task)}" data-d="${d.temperature}" placeholder="${d.temperature}" value="${o === undefined ? '' : o}"></label>`; }).join('')}</div></div>
     <div class="card pad mt"><h4 style="margin-top:0">Stories &amp; scoring</h4>
       <div class="grid g3">${n('max_candidates', 'Stories to write up per source', 1, 'Further leads stay listed.')}${n('evidence_influence', 'Evidence influence (0–1)', 0.05, '0 ignores evidence in priority; 1 scales fully.')}${n('completeness_influence', 'Completeness influence (0–1)', 0.05, 'How much a missing outcome or scattered passages lower priority.')}${n('discover_window_chapters', 'Chapters per discovery call', 1, 'Smaller finds more stories but takes longer.')}</div>
       <div class="grid g3 mt-s">${Object.entries(s.weights).map(([k, v]) => `<label class="f">Weight: ${esc(k)}<input type="number" data-w="${k}" value="${v}"></label>`).join('')}</div>
@@ -680,6 +691,7 @@ async function saveSettings(btn) {
   const patch = {};
   document.querySelectorAll('[data-s]').forEach(el => { patch[el.dataset.s] = el.type === 'checkbox' ? el.checked : el.value; });
   patch.weights = {}; document.querySelectorAll('[data-w]').forEach(el => patch.weights[el.dataset.w] = +el.value);
+  patch.sampling = {}; document.querySelectorAll('[data-t]').forEach(el => { if (el.value !== '' && +el.value !== +el.dataset.d) patch.sampling[el.dataset.t] = {temperature: +el.value}; });
   const k = $('#s-key').value; if (k) patch.api_key = k;
   return act(btn, async () => { const s = await api('/settings', {method: 'PUT', json: patch}); showDerived(s); $('#s-key').value = ''; return s; }, 'Settings saved');
 }

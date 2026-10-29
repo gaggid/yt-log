@@ -14,6 +14,8 @@ from test_phase3f import planned as _planned
 def planned(env, edit=True):
     """A plan with its storyboard. Reference pictures are only part of auto-run when scenes are drawn from them, so most tests choose that."""
     plan_id = _planned(env)
+    st = planner.get_plan(plan_id)["settings"]
+    db.ex("UPDATE plans SET settings=? WHERE id=?", (db.jdump({**st, "pipeline": "q1"}), plan_id))                # these tests are about the steps of the older chain; the material chain has test_chain_v2
     if edit:
         scenes.set_settings(plan_id, {"mode": "auto"})
     else:
@@ -71,21 +73,21 @@ def test_a_planned_storyboard_is_taken_all_the_way_to_a_draft_video(env, monkeyp
     st = auto.state(plan_id)
     assert st["next"] == "voicetags" and {"blueprint", "narration", "characters", "storyboard"} <= {s["key"] for s in st["stages"] if s["done"]}
     out, gw, log = go(plan_id, monkeypatch)
-    assert out["ran"][0] == "voicetags" and out["ran"][1] == "references" and out["ran"][-1] == "thumbnail"
+    assert out["ran"][0] == "voicetags" and out["ran"][1] == "references" and out["ran"][-1] == "publish"
     assert auto.state(plan_id)["remaining"] == 0 and auto.state(plan_id)["next"] is None
     plan = planner.get_plan(plan_id)
     assert editorial.approval_state(plan)["state"] == "approved" and export.list_exports(plan_id)
     assert refs.state(plan_id)["done"] and scenes.state(plan_id)["done"] and voice.state(plan_id)["approved"] == len(plan["segments"])
     v = video.state(plan_id)
     assert v["done"] and v["videos"][-1]["profile"] == "draft" and store.path_of(store.get(v["videos"][-1]["id"])).is_file()
-    assert any("step 1 of" in x[2] or "step 5 of" in x[2] for x in log) and log[-1][2] == "done"
+    assert any("step 1 of" in x[2] or "step 7 of" in x[2] for x in log) and log[-1][2] == "done"
 
 
 def test_the_first_outcome_is_approved_and_pictures_default_to_plain_qwen(env, monkeypatch, fast):
     plan_id = planned(env)
     out, gw, _ = go(plan_id, monkeypatch)
-    assert scenes.settings(planner.get_plan(plan_id))["model"] == "qwen-image-2.1" and scenes.settings(planner.get_plan(plan_id))["mode"] == "edit"
-    assert any("Qwen" in n for n in out["notes"])
+    assert scenes.settings(planner.get_plan(plan_id))["model"] == "qwen-image-2.1" and scenes.settings(planner.get_plan(plan_id))["mode"] == "generate"
+    assert any("drawn plain with Qwen" in n for n in out["notes"])                                      # said as it is: no reference sheets, so no promise of them
     assert {r["body"]["model"] for r in gw.count("/images/generations")} == {"qwen-image-2.1"}
     assert all(r["approved"] for r in scenes.state(plan_id)["scenes"])
     assert all(r["approved"] for r in refs.state(plan_id)["assets"] if not r["skipped"])
@@ -163,7 +165,7 @@ def test_state_in_the_media_summary_and_the_api(tmp_path, monkeypatch):
         review.update_candidate(cid, {"status": "approved"})
         plan = c.post("/api/plans", json={"candidate_id": cid}).json()
         a = c.get(f"/api/media/{plan['id']}").json()["auto"]
-        assert a["next"] == "blueprint" and a["remaining"] == len(auto.STAGES) - sum(1 for s in a["stages"] if s["done"]) and [s["key"] for s in a["stages"]] == [k for k, _ in auto.STAGES]
+        assert a["next"] == "material" and a["remaining"] == len(auto.STAGES) - sum(1 for s in a["stages"] if s["done"]) and [s["key"] for s in a["stages"]] == [k for k, _ in auto.STAGES]
         assert c.post(f"/api/media/{plan['id']}/auto", json={"only": ["nonsense"]}).status_code == 400
 
 
@@ -173,13 +175,15 @@ def test_from_a_brand_new_plan_every_step_runs_including_the_model_steps(env, mo
     pid, cid = approved_story(env)
     plan_id = planner.create_plan(cid, minutes=2)["id"]
     scenes.set_settings(plan_id, {"mode": "auto"})
+    assert auto.state(plan_id)["next"] == "material"                                       # a plan made now starts with the story material
+    db.ex("UPDATE plans SET settings=? WHERE id=?", (db.jdump({**planner.get_plan(plan_id)["settings"], "pipeline": "q1"}), plan_id))              # this test walks the older chain; test_chain_v2 walks the new one
     assert auto.state(plan_id)["next"] == "blueprint"
     be = P2BFake()
     monkeypatch.setattr(auto.llm, "ChatBackend", lambda s, k: be)
     pl = planner.get_plan(plan_id)
-    db.ex("UPDATE plans SET settings=? WHERE id=?", (db.jdump({**pl["settings"], "cast_indian": True}), plan_id))                # the editor chose the cast first
+    db.ex("UPDATE plans SET settings=? WHERE id=?", (db.jdump({**pl["settings"], "cast_indian": True, "gates": {"mode": "warn"}}), plan_id))                # the editor chose the cast first; the fake narration has one 43-second scene
     out, gw, log = go(plan_id, monkeypatch)
-    assert out["ran"][:6] == ["blueprint", "narration", "characters", "storyboard", "voicetags", "references"] and out["ran"][-1] == "thumbnail"
+    assert out["ran"][:6] == ["blueprint", "narration", "characters", "storyboard", "voicetags", "references"] and out["ran"][-1] == "publish"
     assert auto.state(plan_id)["remaining"] == 0
     plan = planner.get_plan(plan_id)
     assert plan["blueprint"] and plan["segments"] and storyboard.get_scenes(plan_id) and editorial.approval_state(plan)["state"] == "approved"
@@ -221,17 +225,18 @@ def test_reference_pictures_are_skipped_when_scenes_are_drawn_plain(env, monkeyp
 def test_the_thumbnail_is_made_last_from_the_plan_and_approved(env, monkeypatch, fast):
     from story3 import thumbnail
     plan_id = planned(env)
-    assert auto.STAGES[-1][0] == "thumbnail" and auto.state(plan_id)["stages"][-1]["done"] is False
+    assert auto.STAGES[-1][0] == "publish" and auto.state(plan_id)["stages"][-1]["done"] is False
     out, gw, _ = go(plan_id, monkeypatch)
-    assert out["ran"][-2:] == ["video", "thumbnail"] and auto.state(plan_id)["remaining"] == 0
+    assert out["ran"][-4:] == ["video", "title", "thumbnail", "publish"] and auto.state(plan_id)["remaining"] == 0
     th = thumbnail.state(plan_id)
     assert th["done"] and th["item"]["approved"] and th["item"]["text"] == "Who removed the handle?"
     path = store.path_of(store.get(th["item"]["id"]))
     from PIL import Image
     assert Image.open(path).size == (1280, 720)                                                     # the size YouTube asks for
-    sent = [r for r in gw.requests if r["url"].endswith("/images/generations") and 'the words "Who removed the handle?"' in str(r["body"].get("prompt", ""))]
-    assert sent and "Composite image" in sent[0]["body"]["prompt"] and "close-up" in sent[0]["body"]["prompt"]       # a composite thumbnail, with the words in quotes
-    assert thumbnail._fallback_prompt(thumbnail.Option(text="Why now?", image="a street"), None).count('"Why now?"') == 1
+    sent = [r for r in gw.requests if r["url"].endswith("/images/generations") and "Composite image" in str(r["body"].get("prompt", ""))]
+    assert sent and "close-up" in sent[0]["body"]["prompt"] and "no text" in sent[0]["body"]["prompt"].lower()                   # a composite thumbnail; the headline is written in code, not drawn
+    assert 'the words "' not in sent[0]["body"]["prompt"]
+    assert thumbnail._fallback_prompt(thumbnail.Option(text="Why now?", image="a street"), None).count('"Why now?"') == 1                # the older way still asks the model for the words
     import pytest
     with pytest.raises(ValueError):
         thumbnail.Option(text="One")                                                                # too short
@@ -244,8 +249,17 @@ def test_auto_run_stops_at_the_characters_until_the_cast_is_chosen(env, monkeypa
     from test_phase2b import P2BFake
     pid, cid = approved_story(env)
     plan_id = planner.create_plan(cid, minutes=2)["id"]
+    db.ex("UPDATE plans SET settings=? WHERE id=?", (db.jdump({**planner.get_plan(plan_id)["settings"], "pipeline": "q1"}), plan_id))
     be = P2BFake()
     monkeypatch.setattr(auto.llm, "ChatBackend", lambda s, k: be)
     with pytest.raises(auto.AutoStop, match="choose who appears in the pictures"):
         go(plan_id, monkeypatch)
     assert planner.get_plan(plan_id)["segments"] and not storyboard.get_assets(plan_id)               # blueprint and narration were kept, no characters made
+
+
+def test_edit_mode_chosen_by_hand_makes_the_sheets_first_instead_of_drawing_plain_in_silence(env, monkeypatch, fast):
+    plan_id = planned(env)
+    scenes.choose(plan_id, "qwen-image-2.1", "edit")
+    out, gw, _ = go(plan_id, monkeypatch, only=["prompts", "approve", "export", "voice", "pictures"])
+    assert refs.state(plan_id)["done"] and any(r["approved"] for r in refs.state(plan_id)["assets"])
+    assert scenes.state(plan_id)["done"] and not any("could not be made" in n for n in out["notes"])

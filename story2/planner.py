@@ -5,9 +5,10 @@ overwritten by regeneration or by edits to other segments.
 """
 import re
 import uuid
+from types import SimpleNamespace
 
 from story import db, llm, projects, settings as settings_mod, storytypes
-from . import intake, leak, maya, prompts as P, store, svara, voices
+from . import intake, leak, lexicon, material, maya, narrate2, prompts as P, safety, store, svara, version, voices
 from .schemas import Blueprint, NarrationOut
 
 WPM = 148                                    # spoken Hinglish words per minute, measured on real Svara hi_male audio (125 was a guess)
@@ -93,8 +94,10 @@ def create_plan(candidate_id: str, narrator_name: str = "", minutes: float = DEF
             "voice": "hi_male", "tts": {"engine": voices.DEFAULT_ENGINE, "voice": voices.ENGINES[voices.DEFAULT_ENGINE]["default_voice"]}, "avatar": {"status": "to be designed"}}
     db.ex("INSERT INTO plans(id,project_id,candidate_id,format,status,narrator,settings,readiness,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
           (pid, story["evidence"]["project_id"], candidate_id, "16:9", "draft", db.jdump(narr),
-           db.jdump({"minutes": float(minutes), "wpm": WPM, "story_type": storytypes.of_project(projects.get(story["evidence"]["project_id"]))}), db.jdump(ready), db.now(), db.now()))
+           db.jdump({"minutes": float(minutes), "wpm": WPM, "story_type": storytypes.of_project(projects.get(story["evidence"]["project_id"])), "pipeline": version.PIPELINE}), db.jdump(ready), db.now(), db.now()))
     store.log(pid, "created", {"candidate": candidate_id})
+    from . import variety
+    variety.assign(pid)                                                       # a signature that differs from the recent films (palette, lens, opening, music, structure, caption accent)
     return get_plan(pid)
 
 
@@ -109,13 +112,33 @@ def set_narrator(plan_id: str, name: str | None = None, **fields) -> dict:
 
 
 def _story_for(plan: dict) -> dict:
-    return intake.load(plan["candidate_id"])
+    """The approved story as the planner sees it. Real names of private victims (and, by default, of people not yet convicted) are replaced by the plan's `name_map` in everything
+    a model reads; a plan without a map (made before the map existed) is unchanged."""
+    story = intake.load(plan["candidate_id"])
+    nm = (plan.get("settings") or {}).get("name_map")
+    if nm:
+        story["public"] = safety.apply_names(story["public"], nm)
+    return story
+
+
+def ensure_name_map(plan_id: str) -> dict:
+    """Write the plan's name map once (settings `anonymise`, default victims_and_suspects). Later calls leave it alone, so the owner's edits stay."""
+    plan = get_plan(plan_id)
+    st = plan["settings"]
+    if "name_map" in st:
+        return st["name_map"]
+    mode = st.get("anonymise") or "victims_and_suspects"
+    nm = safety.suggest_name_map(intake.load(plan["candidate_id"])["public"], mode)
+    db.ex("UPDATE plans SET settings=?, updated_at=? WHERE id=?", (db.jdump({**st, "anonymise": mode, "name_map": nm}), db.now(), plan_id))
+    store.log(plan_id, "name_map", {"mode": mode, "names": len(nm)})
+    return nm
 
 
 # ── blueprint ───────────────────────────────────────────────────────────────
 
 async def make_blueprint(plan_id: str, backend, s: dict | None = None) -> dict:
     s = s or settings_mod.get()
+    ensure_name_map(plan_id)
     plan = get_plan(plan_id)
     story = _story_for(plan)
     minutes = float(plan["settings"]["minutes"])
@@ -123,18 +146,37 @@ async def make_blueprint(plan_id: str, backend, s: dict | None = None) -> dict:
     user = ("STORY FACTS:\n" + intake.facts_text(story["public"]) + f"\n\nTarget length: about {minutes:g} minutes."
             + (f" That is short: plan AT MOST {cap} beats (this replaces the 5 to 9 beats rule), each needing about {MIN_BEAT_WORDS} spoken words, and pick only the facts that fit." if cap < 5 else ""))
 
+    pack_items = material.pack(plan).get("items", []) if material.has(plan) else []
+    if pack_items:
+        user += "\n\nSTORY MATERIAL (ids you can use):\n" + material.text_for(plan)
     caller = llm.JsonCaller(backend, s)
 
     def fits(out: Blueprint) -> None:
         if len(out.beats) > cap + 1 and cap < 9 and not caller.last_attempt:            # sent back with the reason, then the last attempt is accepted
             raise ValueError(f"The plan has {len(out.beats)} beats but a {minutes:g}-minute video has room for {cap}: each beat is about {MIN_BEAT_WORDS} spoken words. Merge or drop beats.")
-    res = await caller.call(P.BLUEPRINT + storytypes.blueprint_note(storytypes.of_plan(plan)), user, Blueprint, fits)
+        if pack_items and not caller.last_attempt:
+            bad = material.blueprint_problems(out, pack_items)
+            if bad:
+                raise ValueError("The plan does not use the story material properly yet:\n- " + "\n- ".join(bad[:6]))
+    res = await caller.call(P.BLUEPRINT + (P.BLUEPRINT_MATERIAL + P.BLUEPRINT_EXPERIENCE + (P.TAKEAWAY_NOTE if takeaway_wanted(plan, pack_items) else "") if pack_items else "") + storytypes.blueprint_note(storytypes.of_plan(plan)), user, Blueprint, fits)
     bp = res.value.model_dump()
+    if pack_items:
+        material.clean_blueprint(bp, pack_items)
     for i, b in enumerate(bp["beats"], 1):
         b["id"] = b["id"] or f"b{i}"
     db.ex("UPDATE plans SET blueprint=?, rev=rev+1, updated_at=? WHERE id=?", (db.jdump(bp), db.now(), plan_id))
     store.log(plan_id, "blueprint", {"structure": bp["structure"], "beats": len(bp["beats"])})
     return get_plan(plan_id)
+
+
+_PRACTICAL_RX = re.compile(r"scam|fraud|cheat|cyber|otp|phishing|apk|loan app|fake call|digital arrest|online|upi|bank account|helpline", re.I)
+
+
+def takeaway_wanted(plan: dict, items: list[dict]) -> bool:
+    """A "what this means for you" beat for incident and explainer films whose details are about something a viewer can protect themselves from (task 7.5); never for a biography."""
+    if storytypes.of_plan(plan) not in ("incident", "explainer"):
+        return False
+    return len(_PRACTICAL_RX.findall(" ".join(i.get("detail", "") for i in items))) >= 3
 
 
 # ── narration ───────────────────────────────────────────────────────────────
@@ -156,6 +198,20 @@ def suspense_text(bp: dict, beat: dict) -> str:
     if not whole and not mine:
         return ""
     return ("SUSPENSE PLAN (tell it as a storyteller who raises the question before the fact):\n" + "\n".join(whole + mine) + "\n\n")
+
+
+def closing(bp: dict, is_last_beat: bool) -> str:
+    """What the last beat must do. The blueprint's `next_hook` is added only when it is in Hinglish (has Devanagari) and the blueprint names a series to follow: an English
+    teaser read by a Hindi voice, or a teaser for a story that does not exist, is worse than none."""
+    if not is_last_beat:
+        return ""
+    hook = (bp.get("next_hook") or "").strip()
+    out = ("\n\nENDING: answer the video's central question first, in plain words. Then close on one concrete image or consequence that stays with the viewer. "
+           "Do not end on a summary or on a question the video never answers. The very last sentence is one specific, open question to the viewer about this story "
+           "(something they can answer in a comment from their own life or opinion, never yes or no, never 'what do you think').")
+    if hook and re.search(r"[ऀ-ॿ]", hook) and (bp.get("series_placement") or "").strip():
+        out += f" The very last line may plant the next story, in your own words: {hook}"
+    return out
 
 
 STOCK_OPENERS = ("मैं आपको", "यहाँ मैं आपको", "चलिए मैं", "पर यहाँ एक सवाल", "पर यहाँ एक उलझन", "पर यहाँ एक twist", "यहाँ मुझे सबसे")
@@ -209,6 +265,7 @@ def set_sentence_tags(seg_id: str, tags: list[str]) -> None:
     sents = db.jload(row["sentences"], [])
     for x, t in zip(sents, tags):
         x["tag"] = maya.norm_tag(t)
+    safety.guard_tags(sents)                                    # a death or an injury is never read cheerfully
     db.ex("UPDATE segments SET sentences=? WHERE id=?", (db.jdump(sents), seg_id))
 
 
@@ -216,6 +273,7 @@ def _segment_fields(sentences: list[dict], wpm: float) -> dict:
     sents = [{"text": x["text"].strip(), "emotion": svara.norm_emotion(x.get("emotion")), "tag": maya.norm_tag(x.get("tag")),
               "pause_after_s": float(x.get("pause_after_s") or 0)}
              for x in sentences if x.get("text", "").strip()]
+    safety.guard_tags(sents)
     plain = " ".join(x["text"] for x in sents)
     annotated = svara.serialise(sents)
     pauses = sum(x["pause_after_s"] for x in sents)
@@ -230,6 +288,8 @@ async def make_narration(plan_id: str, backend, s: dict | None = None, beat_ids:
     plan = get_plan(plan_id)
     if not plan["blueprint"]:
         raise PlanError("make the blueprint first")
+    ensure_name_map(plan_id)
+    plan = get_plan(plan_id)
     story = _story_for(plan)
     bp = plan["blueprint"]
     gone = [x["id"] for x in plan["segments"] if x["beat"] not in {b["id"] for b in bp["beats"]} and not x["locked"] and x["status"] != "approved"]
@@ -275,6 +335,10 @@ async def make_narration(plan_id: str, backend, s: dict | None = None, beat_ids:
         again = repeated_sentences(spoken, [x.text for seg in out.segments for x in seg.sentences])
         if again and not caller.last_attempt:
             raise ValueError("These sentences repeat something already spoken in the video; say something new instead: " + " | ".join(again[:4]))
+        said = [x.text for seg in out.segments for x in seg.sentences]
+        unattributed = safety.accusations(said)
+        if unattributed and not caller.last_attempt:
+            raise ValueError("These sentences state a crime as plain fact; say what the police say or allege (पुलिस के मुताबिक, आरोप है कि, बताया गया): " + " | ".join(unattributed[:3]))
         samey = overused_openers(spoken, [x.text for seg in out.segments for x in seg.sentences])
         if samey and not caller.last_attempt:
             raise ValueError("Too many sentences begin the same way as earlier ones (" + " | ".join(samey[:4]) + "). Start those sentences differently, with something specific to this moment.")
@@ -295,10 +359,12 @@ async def make_narration(plan_id: str, backend, s: dict | None = None, beat_ids:
     _indian_hook = (bp.get("indian_hook") or "").strip()
     system = ((P.NARRATE + storytypes.narrate_note(storytypes.of_plan(plan))
                + (f"\n\nCULTURAL CONTEXT FOR THIS AUDIENCE: {_indian_hook}" if _indian_hook else "")
-               + ("\n\n" + voices.narration_rules(voices.current(plan["narrator"])["engine"])).rstrip())
+               + ("\n\n" + voices.narration_rules(voices.current(plan["narrator"])["engine"])).rstrip()
+               + "\n\n" + safety.ATTRIBUTION_RULE)
               .replace("{narrator}", plan["narrator"].get("name") or UNSET_NAME)
               .replace("{minutes}", f"{minutes / n_beats:.1f}").replace("{words}", str(per_beat))
               .replace("{per_beat}", str(per_beat)).replace("{min_beat}", str(int(per_beat * 0.7))))
+    v2 = narrate2.applies(plan)
     tokens_out = 0
     for k, beat in enumerate(want):
         if progress:
@@ -318,20 +384,37 @@ async def make_narration(plan_id: str, backend, s: dict | None = None, beat_ids:
                    f"again that they already told; move the story forward):\n{earlier}\n\n" if said else "This is the opening of the video.\n\n")
                 + f"WRITE NARRATION FOR THIS BEAT ONLY ({beat['id']}, about {per_beat} words):\n"
                   f"purpose: {beat['purpose']}\nviewer takeaway: {beat['takeaway']}\nfacts: {'; '.join(beat['facts'])}"
-                + (f"\n\nNEXT VIDEO HOOK: End this beat with the following sentence (or a natural variation of it) as the very last line: {bp['next_hook']}"
-                   if beat["id"] == want[-1]["id"] and bp.get("next_hook") else ""))
-        res = await caller.call(system, user, NarrationOut, check)
+                + closing(bp, beat["id"] == want[-1]["id"]))
+        issues: list[dict] = []
+        if v2:                                                  # three passes from the Material Pack (story2/narrate2.py)
+            by_id = {it["id"]: it for it in material.pack(plan)["items"]}
+            ctx = SimpleNamespace(bp=bp, beat=beat, pos=order[beat["id"]] + 1, total=n_beats, per_beat=per_beat, first=not said, last=beat["id"] == want[-1]["id"], spoken=list(spoken),
+                                  items=[by_id[i] for i in beat.get("use", []) if i in by_id], names=material.pack(plan).get("names", []), avoid=(),
+                                  questions=sum(1 for t in spoken if "?" in t), told=[f"{b.get('reward') or b.get('turn') or b.get('purpose')}" for b in bp["beats"] if order[b["id"]] < order[beat["id"]]]
+                                  + [t for t in spoken[-3:]], rules=voices.narration_rules(voices.current(plan["narrator"])["engine"]), profile=lexicon.profile_of(plan["settings"]))
+            checks = plan["settings"].get("checks") or {}
+            ctx.tell_note, ctx.polish_note = storytypes.tell_note(storytypes.of_plan(plan)), storytypes.polish_note(storytypes.of_plan(plan))
+            ctx.payoff, ctx.is_payoff = bp.get("payoff") or "", beat["id"] == bp.get("payoff_position")
+            ctx.best_of_two, ctx.hindi_gate = checks.get("best_of_two", True), checks.get("hindi_gate", True)           # extra model calls: a second version of the opening and the ending, and the Hindi gate
+            value, issues, tok = await narrate2.write_beat(ctx, backend, s)
+            res = SimpleNamespace(value=value, tokens_out=tok)
+            if ctx.alt:                                                                                          # the version that lost is kept for the editor
+                st = get_plan(plan_id)["settings"]
+                db.ex("UPDATE plans SET settings=? WHERE id=?", (db.jdump({**st, "narration_alt": {**(st.get("narration_alt") or {}), beat["id"]: ctx.alt}}), plan_id))
+        else:
+            res = await caller.call(system, user, NarrationOut, check)
         tokens_out += res.tokens_out
         with db.tx() as c:
             c.execute("DELETE FROM segments WHERE plan_id=? AND beat=? AND locked=0 AND status!='approved'", (plan_id, beat["id"]))
             for n, seg in enumerate(res.value.segments):
                 f = _segment_fields([x.model_dump() for x in seg.sentences], wpm)
                 c.execute("INSERT INTO segments(id,plan_id,seq,beat,sentences,plain,annotated,emphasis,pronounce,facts_used,duration_s,"
-                          "evidence_ids,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                          "evidence_ids,issues,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                           ("seg-" + uuid.uuid4().hex[:8], plan_id, order[beat["id"]] + n / 100, beat["id"], db.jdump(f["sentences"]),
                            f["plain"], f["annotated"], db.jdump(seg.emphasis), db.jdump([x.model_dump() for x in seg.pronounce]),
-                           db.jdump(seg.facts_used), f["duration_s"], db.jdump(ev_ids), db.now()))
+                           db.jdump(seg.facts_used), f["duration_s"], db.jdump(ev_ids), db.jdump(issues), db.now()))
     store.log(plan_id, "narration", {"beats": [b["id"] for b in want], "tokens_out": tokens_out})
+    db.ex("UPDATE plans SET settings=? WHERE id=?", (db.jdump(version.stamp(get_plan(plan_id)["settings"], "narration")), plan_id))
     db.ex("UPDATE plans SET rev=rev+1, validation=NULL, updated_at=? WHERE id=?", (db.now(), plan_id))
     from . import storyboard
     storyboard.after_narration(plan_id)
@@ -399,6 +482,12 @@ def validate_plan(plan_id: str) -> dict:
         found = []
         found += [{"where": s["id"], "kind": "svara", "text": p, "detail": ""} for p in svara.validate(s["annotated"])]
         found += leak.check_many([(s["id"], s["plain"])], prof)
+        hidden = safety.real_names_in([s["plain"]], plan["settings"].get("name_map") or {})
+        if hidden:
+            found.append({"where": s["id"], "kind": "private_name", "text": "a real name that this plan hides is spoken: " + ", ".join(hidden), "detail": "the plan's name map (settings) replaces private victims and not-yet-convicted people"})
+        said = safety.accusations([x["text"] for x in s["sentences"]])
+        if said:
+            found.append({"where": s["id"], "kind": "attribution", "level": "warn", "text": "a crime is stated as plain fact: " + said[0][:90], "detail": "say what the police say or allege (पुलिस के मुताबिक, आरोप है कि)"})
         bad = svara.foreign_chars(s["plain"])
         if bad:
             found.append({"where": s["id"], "kind": "script", "text": "characters the voice cannot read: " + " ".join(bad), "detail": "digits and non-Latin, non-Devanagari scripts are skipped or mispronounced; write numbers as words"})

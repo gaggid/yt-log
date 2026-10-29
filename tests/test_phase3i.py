@@ -69,8 +69,9 @@ def test_everything_ready_builds_a_video_as_long_as_the_audio(env, monkeypatch):
     path = store.path_of(it)
     assert path.is_file() and it["status"] == "done" and it["file"].startswith("video/tiny-a1")
     real = video.probe_seconds(path)
-    assert abs(real * video.PLAYBACK_SPEED - chk["audio_s"]) < 0.8 and abs(real * video.PLAYBACK_SPEED - chk["plan_s"]) < 0.8            # the timeline adds up to the audio, then the whole video plays 1.25 times faster
-    assert video.PLAYBACK_SPEED == 1.25 and it["meta"]["speed"] == 1.25 and abs(it["meta"]["duration_s"] - chk["audio_s"] / 1.25) < 0.8
+    card = video.END_CARD_S                                                                       # the closing card is silent and comes after the voice
+    assert abs(real * video.PLAYBACK_SPEED - chk["audio_s"] - card) < 0.8 and abs(real * video.PLAYBACK_SPEED - chk["plan_s"] - card) < 0.8
+    assert video.PLAYBACK_SPEED == 1.25 and it["meta"]["speed"] == 1.25 and abs(it["meta"]["duration_s"] - (chk["audio_s"] + card) / 1.25) < 0.8
     assert it["meta"]["scenes"] == len(storyboard.get_scenes(plan_id)) and not out["placeholders"]
     info = video.media_info(path)["streams"]
     assert {s["codec"] for s in info} == {"h264", "aac"}
@@ -84,7 +85,7 @@ def test_every_scene_appears_once_and_in_order(env, monkeypatch):
     sc = sorted(storyboard.get_scenes(plan_id), key=lambda x: (x["start_s"], x["seq"]))
     assert len(it["meta"]["moves"]) == len(sc) == it["meta"]["scenes"]
     clips = sorted((store.media_dir(plan_id, "video") / "work" / "clips-tiny").glob("*.mp4"))
-    assert [c.name[:3] for c in clips] == [f"{n:03d}" for n in range(len(sc))]
+    assert [c.name[:3] for c in clips if not c.name.startswith("zz-")] == [f"{n:03d}" for n in range(len(sc))]          # the last file is the closing card
 
 
 def test_the_same_move_is_never_used_twice_in_a_row_and_cards_hold_still():
@@ -125,7 +126,7 @@ def test_build_anyway_marks_every_gap_and_still_has_the_right_length(env, monkey
     kinds = [p["kind"] for p in out["placeholders"]]
     assert kinds.count("picture") == len(storyboard.get_scenes(plan_id)) - 1 and kinds.count("voice") == len(planner.get_plan(plan_id)["segments"]) - 1
     chk = video.checklist(plan_id)
-    assert abs(video.probe_seconds(store.path_of(out["item"])) * video.PLAYBACK_SPEED - chk["plan_s"]) < 1.0
+    assert abs(video.probe_seconds(store.path_of(out["item"])) * video.PLAYBACK_SPEED - chk["plan_s"] - video.END_CARD_S) < 1.0
     assert not video.state(plan_id)["done"]                                                      # a video with placeholders is never "done"
 
 
@@ -170,7 +171,7 @@ def test_an_approved_graphic_is_used_for_a_scene_that_needs_one(env, monkeypatch
 
 def test_captions_follow_the_narration_sentences(env, monkeypatch):
     plan_id = ready(env, monkeypatch)
-    ev = video.caption_events(plan_id)
+    ev = video.caption_events(plan_id, "sentence")                                              # phrase captions have their own tests (test_video_v2)
     plan = planner.get_plan(plan_id)
     assert len(ev) == sum(len([s_ for s_ in seg["sentences"] if s_["text"].strip()]) for seg in plan["segments"])
     assert all(a < b for a, b, _t in ev) and all(ev[i][1] <= ev[i + 1][0] + 0.01 for i in range(len(ev) - 1))
@@ -180,7 +181,7 @@ def test_captions_follow_the_narration_sentences(env, monkeypatch):
         out = run_build(plan_id, captions=True)
         assert out["item"]["meta"]["captions"] and store.path_of(out["item"]).is_file()
         ass = (store.media_dir(plan_id, "video") / "work" / "captions.ass").read_text(encoding="utf-8")
-        assert "Nirmala UI" in ass and ass.count("Dialogue:") == len(ev)
+        assert "Nirmala UI" in ass and ass.count("Dialogue:") == len(video.caption_events(plan_id))
 
 
 def test_rebuilding_reuses_finished_clips_and_a_change_makes_the_video_old(env, monkeypatch):

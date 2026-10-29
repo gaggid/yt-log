@@ -29,7 +29,7 @@ Return ONLY this JSON object:
   "cold_open": "the most striking moment, told first without its explanation",
   "hook_scene_brief": "the concrete camera image for seconds 0-5: one sentence describing what is on screen before the viewer has any context — not what is said, what is SEEN (a place, an object, an action, a face in shadow)",
   "cold_open_visual": "what the camera shows before context is established: the thing, place or action as a storyboard note, not a narration line",
-  "next_hook": "one sentence the narrator delivers at the very end of the video to plant the next story — a question or premise, not a title or announcement; empty if this is a standalone story",
+  "next_hook": "ONLY when the story facts really name a second story that follows: one Hinglish sentence (Hindi in Devanagari) that plants it, a question or premise, not a title or announcement. Otherwise EMPTY: never invent a teaser, and never write it in English",
   "series_placement": "series name (3-5 words) and 2 to 3 related story premises from the same source that could follow this video; empty if this story stands alone",
   "music_brief": "overall emotional register for the soundtrack (e.g. 'low sparse piano, tense') and 2 to 3 specific moments where the music should shift and why",
   "indian_hook": "one or two sentences: what specifically resonates with Indian youth about this story — a cultural parallel, a shared anxiety, a figure they know or an institution they trust or distrust",
@@ -286,14 +286,13 @@ Return ONLY this JSON object:
   "props": ["objects that must be visible"],
   "composition": {"position": "where the subject sits in the frame", "left": "", "centre": "", "right": "", "camera_angle": "", "distance": "", "perspective": "", "framing": ""},
   "lighting": "source, direction, softness, contrast, time of day",
-  "palette": "main colours", "atmosphere": "air, weather, haze, mood in visible terms", "style": "the treatment, matching the style asset",
+  "palette": "main colours", "atmosphere": "air, weather, haze, mood in visible terms",
   "foreground": "", "middle": "", "background": "",
   "motion_intent": "how it could move later (slow push in, pan, static hold)",
   "text_on_screen": [{"text": "exact words", "placement": "where"}],
   "assets": ["names of continuity assets used"],
   "use_ref_assets": ["subset of asset names from 'assets' whose reference images should be sent to the image model — see rule below"],
-  "fixed_by_facts": ["visual details that come from the story's facts"],
-  "creative_choices": ["details that are our creative decisions"],
+  "fixed_by_facts": ["ONLY for chart, document, map or screen scenes: the exact numbers or dated events it must show, copied from the story facts; otherwise []"],
   "exclusions": ["things that must not appear"],
   "needs_asset": "", "fallback": ""
 }]}
@@ -344,8 +343,8 @@ For each option:
 - "text": the words printed on the thumbnail. English letters only, 2 to 8 words, usually a QUESTION that the video answers, or a short, startling statement. Curiosity, not a lie.
   Use only names, places and numbers that are in the story facts. No emoji, no hashtags.
 - "image": describe the composite layout in three parts, separated by " | ":
-    FACE: one person's emotional close-up on the left — their face, emotion (shock/fear/disbelief/anger), and what their hands or phone are doing.
-    PANELS: two or three small rectangular scenes stacked on the right — each one a key moment from the story. If a phone, screen or message is in the story, one panel should show it as a UI mockup (e.g. a WhatsApp notification, a bank SMS, a police alert on a screen).
+    FACE: ONE face only, on the left: the MAIN PERSON given below (same gender and age), their emotion (shock/fear/disbelief/anger), and what their hands or phone are doing. Never a second face, never a different person.
+    PANELS: two or three small rectangular scenes stacked on the right — each one a key moment from the story, shown by hands, objects or places: no faces, no maps and no written words in the panels. If a phone, screen or message is in the story, one panel should show it as a UI mockup (e.g. a WhatsApp notification, a bank SMS, a police alert on a screen).
     TEXT AREA: where the large bold text sits and what colour it should be (e.g. "yellow-white bold text at the bottom, red accent on the key number").
 - "why": one short phrase: why this makes people click.
 
@@ -363,13 +362,13 @@ Turn the concept below into a single detailed image prompt that produces a profe
 STYLE: Photorealistic digital composite. Vivid saturated colours. High contrast. Everything is sharp. No illustration, no painting, no brushwork, no film grain.
 
 LAYOUT:
-Left 35% of the frame — one person's emotional close-up. Their face fills this area. Emotion is unmistakable (shock, fear, disbelief). Eyes wide. Warm natural light on the face. South Asian adult with realistic features; never a celebrity or named person.
+Left 35% of the frame — one person's emotional close-up: THE FACE named in the request (same gender and age). Their face fills this area and is the ONLY face in the image. Emotion is unmistakable (shock, fear, disbelief). Eyes wide. Warm natural light on the face. South Asian features; never a celebrity or named person.
 Right 65% — two or three crisp rectangular panels with thin dark borders between them. Each panel shows a different scene from the story concept. If the concept mentions a phone or screen, one panel must show a clear UI mockup: a WhatsApp notification bubble, a bank debit SMS, or a police alert — with the key number or phrase visible as small text inside the panel.
 The panels have dark moody backgrounds. Bright lit face on the left contrasts with the dark panels on the right.
 
 TEXT: The exact quoted words appear as very large all-capital bold text spanning the lower portion of the image, overlapping slightly onto panels. White letters with a thick black stroke and a red or orange drop shadow. The text is spelled exactly as given — never changed.
 
-CONSTRAINTS: No extra people beyond the face and the panel scenes. No logos or brand marks. No anime or cartoon style. No floating objects or symbols. One clear focal point in each area.
+CONSTRAINTS: Exactly one face in the whole image; the panels show no faces, no maps and no written words except a phone or SMS mockup when the concept asks for it. No logos or brand marks. No anime or cartoon style. No floating objects or symbols. One clear focal point in each area.
 
 Write the prompt for the concept and words given below."""
 
@@ -400,3 +399,192 @@ Think like a storyteller before you choose:
 
 Return ONLY this JSON object, one entry per sentence number, in order:
 {"sentences": [{"n": 1, "tag": "one allowed word or neutral", "why": "five words at most"}]}"""
+
+
+MATERIAL = """[TASK:p2_material]
+You are a researcher preparing a documentary shoot about ONE true story. A writer and a storyboard artist will work only from your list, so it must hold every concrete thing a storyteller could tell and a camera could show.
+You receive the story facts and the source passages the story was found in. The passages are for your understanding only: you write the list in your own words.
+
+Return ONLY this JSON object:
+{"items": [{"kind": "action | object | place | person | number | sensory | irony | cause | clue | aftermath",
+            "detail": "ONE concrete detail as a plain English sentence, in your own words (who did what, what the object looks like, where it was, how many, how long)",
+            "when": "when it happened (a year, a date, 'the next morning', 'six months before the end'), or empty",
+            "where": "the place, or empty", "who": "who is involved, by the names used in the facts, or empty",
+            "basis": "stated | implied",
+            "alleged": true or false,
+            "visual": 0 to 3,
+            "weight": 0 to 3,
+            "say": ["two to four words a narrator telling this item would almost certainly use, in English or Hindi"]}],
+ "chain": ["only for a story where something is found out or solved: the steps of how it was found, in order, each as a short sentence; otherwise an empty list"],
+ "names": [{"name": "one spelling of a person or place, exactly as in the facts", "say": "how a Hindi voice should say it, in Devanagari"}]}
+
+How to write the list:
+- 30 to 40 items, in the order things HAPPENED (not the order the passages tell them).
+- Every item is a fact the passages state or clearly imply. Never invent: no weather, no mood, no feelings, no thoughts, no smell or sound the passages do not give. If the passages give no sensory detail, write no sensory items.
+- Prefer the specific over the general: a tool, a number, a job, a pay, a place, a time of day, a household detail, what someone did with their hands. A general sentence ("he moved around a lot") is not an item; "he worked as a daily-wage labourer in a Mumbai slum" is.
+- Cover: at least 6 objects, 5 places, 6 actions, 3 numbers, 2 ironies or reversals (what a person believed against what was true), and for a story of discovery the clue chain, the false trail, and what happened to the people afterwards (aftermath). Include small human details that make a person real (family, work, habits, what was lost).
+- "alleged" is true when the passages say police, a complainant or an investigator claims it and a court has not decided; "basis" is "implied" when it follows from the passages without being said.
+- "visual": 3 = a vivid image that can be shown (an object, an action, a place with a look), 2 = showable, 1 = only with a symbol, 0 = cannot be shown (a statistic, a legal step).
+- "weight": 3 = the story cannot be told without it, 0 = a nice extra.
+- Numbers, dates, amounts and ages exactly as in the passages.
+- Write in your own words. Never copy five words in a row from a passage. Never quote anyone. Never mention a book, an author, a publication, "the article", "the report", "the passage" or any source.
+- Use the names exactly as the facts give them, with ONE spelling for each (the passages may spell a name two ways: choose one and list it in "names")."""
+
+
+BLUEPRINT_MATERIAL = """
+
+STORY MATERIAL (added to the facts; each line has an id like m12): a list of the concrete details the video can tell and show. Plan the telling FROM it.
+- Give every beat "use": the ids of the 3 to 7 details this beat tells, in the order it tells them. Ids (like m12) go ONLY into "use" and "show", never into "facts"; "facts" stays a list of short plain sentences. Every beat MUST have non-empty "use", "turn" and "reward". Every detail marked weight 3 in the story must be used by some beat. Never use an id twice unless the beat re-tells it as a callback.
+- Give every beat "show": up to 3 ids of details with a strong picture (objects, places, actions) that the camera must see in this beat.
+- Give every beat "turn": the reversal or the new fact that changes what the viewer thought (one sentence, a statement, never a question), and "reward": the concrete new thing the viewer gets here (a person, a place, an object or a number).
+- Give every beat "question": the question it opens in the viewer's mind, and "answer_beat": the id of the later beat that answers it.
+- "payoff_position": the id of the beat that tells the answer to the central question; it must come before the last beat unless the last beat is only the aftermath. Never hold the answer for the final seconds.
+- The cold open shows the QUESTION, not its resolution: pick the striking moment that raises it, and keep what resolves it for its own beat. A story of discovery tells its clue chain in order, one clue per beat or two, with the viewer given each clue before it is explained.
+- Keep each beat to what can be told in 40 to 60 seconds; the first beat is at most 20 seconds. Use details to make people real (family, work, habits), not only the plot."""
+
+
+TAKEAWAY_NOTE = """
+
+WHAT THIS MEANS FOR YOU: this story is one an ordinary viewer can learn from. Make the beat before the last beat a short "what you can do" part: two or three concrete steps a viewer can take (for example do not install an app sent in a message, call the cyber helpline 1930, check who is really calling). Take the steps from the details when they are there. It is general advice, never legal or financial advice, and never blames the victims."""
+
+
+NARRATE_DRAFT = """[TASK:p2_narrate_draft]
+You are the storyteller of a long YouTube video for an Indian audience: a calm, curious, slightly dry narrator who has read everything about this true story and tells it the way a clever friend would, in spoken Hinglish. You tell ONE part of the film.
+
+You receive the film's promise and central question, what this part must do, the numbered details it must tell (each has an id), the details the camera will show, and what has already been told. Tell the part in your own words, as one piece of spoken prose of about {words} words.
+
+How to tell it:
+- Start inside a concrete moment: a thing, a place, an action, a number, a person doing something. Never open with a greeting, an announcement of the topic, or a remark about the story itself.
+- Every sentence must give the viewer something new: a fact, a person, an object, a place, a number or a turn. A sentence that only comments on the one before it is cut.
+- Tell the details as they happened and how they looked. Say what people did and what things were like. Do not describe feelings or atmosphere the details do not give, and do not explain what the viewer already understood.
+- Use the details given for this part, in the order given. Use their numbers, places and names exactly.
+- The "turn" of this part lands plainly, in a few short words, after the details that prepare it. Give it room: a short sentence on its own.
+- Ask at most one question in the whole part, and only where the viewer cannot guess the answer. Never end a part with a question the film does not answer.
+- Address the viewer at most once. Do not announce what you are about to do or what the viewer should feel.
+- You are a narrator, not a witness: never say you saw or were there. You may say "मैं" at most twice in the part, for a short reaction or an honest view, never to announce.
+- Keep the story's honesty: where a detail is marked ALLEGED, say it as something police or a complainant say, not as settled fact.
+- End on the closing line asked for below, or on a concrete image, then stop. Do not summarise the part.
+
+Language: spoken Hinglish. EVERY Hindi word is written in Devanagari letters (यह एक पदार्थ है), never in Latin letters (not "yeh ek padarth hai"); English words in Latin letters, only words people really say in English (phone, police, court, bank, number). Names in Latin letters as given. Numbers as words, never digits. No quotation marks, brackets, headings, lists or symbols. Short sentences mixed with a few longer ones; every sentence ends with . or ? or !.
+Return the prose only."""
+
+
+NARRATE_EDIT = """[TASK:p2_narrate_edit]
+You are the editor of a spoken Hinglish script for a YouTube video. You receive ONE part of the narration as plain prose, and a list of problems the checks found in it (possibly none). Return the same part, edited.
+
+What you do:
+- Keep every fact, name, number and detail. Do not add facts that are not in the prose or in the details listed under MISSING DETAILS.
+- Cut every sentence that adds nothing new (a comment on the previous sentence, a promise of what is coming, a sentence about how the viewer should feel). Merge fragments. Make each sentence say one clear thing.
+- Fix every problem in the list: replace a flagged phrase with something specific to this moment (never with a similar stock phrase), turn a question into a statement where the list asks for fewer questions, add each missing detail in one or two natural sentences, attribute each accusation as something police or a complainant say.
+- Keep the voice: calm, concrete, a clever friend telling a story. Keep the language rules: every Hindi word in Devanagari letters (never "yeh ek hai" in Latin letters), English words in Latin letters, numbers as words, no digits, no quotation marks, no brackets.
+- Keep the length within 10% of the prose unless the problems ask for more or less.
+Return the revised prose only."""
+
+
+NARRATE_TAG = """[TASK:p2_narrate_tag]
+You mark up ONE part of a spoken Hinglish narration for a voice. The sentences are numbered; do not change them.
+For each sentence give: "emotion" (neutral | clear | sad | fear | anger | happy) and "pause_after_s".
+- neutral is right for almost every sentence; clear for a sentence of precise numbers or names. Give sad, fear or anger only to the one or two sentences at the true peak of the part and only when plainly right; happy only for real relief or triumph, never for a death, an injury or a loss.
+- pause_after_s: 0 for most; 0.4 to 1.2 after a reveal or before a turn; never more than 2.
+Also list "pronounce" (names and unusual words with how a Hindi voice should say them, in Devanagari) and "emphasis" (up to four words to stress).
+Return ONLY: {"sentences": [{"n": 1, "emotion": "neutral", "pause_after_s": 0}], "pronounce": [{"word": "", "say": "", "note": ""}], "emphasis": [""]}"""
+
+
+EVENTS = """[TASK:p2_events]
+You are the director's assistant planning WHAT THE CAMERA SEES for ONE part of a true-story video, before any picture is designed. The narration of the part is numbered by sentence. You turn it into EVENTS: single filmable moments, each playing under a run of consecutive sentences.
+
+Return ONLY this JSON object:
+{"events": [{"sentences": [1, 2],
+             "kind": "place | person | reaction | hands | object | document | map | crowd | texture | phone",
+             "who": ["the people in frame, by role or the names in the continuity list; empty when nobody is"],
+             "where": "a specific place, with the one detail that makes it THIS place (a rooftop room with a tin door, a platform with a yellow clock), never just 'a street' or 'a room'",
+             "doing": "what is visibly happening at this instant, in plain words (who does what with what)",
+             "key_object": "the one object that matters in frame, or empty",
+             "foreground": "something in front of the lens that gives depth, or empty",
+             "period": "the year or era when it matters (1991, now), or empty",
+             "ledger": ["ids of the story details this moment shows, like m3"],
+             "reveal": true or false, "clue": true or false}]}
+
+Rules:
+- Cover EVERY sentence exactly once, in order. An event covers one to three sentences and plays for at most 8 seconds (the seconds are shown): a long sentence run is split into several events that show different things.
+- Show what is TOLD, not the words. The narration says "he hid for years": show the rented barsati, the pay packet, the cheap phone, a day's work, not a man looking worried. Prefer the objects, places, hands and actions in the story details to faces.
+- Every event grounds itself in the story details (the ids on the left of each detail). An event with no detail behind it is allowed only as "texture" (a macro shot of a surface or an object of that place) or as a short world shot of ordinary life in that place and time (a tea stall, a platform, laundry on a roof): at most one event in six, never a new fact.
+- No two events may show the same thing. Each event differs from the one before in place, in who is in frame, or in what is done. Never more than two events in a row in the same place. Do not use a face (person or reaction) in more than half of the events.
+- Use many different places over the part and move through the places the story really goes. Put each event where it really happened; a person never stands in a place they were not in.
+- A person who is a victim is never shown smiling or at ease; a violent act is never shown, only what comes before or after it (a door, hands, an object, a place).
+- Mark "reveal" for the moment the narration turns or tells the answer, "clue" for a moment that shows a clue before it is explained.
+- Use only what the details and the narration give: no invented names, numbers, objects or places."""
+
+
+REGISTRY_EVENTS = """
+
+THE WORLD OF THIS FILM (this replaces the size limits above): the events list shows what the camera will see. Build the picture list from it.
+- One place asset for every distinct place in the events (merge near-duplicates), 10 to 24 places. Every place gets its own signature: the few things that make it THIS place, with counts, in its region and period.
+- One person asset for every person who is in two or more events, named as in the story facts; a person who appears at more than one age in the story (the years shown tell you) gets "life_stages": a list of {"from_year": 1991, "to_year": 1996, "age": 27, "look_changes": "what is different at this age: hair, build, clothes"}, and their base "age" is the age in the MAIN period of the story. People who appear once are not assets.
+- No two people may look alike: give each a different build, age, clothing colour and one signature item. Officers, colleagues or relatives are individuals, never one generic role.
+- Props: every object that is the key object of two or more events, up to 12.
+- Up to 40 assets in all. Everything still follows the rules above (slots, no ideas or charts, no source mention)."""
+
+
+DIRECTOR_EVENTS = """
+
+THE EVENTS ARE PLANNED: below the narration you are given, for each segment, the events the camera will see (each with an id). Plan EXACTLY ONE shot for every event, in the same order, and put the event's id in the shot's "event" field. Ignore the "one shot for every 4 to 6 seconds" rule: the events decide how many shots there are.
+Do not change what an event shows. Choose how the camera shows it: a place or a crowd is wide or extreme wide, an object, a document or a phone is close or extreme close, hands are close, a face (person or reaction) is close or medium; the angle and the move follow the feeling of the moment (see the rules above); the event's "reveal" gets a push in or a pull back, and a close or extreme close."""
+
+
+BLUEPRINT_EXPERIENCE = """
+- "experience": the design of what the viewer goes through, as an object:
+  {"promise": "what the viewer is promised in one line", "stake_to_viewer": "who is at risk and why THIS viewer should care, stated inside the first 15 seconds",
+   "clock_device": "countdown | counter | calendar | none, and its value, for example 'six hours' or '121 apps'", "clue_device": "which clue the viewer is shown BEFORE it is explained, so they can guess",
+   "set_piece": {"beat": "the beat id", "idea": "a shot-by-shot idea for 40 to 60 seconds, built from at least four details marked as showable"},
+   "participation": {"pause_and_guess_beat": "the beat id that ends with a held moment asking the viewer what happened next, right before a reveal the details answer", "closing_question": "one specific open question for the end"},
+   "afterimage": "the last image of the film, taken from the details", "signature_graphic": "the built card that recurs in this film: call_log | chat | sms | fir | news_clip | route_map | ledger | counter",
+   "structure_form": "mystery | countdown | two_timeline | case_file | what_would_you_do"}
+  Choose them for THIS story; do not use a device the details do not support."""
+
+
+JUDGE_NARRATION = """[TASK:p2_judge_narration]
+You are a strict script editor choosing between two versions (A and B) of the SAME part of a spoken Hinglish YouTube narration. Judge only the writing, using this rubric:
+1. The first sentence puts the viewer inside one concrete moment (an opening part) or the last sentences answer the film's opening question and end on one image (a closing part).
+2. Every sentence gives something new: a fact, person, object, place, number or turn.
+3. No stock phrase, no cliche, no empty comment on the sentence before.
+4. The tone fits the facts: calm and exact over a death or a loss.
+5. It is natural spoken Hinglish, not stiff or translated.
+Return ONLY: {"winner": "A" or "B", "reason": "one sentence"}"""
+
+
+BACKTRANSLATE = """[TASK:p2_backtranslate]
+Translate this spoken Hinglish narration into plain, literal English, sentence by sentence, keeping every name, number and fact. Do not improve, summarise or explain. Return the English text only."""
+
+
+JUDGE_HINDI = """[TASK:p2_judge_hindi]
+You check ONE part of a spoken Hinglish narration for a male first-person narrator. You get the Hindi text, a literal English back-translation of it, and the numbered details (with ids) that the part is supposed to tell.
+Report:
+- "missing": ids of details that are NOT told in the back-translation.
+- "contradicted": ids of details that the back-translation says differently (a wrong number, name, place or order).
+- "stiff": up to three sentences (quote the first words) that sound translated, bookish or unnatural for a Hindi speaker, with a short reason.
+- "english_heavy": true when English words make up more than about a third of the words.
+- "gender_wrong": true when the narrator speaks of himself with feminine verb forms.
+- "samey": true when most sentences have the same shape.
+Return ONLY: {"missing": [], "contradicted": [], "stiff": [{"start": "", "why": ""}], "english_heavy": false, "gender_wrong": false, "samey": false}"""
+
+
+DEVANAGARI = """[TASK:p2_devanagari]
+You rewrite spoken Hinglish so that every Hindi word is written in Devanagari letters. English words that people really say in English (phone, police, court, bank, number, tank, data) stay in Latin letters. Names stay in Latin letters as given. Numbers stay as words, never digits. Do not translate, summarise, add or remove anything: the same sentences, in the same order, with the same full stops.
+Return the rewritten text only."""
+
+
+TITLES = """[TASK:p2_title]
+You write YouTube titles for a long true-story video for an Indian audience. You get the central question, the cold open, the stakes, what matters to an Indian viewer and the most surprising details.
+Write NINE options: three in Hinglish written in Latin letters (how people type on a phone), three in Hindi in Devanagari, three in English.
+Rules for every title:
+- At most 60 characters. At most one number, at most one named place or person. A number is exact and is in the details; a rupee amount is written Indian style (₹64 crore, 5 lakh).
+- A curiosity gap: a question the film answers, or a claim with the surprise held back. It must be TRUE to the film: never promise what the film does not say, never exaggerate.
+- No caps-lock shouting, no "shocking", no "you won't believe", no emoji, no hashtags. Never mention a community, caste or religion. Never name a book, an author or a source.
+- Do not repeat the same opening words across options.
+Return ONLY: {"options": [{"title": "", "kind": "hinglish | hindi | english", "why": "one short phrase"}]}"""
+
+
+SUBS_EN = """[TASK:p2_subs_en]
+Translate these numbered lines of a spoken Hinglish narration into natural, short English subtitles. Keep every name and number exactly. One output line per input line, same numbers. Do not add or remove lines.
+Return ONLY: {"lines": [{"n": 1, "text": ""}]}"""

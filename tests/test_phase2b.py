@@ -97,7 +97,7 @@ def test_storyboard_covers_every_sentence_and_timing_matches_narration(env):
     assert starts == sorted(starts) and starts[0] == 0
     d = p["scenes"][0]["data"]
     assert d["narrative"]["purpose"] and d["output"] == {"aspect_ratio": "16:9", "width": 1344, "height": 768}
-    assert d["continuity"]["assets"] and d["prompts"] == {} and d["facts"]["fixed"] and d["facts"]["creative"]
+    assert d["continuity"]["assets"] and d["prompts"] == {} and d["facts"] == {"fixed": [], "creative": []}     # a picture needs no "must be visible" fact lines
     assert d["generation_intent"].startswith("an anonymous trader") and d["feasibility"]["level"] == "ok"
     assert storyboard.validate_storyboard(p["id"])["ok"]
 
@@ -114,7 +114,8 @@ def test_charts_need_assets_and_numbers_must_come_from_facts(env):
     d = p["scenes"][0]["data"]
     assert d["feasibility"]["level"] == "needs_asset" and d["feasibility"]["needs_asset"] and d["feasibility"]["fallback"]
     rep = storyboard.validate_storyboard(p["id"])
-    assert any(i["kind"] == "text" and "999" in i["text"] for i in rep["issues"])         # an invented number is caught
+    shown = " ".join(x["text"] for sc in p["scenes"] for x in sc["data"]["text_on_screen"])
+    assert "999" not in shown or any(i["kind"] == "text" and "999" in i["text"] for i in rep["issues"])         # an invented number is removed when the scene is built, or else caught
 
 
 def test_source_leaks_in_scene_text_are_reported(env):

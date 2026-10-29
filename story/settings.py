@@ -26,13 +26,39 @@ DEFAULTS: dict = {
     "completeness_influence": 0.4,  # how much a missing turn/outcome or scattered evidence lowers priority (0 = ignore)
     "discover_window_chapters": 3,  # chapters (or sections) shown to one story-discovery call; smaller = more thorough
     "ocr": False,
+    "sampling": {},               # per-task overrides of SAMPLING, e.g. {"p2_narrate": {"temperature": 0.9}}
+    "sampling_probe": {},         # which optional sampling fields the model server accepted at the last connection test
 }
+
+# Sampling per task (docs/AUDIT_2026-10-29.md section 5). Creative writing needs a warmer temperature than the 0.2 that suits JSON extraction; a task not listed
+# here keeps the global `temperature`. top_p and the penalties are only sent when the connection test found the server accepts them.
+SAMPLING: dict[str, dict] = {
+    "p2_blueprint": {"temperature": 0.5}, "p2_narrate": {"temperature": 0.7, "top_p": 0.95, "frequency_penalty": 0.3},
+    "p2_narrate_draft": {"temperature": 0.8, "top_p": 0.95, "frequency_penalty": 0.3}, "p2_narrate_edit": {"temperature": 0.4}, "p2_narrate_tag": {"temperature": 0.1},
+    "p2_registry": {"temperature": 0.4}, "p2_director": {"temperature": 0.5}, "p2_scenes": {"temperature": 0.6}, "p2_voice_tags": {"temperature": 0.2},
+    "p2_thumbnail": {"temperature": 0.8}, "p2_material": {"temperature": 0.3}, "p2_events": {"temperature": 0.5}, "p2_experience": {"temperature": 0.7},
+    "p2_title": {"temperature": 0.8},
+}
+OPTIONAL_SAMPLING = ("top_p", "frequency_penalty", "presence_penalty")
+
+
+def sampling(task: str, s: dict | None = None) -> dict:
+    """The sampling fields for one task: the global temperature, then the table above, then the owner's overrides. Optional fields (top_p, penalties) are dropped unless
+    the last connection test said the server accepts them."""
+    s = s or get()
+    out: dict = {"temperature": s.get("temperature", DEFAULTS["temperature"])}
+    out.update(SAMPLING.get(task, {}))
+    out.update((s.get("sampling") or {}).get(task, {}))
+    probe = s.get("sampling_probe") or {}
+    return {k: v for k, v in out.items() if k not in OPTIONAL_SAMPLING or probe.get(k)}
+
 
 _INT = {"context_limit", "output_reserve", "chunk_tokens", "chunk_overlap", "concurrency", "retries",
         "transport_retries", "timeout_s", "max_candidates", "discover_window_chapters"}
 _FLOAT = {"safety_margin", "chars_per_token", "temperature", "evidence_influence", "completeness_influence", "retry_backoff_s"}
 _STR = {"base_url", "model", "json_mode"}
 _BOOL = {"ocr"}
+_DICT = {"sampling", "sampling_probe"}
 
 
 class SettingsError(ValueError):
@@ -69,6 +95,8 @@ def validate(patch: dict) -> dict:
                 v = str(v).strip()
             elif k in _BOOL:
                 v = bool(v)
+            elif k in _DICT:
+                v = dict(v or {})
             elif k == "weights":
                 v = {n: float(x) for n, x in dict(v).items()}
                 if set(v) != set(DEFAULTS["weights"]) or any(x < 0 for x in v.values()) or sum(v.values()) <= 0:

@@ -32,6 +32,26 @@ class FakeBackend:
         if self.bad_json.get(task, 0) > 0:
             self.bad_json[task] -= 1
             return LLMResult("Sure! here you go: {not valid")
+        if task == "p2_judge_narration":                  # the order is swapped on the second ask, so a fixed answer is a split decision: the first version stays
+            return LLMResult(json.dumps({"winner": "A", "reason": "test"}))
+        if task == "p2_devanagari":
+            return LLMResult(user)
+        if task == "p2_title":
+            return LLMResult(json.dumps({"options": [{"title": "Aakhir kya hua us raat?", "kind": "hinglish", "why": "question"}, {"title": "आखिर उस रात क्या हुआ?", "kind": "hindi", "why": "question"},
+                                                     {"title": "What happened that night?", "kind": "english", "why": "question"}]}))
+        if task == "p2_subs_en":
+            ns = re.findall(r"^(\d+)\. ", user, re.M)
+            return LLMResult(json.dumps({"lines": [{"n": int(n), "text": f"English line {n}"} for n in ns]}))
+        if task.startswith("p2_rate_"):
+            keys = "concrete natural tone payoff variety moment world accuracy curiosity specific honest focus emotion legible".split()
+            return LLMResult(json.dumps({"scores": [{"key": k, "score": 4 if k != "variety" else 2, "reason": f"reason for {k}"} for k in keys]}))
+        if task == "p2_judge_persona":
+            return LLMResult(json.dumps({"answer": {"would_click": True, "click": "the title is clear", "would_leave": "Sunil" in user, "leave_at": "1:30", "leave_why": "slow", "not_understood": "",
+                                                    "unfair": "", "share": "with family"}}))
+        if task == "p2_backtranslate":
+            return LLMResult("English text of the part.")
+        if task == "p2_judge_hindi":
+            return LLMResult(json.dumps({"missing": [], "contradicted": [], "stiff": [], "english_heavy": False, "gender_wrong": False, "samey": False}))
         if task == "p2_voice_tags":                       # the first sentence of a segment is curious, the rest plain
             n = len(re.findall(r"^\d+\. ", user.split("THE SEGMENT")[-1], re.M))
             return LLMResult(json.dumps({"sentences": [{"n": i, "tag": "curious" if i == 1 else "neutral", "why": "test"} for i in range(1, n + 1)]}))

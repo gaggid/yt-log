@@ -10,7 +10,7 @@ from story import llm, settings as settings_mod
 from story.pipeline import manager
 from story2 import jobs, planner, providers
 
-from . import auto, clips, graphics, likeness, refs, scenes, store, thumbnail, video, voice
+from . import auto, cards, clips, graphics, publish, likeness, refs, scenes, store, thumbnail, video, voice
 
 router = APIRouter(prefix="/api/media")
 
@@ -45,7 +45,7 @@ async def media_file(plan_id: str, name: str):
 async def media_state(plan_id: str):
     _guard(planner.get_plan, plan_id)
     await asyncio.to_thread(providers.refresh, settings_mod.get(), settings_mod.api_key())             # image models the gateway lists become choices
-    st = {"voice": voice.state(plan_id), "refs": refs.state(plan_id), "scenes": scenes.state(plan_id), "clips": clips.state(plan_id), "graphics": graphics.state(plan_id), "video": video.state(plan_id), "thumbnail": thumbnail.state(plan_id), "likeness": likeness.state(plan_id)}
+    st = {"voice": voice.state(plan_id), "refs": refs.state(plan_id), "scenes": scenes.state(plan_id), "clips": clips.state(plan_id), "graphics": graphics.state(plan_id), "video": video.state(plan_id), "thumbnail": thumbnail.state(plan_id), "publish": publish.state(plan_id), "likeness": likeness.state(plan_id)}
     return {**st, "auto": auto.state(plan_id, st)}
 
 
@@ -105,6 +105,13 @@ async def make_voice(plan_id: str, body: VoiceReq | None = None):
     async def work(progress):
         await voice.generate(plan_id, body.segment_ids, body.only_missing, progress, settings_mod.get(), settings_mod.api_key())
     return _start(plan_id, "voice", work)
+
+
+@router.post("/{plan_id}/voice/trim")
+async def trim_voice(plan_id: str, body: VoiceReq | None = None):
+    """Remove the blank stretches from the voice that already exists (a new numbered take per part; nothing is spoken again). Takes a few seconds, so it runs at once."""
+    body = body or VoiceReq()
+    return await asyncio.to_thread(_guard, voice.retrim, plan_id, body.segment_ids)
 
 
 @router.post("/{plan_id}/voice/sample")
@@ -348,6 +355,12 @@ async def make_video(plan_id: str, body: VideoReq | None = None):
 class GraphicsReq(BaseModel):
     scene_ids: list[str] | None = None
     force: bool = False
+
+
+@router.post("/{plan_id}/cards")
+async def plan_cards(plan_id: str):
+    """Turn the scenes whose event is a chat, a call list, a report, a cutting, an ID, accounts, a phone screen or a route into built evidence cards (they are made by "Build graphics")."""
+    return {"cards": _guard(cards.plan, plan_id)}
 
 
 @router.post("/{plan_id}/graphics")

@@ -10,7 +10,7 @@ import re
 import uuid
 
 from story import db, llm, settings as settings_mod, storytypes
-from . import describe, director, intake, leak, maya, planner, prompts as P, providers, store, styles, svara
+from . import analogies, describe, director, era, names as names_mod, events as events_mod, intake, leak, material, maya, planner, prompts as P, providers, region, safety, store, styles, svara, version
 from .scene_schemas import ASPECTS, NEEDS_ASSET, RegistryOut, SceneOut, ScenesOut
 
 MIN_SCENE_S, MAX_SCENE_S = 2.0, 20.0
@@ -141,7 +141,7 @@ _NOT_A_PLACE = re.compile(r"\b(abstract|void|limbo|grid|dimension|realm|virtual|
 _NOWHERE = re.compile(r"\b(abstract|void|nowhere|limbo|blank|empty space|infinite|undefined|unknown|none|n/a)\b", re.I)
 
 
-def scene_problems(scenes: list, assets: list[dict]) -> list[str]:
+def scene_problems(scenes: list, assets: list[dict], story_type: str = "") -> list[str]:
     """Why a designed scene would not be a picture of the story. Works for any subject: a scene must happen somewhere, to someone.
     A scene that is only an idea (a line, a symbol, a floating object in 'abstract space') is sent back to be translated into a moment."""
     people = {a["name"].lower() for a in assets if a["kind"] == "person"}
@@ -171,8 +171,29 @@ def scene_problems(scenes: list, assets: list[dict]) -> list[str]:
         if sc.visual_type not in NEEDS_ASSET and _FX.search(f"{sc.subject} {sc.action}"):
             out.append(f"scene {i} ({sc.subject[:50]}): it draws an effect (a pulse, burst, glow, energy, vortex) instead of something in the world. Show a person reacting, "
                        "an object, or the place, as it would look to someone standing there.")
+    for i, sc in enumerate(scenes, 1):
+        for msg in era.problems(" ".join([sc.subject, sc.action, sc.foreground, sc.middle, sc.background, " ".join(sc.props)]), era.year_of(sc.period)):
+            out.append(f"scene {i} ({sc.subject[:50]}): {msg}. Draw what that time had (for example {era.props_for(era.year_of(sc.period)).split(', ')[0]}).")
+    if story_type in ("explainer", "listicle") and len(scenes) >= 3:
+        loose = [sc for sc in scenes if sc.visual_type in ("metaphor", "abstract")]
+        if len(loose) / len(scenes) > METAPHOR_SHARE:
+            out.append(f"{len(loose)} of {len(scenes)} scenes are metaphors or abstract. In {story_type} films show the idea as an everyday scene in a real place (a shop counter, a platform, a rooftop tank), "
+                       "so at most one scene in ten is a metaphor.")
+    seen: dict[tuple, int] = {}
+    for i, sc in enumerate(scenes, 1):                              # the same person, in the same place, seen the same way twice in a part is one picture drawn twice (task 3.6)
+        who = frozenset(n.lower() for n in sc.assets) & people
+        comp = getattr(sc, "composition", None)
+        if comp is None:
+            continue
+        key = (who, (sc.location or "").lower(), director._size(comp.distance), director._angle(comp.camera_angle))
+        if who and key in seen and comp.distance and comp.camera_angle:
+            out.append(f"scene {i} repeats scene {seen[key]}: the same person in the same place from the same distance and angle. Change the distance, the angle or what the person is doing.")
+        seen.setdefault(key, i)
     out += _monotony(scenes, people, places)
     return out
+
+
+METAPHOR_SHARE = 0.10
 
 
 def _monotony(scenes: list, people: set, places: set) -> list[str]:
@@ -214,17 +235,31 @@ async def make_registry(plan_id: str, backend, s: dict | None = None) -> dict:
                "\nCAST: do not default to any one ethnicity. Choose each person's ethnicity, skin, hair, eyes, name and clothes from the story's own country, region, period and community "
                "(use the names and places in the story facts); when the story does not say, pick what is most plausible for that place and time."))
     tries: list[int] = []
+    with_events = events_mod.current(plan)
+    if with_events:
+        user += "\n\n" + events_mod.world_text(plan)
+    regional = region.note(plan, events_mod.world_text(plan) if with_events else "")
+    if regional:
+        user += "\n\n" + regional
+    want = events_mod.world(plan) if with_events else {}
 
     def enough(out: RegistryOut) -> None:
         tries.append(1)
         real = [x for x in out.assets if x.kind in ("person", "place") and x.literal and not not_drawable(x.kind, x.name, x.appearance, x.evidence_note)]
         places, people = [x for x in real if x.kind == "place"], [x for x in real if x.kind == "person"]
+        if with_events and len(tries) <= 2 and len(places) < min(10, len(want["places"])):
+            raise ValueError(f"The list has {len(places)} place(s) but the events show {len(want['places'])} different ones: list a place asset for each distinct place (at least {min(10, len(want['places']))}).")
+        if with_events and len(tries) <= 2 and len(people) < min(6, len([k for k, v in want["people"].items() if v >= 2]) + 1):
+            raise ValueError(f"The list has {len(people)} people; the events have several people who appear more than once: list each one as their own person, with different looks.")
         if len(tries) <= 2 and (len(places) < 3 or len(people) < 2):
             raise ValueError(f"The list has {len(places)} real place(s) and {len(people)} person(s) that can be drawn. A place is somewhere that physically exists (never a space, grid or idea). "
                              "Give the story at least 3 different real places it moves through and at least 2 people (the main person and supporting people).")
 
-    res = await llm.JsonCaller(backend, s).call(P.REGISTRY, user, RegistryOut, enough)
+    res = await llm.JsonCaller(backend, s).call(P.REGISTRY + (P.REGISTRY_EVENTS if with_events else ""), user, RegistryOut, enough)
     kept = {a["name"].lower(): a for a in get_assets(plan_id) if a["locked"]}
+    story_names = {str(p.get("name", "")).lower() for p in story["public"].get("people", [])} - {""}
+    regions = [r for r in region.detect(plan, events_mod.world_text(plan) if with_events else "") if r != "generic"]
+    cast_names: dict[str, str] = {}
     named = {a["name"].lower(): {k: a["data"][k] for k in ("public_figure", "fictionalisation", "likeness_photos") if k in a["data"]}
              for a in get_assets(plan_id) if a["kind"] == "person" and not a["locked"] and a["data"].get("fictionalisation") in LIKENESS}     # the editor's choices about real people
     with db.tx() as c:
@@ -238,6 +273,10 @@ async def make_registry(plan_id: str, backend, s: dict | None = None) -> dict:
                 continue                                            # charts, ideas and groups are never listed as one drawable thing
             data = a.model_dump()
             data["name"] = a.name = re.sub(r"\s+style$", "", a.name.strip(), flags=re.I) or a.name           # the model sometimes tacks the word "style" onto every name
+            if a.kind == "person" and describe.indian_on(plan["settings"]) and data.get("fictionalisation") in ("generic_reconstruction", "fictional")                     and a.name.lower() not in story_names and names_mod.needs_rename(a.name):
+                old_name = a.name                                       # an invented person under an Indian cast gets a name that fits the region (never a name the story gave)
+                data["name"] = a.name = names_mod.suggest(regions, str((data.get("appearance") or {}).get("gender") or data.get("description") or ""), set(cast_names.values()) | set(story_names), old_name)
+                cast_names[old_name] = a.name
             ap = describe.clean(data.get("appearance"))
             if ap and a.kind in ("person", "narrator") and describe.indian_on(plan["settings"]):
                 ap = describe.indianise(ap)                         # the cast setting is enforced here too, not left to the model's wording
@@ -258,6 +297,8 @@ async def make_registry(plan_id: str, backend, s: dict | None = None) -> dict:
                       ("as-" + uuid.uuid4().hex[:8], plan_id, "narrator", "narrator", db.jdump({
                           "name": "narrator", "kind": "narrator", "description": "", "fixed": [], "flexible": [],
                           "fictionalisation": "fictional", "evidence_note": "avatar to be designed", "status": "to be designed"}), db.now()))
+    if cast_names:
+        store.log(plan_id, "cast_names", {"renamed": cast_names})
     db.ex("UPDATE plans SET settings=?, updated_at=? WHERE id=?", (db.jdump({**planner.get_plan(plan_id)["settings"], "registry_direction": styles.DIRECTION, "registry_style": styles.style_id(plan["settings"])}), db.now(), plan_id))
     store.log(plan_id, "registry", {"assets": len(get_assets(plan_id))})
     return planner.get_plan(plan_id)
@@ -314,6 +355,7 @@ def follow_shots(scenes: list, shots: list[dict], force: bool = False) -> list[s
         n = sc.shot if 1 <= sc.shot <= len(shots) else min(len(shots), int(k * len(shots) / len(scenes)) + 1)
         sh = shots[n - 1]
         sc.shot = n
+        sc.pov = dict(sh.get("pov") or {})                           # a point-of-view shot reaches the scene, the picture prompt and the video
         if director._size(sc.composition.distance) != sh["size"] or director._angle(sc.composition.camera_angle) != sh["angle"]:
             off.append(f"scene {k + 1} follows shot {n} ({sh['size']}, {sh['angle']}) but its camera is {sc.composition.distance or 'unset'}, {sc.composition.camera_angle or 'unset'}")
         if force:
@@ -343,16 +385,16 @@ def build_scene(sc: SceneOut, assets: list[dict], plan: dict, evidence_ids: list
         "visual_type": sc.visual_type, "subject": sc.subject, "action": sc.action,
         "setting": {"location": sc.location, "period": sc.period, "props": sc.props},
         "composition": sc.composition.model_dump(), "lighting": sc.lighting, "palette": sc.palette, "atmosphere": sc.atmosphere,
-        "style": sc.style, "layers": {"foreground": sc.foreground, "middle": sc.middle, "background": sc.background},
-        "motion_intent": sc.motion_intent, "direction": {"shot": sc.shot, "move": director._move(sc.motion_intent)}, "text_on_screen": [t.model_dump() for t in sc.text_on_screen],
-        "facts": {"fixed": sc.fixed_by_facts, "creative": sc.creative_choices},
+        "style": styles.for_plan(plan["settings"])["short"], "layers": {"foreground": sc.foreground, "middle": sc.middle, "background": sc.background},
+        "motion_intent": sc.motion_intent, "direction": {"shot": sc.shot, "move": director._move(sc.motion_intent), **({"pov": sc.pov} if sc.pov else {})}, "text_on_screen": [t.model_dump() for t in sc.text_on_screen],
+        "facts": {"fixed": sc.fixed_by_facts if sc.visual_type in NEEDS_ASSET else [], "creative": []},          # only a built card needs facts; for a picture they became "must be visible" lines that said nothing
         "evidence_ids": evidence_ids, "continuity": {
             "assets": ids, "unknown": unknown,
             # only stored when explicitly set; absent = no filter (all eligible refs used)
             **( {"use_ref_assets": [by_name[n.lower()] for n in sc.use_ref_assets if n.lower() in by_name]} if sc.use_ref_assets else {} )
         },
         "output": {"aspect_ratio": plan["format"], "width": w, "height": h},
-        "exclusions": sc.exclusions, "prompts": {}, "adapters": {},
+        "exclusions": sc.exclusions, "prompts": {}, "adapters": {}, "event": sc.event,
         "translation": {"idea": sc.idea, "moment": sc.translation},
     }
     needs = sc.visual_type in NEEDS_ASSET
@@ -375,6 +417,7 @@ def apply_voice_tags(seg_id: str) -> None:
         tag = db.jload(r["data"], {}).get("voice_tag") or ""
         for i in range(r["s_from"], min(r["s_to"], len(sents)) + 1):
             sents[i - 1]["tag"] = tag
+    safety.guard_tags(sents)
     db.ex("UPDATE segments SET sentences=? WHERE id=?", (db.jdump(sents), seg_id))
 
 
@@ -430,18 +473,38 @@ async def make_storyboard(plan_id: str, backend, s: dict | None = None, segment_
         shots = director.shots_for(plan, idx)
         nxt = ordered_segs[idx]["sentences"][0]["text"][:160] if idx < len(ordered_segs) and ordered_segs[idx]["sentences"] else "the video ends."
         beat_brief = _beat_visual_brief_text(plan["blueprint"], seg["beat"])
+        seg_events = events_mod.for_segment(plan, seg["id"]) if events_mod.current(plan) else []
+        ev_block = ("EVENTS FOR THIS SEGMENT (design exactly ONE scene per event, in this order; set the scene's \"sentences\" to the event's sentences and \"event\" to its id; the scene shows what the "
+                    "event says: its place, who is in frame, what they do, its key object and foreground. Do not change what the event shows; you decide the light, the palette, the "
+                    "composition details and the feeling):\n" + "\n".join(
+                        f"{e['id']}: sentences {e['sentences'][0]}-{e['sentences'][1]} | {e['kind']} | where: {e['where']} | who: {', '.join(e['who']) or 'nobody'} | doing: {e['doing']}"
+                        + (f" | key object: {e['key_object']}" if e['key_object'] else "") + (f" | foreground: {e['foreground']}" if e['foreground'] else "")
+                        + (f" | period: {e['period']}" if e['period'] else "") for e in seg_events) + "\n\n") if seg_events else ""
         user = (f"STORY FACTS:\n{facts}\n\nVISUAL STYLE (every scene is drawn in it): {look['short']}. {look['look']}\n\n"
                 f"CONTINUITY ASSETS (use these names in \"assets\"):\n{_asset_lines(assets)}\n\n"
                 f"STORY MAP (>> is this segment):\n{director.story_map(plan, idx)}\n\n"
                 f"DIRECTOR'S SHOT LIST for this segment (follow it):\n{director.shot_list(plan, idx)}\n\n"
                 f"WHAT COMES NEXT: {nxt}\n\n"
                 f"PREVIOUS SCENES (do not repeat their composition):\n{_prev_summary(prior)}\n\n"
-                + beat_brief
+                + beat_brief + ev_block
                 + f"THIS SEGMENT (beat {seg['beat']}), {n} sentence(s), {sum(secs):.1f} s:\n{lines}\n\n"
                 "Design the scenes for this segment now.")
 
-        def fix(out: ScenesOut, n=n, shots=shots) -> None:
-            rngs = repair_coverage([sc.sentences for sc in out.scenes], n)
+        def fix(out: ScenesOut, n=n, shots=shots, seg_events=seg_events) -> None:
+            if seg_events:
+                k = len(seg_events)
+                if len(out.scenes) != k and len(tries) < 2 and not caller.last_attempt:
+                    raise ValueError(f"Design exactly {k} scenes, one for each event, in order (you designed {len(out.scenes)}).")
+                out.scenes = out.scenes[:k]
+                for i, (sc, e) in enumerate(zip(out.scenes, seg_events), 1):        # the event decides which sentences the scene plays under and which event it shows
+                    sc.sentences, sc.event = list(e["sentences"]), e["id"]
+                    if e.get("period") and not sc.period:
+                        sc.period = e["period"]                          # the year decides which life stage of a person is drawn
+                    if len(shots) == k:
+                        sc.shot = i
+                if out.scenes:
+                    out.scenes[-1].sentences = [out.scenes[-1].sentences[0], n]
+            rngs = repair_coverage([sc.sentences for sc in out.scenes], n) if not seg_events else [list(sc.sentences) for sc in out.scenes]
             if len(rngs) != len(out.scenes):                         # ranges collapsed: keep scenes in order, re-split
                 out.scenes = out.scenes[:len(rngs)]
             for sc, r in zip(out.scenes, rngs):
@@ -449,7 +512,7 @@ async def make_storyboard(plan_id: str, backend, s: dict | None = None, segment_
             tries.append(1)
             last = len(tries) > 2 or caller.last_attempt                 # sent back with the reasons, then on the last attempt accepted and left to the checks
             off = follow_shots(out.scenes, shots, force=last)
-            bad = [] if last else scene_problems(out.scenes, assets)
+            bad = [] if last else scene_problems(out.scenes, assets, storytypes.of_plan(plan))
             if not last and (bad or off):
                 raise ValueError("These scenes are not right yet:\n- " + "\n- ".join(bad + off))
 
@@ -457,22 +520,32 @@ async def make_storyboard(plan_id: str, backend, s: dict | None = None, segment_
         for again in range(3):                                       # a long segment can come back as broken JSON three times running: ask again before giving up
             tries.clear()
             try:
-                res = await caller.call(P.SCENES + storytypes.scenes_note(storytypes.of_plan(plan)), user, ScenesOut, fix)
+                res = await caller.call(P.SCENES + storytypes.scenes_note(storytypes.of_plan(plan)) + (analogies.note() if storytypes.of_plan(plan) in ("explainer", "listicle") else ""), user, ScenesOut, fix)
                 break
             except llm.ValidationFailed:
                 if again == 2:
                     raise
+        text_allowed = (intake.facts_text(story["public"]) + " " + (" ".join(it.get("detail", "") for it in material.pack(plan).get("items", [])) if material.has(plan) else "")
+                        + " " + " ".join(f"{e.get('doing', '')} {e.get('key_object', '')}" for e in events_mod.for_segment(plan, seg["id"]))).lower()
         with db.tx() as c:
             c.execute("DELETE FROM scenes WHERE segment_id=? AND locked=0" + ("" if replace_approved else " AND status!='approved'"), (seg["id"],))
             for k, sc in enumerate(res.value.scenes):
+                safety.scrub_scene(sc, " ".join(x["text"] for x in seg["sentences"][sc.sentences[0] - 1:sc.sentences[1]]))     # no smiling over a death
+                if sc.visual_type not in NEEDS_ASSET and sc.visual_type != "text_led":              # cards are built from verified facts; a text-led scene is about its text
+                    safety.scrub_text(sc, text_allowed)                                                                        # no words on a wall that the story does not give
                 data, _ = build_scene(sc, assets, plan, ev)
                 _insert_scene(c, plan_id, seg, k, sc.sentences, data)
         apply_voice_tags(seg["id"])
         retime(plan_id)
+    if events_mod.current(plan) and not segment_ids:
+        split_long(plan_id)                                          # no scene holds one picture for more than about eight seconds
+        from . import inserts, worldfix
+        inserts.add(plan_id)                                         # cutaways of ordinary life in the story's region make the world feel big (task 3.12)
+        worldfix.sweep(plan_id)                                      # too many faces, or one face too often: some of them become the object or the place (task 3.11)
     if progress:
         progress(len(todo), len(todo), "done")
     db.ex("UPDATE plans SET settings=?, updated_at=? WHERE id=?",
-          (db.jdump({**planner.get_plan(plan_id)["settings"], "storyboard_direction": styles.DIRECTION, "storyboard_style": look["id"]}), db.now(), plan_id))
+          (db.jdump(version.stamp({**planner.get_plan(plan_id)["settings"], "storyboard_direction": styles.DIRECTION, "storyboard_style": look["id"]}, "storyboard")), db.now(), plan_id))
     store.log(plan_id, "storyboard", {"segments": len(todo), "style": look["id"]})
     return planner.get_plan(plan_id)
 
@@ -510,6 +583,7 @@ async def regenerate_scene(scene_id: str, backend, s: dict | None = None, note: 
             raise ValueError("This scene is not a picture of the story:\n- " + "\n- ".join(bad))
 
     res = await llm.JsonCaller(backend, s).call(P.SCENES + storytypes.scenes_note(storytypes.of_plan(plan)), user, ScenesOut, one)
+    safety.scrub_scene(res.value.scenes[0], " ".join(x["text"] for x in seg["sentences"][a - 1:b]))
     data, _ = build_scene(res.value.scenes[0], assets, plan, story["evidence"]["paragraph_ids"])
     db.ex("UPDATE scenes SET data=?, rev=rev+1, stale=0, status='draft', issues='[]', updated_at=? WHERE id=?",
           (db.jdump(data), db.now(), scene_id))
@@ -565,6 +639,60 @@ def retime(plan_id: str) -> float:
                           (round(st, 2), round(en, 2), round(en - st, 2), sc["id"]))
             t += sum(sd)
     return round(t, 2)
+
+
+# ── scenes that are too long (audit task 3.5): a still held for 20 or 30 seconds loses the viewer ───────────
+
+DEFAULT_MAX_SCENE_S = 8.0
+_BIGGER = {"extreme wide": "wide", "wide": "medium", "medium": "close", "close": "wide", "extreme close": "medium"}      # the second look at the same moment is from a different distance
+_OTHER_ANGLE = {"eye level": "low", "low": "high", "high": "eye level", "overhead": "eye level", "side": "low", "over the shoulder": "eye level"}
+_MOVES = ("push in", "pan right", "pull back", "tilt up", "pan left", "tilt down")
+
+
+def split_long(plan_id: str, max_s: float | None = None) -> int:
+    """Split every scene that plays longer than `max_s` seconds (plan setting `max_scene_s`, 8 by default) into scenes of at most that length, at sentence boundaries. The new
+    scenes show the same event from another distance and angle (`variant_of` names the scene they continue); a single sentence longer than the limit stays one scene (the video
+    gives it two camera moves). Locked scenes are left alone. Returns how many scenes were added; prompts of the changed scenes must be written again."""
+    plan = planner.get_plan(plan_id)
+    max_s = float(max_s or plan["settings"].get("max_scene_s") or DEFAULT_MAX_SCENE_S)
+    wpm = plan["settings"].get("wpm", planner.WPM)
+    real = real_audio(plan_id)
+    added = 0
+    segs = {s["id"]: s for s in plan["segments"]}
+    with db.tx() as c:
+        for sc in get_scenes(plan_id):
+            seg = segs.get(sc["segment_id"])
+            if not seg or sc["locked"] or sc["s_to"] <= sc["s_from"]:
+                continue
+            sd = sentence_seconds(seg, wpm, real.get(seg["id"]))
+            a, b = sc["s_from"], min(sc["s_to"], len(sd))
+            if sum(sd[a - 1:b]) <= max_s * 1.1:
+                continue
+            parts, cur, t = [], [a], 0.0
+            for i in range(a, b + 1):
+                if t + sd[i - 1] > max_s and i > cur[0]:
+                    parts.append([cur[0], i - 1])
+                    cur, t = [i], 0.0
+                t += sd[i - 1]
+            parts.append([cur[0], b])
+            if len(parts) < 2:
+                continue
+            first = dict(sc["data"])
+            first["prompts"], first["adapters"] = {}, {}
+            c.execute("UPDATE scenes SET s_from=?, s_to=?, data=?, rev=rev+1, updated_at=? WHERE id=?", (parts[0][0], parts[0][1], db.jdump(first), db.now(), sc["id"]))
+            comp, move = dict(first.get("composition") or {}), first.get("direction", {}).get("move", "drift")
+            for k, rng in enumerate(parts[1:], 1):
+                comp = {**comp, "distance": _BIGGER.get(str(comp.get("distance", "")).lower(), "medium"), "camera_angle": _OTHER_ANGLE.get(str(comp.get("camera_angle", "")).lower(), "eye level")}
+                move = _MOVES[(_MOVES.index(move) + 1) % len(_MOVES)] if move in _MOVES else _MOVES[k % len(_MOVES)]
+                data = {**first, "composition": comp, "direction": {**(first.get("direction") or {}), "move": move}, "motion_intent": f"slow {move}", "variant_of": sc["id"],
+                        "generation_intent": first.get("generation_intent", "")}
+                c.execute("INSERT INTO scenes(id,plan_id,seq,segment_id,s_from,s_to,data,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                          ("sc-" + uuid.uuid4().hex[:8], plan_id, sc["seq"] + k / 10000, sc["segment_id"], rng[0], rng[1], db.jdump(data), db.now()))
+                added += 1
+    if added:
+        retime(plan_id)
+        store.log(plan_id, "split_long", {"added": added, "max_s": max_s})
+    return added
 
 
 def on_segment_changed(seg_id: str, old_n: int, new_n: int) -> None:
@@ -755,6 +883,7 @@ def validate_storyboard(plan_id: str) -> dict:
     prof = leak.profile(story["evidence"]["project_id"], story["evidence"]["passages"])
     facts = intake.facts_text(story["public"]).lower()
     known_numbers = fact_numbers(facts)
+    story_details = facts + " " + (" ".join(it.get("detail", "") for it in material.pack(plan).get("items", [])) if material.has(plan) else "")
     scenes = get_scenes(plan_id)
     seg_ids = {s["id"] for s in plan["segments"]}
     issues: list[dict] = []
@@ -796,6 +925,12 @@ def validate_storyboard(plan_id: str) -> dict:
                            d["narrative"]["purpose"], d["narrative"]["takeaway"]])
         for f in leak.check(text, prof, scene=True):
             add(sc, "source_leak", f"{f.kind}: {f.text}")
+        yr = era.year_of((d.get("setting") or {}).get("period") or "")
+        pic = " ".join([d["subject"], d["action"], " ".join((d.get("setting") or {}).get("props") or []), *(d.get("layers") or {}).values()])
+        for m in era.problems(pic, yr):
+            add(sc, "era", m)
+        for m in era.suspects(pic, yr) + era.conflicts_with_story(pic, story_details, yr):
+            add(sc, "era", m, "warn")
     for seg in plan["segments"]:
         c = cov[seg["id"]]
         if any(scn["segment_id"] == seg["id"] for scn in scenes):
@@ -831,6 +966,11 @@ def validate_storyboard(plan_id: str) -> dict:
         mine = _content_words(" ".join([d.get("subject", ""), d.get("action", ""), str((d.get("setting") or {}).get("location", "")), " ".join(map(str, (d.get("setting") or {}).get("props", [])))]))
         if len(mine) >= 4 and not (mine & world):
             add(sc, "unrelated", "nothing in this scene appears in the story's facts or among its characters, places and objects: check that it belongs to this story", "warn")
+    if events_mod.current(plan):                                    # the world rules of audit 14.4: a big, varied world and no repeated faces (for plans planned from events)
+        from . import audit
+        for metric, m in audit.world({**plan, "scenes": ordered}).items():
+            if m["status"] == "warn":
+                issues.append({"where": "plan", "kind": "world", "level": "warn", "text": f"{metric.replace('_', ' ')} is {m['value']} (target {m['target']})" + (f": {m['note']}" if m.get("note") else "")})
     need = [sc for sc in ordered if sc["data"]["feasibility"]["level"] == "needs_asset"]
     rights = [f for f in story["evidence"]["figures"] if f.get("rights_flag")]
     if need and rights:

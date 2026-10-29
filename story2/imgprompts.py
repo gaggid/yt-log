@@ -8,7 +8,7 @@ import hashlib
 import json
 import re
 
-from . import describe, leak, mood, providers, styles
+from . import describe, era, leak, variety, mood, providers, safety, styles
 from .scene_schemas import NEEDS_ASSET
 from .storyboard import fact_numbers
 
@@ -171,6 +171,9 @@ def feeling_texts(scene: dict, plan: dict | None) -> list[str]:
     out = [_s((d.get("narrative") or {}).get("emotional_effect"))]
     by = ((plan or {}).get("settings") or {}).get("director", {}).get("by_segment", {})
     out += [_s(v.get("emotion")) for v in by.values() if v.get("segment_id") == scene.get("segment_id")]
+    seg = next((g for g in (plan or {}).get("segments", []) if g["id"] == scene.get("segment_id")), None)
+    if seg and safety.grave(" ".join(x["text"] for x in seg["sentences"][max(0, scene.get("s_from", 1) - 1):scene.get("s_to", 0)])):
+        out.append(mood.GRAVE_MARK)
     return [t for t in out if t]
 
 
@@ -180,7 +183,10 @@ def person_hide(a: dict, hide: set[str]) -> set[str]:
     return hide | ({"face", "eyes", "expression"} if a["data"].get("fictionalisation") == "real_person_no_likeness" else set())
 
 
-def _ambient_hint(location: str, layers: dict) -> str:
+_QUIET_RX = re.compile(r"quiet|empty|deserted|still|alone|lonely|silent|calm|hush|abandoned", re.I)
+
+
+def _ambient_hint(location: str, layers: dict, atmosphere: str = "", exclusions=()) -> str:
     """One sentence added to the environment when the location is a public space but the background layers don't mention people or activity.
     Prevents scenes where a busy street has vehicles but no bystanders because the narration never named them."""
     if not location or not _PUBLIC_RX.search(location):
@@ -189,11 +195,38 @@ def _ambient_hint(location: str, layers: dict) -> str:
     mid = _s(layers.get("middle", ""))
     if re.search(r"\b(people|person|crowd|pedestrians?|bystanders?|vendors?|passengers?|spectators?|activity|busy|commuters?|shoppers?)\b", bg + mid, re.I):
         return ""
+    if _QUIET_RX.search(atmosphere or ""):
+        return ""                                   # a quiet or empty place is not crowded: the scene says so itself
+    if any(re.search(r"crowd|people|bystander|pedestrian", _s(x), re.I) for x in exclusions or ()):
+        return "Only two or three distant figures in the background."           # said as what is there, not as what is not
     return "Background populated with bystanders, movement and activity natural to this kind of place."
 
 
-def _subject_text(d: dict, people: list[dict], indian: bool = False, ref_index: dict[str, int] | None = None) -> str:
-    out = [_s(d.get("subject"))]
+def scene_year(d: dict) -> int | None:
+    """The year a scene is set in, from its period ("1991", "August 1991", "present day" gives 9999 = the latest life stage), or None when it says nothing."""
+    per = _s(_g(d, "setting", "period"))
+    m = re.search(r"\b(1[5-9]\d\d|20\d\d)\b", per)
+    if m:
+        return int(m.group())
+    return 9999 if re.search(r"present|now|today|current|modern", per, re.I) else None
+
+
+def _subject_lead(d: dict, people: list[dict], assets: list[dict] | None = None) -> str:
+    """The main subject's words. When the scene's subject is only the place ("Ludhiana Street") but a person is in it, the person is the subject and the place stays in
+    the environment: otherwise the prompt says "Main subject: Ludhiana Street" and then describes a man."""
+    subject = _s(d.get("subject"))
+    if not subject or not people:
+        return subject
+    names = {_s(_g(d, "setting", "location")).lower()} | {a["name"].lower() for a in (assets or []) if a["kind"] == "place"}
+    names.discard("")
+    low = subject.lower()
+    if any(low == n or low in n or n in low for n in names) and not any(a["name"].lower() in low for a in people):
+        return " and ".join(a["name"] for a in people[:2])
+    return subject
+
+
+def _subject_text(d: dict, people: list[dict], indian: bool = False, ref_index: dict[str, int] | None = None, assets: list[dict] | None = None) -> str:
+    out = [_subject_lead(d, people, assets)]
     hide = hidden_for(d)
     ri = ref_index or {}
     for a in people:
@@ -203,7 +236,7 @@ def _subject_text(d: dict, people: list[dict], indian: bool = False, ref_index: 
             # Reference image is being sent — use the image as the appearance source, not text, to avoid duplication.
             # Only keep fixed (must-be-visible) details that may not be obvious from the reference sheet angle.
             if a["kind"] in ("person", "narrator"):
-                _det, fixed = describe.person_view(a, indian, person_hide(a, hide))
+                _det, fixed = describe.person_view(a, indian, person_hide(a, hide), scene_year(d))
             else:
                 fixed = a["data"].get("fixed", [])
             extra = "; ".join(_s(x) for x in fixed if _s(x))
@@ -211,7 +244,7 @@ def _subject_text(d: dict, people: list[dict], indian: bool = False, ref_index: 
             out.append(f"Always the same: {extra}" if extra else "")
         else:
             if a["kind"] in ("person", "narrator"):
-                det, fixed = describe.person_view(a, indian, person_hide(a, hide))          # composed from the slots: what the frame hides is left out, the cast setting applies
+                det, fixed = describe.person_view(a, indian, person_hide(a, hide), scene_year(d))          # composed from the slots: what the frame hides is left out, the cast setting applies
                 det = _s(det)
             else:
                 det, fixed = _s(a["data"].get("description")), a["data"].get("fixed", [])
@@ -395,7 +428,7 @@ def compile_qwen(scene: dict, assets_used: list[dict], plan: dict, refs: dict, e
     loc = _val(_g(d, "setting", "location"))
     env = "Environment: " + _sent(loc, f"Period: {_val(_g(d, 'setting', 'period'))}" if _val(_g(d, "setting", "period")) else "",
                                   f"Atmosphere: {_s(d.get('atmosphere'))}" if _s(d.get("atmosphere")) else "")
-    ambient = "" if plate else _ambient_hint(loc, d.get("layers") or {})
+    ambient = "" if plate else _ambient_hint(loc, d.get("layers") or {}, _s(d.get("atmosphere")), d.get("exclusions") or [])
     env_full = env + ("" if plate else " " + _layers(d)) + (f" {ambient}" if ambient else "")
 
     if env_led and not plate:
@@ -406,18 +439,18 @@ def compile_qwen(scene: dict, assets_used: list[dict], plan: dict, refs: dict, e
         feel = mood.line(feeling_texts(scene, plan), hidden_for(d), bool(people))
         if feel:
             sec["feeling"] = feel
-        sec["subject"] = "Main subject: " + _sent(_subject_text(d, people, indian, ref_index))
+        sec["subject"] = "Main subject: " + _sent(_subject_text(d, people, indian, ref_index, assets_used))
         sec["action"] = "Action and moment: " + _sent(f"The single moment shown is {_lead_lower(d.get('action'))}" if _s(d.get("action")) else
                                                       "A still, held moment with no competing action")
         sec["composition"] = "Composition: " + _sent(f"The subject sits {_s(comp.get('position'))}" if _s(comp.get("position")) else "", _positions(comp))
     else:
         # character-led / standard order: subject and action first
         if plate:
-            sec["subject"] = "Main subject: " + _sent(_s(_g(d, "feasibility", "fallback")) or _subject_text(d, people, indian, ref_index),
+            sec["subject"] = "Main subject: " + _sent(_s(_g(d, "feasibility", "fallback")) or _subject_text(d, people, indian, ref_index, assets_used),
                                                      ("Apart from the quoted words, any screen, paper or sign shows only abstract glowing light and shapes" if shown else
                                                       "Any screen, paper or sign in the scene shows only abstract glowing light and shapes, nothing readable"))
         else:
-            sec["subject"] = "Main subject: " + _sent(_subject_text(d, people, indian, ref_index))
+            sec["subject"] = "Main subject: " + _sent(_subject_text(d, people, indian, ref_index, assets_used))
         sec["action"] = "Action and moment: " + _sent(f"The single moment shown is {_lead_lower(d.get('action'))}" if _s(d.get("action")) and not plate else
                                                       "A still, held moment with no competing action")
         sec["environment"] = env_full
@@ -456,6 +489,81 @@ def compile_qwen(scene: dict, assets_used: list[dict], plan: dict, refs: dict, e
     return _finish("qwen", "qwen-image-2.1", cfg, scene, prompt, "", sec, (w, h), refs, notes, plate, plan, effective_mode)
 
 
+# ── Qwen prompt v2 (audit task 4.1): one flowing, positive paragraph about the event, not a form with a constraints block ──
+
+def _camera_words(comp: dict) -> str:
+    dist, ang = _s(comp.get("distance")).lower(), _s(comp.get("camera_angle")).lower()
+    if not dist and not ang:
+        return "Framed as a medium shot at eye level."
+    lens = next((t for k, t in _LENS if k in dist), "")
+    how = next((t for k, t in _ANGLE if k in ang), "")
+    head = " ".join(x for x in (f"{dist} shot" if dist else "", f"from a {ang} angle" if ang else "") if x)
+    return _sent("Framed as a " + head, how, lens)
+
+
+def compile_qwen_v2(scene: dict, assets_used: list[dict], plan: dict, refs: dict, effective_mode: str | None = None) -> dict:
+    """The picture prompt for a scene that shows a planned event: who is doing what (the moment) first, then where, then the light, then the camera in plain words, the feeling as
+    what the face and body show, one short sentence of style. Everything is said as what IS there: there is no list of things that must not appear (the endpoint ignores a negative
+    prompt, and naming a thing in a prompt invites it). Charts and documents keep the older form: they are built as cards."""
+    d = scene["data"]
+    if _plate(d):
+        return compile_qwen(scene, assets_used, plan, refs, effective_mode)
+    cfg, notes = providers.get("qwen-image-2.1"), []
+    fmt = plan["format"]
+    w, h = d["output"]["width"], d["output"]["height"]
+    shown, _skipped = _exact_text(d, notes)
+    people = [a for a in assets_used if a["kind"] in ("person", "narrator")]
+    indian = describe.indian_on(plan.get("settings"))
+    look = styles.for_plan(plan.get("settings"))
+    _mode = effective_mode or (plan.get("settings") or {}).get("scene_pictures", {}).get("mode") or "generate"
+    use_refs = bool(refs["references"]) and _mode in ("edit", "auto")
+    ref_index = {r["asset_id"]: i for i, r in enumerate(refs["references"], 1)} if use_refs else {}
+    comp = d.get("composition") or {}
+    loc = _val(_g(d, "setting", "location"))
+    action = _lead_lower(d.get("action"))
+    sec: dict[str, str] = {}
+    sec["moment"] = _sent(_subject_text(d, people, indian, ref_index, assets_used), (f"At this instant {action}" if action and people else _s(d.get("action"))))
+    ambient = _ambient_hint(loc, d.get("layers") or {}, _s(d.get("atmosphere")), d.get("exclusions") or [])
+    props = ", ".join(_s(p) for p in _g(d, "setting", "props", default=[]) if _s(p))
+    sec["place"] = _sent(f"The place is {loc}" if loc else "", _layers(d), f"Visible: {props}" if props else "", ambient)
+    fixed_lines = [f"{a['name']}: {'; '.join(_s(x) for x in _place_fixed(a, d))}" for a in assets_used if _place_fixed(a, d) and a["kind"] == "place"]
+    if fixed_lines:
+        sec["place"] += " " + _sent("The place is recognisable by " + "; ".join(fixed_lines))
+    period = _val(_g(d, "setting", "period"))
+    sec["light"] = _sent(f"Set in {period}" if period else "", _s(d.get("lighting")) or "soft even light from one clear direction", f"the air feels {_s(d.get('atmosphere'))}" if _s(d.get("atmosphere")) else "",
+                         f"palette of {_s(d.get('palette'))}" if _s(d.get("palette")) else "", era.look(era.year_of(period)))
+    sec["camera"] = _camera_words(comp)
+    pov = (d.get("direction") or {}).get("pov") or {}
+    if pov.get("through"):
+        sec["camera"] += " " + _sent(f"We see it through {_s(pov['through'])}, as {_s(pov.get('of')) or 'someone'} would, with its frame, edge and reflections visible around the scene")
+    feel = mood.line(feeling_texts(scene, plan), hidden_for(d), bool(people))
+    if feel:
+        sec["feeling"] = feel.replace("Feeling of the moment: ", "The feeling: ", 1)
+    pos = _positions(comp)
+    if pos:
+        sec["composition"] = _sent("Placement: " + pos)
+    if shown:
+        sec["text"] = "Exact text: " + _sent("; ".join(f'the words "{_s(t["text"])}"' + (f" placed {_s(t['placement'])}" if _s(t.get("placement")) else "") for t in shown), "written once in clear English letters, spelled exactly as quoted")
+    else:
+        sec["text"] = "Signs, papers and screens show soft blank surfaces."
+    if indian and people:
+        sec["cast"] = "Every person is Indian with South Asian features."
+    ref_lines = [f"Image {i}: {r['role']} ({r['name']})" for i, r in enumerate(refs["references"], 1)] if use_refs else []
+    if ref_lines:
+        sec["continuity"] = "Reference images: " + "; ".join(ref_lines) + "."
+    sec["style"] = _sent(f"Style: {look['short']}, hand-painted look, soft film grain" + (f", {variety.look_words((plan.get('settings') or {}).get('signature'))}" if (plan.get("settings") or {}).get("signature") else ""))
+    sec["framing"] = "The lowest fifth of the frame holds nothing important."
+    prompt = " ".join(v.strip() for v in sec.values() if v.strip())
+    out = _finish("qwen", "qwen-image-2.1", cfg, scene, prompt, "", sec, (w, h), refs, notes, False, plan, effective_mode)
+    out["prompt_version"] = "v2"
+    return out
+
+
+def compile_qwen_auto(scene: dict, assets_used: list[dict], plan: dict, refs: dict, effective_mode: str | None = None) -> dict:
+    """v2 for a scene planned from an event, the older form for every other scene (plans made before events keep their prompts)."""
+    return (compile_qwen_v2 if scene["data"].get("event") else compile_qwen)(scene, assets_used, plan, refs, effective_mode)
+
+
 # ── FLUX.2 Klein: natural prose, exclusions as positive statements plus the supported negative_prompt ──
 
 def compile_flux(scene: dict, assets_used: list[dict], plan: dict, refs: dict, effective_mode: str | None = None) -> dict:
@@ -476,13 +584,13 @@ def compile_flux(scene: dict, assets_used: list[dict], plan: dict, refs: dict, e
     sec: dict[str, str] = {"style": _sent(look["look"])}
     if plate:
         notes.append("this visual needs a verified chart, document, screen, map or diagram: the picture is the illustrated scene around it; the exact content is added later")
-    subject = _subject_text(d, people, indian, ref_index)
+    subject = _subject_text(d, people, indian, ref_index, assets_used)
     sec["subject"] = _sent(_s(_g(d, "feasibility", "fallback")) or subject, "Any screen, paper or sign shows only abstract glowing light and shapes") if plate else _sent(subject)
     sec["action"] = "" if plate else _sent(f"{_s(d.get('action'))}" if _s(d.get("action")) else "The moment is still and held")
     loc = _val(_g(d, "setting", "location"))
     where = _sent(f"The scene is set in {_run(loc)}" if loc else "",
                   f"The period is {_run(_val(_g(d, 'setting', 'period')))}" if _val(_g(d, "setting", "period")) else "")
-    ambient = "" if plate else _ambient_hint(loc, d.get("layers") or {})
+    ambient = "" if plate else _ambient_hint(loc, d.get("layers") or {}, _s(d.get("atmosphere")), d.get("exclusions") or [])
     sec["setting"] = where + ("" if plate else " " + _layers(d)) + (f" {ambient}" if ambient else "")
     feel = "" if plate else mood.line(feeling_texts(scene, plan), hidden_for(d), bool(people))
     if feel:
@@ -550,7 +658,7 @@ def _finish(adapter: str, model: str, cfg: dict, scene: dict, prompt: str, negat
     return out
 
 
-COMPILERS = {"qwen": compile_qwen, "flux": compile_flux}
+COMPILERS = {"qwen": compile_qwen_auto, "flux": compile_flux}
 
 
 def compile_scene(scene: dict, assets: list[dict], plan: dict, first_seen: dict[str, str] | None = None,
@@ -578,6 +686,46 @@ def first_appearances(scenes: list[dict]) -> dict[str, str]:
 
 # ── validation: does the prompt still say what the scene says? ──────────────
 
+_NEG_LIST = re.compile(r"\b(?:must not|should not|do not|don't|never|avoid|without|no [a-z]+ (?:or|and) no)\b", re.I)
+_NEG_WORD = re.compile(r"\b(?:no|not|nobody|none|nothing)\b", re.I)
+_CROWD = re.compile(r"\b(?:crowd|crowded|bustling|packed with people|throng)\b", re.I)
+_QUIET = re.compile(r"\b(?:empty|deserted|quiet|alone|still lane|nobody|stands empty)\b", re.I)
+_QUOTED = re.compile(r'the words "', re.I)
+
+
+def lint(c: dict, scene: dict, assets: list[dict]) -> list[dict]:
+    """Defects of a picture prompt that the validator does not look for (task 4.2): negations, which the endpoint ignores or turns into the thing named; a crowd and an empty
+    place in one prompt; more than one quoted text; a man described where the asset is a woman (or the reverse). Only for the one-paragraph prompts (`prompt_version` v2);
+    the older form is built from sections that name exclusions on purpose."""
+    if c.get("prompt_version") != "v2":
+        return []
+    p = c["prompt"]
+    out = []
+
+    def add(kind, text, level="error"):
+        out.append({"adapter": c["adapter"], "kind": kind, "text": text, "level": level})
+    body = re.sub(r"Style:[^.]*\.", "", p)                                            # the style sentence may say "no"
+    body = re.sub(r"Signs, papers and screens show soft blank surfaces\.", "", body)
+    if _NEG_LIST.search(body):
+        add("lint_negation", f"the prompt tells the model what must not appear ({_NEG_LIST.search(body).group()}): say what is there instead")
+    elif _NEG_WORD.search(body):
+        add("lint_negation", f"the prompt has a negation ({_NEG_WORD.search(body).group()}): say what is there instead", "warn")
+    if _CROWD.search(body) and _QUIET.search(body):
+        add("lint_contradiction", f"the prompt says both crowd ({_CROWD.search(body).group()}) and quiet ({_QUIET.search(body).group()})")
+    if len(_QUOTED.findall(p)) > 1:
+        add("lint_text", "more than one quoted text: the model draws one text reliably")
+    low = " " + p.lower() + " "
+    for a in assets:
+        if a["kind"] != "person" or a["name"].lower() not in low:
+            continue
+        g = str((a["data"].get("appearance") or {}).get("gender", "")).lower()
+        if re.search(r"woman|female|girl|lady", g) and re.search(r"\b(?:a|the) (?:man|boy)\b", low) and not re.search(r"\b(?:a|the) (?:woman|girl)\b", low):
+            add("lint_gender", f"{a['name']} is a woman but the prompt describes a man", "warn")
+        if re.search(r"\bman\b|\bmale\b|\bboy\b", g) and re.search(r"\b(?:a|the) (?:woman|girl)\b", low) and not re.search(r"\b(?:a|the) (?:man|boy)\b", low):
+            add("lint_gender", f"{a['name']} is a man but the prompt describes a woman", "warn")
+    return out
+
+
 def validate_prompt(c: dict, scene: dict, assets: list[dict], facts: str, prof: "leak.SourceProfile | None" = None) -> list[dict]:
     d, p = scene["data"], c["prompt"]
     both = p + " " + c.get("negative_prompt", "")
@@ -602,7 +750,7 @@ def validate_prompt(c: dict, scene: dict, assets: list[dict], facts: str, prof: 
             add("fact", f"fixed detail not in the prompt: {_s(f)}")
     used = assets_for(scene, assets)
     st = next((a for a in used if a["kind"] == "style"), None)
-    if st and _s(st["data"].get("description")) and not covers(p, _s(st["data"]["description"]), 0.7):
+    if st and _s(st["data"].get("description")) and not covers(p, _s(st["data"]["description"]), 0.7) and not (c.get("prompt_version") == "v2" and styles.get(c["params"]["style"])["short"] in p):
         add("style", "the plan's visual style is not in the prompt")
     hide = hidden_for(d)
     for a in used:
@@ -612,7 +760,8 @@ def validate_prompt(c: dict, scene: dict, assets: list[dict], facts: str, prof: 
         for fx in fixed:
             if _s(fx) and not covers(p, fx):
                 add("continuity", f"{a['name']}: “{_s(fx)}” must stay the same but is not in the prompt")
-    for ex in d.get("exclusions") or []:
+    v2 = c.get("prompt_version") == "v2"                                                       # v2 states what is there and never lists what must not appear
+    for ex in ([] if v2 else d.get("exclusions") or []):
         if _s(ex) and not covers(both, strip_negation(ex)):
             add("exclusion", f"exclusion not carried into the prompt: {_s(ex)}")
     for t in d.get("text_on_screen") or []:
@@ -638,7 +787,7 @@ def validate_prompt(c: dict, scene: dict, assets: list[dict], facts: str, prof: 
     for w in VAGUE:
         if re.search(rf"\b{w}\b", p, re.I):
             add("vague", f"“{w}” asks for an effect without saying what is visible: describe the visible details instead", "warn")
-    if not any(_s(comp.get(k)) for k in ("left", "centre", "right")) and d.get("visual_type") not in ("minimalist", "transition") and not plate:
+    if not any(_s(comp.get(k)) for k in ("left", "centre", "right")) and d.get("visual_type") not in ("minimalist", "transition") and not plate and not v2:
         add("composition", "no left/centre/right description: the model decides the layout", "warn")
     if c["adapter"] == "qwen" and c.get("negative_prompt"):
         add("negative", "the Qwen endpoint ignores a negative prompt; none should be sent")
@@ -654,6 +803,7 @@ def validate_prompt(c: dict, scene: dict, assets: list[dict], facts: str, prof: 
     lic = providers.get(c["model"])["licence"]
     if lic["status"] != "verified":
         add("licence", f"licence for {providers.get(c['model'])['label']} weights is {lic['status']}: {lic['note']}", "warn")
+    issues += lint(c, scene, assets)
     return issues
 
 

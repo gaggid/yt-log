@@ -137,10 +137,13 @@ def brief(scene: dict, assets: list[dict], style: str, context: str = "", narrat
     people = [a for a in imgprompts.assets_for(scene, assets) if a["kind"] in ("person", "narrator", "place", "prop")]
     who = "; ".join(f"{a['name']}: {_s(a['data'].get('description'))}" for a in people)
     q = quoted_texts(scene)
+    ev = d.get("event")
+    moment = " ".join(x for x in (_s(d.get("action")), (f"key object: {_s(d['layers'].get('foreground'))}" if (d.get("layers") or {}).get("foreground") else "")) if x) if ev else ""
     return " ".join(x for x in [
         context, f"Narration for this moment: {narration}" if narration else "", f"Subject: {_s(d.get('subject'))}.", f"Action: {_s(d.get('action'))}." if _s(d.get("action")) else "",
         f"Setting: {_val(d, 'setting', 'location')}. Period: {_val(d, 'setting', 'period')}." if _val(d, "setting", "location") else "",
         f"Lighting: {_s(d.get('lighting'))}." if _s(d.get("lighting")) else "", f"People, places and objects that may appear: {who}." if who else "No recurring people or objects.",
+        f"The moment to show: {moment}." if moment else "",
         ("The picture must contain exactly these words and no other text: " + "; ".join(f'"{t}"' for t in q) + ".") if q else "The picture must contain no readable text, letters or numbers.",
         f"Style: {style}" if style else ""] if x)
 
@@ -227,6 +230,20 @@ def done_current(plan_id: str, scene: dict, c: dict | None) -> list[dict]:
 
 # ── drawing ─────────────────────────────────────────────────────────────────
 
+SECOND_ANGLE = ("Image 1 is the same moment seen from another distance and angle: keep the same people, their clothes, the place, the objects and the light exactly as in Image 1, "
+                "and change only the camera as described next. ")
+
+
+def variant_base(plan_id: str, scene: dict):
+    """The picture a second-angle scene continues (task 3.5): the best finished picture of the scene it is a variant of, as a file, or None (the scene is then drawn from its own prompt)."""
+    base = (scene["data"] or {}).get("variant_of")
+    if not base:
+        return None
+    done = [i for i in store.items(plan_id, KIND, base) if i["status"] == "done" and i["file"] and store.path_of(i).is_file()]
+    done.sort(key=lambda i: (bool(i["approved"]), i["attempt"]), reverse=True)
+    return store.path_of(done[0]) if done else None
+
+
 async def generate(plan_id: str, scene_ids: list[str] | None = None, candidates: int | None = None, only_missing: bool = True, model: str | None = None,
                    mode: str | None = None, progress=None, s: dict | None = None, key: str = "", score: bool = True, variants: list[dict] | None = None) -> dict:
     """Draw pictures for the chosen scenes (all scenes by default). only_missing leaves scenes that are approved or already have a current picture
@@ -280,7 +297,11 @@ async def generate(plan_id: str, scene_ids: list[str] | None = None, candidates:
             seed = seed_for(sc["id"], it["attempt"])
             t0 = time.time()
             try:
-                img, req = await draw(client, s, key, m, c, mo, seed, plan)
+                base_pic = variant_base(plan_id, sc)
+                extra, prompt = ([base_pic], SECOND_ANGLE + c["prompt"]) if base_pic else (None, None)
+                img, req = await draw(client, s, key, m, c, mo, seed, plan, extra, prompt)
+                if base_pic:
+                    req = {**req, "second_angle_of": sc["data"]["variant_of"]}
                 name = f"scenes/{sc['id']}-a{it['attempt']}.png"
                 (out_dir / f"{sc['id']}-a{it['attempt']}.png").write_bytes(base64.b64decode(img["b64_json"]))
                 store.update(it["id"], status="done", file=name, meta={"seed": img.get("seed", seed), "width": img.get("width"), "height": img.get("height"),
@@ -392,6 +413,31 @@ async def redraw(plan_id: str, scene_id: str, model: str, mode: str = "generate"
     if progress:
         progress(n_pics, n_pics, "done")
     return {"made": made, "failed": failed, "scored": scored, "items": new_ids}
+
+
+def change_for(row: dict, note: str = "") -> str:
+    """What to ask a correction for, from the judge's own words about the best picture so far (task 4.6): remove what the brief did not ask for, fix the defects it saw, and
+    change the picture if it duplicates another. Empty when the picture has nothing to correct."""
+    best = row.get("best_item") or {}
+    sc = best.get("score") or {}
+    flags = [f for f in sc.get("flags", []) if not f.startswith("a stray letter")]
+    extras = [f[len("not in the brief: "):] for f in flags if f.startswith("not in the brief: ")]
+    bad = [f[len("looks wrong: "):] for f in flags if f.startswith("looks wrong: ")]
+    other = [f for f in flags if not f.startswith(("not in the brief: ", "looks wrong: "))]
+    parts = []
+    if extras:
+        parts.append("remove " + ", ".join(extras[:3]))
+    if bad:
+        parts.append("fix " + "; ".join(bad[:3]))
+    if other:
+        parts.append(other[0])
+    if note:
+        parts.append(note)
+    return ". ".join(parts)
+
+
+MAX_FIXES = 2                         # corrections per picture in auto-run
+GOOD_ENOUGH = 75                      # the judge's event_fit at which a picture is left alone
 
 
 async def correct(plan_id: str, scene_id: str, change: str, keep: list[str] | None = None, base_item: str | None = None, progress=None,
@@ -625,6 +671,7 @@ def state(plan_id: str) -> dict:
             est += _eta(m, allitems) * st["candidates"]
         rows.append({"id": sc["id"], "start_s": sc["start_s"], "duration_s": sc["duration_s"], "subject": _s(sc["data"].get("subject")), "visual_type": sc["data"].get("visual_type"),
                      "model": m, "mode": resolve_mode(mode_for(sc, plan), c) if c else "generate", "chosen_here": sc["id"] in st["per_scene"],
+                     "plain_fallback": bool(c) and mode_for(sc, plan) != "generate" and resolve_mode(mode_for(sc, plan), c) == "generate" and bool(c.get("missing_references")),
                      "can_edit": bool(c.get("references")) and providers.get(m)["edits"], "references": [r["name"] for r in c.get("references", [])],
                      "quoted": quoted_texts(sc), "prompt": c.get("prompt", ""), "has_prompt": bool(c), "approved": ok["id"] if ok else None, "approved_current": bool(ok and ok["current"]),
                      "candidates": cands, "candidates_done": len(good), "best": b["id"] if b else None, "best_item": b,
@@ -633,7 +680,7 @@ def state(plan_id: str) -> dict:
     unscored = sum(1 for i in allitems if i["status"] == "done" and not i["meta"].get("score"))
     bulk = sum(1 for r in rows if not r["approved"] and r["best_item"] and r["best_item"]["score"]["total"] >= refscore.AUTO_APPROVE_MIN and not r["best_item"]["score"]["hard"])
     trial = [r for r in rows if r["id"] in st["trial"]]
-    return {"ready": ready, "settings": st, "scenes": rows, "total": len(rows), **counts, "unscored": unscored, "bulk_ready": bulk, "min_score": refscore.AUTO_APPROVE_MIN,
+    return {"ready": ready, "settings": st, "scenes": rows, "total": len(rows), **counts, "plain_fallback": sum(1 for r in rows if r["plain_fallback"]), "unscored": unscored, "bulk_ready": bulk, "min_score": refscore.AUTO_APPROVE_MIN,
             "eta_missing_s": round(est), "done": bool(rows) and counts["approved"] == len(rows), "trial": [r["id"] for r in trial],
             "trial_done": bool(trial) and all(any(c["trial"] and c["status"] == "done" for c in r["candidates"]) for r in trial),
             "models": {m: providers.get(m)["label"] for m in providers.PROVIDERS},

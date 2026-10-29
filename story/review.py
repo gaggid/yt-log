@@ -2,7 +2,7 @@
 Every operation keeps the source links (candidate_refs) intact."""
 import copy
 
-from . import db, figures, storytypes
+from . import db, figures, reach, storytypes
 from .pipeline import next_story_id, uniq
 
 STATUSES = ("pending", "approved", "rejected")
@@ -67,6 +67,7 @@ def list_candidates(pid: str, status: str = "", q: str = "", min_priority: float
         r["claims"] = len(d.get("claims", []))
         r["chapter_idxs"] = d.get("chapter_idxs", [])
         r["flags"] = len(d.get("flags", []))
+        r["reach"] = reach.scores(d, r.get("title", ""))
         r["completeness"] = r["completeness"] if r["completeness"] is not None else 0
         r["pages"] = pages_of(pid, r["id"])
         out.append(r)
@@ -172,6 +173,22 @@ def _dedupe_by(items: list[dict], key: str) -> list[dict]:
             continue
         seen.add(k)
         out.append(it)
+    return out
+
+
+def merge_suggestions(pid: str, share: float = 0.5) -> list[dict]:
+    """Stories of one project that are mostly the same passages (the fugitive case: one article gave several thin stories). A pair where more than `share` of the smaller story's
+    passages are also in the other is suggested for merging; the suggestion keeps the strongest story's title. Pending stories only."""
+    cands = [c for c in list_candidates(pid, status="pending")]
+    refs = {c["id"]: {r["idx"] for r in get_refs(pid, c["id"])} for c in cands}
+    out = []
+    for i, a in enumerate(cands):
+        for b in cands[i + 1:]:
+            ra, rb = refs[a["id"]], refs[b["id"]]
+            small = min(len(ra), len(rb))
+            if small and len(ra & rb) / small > share:
+                best = a if a["eff_priority"] >= b["eff_priority"] else b
+                out.append({"ids": [a["id"], b["id"]], "shared": len(ra & rb), "of": small, "title": best["title"], "why": f"{len(ra & rb)} of {small} passages are the same"})
     return out
 
 

@@ -108,7 +108,7 @@ def timeline_events(scene: dict, pub: dict) -> list[dict]:
 def facts_ctx(plan: dict) -> dict:
     story = planner._story_for(plan)
     text = intake.facts_text(story["public"])
-    return {"text": text, "lower": text.lower(), "known": {x.replace(",", "") for x in storyboard.fact_numbers(text)}, "pub": story["public"]}
+    return {"text": text, "lower": text.lower(), "known": {x.replace(",", "") for x in storyboard.fact_numbers(text)}, "pub": story["public"], "plan": plan}
 
 
 # ── choosing what to build ──────────────────────────────────────────────────
@@ -116,6 +116,9 @@ def facts_ctx(plan: dict) -> dict:
 def spec_for(scene: dict, ctx: dict) -> dict:
     """Decide the template and the content from the facts. Returns {template, items/events/text, dropped, fallback, wanted}."""
     d = scene["data"]
+    if d.get("card") and ctx.get("plan"):
+        from . import cards                                               # a chat, SMS, call list, report, cutting, ID, ledger, phone screen, route or counter built from the story's details
+        return cards.spec(scene, ctx["plan"], ctx)
     vt = d.get("visual_type")
     wanted = {"data_chart": "a chart", "map_timeline": "a timeline or map", "document_archival": "a document", "screen_interface": "a screen", "diagram": "a diagram"}.get(vt, "a graphic")
     figs, dropped = [], []
@@ -386,10 +389,24 @@ def draw_text(spec: dict, style: str) -> Image.Image:
 DRAW = {"stat": draw_stat, "compare": draw_compare, "bar": draw_bar, "line": draw_line, "timeline": draw_timeline, "text": draw_text}
 
 
+def draw(spec: dict, style: str) -> Image.Image:
+    if spec["template"] in DRAW:
+        return DRAW[spec["template"]](spec, style)
+    from . import cards
+    return cards.DRAW[spec["template"]](spec, style)
+
+
+def animation(template: str) -> str:
+    if template in ANIM:
+        return ANIM[template]
+    from . import cards
+    return cards.TYPES[template][1]
+
+
 def numbers_on_card(spec: dict) -> list[str]:
     """Every number the card shows (digits only), for the check that each one is in the facts."""
     t = spec["template"]
-    shown = [x["shown"] for x in spec.get("items", [])] + [x["shown"] for x in spec.get("points", [])]
+    shown = [x["shown"] for x in spec.get("items", [])] + [x["shown"] for x in spec.get("points", [])] + list(spec.get("texts", []))
     shown += [x["label"] for x in spec.get("items", []) + spec.get("points", [])]
     if t == "timeline":
         shown += [e["when"] + " " + e["what"] for e in spec["events"]]
@@ -419,14 +436,14 @@ def build(plan_id: str, scene_ids: list[str] | None = None, force: bool = False)
         if have and not force:
             kept += 1
             continue
-        im = DRAW[spec["template"]](spec, style)
+        im = draw(spec, style)
         it = store.add(plan_id, KIND, sc["id"], 0, "running", {})
         name = f"graphics/{sc['id']}-a{it['attempt']}.png"
         im.save(out_dir / f"{sc['id']}-a{it['attempt']}.png")
         fb = explain(spec, sc)
         store.update(it["id"], status="done", file=name, meta={"template": spec["template"], "spec": {k: v for k, v in spec.items() if k not in ("dropped", "wanted", "fallback")},
                                                                "spec_hash": h, "style": style, "fallback": fb, "dropped": spec["dropped"], "wanted": spec["wanted"],
-                                                               "numbers": numbers_on_card(spec), "animation": ANIM[spec["template"]], "width": SIZE[0], "height": SIZE[1]})
+                                                               "numbers": numbers_on_card(spec), "animation": animation(spec["template"]), "width": SIZE[0], "height": SIZE[1]})
         made += 1
     plan_store.log(plan_id, "graphics", {"made": made, "kept": kept})
     return {"made": made, "kept": kept, "state": state(plan_id)}

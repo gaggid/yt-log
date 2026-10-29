@@ -117,6 +117,32 @@ NARRATE_NOTE = {
                 "Keep items equal in length. The closing beat names the pattern across the items.",
 }
 
+# Notes for the three-pass narration (draft and edit): what each kind of film needs from the telling, over the details of the Material Pack.
+TELL_NOTE = {
+    "incident": "\n\nThis is a story of an incident. Tell the chain of discovery in order: what was found first, what it led to, what each clue made the people do. Each clue is given before it is explained.",
+    "biography": "\n\nThis is a life. Name the period each time the telling moves on, as the details give it; show who the person was at that age (what they wanted, what it cost). Keep them human, never a monument.",
+    "documentary": "\n\nThis is a documentary. Lay out the evidence calmly: what is firm, what is only reported, then the other side with its due. Every number comes with what it measures.",
+    "explainer": "\n\nThis is an explainer. One everyday comparison that stays with the viewer, used again and again, before the technical term; the term is said once. One idea per sentence.",
+    "listicle": "\n\nThis is a numbered list. Each item starts with its number and name, gives its strongest detail and one vivid example, then hands over to the next.",
+}
+
+POLISH_NOTE = {
+    "incident": "\n\nKeep the order of discovery; do not move the answer earlier than the part that tells it.",
+    "biography": "\n\nKeep the period markers; never invent a thought or a quote for the person.",
+    "documentary": "\n\nKeep every hedge (reportedly, according to, the study found); never turn a claim into a fact.",
+    "explainer": "\n\nKeep the comparison the same all through; cut a second comparison that competes with it.",
+    "listicle": "\n\nKeep the item number at the start of its part; keep the items equal in length.",
+}
+
+
+def tell_note(t: str) -> str:
+    return TELL_NOTE.get(t, "")
+
+
+def polish_note(t: str) -> str:
+    return POLISH_NOTE.get(t, "")
+
+
 DIRECTOR_NOTE = {
     "biography": "\n\nPROJECT TYPE: BIOGRAPHY. Show the person in each phase (age, place and clothes change with the period) and the places that shaped them. Use establishing shots at every "
                  "change of period. A person with a real name is only ever drawn as the registry describes them.",

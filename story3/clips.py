@@ -42,6 +42,36 @@ def settings(plan: dict) -> dict:
     return {"enabled": bool(cur.get("enabled", False))}
 
 
+DEFAULT_BUDGET = 8                      # motion clips per film: the hook, each reveal and the climax (task 5.2)
+
+
+def choose_scenes(plan_id: str, budget: int | None = None) -> list[str]:
+    """Mark the scenes that deserve a moving clip: the first picture of the film, the pictures of reveal events, and the last picture before the end; at most `budget` (plan setting
+    `clip_budget`), spread over the film, never a built card. Only when motion clips are switched on for the plan. Returns the scene ids marked."""
+    from story2 import events as events_mod, storyboard
+    plan = planner.get_plan(plan_id)
+    if not settings(plan)["enabled"]:
+        return []
+    budget = int(budget or plan["settings"].get("clip_budget") or DEFAULT_BUDGET)
+    scenes = [s for s in sorted(storyboard.get_scenes(plan_id), key=lambda x: (x["start_s"], x["seq"])) if s["data"].get("visual_type") not in NEEDS_ASSET and not s["locked"]]
+    if not scenes:
+        return []
+    reveal = {e["id"] for e in events_mod.of(plan) if e.get("reveal")}
+    want = [scenes[0]["id"]] + [s["id"] for s in scenes[1:-1] if s["data"].get("event") in reveal] + [scenes[-1]["id"]]
+    if len(want) > budget:
+        keep = {want[0], want[-1]}
+        mid = want[1:-1]
+        step = max(1, len(mid) // max(1, budget - 2))
+        keep |= set(mid[::step][:max(0, budget - 2)])
+        want = [w for w in want if w in keep]
+    for s in scenes:
+        d = dict(s["data"])
+        if bool(d.get("motion_clip")) != (s["id"] in want):
+            d["motion_clip"] = s["id"] in want
+            db.ex("UPDATE scenes SET data=?, rev=rev+1, updated_at=? WHERE id=?", (db.jdump(d), db.now(), s["id"]))
+    return want
+
+
 def set_settings(plan_id: str, patch: dict) -> None:
     plan = planner.get_plan(plan_id)
     cur = {**(plan["settings"].get("motion_clips") or {})}

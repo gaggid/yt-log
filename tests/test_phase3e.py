@@ -441,3 +441,17 @@ def test_auto_run_has_a_voice_direction_step_only_maya_needs(env):
     narr = voices.choose(planner.get_plan(plan_id)["narrator"], "veena-tts")
     planner.set_narrator(plan_id, None, tts=narr["tts"])
     assert auto.done(plan_id, "voicetags") is True
+
+
+def test_a_take_with_a_long_silence_is_made_again_and_the_best_one_kept(env, monkeypatch, fast):
+    """The engine sometimes goes quiet near the end of a long request: that take is made again with another seed, up to two more times, and flagged."""
+    monkeypatch.setattr(voice, "RETAKES", 2)
+    plan_id = exported(env)
+    gw = Gateway()
+    out = run(plan_id, gw, monkeypatch)
+    segs = planner.get_plan(plan_id)["segments"]
+    assert out["made"] == len(segs) and len(gw.requests) > len(segs)                                   # silent audio is all dead air, so every part was retried
+    seeds = {r["body"]["seed"] for r in gw.requests}
+    assert len(seeds) > 1                                                                              # a different seed for each retry
+    metas = [i["meta"] for i in store.items(plan_id, "voice")]
+    assert any("made 3 times" in " ".join(m.get("flags", [])) for m in metas)

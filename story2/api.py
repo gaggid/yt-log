@@ -9,7 +9,7 @@ from story import db, llm, settings as settings_mod, storytypes
 from story.pipeline import manager
 from fastapi.responses import FileResponse
 
-from . import describe, editorial, export, imgplan, imgprompts, intake, jobs, planner, providers, resolve, storyboard, styles, voicetags, voices
+from . import audit as audit_mod, describe, editorial, export, imgplan, imgprompts, intake, events as events_mod, jobs, lexicon, material, planner, providers, resolve, safety, storyboard, store, styles, version, voicetags, voices
 
 router = APIRouter(prefix="/api/plans")
 
@@ -143,7 +143,7 @@ async def resolve_blocker(plan_id: str, body: ResolveReq):
     return {"kind": "job", "job": _start(plan_id, "fix: " + resolve.FIXES[fix]["label"].lower(), step)}
 
 
-STEP_EVENTS = ("blueprint", "narration", "registry", "references", "storyboard", "voicetags", "compile_prompts", "fix_repeats", "approved", "export", "voice", "scene_pictures", "graphics", "video", "thumbnail", "auto_run")
+STEP_EVENTS = ("material", "blueprint", "narration", "events", "registry", "references", "storyboard", "voicetags", "compile_prompts", "fix_repeats", "approved", "export", "voice", "scene_pictures", "graphics", "video", "thumbnail", "auto_run")
 
 
 def step_times(plan_id: str) -> dict:
@@ -159,7 +159,9 @@ def style_info(p: dict) -> dict:
     return {**{k: v for k, v in styles.get(sid).items() if k in ("id", "label", "description", "short")},
             "registry_stale": bool(p["assets"]) and (st.get("registry_direction") != styles.DIRECTION or st.get("registry_style") != sid or not asset),
             "storyboard_stale": bool(p["scenes"]) and (st.get("storyboard_direction") != styles.DIRECTION or st.get("storyboard_style") != sid or orphaned_scenes(p)),
-            "scenes_orphaned": orphaned_scenes(p)}
+            "scenes_orphaned": orphaned_scenes(p),
+            "pipeline": version.of(st), "pipeline_now": version.PIPELINE,
+            "narration_pipeline_stale": bool(p["segments"]) and version.stale(st, "narration"), "storyboard_pipeline_stale": bool(p["scenes"]) and version.stale(st, "storyboard")}
 
 
 def orphaned_scenes(p: dict) -> bool:
@@ -235,6 +237,13 @@ async def delete_plan(plan_id: str):
     return {"ok": True}
 
 
+@router.get("/{plan_id}/audit")
+async def plan_audit(plan_id: str, audio: bool = False):
+    """The audit scorecard (docs/AUDIT_2026-10-29.md section 8) and the boredom map. `audio=true` also runs the ffmpeg checks on the voice and the video."""
+    _guard(planner.get_plan, plan_id)
+    return await asyncio.to_thread(audit_mod.scorecard, plan_id, audio)
+
+
 @router.get("/{plan_id}/job")
 async def job(plan_id: str):
     return jobs.status(plan_id)
@@ -269,6 +278,9 @@ async def set_tts(plan_id: str, body: Tts):
 
 class Settings(BaseModel):
     minutes: float | None = None
+    anonymise: str | None = None                   # off | victims | victims_and_suspects: whose real names are replaced (settings name_map)
+    name_map: dict[str, str] | None = None         # the owner's own map: real name -> name used in the video
+    audience: dict | None = None                   # {"profile": metro_hinglish | hindi_first | senior_friendly, "region": "..."}: who the words are written for
 
 
 @router.patch("/{plan_id}/narrator")
@@ -280,8 +292,74 @@ async def narrator(plan_id: str, body: Narrator):
 async def plan_settings(plan_id: str, body: Settings):
     p = _guard(planner.get_plan, plan_id)
     st = {**p["settings"], **({"minutes": body.minutes} if body.minutes else {})}
+    if body.anonymise is not None:
+        if body.anonymise not in safety.MODES:
+            raise HTTPException(400, "anonymise must be one of: " + ", ".join(safety.MODES))
+        st["anonymise"] = body.anonymise
+        st["name_map"] = safety.suggest_name_map(intake.load(p["candidate_id"])["public"], body.anonymise)
+    if body.audience is not None:
+        prof = str(body.audience.get("profile") or lexicon.DEFAULT_PROFILE)
+        if prof not in lexicon.PROFILES:
+            raise HTTPException(400, "profile must be one of: " + ", ".join(lexicon.PROFILES))
+        st["audience"] = {"profile": prof, "region": str(body.audience.get("region") or "")}
+    if body.name_map is not None:
+        st["name_map"] = {str(k).strip(): str(v).strip() for k, v in body.name_map.items() if str(k).strip() and str(v).strip()}
     db.ex("UPDATE plans SET settings=?, updated_at=? WHERE id=?", (db.jdump(st), db.now(), plan_id))
+    if body.anonymise is not None or body.name_map is not None:
+        store.log(plan_id, "name_map", {"mode": st.get("anonymise"), "names": len(st.get("name_map") or {})})
     return _guard(planner.get_plan, plan_id)
+
+
+@router.get("/{plan_id}/gates")
+async def get_gates(plan_id: str):
+    """The automatic quality gates measured now: narration, storyboard, pictures, and the safety and cultural rules (nothing is changed)."""
+    from . import gates
+    _guard(planner.get_plan, plan_id)
+    return {"mode": gates.mode(planner.get_plan(plan_id)), "narration": gates.measure(plan_id, "narration"), "storyboard": gates.measure(plan_id, "storyboard"),
+            "pictures": gates.measure(plan_id, "pictures"), "safety": gates.safety_gate(plan_id)}
+
+
+@router.post("/{plan_id}/panel")
+async def run_panel(plan_id: str):
+    """The persona panel reads the film as eight kinds of Indian viewer and says where each would leave (a model step, about 15 minutes on the local model)."""
+    from . import judges
+    async def step(be, s, progress):
+        progress(0, 1, "the viewer panel is reading the film")
+        await judges.panel(plan_id, be, s)
+        return planner.get_plan(plan_id)
+    return _start(plan_id, "panel", step)
+
+
+@router.post("/{plan_id}/material")
+async def make_material(plan_id: str):
+    """Collect the story's concrete details (the Material Pack) from the source passages, in our own words. A model step: runs as the usual one-at-a-time job."""
+    async def step(be, s, progress):
+        progress(0, 1, "collecting the story's material")
+        await material.make_material(plan_id, be, s)
+        progress(1, 1, "done")
+    return _start(plan_id, "material", step)
+
+
+class EventsReq(BaseModel):
+    segment_ids: list[str] | None = None
+
+
+@router.post("/{plan_id}/events")
+async def make_events(plan_id: str, body: EventsReq | None = None):
+    """Plan what the camera sees (the visual events ledger): one filmable moment under every run of narration sentences, from the narration and the story material."""
+    async def step(be, s, progress):
+        await events_mod.make_events(plan_id, be, s, body.segment_ids if body else None, progress)
+    return _start(plan_id, "events", step)
+
+
+class MaterialEdit(BaseModel):
+    items: list[dict]
+
+
+@router.put("/{plan_id}/material")
+async def save_material(plan_id: str, body: MaterialEdit):
+    """The owner's edit of the list (add, change or remove items). Items added here survive a new run."""
+    return _guard(material.save_items, plan_id, body.items)
 
 
 @router.post("/{plan_id}/blueprint")

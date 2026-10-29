@@ -1,4 +1,5 @@
 """Model-output schemas for Phase 2 (lenient about harmless variations, strict about required content)."""
+import re
 from typing import Annotated
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
@@ -17,6 +18,20 @@ def _structure(v):
              "multiple_cases": "multi_case", "question": "question_journey", "educational": "question_journey"}
     v = alias.get(v, v)
     return v if v in STRUCTURES else "cold_open"
+
+
+def _ids(v):
+    """Material Pack ids as written by a model: "m3", "M3", 3, "m3, m5" all become ["m3", "m5"]."""
+    if v is None:
+        return []
+    if not isinstance(v, (list, tuple)):
+        v = [v]
+    out = []
+    for x in v:
+        for m in re.finditer(r"[a-zA-Z]*\d+", str(x)):
+            tok = m.group(0).lower()
+            out.append(tok if tok[0].isalpha() else "m" + tok)
+    return list(dict.fromkeys(out))
 
 
 def _emotion(v):
@@ -53,6 +68,12 @@ class Beat(M):
     primary_visual: Str = ""            # what the camera MUST show in this beat — the concept or object itself, not a character reacting to it
     unfilmable: StrList = []            # concepts in this beat that cannot be directly filmed (invisible, microscopic, cosmic, statistical)
     visual_device: Str = ""             # for each item in unfilmable, the decided visual representation (empty if nothing is unfilmable)
+    use: Annotated[list[str], BeforeValidator(_ids)] = []     # Material Pack ids this beat tells, in order (empty for a plan without a pack)
+    show: Annotated[list[str], BeforeValidator(_ids)] = []    # Material Pack ids the camera must show in this beat (at most three)
+    turn: Str = ""                      # the reversal or new fact of this beat, a statement
+    reward: Str = ""                    # the concrete new thing the viewer gets here
+    question: Str = ""                  # the question this beat opens in the viewer's mind
+    answer_beat: Str = ""               # the later beat that answers it
 
 
 class Blueprint(M):
@@ -76,6 +97,8 @@ class Blueprint(M):
     turning_point: Str = ""
     payoff: Str = ""
     ending: Str = ""
+    payoff_position: Str = ""           # the beat that tells the answer to the central question
+    experience: dict = {}               # the design of what the viewer goes through (promise, stake, clock, clue, set piece, participation, afterimage), see prompts.BLUEPRINT_EXPERIENCE
     beats: list[Beat] = []
 
     @field_validator("beats")
