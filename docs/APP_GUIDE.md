@@ -257,3 +257,15 @@ The plan and its progress are in [TASKS_quality_overhaul.md](TASKS_quality_overh
 - **The finished video** plays at `plan.settings.speed` (1.25 default), has phrase captions in the film's accent colour, a quiet sound bed ducked under the voice (`settings.audio`), chapter flashes, a year label and a colour grade at jumps in time, and a 4-second end card (`settings.structure.end_card`). The thumbnail headline is written in code. The publish pack is written to `media/<plan>/publish/` and never uploads.
 - **Where things live:** `story2/gates.py` (gates, safety and cultural rules), `judges.py` (rubric judges, persona panel), `region.py` + `data/regions.json`, `inserts.py`, `era.py`, `worldfix.py`, `variety.py` (the per-film signature), `story3/cards.py` (evidence cards and the route map), `audio.py`, `publish.py`, `dupes.py`, `story/reach.py` (Phase 1 chips).
 - **Known soft spots:** the gates' thresholds are first values (task 8.2 needs real films); pictures, voice and music were not run on real models in this build; see `docs/TASKS_quality_overhaul.md` for each task's status.
+
+## 8e. Shorts (Phase 4), added 2026-10-29
+
+A new section ("Shorts" in the header, `#/shorts`) plans and makes a 30-second 9:16 video where every moving picture comes from a Wan 2.2 model. The plan and the owner's decisions are in [PLAN_shorts.md](PLAN_shorts.md). What exists:
+
+- **Screens:** `static/shorts.js`. A list, a "New short" dialog (pick the model, then an idea or an approved story), and one page per short with a Next bar, an Auto-run button, the plan (editable character, place, look), the checks, the keyframe sheet (keyframe pipeline), per-beat narration with a voice take, per-shot prompts and clips, and the final video. A remix has its own page: link, window picker with the cut map, character picture, appearance prompt, sound option, rights boxes.
+- **Pipelines** (`shorts/pipelines.py`): `quick` (Wan 5B), `keyframe` (14B text-to-video stills, then 14B image-to-video), `remix` (Animate). Pictures: Wan decides, one picture of the main character (used for shots marked as showing them), or a picture per shot.
+- **Pace:** 11 to 13 shots, none over 3.0 s, the hook shot 2.0 s or less, hard cuts, captions of two to four words in the lower third. 30.0 s exactly.
+- **Voice:** the app's own voices (Maya by default), one take per beat, spoken in Hinglish; the voice is sped or slowed at most 12% to land on 30 s.
+- **Steps:** plan, voice, fit the shots to the voice, (keyframes, look at them), clips, put together. Auto-run does them in order and stops at the first problem, and at the keyframe checkpoint unless turned off.
+- **Time:** about 20 min (quick), about an hour (keyframe), about 35 min (remix) per short, one request at a time, so a Shorts job blocks long-form jobs. Run `python -m shorts.probe` once to replace the docs' timings with this machine's.
+- **Not done yet:** the 14B text-to-video-only pipeline and the speech-to-video (talking narrator) pipeline; a vision check of each clip; quality is unproven until a run on the real models (the tests use a fake gateway).

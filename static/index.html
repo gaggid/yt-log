@@ -96,6 +96,7 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:8px;
   <h1><a href="#/" style="color:inherit">Source to Story</a></h1>
   <span class="sp"></span>
   <span id="build-info" class="small mute" style="margin-right:12px"></span>
+  <a href="#/shorts">Shorts</a>
   <a href="#/settings">Settings</a>
   <a href="/nxt" target="_blank" rel="noopener" title="Open NXT Studio" style="font-size:12px;padding:3px 10px;border:1px solid var(--line);border-radius:6px;color:var(--mute);white-space:nowrap">NXT ↗</a>
   <button class="small" onclick="logout()">Sign out</button>
@@ -104,6 +105,7 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:8px;
 <div id="overlay"></div>
 <div id="toasts"></div>
 <script src="/plan.js"></script>
+<script src="/shorts.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -181,6 +183,8 @@ function route() {
   document.removeEventListener('keydown', drawerKeys);
   const h = (location.hash.slice(1) || '/').split('?')[0]; let m;
   if (h === '/settings') return viewSettings();
+  if (h === '/shorts') return viewShorts();
+  if ((m = h.match(/^\/short\/([\w-]+)$/))) return viewShort(m[1]);
   if ((m = h.match(/^\/plan\/([\w-]+)$/))) return viewPlan(m[1]);
   if ((m = h.match(/^\/p\/([0-9a-f]+)(?:\/(\w+))?$/))) return viewProject(m[1], m[2] || 'progress');
   return viewDashboard();

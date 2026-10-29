@@ -38,6 +38,7 @@ SAMPLING: dict[str, dict] = {
     "p2_registry": {"temperature": 0.4}, "p2_director": {"temperature": 0.5}, "p2_scenes": {"temperature": 0.6}, "p2_voice_tags": {"temperature": 0.2},
     "p2_thumbnail": {"temperature": 0.8}, "p2_material": {"temperature": 0.3}, "p2_events": {"temperature": 0.5}, "p2_experience": {"temperature": 0.7},
     "p2_title": {"temperature": 0.8},
+    "p4_plan": {"temperature": 0.8, "top_p": 0.95, "frequency_penalty": 0.3}, "p4_shots": {"temperature": 0.6},        # shorts (docs/PLAN_shorts.md)
 }
 OPTIONAL_SAMPLING = ("top_p", "frequency_penalty", "presence_penalty")
 

@@ -14,3 +14,5 @@ Pillow
 # reportlab
 # exported plan validation
 jsonschema
+# Shorts: fetch the YouTube video a remix is driven by
+yt-dlp

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Source-to-Story: turns a book (PDF) or article into a 16:9 long-form video through three stages with a human checkpoint each: Phase 1 `story/` (source to story candidates), Phase 2 `story2/` (story to video plan), Phase 3 `story3/` (plan to voice, pictures, graphics, ffmpeg draft video). `legacy/` is the old news-podcast generator, not served; leave it alone.
+Source-to-Story: turns a book (PDF) or article into a 16:9 long-form video through three stages with a human checkpoint each: Phase 1 `story/` (source to story candidates), Phase 2 `story2/` (story to video plan), Phase 3 `story3/` (plan to voice, pictures, graphics, ffmpeg draft video). `shorts/` (Phase 4) makes 30-second 9:16 shorts with Wan 2.2 models only; plan and status in [docs/PLAN_shorts.md](docs/PLAN_shorts.md). `legacy/` is the old news-podcast generator, not served; leave it alone.
 
 The active quality plan (audit, tasks, status of each) is [docs/TASKS_quality_overhaul.md](docs/TASKS_quality_overhaul.md): read it before changing narration, scenes or prompts, and tick tasks there as they land. Read [docs/RUN_LOG.md](docs/RUN_LOG.md) for what the latest end-to-end runs found and fixed, and [docs/APP_GUIDE.md](docs/APP_GUIDE.md) first (owner rules, measured model facts, invariants, plan-screen flow) and [docs/ROADMAP.md](docs/ROADMAP.md) for what remains.
 
@@ -26,13 +26,23 @@ No linter or build step configured. `static/plan.js` is served from disk uncache
 
 ## Architecture
 
-- `main.py` mounts three FastAPI routers: `story/api.py` (`/api`), `story2/api.py` (`/api/plans`), `story3/api.py` (`/api/media`). UI is plain static files (`static/index.html`, `plan.js`), no framework.
+- `main.py` mounts four FastAPI routers: `story/api.py` (`/api`), `story2/api.py` (`/api/plans`), `story3/api.py` (`/api/media`), `shorts/api.py` (`/api/shorts`). UI is plain static files (`static/index.html`, `plan.js`), no framework.
 - All models sit behind one local OpenAI-compatible gateway (default `127.0.0.1:8810/v1`): chat/vision (Gemma), voice (Veena `agastya` by default, Svara `hi_male` selectable; `story2/voices.py`), images (Qwen Image 2.1 is the default; FLUX.2 Klein and every other image model the gateway lists are selectable per scene). Gateway allows one concurrent request per key, so `story2/jobs.py` runs one background job at a time and refuses a second.
 - Data in gitignored `data/`: SQLite `story.db` (Phase 1 tables, Phase 2 `plans/segments/scenes/assets/plan_revisions`, Phase 3 `media`), plus sources, exports, previews, media files.
 - Phase 3 `media` rows are numbered attempts, never overwritten; approving one un-approves siblings (`story3/store.py`).
 - `story3/auto.py` is the "Auto-run" job that chains every unfinished step; keep it in sync when adding a step (and with the step order in `static/plan.js`: the order is blueprint, narration, characters, storyboard, references, prompts, repeats, approve, export, voice, pictures, graphics, video, thumbnail).
 - `story2/director.py` plans the whole film as shots (emotion, place, size, angle, camera move per segment) before any scene is drawn; `make_storyboard` calls it when no current plan exists. Each scene names the shot it follows (`scene.data.direction`), the shot's size and angle are written into `composition`, and `story3/video.py` takes the camera move from `direction.move`. Anything planned must be wired the same way: field in the scene, text in the Qwen prompt (`imgprompts.compile_qwen`, camera first), consumer in the video build.
 - Tests use fake models/gateways (`tests/fakellm.py`, `tests/conftest.py`).
+
+## Shorts (Phase 4, `shorts/`)
+
+- Three pipelines, chosen by the Wan model: `quick` (5B, text or picture per shot), `keyframe` (a still per shot, checked by a person, then each animated with the 14B image-to-video model at full quality), `remix` (Animate: a YouTube video's motion on the user's character). Speed LoRA is off everywhere ("always final"). Clip requests are built only in `shorts/pipelines.py` (and `remix.request`); the one gateway client is `shorts/wan.py`, also used by `story3/clips.py`.
+- Owner rule: **no shot is on screen longer than 3.0 seconds** and the short is exactly 30 s (900 frames at 30 fps). `shorts/timeline.py` fits the voice into 30 s and gives every shot whole output frames; `shorts/checks.py` blocks Make on a longer shot; `planner.fit_shots` rewrites a beat's shots when the real voice runs long. Clips are generated at the next 4n+1 frames and trimmed in `stitch.py`.
+- Voice is made per beat before any clip (shot lengths come from the real voice, `planner.sync_timing`). Voice, keyframe and clip validity are hashes of their inputs (`store.input_hash`, `pipelines.req_hash`, which leaves the seed out), like the long-form media.
+- Clips, keyframes, voice and the final video are `media` rows with `plan_id` = the short's id (kinds `short_key`, `short_clip`, `short_voice`, `short_final`). A running attempt stores the gateway's job id; `clips._adopt` resumes it after a restart.
+- Remix: the YouTube video is only the motion guide; it stays under `data/media/<short>/remix/`, is never exported or uploaded, and two rights boxes must be ticked before Make. Animate does not keep the video's own background (character and background come from the picture and the prompt).
+- `python -m shorts.probe` measures the gateway's Wan models and writes `data/shorts_probe/timings.json`, which the time estimates read. Run it first on a new gateway.
+- Tests: `tests/test_shorts.py` with `tests/shorts_fakes.py` (mock video gateway, fake chat, tone voice, tiny ffmpeg clips).
 
 ## Invariants that span files
 

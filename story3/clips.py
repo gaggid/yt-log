@@ -2,9 +2,7 @@
 pictures. One approved MP4 per opted-in scene; nothing is overwritten; approval picks
 the one that counts. Off by default — the user enables the feature globally then toggles
 per scene."""
-import asyncio
 import base64
-import time
 
 import httpx
 
@@ -215,16 +213,12 @@ async def generate(plan_id: str, scene_ids: list[str] | None,
 
         it     = store.add(plan_id, KIND, sc["id"],
                            meta={"job_id": job_id, "prompt": prompt})
-        mp4_url = await _poll(job_id, base_url, headers)
-
-        async with httpx.AsyncClient(timeout=120) as client:
-            dl = await client.get(mp4_url)
-        dl.raise_for_status()
+        content = await _fetch_clip(job_id, base_url, api_key)
 
         fname = f"clip/{sc['id']}-a{it['attempt']}.mp4"
         out   = store.media_dir(plan_id) / fname
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_bytes(dl.content)
+        out.write_bytes(content)
         store.update(it["id"], status="done", file=fname,
                      meta={"job_id": job_id, "prompt": prompt,
                            "duration_s": duration, "source_scene": sc["id"]})
@@ -264,38 +258,24 @@ async def generate_scene(plan_id: str, scene_id: str, item_id: str | None,
     if not job_id:
         raise MediaError(f"no job id in clip response: {r.text[:200]}")
     it      = store.add(plan_id, KIND, scene_id, meta={"job_id": job_id, "prompt": prompt, "source_item": item_id})
-    mp4_url = await _poll(job_id, base_url, headers)
-    async with httpx.AsyncClient(timeout=120) as client:
-        dl = await client.get(mp4_url)
-    dl.raise_for_status()
+    content = await _fetch_clip(job_id, base_url, api_key)
     fname = f"clip/{scene_id}-a{it['attempt']}.mp4"
     out   = store.media_dir(plan_id) / fname
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_bytes(dl.content)
+    out.write_bytes(content)
     store.update(it["id"], status="done", file=fname,
                  meta={"job_id": job_id, "prompt": prompt,
                        "duration_s": duration, "source_scene": scene_id, "source_item": item_id})
 
 
-async def _poll(job_id: str, base_url: str, headers: dict, timeout: int = 300) -> str:
-    """Poll GET /v1/jobs/{job_id} until succeeded; return the video URL."""
-    deadline = time.time() + timeout
-    async with httpx.AsyncClient(timeout=15) as client:
-        while time.time() < deadline:
-            r = await client.get(f"{base_url}/jobs/{job_id}", headers=headers)
-            r.raise_for_status()
-            j      = r.json()
-            status = j.get("status", "")
-            if status == "succeeded":
-                url = j.get("url") or (j.get("result") or {}).get("url")
-                if not url:
-                    raise MediaError(f"job {job_id} succeeded but no URL in response")
-                return url
-            if status in ("failed", "cancelled"):
-                raise MediaError(f"clip job {job_id} {status}: {j.get('error', '')}")
-            retry = float(r.headers.get("Retry-After", 5))
-            await asyncio.sleep(retry)
-    raise MediaError(f"clip job {job_id} timed out after {timeout}s")
+async def _fetch_clip(job_id: str, base_url: str, api_key: str) -> bytes:
+    """Wait for the job and download the clip with the Shorts video client (one hour for the job, and a result URL that is a path on the gateway's host is understood)."""
+    from shorts import wan
+    try:
+        res = await wan.wait(job_id, base_url, api_key)
+        return await wan.fetch(res, base_url, api_key)
+    except wan.WanError as e:
+        raise MediaError(f"clip job {job_id}: {e}") from e
 
 
 # ── approval ──────────────────────────────────────────────────────────────────
