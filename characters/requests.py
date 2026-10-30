@@ -125,12 +125,23 @@ def build(char: dict, view: str, attempt: int, listing: dict | None = None, seed
         how, body["prompt"], paths = "edit", photo_prompt(char) + (" " + extra.strip() if extra.strip() else ""), [photo]
         ref_ids = ["photo"]
     elif how == "draw":
-        body["prompt"] = draw_prompt(char, view, listing) + (" " + extra.strip() if extra.strip() else "")
-        lo = _loras(r)
-        if lo:
-            body["lora"] = lo
-        if providers.PROVIDERS.get(r["model"], {}).get("negative_prompt"):
-            body["negative_prompt"] = NEGATIVE
+        canon = store.canon_items(char)
+        if view == "body" and char["kind"] == "person" and canon.get("portrait"):
+            # portrait is approved: edit from it so the full-body picture shows the same face
+            how = "edit"
+            paths = [media.path_of(canon["portrait"])]
+            ref_ids = [canon["portrait"]["id"]]
+            body["prompt"] = ("The picture shows the person's face and upper body. "
+                              f"{VIEWS['body']['frame']} "
+                              "Keep exactly the same face, hair, skin tone, build and clothing. "
+                              f"{extra.strip() + ' ' if extra.strip() else ''}{NO_TEXT}")[:3900]
+        else:
+            body["prompt"] = draw_prompt(char, view, listing) + (" " + extra.strip() if extra.strip() else "")
+            lo = _loras(r)
+            if lo:
+                body["lora"] = lo
+            if providers.PROVIDERS.get(r["model"], {}).get("negative_prompt"):
+                body["negative_prompt"] = NEGATIVE
     else:
         canon = store.canon_items(char)
         for cv in v["refs"]:

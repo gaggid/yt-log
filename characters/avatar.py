@@ -42,6 +42,12 @@ def verdict(scores: dict) -> str:
 
 
 def picture_path(char: dict) -> Path:
+    look_id = (char.get("avatar") or {}).get("look_id", "")
+    if look_id:
+        from . import studio_edit
+        lk_it = studio_edit.look_item(char, look_id)
+        if lk_it:
+            return media.path_of(lk_it)
     canon = store.canon_items(char)
     it = canon.get("portrait") or canon.get("body")
     if not it:

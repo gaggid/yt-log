@@ -239,7 +239,10 @@ async def state(char_id: str):
         for it in media.items(char_id, kind):
             gallery.setdefault(it["key"], []).append(_view(char_id, it, ident))
     views = [v for v, spec in R.VIEWS.items() if spec["kind"] == c["kind"]]
-    return {**_card(c), "idea": c["idea"], "slots": c["slots"], "personality": c["personality"], "styling": c.get("styling", ""), "avatar": {"voice": avatar.voice_of(c), "ready": avatar.ready_state(c), "clip": next((f"/api/characters/file/{char_id}/{i['file']}" for i in reversed(media.items(char_id, avatar.KIND)) if i["status"] == "done" and i["file"]), "")}, "glamour_problem": store.glamour_problem(c) if c["kind"] == "person" else "", "notes": c["notes"], "render": c["render"], "locked": store.locked(c), "canon": c["canon"],
+    av_look_id = (c.get("avatar") or {}).get("look_id", "")
+    av_look_it = studio_edit.look_item(c, av_look_id) if av_look_id else None
+    av_picture_url = f"/api/characters/file/{char_id}/{av_look_it['file']}" if av_look_it else (_thumb(c) if store.canon_items(c).get("portrait") else "")
+    return {**_card(c), "idea": c["idea"], "slots": c["slots"], "personality": c["personality"], "styling": c.get("styling", ""), "avatar": {"voice": avatar.voice_of(c), "ready": avatar.ready_state(c), "look_id": av_look_id, "picture_url": av_picture_url, "clip": next((f"/api/characters/file/{char_id}/{i['file']}" for i in reversed(media.items(char_id, avatar.KIND)) if i["status"] == "done" and i["file"]), "")}, "glamour_problem": store.glamour_problem(c) if c["kind"] == "person" else "", "notes": c["notes"], "render": c["render"], "locked": store.locked(c), "canon": c["canon"],
             "rights": c["rights"], "photo": f"/api/characters/file/{char_id}/{c['source_photo']}" if store.photo_path(c) else "", "gaps": describe.missing(c["kind"] if c["kind"] != "person" else "person", c["slots"]),
             "identity": R.identity_text(c), "declared": c.get("declared", {}), "declared_keys": [{"key": k, "label": store.DECLARED_LABEL[k]} for k in store.DECLARED[c["kind"]]], "looks": [{**x, "stale": x["version"] != c["version"]} for x in c["looks"]], "recipes": c.get("recipes", []), "gallery": gallery, "views": views, "job": jobs.status(char_id), "identity_hash": ident,
             "estimate_s": {"draw": 70, "edit": 110}}
@@ -325,6 +328,7 @@ async def suggest(char_id: str, body: SuggestReq):
 
 class AvatarReq(BaseModel):
     voice: dict | None = None                    # {"engine", "voice"}; {} = the app's default voice
+    look_id: str | None = None                   # a saved look to use instead of the canon portrait; "" clears it
 
 
 @router.patch("/{char_id}/avatar")
@@ -341,6 +345,17 @@ async def avatar_patch(char_id: str, body: AvatarReq):
             except ValueError as e:
                 raise HTTPException(400, str(e))
         c["avatar"] = {**(c.get("avatar") or {}), "voice": v}
+    if "look_id" in p:
+        lid = (p["look_id"] or "").strip()
+        if lid and not studio_edit.look_item(c, lid):
+            raise HTTPException(400, "that look has no approved picture; approve the picture first or choose another look")
+        av = dict(c.get("avatar") or {})
+        if av.get("look_id", "") != lid:
+            av["look_id"] = lid
+            av.pop("ready", None)          # changing the picture invalidates the old test result
+            c["avatar"] = av
+        else:
+            c["avatar"] = {**av, "look_id": lid}
     store.save(c)
     return await state(char_id)
 
@@ -351,8 +366,12 @@ async def avatar_test(char_id: str):
     c = _get(char_id)
     if c["kind"] != "person":
         raise HTTPException(400, "only a person can talk")
-    if not store.canon_items(c).get("portrait"):
-        raise HTTPException(400, "approve a portrait first: the avatar is made from it")
+    look_id = (c.get("avatar") or {}).get("look_id", "")
+    if look_id:
+        if not studio_edit.look_item(c, look_id):
+            raise HTTPException(400, "the selected look has no approved picture; choose another look or clear it")
+    elif not store.canon_items(c).get("portrait"):
+        raise HTTPException(400, "approve a portrait first (or save a look and pick it as the avatar picture)")
     s, key = settings_mod.get(), settings_mod.api_key()
     return _start(char_id, "char_avatar", lambda progress: avatar.run_test(char_id, progress, s, key))
 

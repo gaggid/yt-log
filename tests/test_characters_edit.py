@@ -87,8 +87,8 @@ def test_a_picture_can_be_kept_saved_as_a_look_and_promoted_to_canon(gw):
     v = c["version"]
     c = studio_edit.set_canon_view(c["id"], a["id"], "body")
     assert c["version"] == v + 1 and c["canon"]["body"] == a["id"] and studio_edit.look_item(c, c["looks"][0]["id"])["id"] == a["id"]
-    with pytest.raises(store.CharError):
-        studio_edit.save_look(c["id"], store.canon_items(c)["portrait"]["id"], "x")
+    c = studio_edit.save_look(c["id"], store.canon_items(c)["portrait"]["id"], "Headshot")
+    assert any(x["name"] == "Headshot" for x in c["looks"]), "any finished picture including portraits can be saved as a look"
 
 
 def test_the_matrix_makes_one_picture_per_look_and_expression_and_is_capped(gw):

@@ -113,11 +113,9 @@ async def check_item(char_id: str, item_id: str, s: dict | None = None, key: str
 
 
 def save_look(char_id: str, item_id: str, name: str) -> dict:
-    """Keep an edited picture as a named look. The look remembers the canon version it was made from, so it shows as old when the canon changes."""
+    """Keep any finished picture of this character as a named look. The look remembers the canon version it was made from, so it shows as old when the canon changes."""
     char = store.get(char_id)
     it = _item(char_id, item_id)
-    if it["kind"] != store.EDIT or it["meta"].get("op") not in ("edit", "tryon"):
-        raise store.CharError("only an edited (or dressed) picture can be saved as a look")
     lid = "lk-" + it["id"][-6:]
     char["looks"] = [x for x in char["looks"] if x["id"] != lid] + [{"id": lid, "name": name.strip() or "Look", "item": item_id, "version": char["version"],
                                                                       "recipe": {k: it["meta"].get(k) for k in ("preset", "value", "garment_scope", "op")}}]
