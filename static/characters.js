@@ -90,6 +90,7 @@ window.viewCharacter = async function (id) {
   };
   window._chLoad = load;
   await loadLists();
+  try { window._chVoices = Object.entries((await api('/shorts/options')).voices || {}); } catch { window._chVoices = []; }
   await load(true);
   if (sessionStorage.getItem('ch-suggest-' + id)) { sessionStorage.removeItem('ch-suggest-' + id); await suggest(null); if (C && !C.gaps.length) await post(null, '/generate', {views: ['portrait'], n: 4}, 'Drawing four portraits: pick one as the canon'); }
 };
@@ -97,6 +98,7 @@ const editing = () => ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeEl
 const post = (btn, path, json, ok) => act(btn, async () => { await flushSlots(); await call('/' + CID + path, {method: 'POST', json: json || {}}); await window._chLoad(true); return true; }, ok);
 let PENDING = Promise.resolve();
 const flushSlots = async () => { document.querySelectorAll('[data-slot]').forEach(e => { clearTimeout(e._t); if ((C.slots[e.dataset.slot] || '') !== e.value) { const slots = {...C.slots}; slots[e.dataset.slot] = e.value; PENDING = patch({slots}); } }); await PENDING; };
+const patchAvatar = async (json) => { await act(null, async () => { C = await call('/' + CID + '/avatar', {method: 'PATCH', json}); render(); return true; }); };
 const patch = async (json) => { await act(null, async () => { C = await call('/' + CID, {method: 'PATCH', json}); render(); return true; }); };
 const hdur = s => (window.hd ? hd(s) : Math.round(s) + 's');
 
@@ -119,6 +121,17 @@ function render() {
   wire();
 }
 function refreshCenter() { $('#ch-job').innerHTML = jobBox(); $('#ch-center').innerHTML = centerView(C.job && C.job.state === 'running'); wireCenter(); }
+
+function avatarBlock(dis) {
+  const a = C.avatar || {voice: {}, ready: {}}, r = a.ready || {}, vs = window._chVoices || [];
+  const cur = a.voice && a.voice.engine ? `${a.voice.engine}|${a.voice.voice}` : '';
+  const badge2 = r.state === 'pass' ? badge('good', 'ready to talk') : r.state === 'weak' ? badge('warn', 'weak: see the notes') : badge('queued', 'not tested');
+  return `<h3>Talking avatar</h3>
+    <label class="f"><select id="av-voice" ${dis}><option value="">the app's default voice</option>${vs.flatMap(([eng, e]) => Object.entries(e.voices).map(([v, g]) => `<option value="${esc(eng)}|${esc(v)}" ${cur === eng + '|' + v ? 'selected' : ''}>${esc(e.label)}: ${esc(v)} (${esc(g)})</option>`)).join('')}</select></label>
+    <div class="row small mt-s">${badge2}${r.stale ? ' ' + badge('warn', 'character changed since') : ''}<span class="sp"></span><button class="small" id="av-test" ${dis} ${C.canon && C.canon.portrait ? '' : 'disabled'} title="Makes a 3-second talking clip of the approved portrait with this voice and checks the mouth, hands and likeness. Takes several minutes.">Run the 3 s test</button></div>
+    ${r.state ? `<div class="mute small">mouth ${r.mouth}/10 · hands ${r.hands}/10 · same person ${r.identity}/10${(r.notes || []).length ? ' · ' + esc(r.notes.join('; ')) : ''}</div>` : '<div class="mute small">The test needs an approved portrait and the talking model on the gateway.</div>'}
+    ${a.clip ? `<video src="${esc(a.clip)}" controls muted style="width:100%;max-height:260px;margin-top:6px"></video>` : ''}`;
+}
 
 function stylingBlock(dis) {
   const st = (OPT && OPT.styling) || [], glam = C.styling === 'glamour', gender = ((C.declared || {}).gender || '').toLowerCase();
@@ -143,6 +156,7 @@ function sideView(busy) {
     <div class="row mt-s"><button class="small primary" id="ch-suggest" ${dis}>Fill the empty details</button><button class="small" id="ch-suggest-all" ${dis} title="Write every detail again; the five above stay">Write all again</button></div>
     ${C.kind === 'person' ? `<div class="row mt-s small">${C.photo ? `<img src="${esc(C.photo)}" style="width:44px;border-radius:6px"> started from a picture (${esc(C.rights.basis)})` : ''}<button class="small" id="ch-photo" ${dis}>${C.photo ? 'Change the picture' : 'Start from a picture'}</button></div>` : ''}
     ${C.kind === 'person' ? stylingBlock(dis) : ''}
+    ${C.kind === 'person' ? avatarBlock(dis) : ''}
     ${C.kind === 'person' ? `<h3>Read a detail from a picture</h3><div class="row small" style="gap:6px"><select id="rd-aspect" ${dis}><option value="hair">hair (colour, streaks, style)</option><option value="outfit">outfit</option><option value="accessories">accessories</option><option value="face">face and skin</option><option value="expression">expression</option></select><button class="small" id="rd-pick" ${dis}>Choose a picture</button></div><div class="mute small">The model looks at the picture and writes the words into the matching detail; you can change them. The picture itself is not kept and is not given to the image model.</div>` : ''}
     <h3>Details</h3><div class="mute small">${C.gaps.length ? 'Fill these in: ' + C.gaps.map(esc).join(', ') + '. An image model invents what is not written.' : 'Every detail is written.'}</div>
     ${keys.map(k => `<label class="ch-slot ${C.gaps.includes(k) ? 'gap' : ''}" title="${esc(hints[k])}"><span>${esc(k)}</span><input data-slot="${k}" list="dl-slot-${k}" value="${esc(C.slots[k] || '')}" placeholder="pick or type" ${dis}>${dl('dl-slot-' + k, (OPT.choices[C.kind] || {})[k] || [])}</label>`).join('')}
@@ -196,6 +210,8 @@ function wire() {
   const val = (sel, key, conv = x => x) => { const e = document.querySelector(sel); if (e) e.onchange = () => patch({[key]: conv(e.value)}); };
   val('#ch-idea', 'idea'); val('#ch-pers', 'personality'); val('#ch-notes', 'notes'); val('#ch-tags', 'tags', v => v.split(','));
   const rdp = $('#rd-pick'); if (rdp) rdp.onclick = () => { const f = document.createElement('input'); f.type = 'file'; f.accept = 'image/jpeg,image/png,image/webp'; f.onchange = async () => { if (!f.files[0]) return; const fd = new FormData(); fd.append('file', f.files[0]); fd.append('aspect', $('#rd-aspect').value); await act(null, async () => { C = await call('/' + CID + '/read-detail', {method: 'POST', form: fd}); render(); return true; }, 'Read: check the words in the details'); }; f.click(); };
+  const avv = $('#av-voice'); if (avv) avv.onchange = () => { const [engine, voice] = avv.value.split('|'); patchAvatar(avv.value ? {voice: {engine, voice}} : {voice: {}}); };
+  const avt = $('#av-test'); if (avt) avt.onclick = () => post(avt, '/avatar/test', {}, 'The test clip is being made');
   const sty = $('#ch-styling'); if (sty) sty.onchange = () => patch({styling: sty.value});
   const out = $('#ch-outfit'); if (out) out.onchange = () => { const o = ((OPT && OPT.outfits) || []).find(x => x.id === out.value); if (!o) return; const slots = {...C.slots}; ['top', 'bottom', 'footwear', 'accessories', 'expression'].forEach(k => { slots[k] = o[k]; }); if (o.styling && C.styling !== 'glamour') patch({slots, styling: 'glamour'}); else patch({slots}); };
   document.querySelectorAll('[data-slot]').forEach(e => {

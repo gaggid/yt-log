@@ -75,3 +75,9 @@ def test_the_estimate_counts_avatar_shots_as_talking_clips(gw, env):
     sh["avatar"] = False
     store.save(short)
     assert base != P.estimate_s(store.get(short["id"]))
+
+
+def test_an_avatar_whose_character_has_not_passed_the_test_gets_a_warning_not_a_block(gw, env):
+    short, sid = avatar_short()
+    issues = [i for i in checks.run(short)["issues"] if i["code"] == "avatar_ready"]
+    assert issues and issues[0]["level"] == "warn" and "avatar test" in issues[0]["text"]

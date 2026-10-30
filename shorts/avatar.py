@@ -9,7 +9,9 @@ from pathlib import Path
 
 from story3 import store as media
 
-from . import models, timeline, voice as svoice
+from characters import avatar as cavatar
+
+from . import cast, models, timeline, voice as svoice
 
 MODEL = models.TALK
 
@@ -63,6 +65,12 @@ def problems(short: dict) -> list[dict]:
         n = short["shots"].index(sh) + 1
         if not sh.get("cast"):
             out.append({"level": "block", "code": "avatar_cast", "shot": sh["id"], "text": f"Shot {n} is a talking avatar but no library character is in it: put a cast character in the shot."})
+        for m in cast.members(short):
+            if m.get("char") and m["char"]["id"] in (sh.get("cast") or []):
+                r = cavatar.ready_state(m["char"])
+                if r["state"] != "pass" or r["stale"]:
+                    why = "has not passed the avatar test" if not r["state"] else "is weak in the avatar test" if r["state"] == "weak" else "changed since its avatar test"
+                    out.append({"level": "warn", "code": "avatar_ready", "shot": sh["id"], "text": f"{m['char']['name']} {why}: run the 3 s test on the Characters screen so the lips and hands are known to be good."})
         beat = beat_of(short, sh)
         if beat and not svoice.chosen(short, beat):
             out.append({"level": "block", "code": "avatar_voice", "shot": sh["id"], "text": f"Shot {n} is a talking avatar: make the voice of its beat first, the avatar speaks it."})

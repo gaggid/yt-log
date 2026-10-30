@@ -79,7 +79,7 @@ def create(name: str, kind: str = "person", slots: dict | None = None, extra: di
         raise CharError(f"kind is one of: {', '.join(KINDS)}")
     cid = f"ch-{hashlib.sha1(f'{name}{kind}{db.now()}'.encode()).hexdigest()[:8]}"
     data = {"idea": "", "slots": describe.clean(slots), "personality": "", "render": render.default(), "tags": [], "notes": "", "canon": {}, "version": 1,
-            "rights": {"basis": "invented", "confirmed": True, "note": ""}, "source_photo": "", "looks": [], "recipes": [], "declared": {}, "styling": "", **(extra or {})}
+            "rights": {"basis": "invented", "confirmed": True, "note": ""}, "source_photo": "", "looks": [], "recipes": [], "declared": {}, "styling": "", "avatar": {}, **(extra or {})}
     data["render"] = render.clean(data["render"])
     db.ex("INSERT INTO chars(id,name,kind,status,data,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", (cid, name.strip() or "Untitled", kind, "draft", db.jdump(data), db.now(), db.now()))
     return get(cid)

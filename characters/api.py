@@ -9,11 +9,11 @@ from pydantic import BaseModel
 
 from story import llm, settings as settings_mod
 from story.pipeline import manager
-from story2 import describe, jobs, providers
+from story2 import describe, jobs, providers, voices
 from story3 import store as media
 from story3.voice import MediaError
 
-from . import choices, pack, check, edits, render, requests as R, store, studio, studio_edit, wardrobe
+from . import avatar, choices, pack, check, edits, render, requests as R, store, studio, studio_edit, wardrobe
 
 router = APIRouter(prefix="/api/characters")
 MAX_UPLOAD = 12 * 1024 * 1024
@@ -239,7 +239,7 @@ async def state(char_id: str):
         for it in media.items(char_id, kind):
             gallery.setdefault(it["key"], []).append(_view(char_id, it, ident))
     views = [v for v, spec in R.VIEWS.items() if spec["kind"] == c["kind"]]
-    return {**_card(c), "idea": c["idea"], "slots": c["slots"], "personality": c["personality"], "styling": c.get("styling", ""), "glamour_problem": store.glamour_problem(c) if c["kind"] == "person" else "", "notes": c["notes"], "render": c["render"], "locked": store.locked(c), "canon": c["canon"],
+    return {**_card(c), "idea": c["idea"], "slots": c["slots"], "personality": c["personality"], "styling": c.get("styling", ""), "avatar": {"voice": avatar.voice_of(c), "ready": avatar.ready_state(c), "clip": next((f"/api/characters/file/{char_id}/{i['file']}" for i in reversed(media.items(char_id, avatar.KIND)) if i["status"] == "done" and i["file"]), "")}, "glamour_problem": store.glamour_problem(c) if c["kind"] == "person" else "", "notes": c["notes"], "render": c["render"], "locked": store.locked(c), "canon": c["canon"],
             "rights": c["rights"], "photo": f"/api/characters/file/{char_id}/{c['source_photo']}" if store.photo_path(c) else "", "gaps": describe.missing(c["kind"] if c["kind"] != "person" else "person", c["slots"]),
             "identity": R.identity_text(c), "declared": c.get("declared", {}), "declared_keys": [{"key": k, "label": store.DECLARED_LABEL[k]} for k in store.DECLARED[c["kind"]]], "looks": [{**x, "stale": x["version"] != c["version"]} for x in c["looks"]], "recipes": c.get("recipes", []), "gallery": gallery, "views": views, "job": jobs.status(char_id), "identity_hash": ident,
             "estimate_s": {"draw": 70, "edit": 110}}
@@ -321,6 +321,40 @@ async def suggest(char_id: str, body: SuggestReq):
         c["name"] = out["name"]
     store.save(c)
     return await state(char_id)
+
+
+class AvatarReq(BaseModel):
+    voice: dict | None = None                    # {"engine", "voice"}; {} = the app's default voice
+
+
+@router.patch("/{char_id}/avatar")
+async def avatar_patch(char_id: str, body: AvatarReq):
+    c = _get(char_id)
+    if c["kind"] != "person":
+        raise HTTPException(400, "only a person can talk")
+    p = body.model_dump(exclude_unset=True)
+    if "voice" in p:
+        v = p["voice"] or {}
+        if v:
+            try:
+                v = voices.choose({}, v.get("engine", ""), v.get("voice"))["tts"]
+            except ValueError as e:
+                raise HTTPException(400, str(e))
+        c["avatar"] = {**(c.get("avatar") or {}), "voice": v}
+    store.save(c)
+    return await state(char_id)
+
+
+@router.post("/{char_id}/avatar/test")
+async def avatar_test(char_id: str):
+    """The ready test: a 3-second talking clip with the avatar's voice, judged on mouth, hands and identity. Takes minutes on the gateway."""
+    c = _get(char_id)
+    if c["kind"] != "person":
+        raise HTTPException(400, "only a person can talk")
+    if not store.canon_items(c).get("portrait"):
+        raise HTTPException(400, "approve a portrait first: the avatar is made from it")
+    s, key = settings_mod.get(), settings_mod.api_key()
+    return _start(char_id, "char_avatar", lambda progress: avatar.run_test(char_id, progress, s, key))
 
 
 @router.post("/{char_id}/read-detail")
