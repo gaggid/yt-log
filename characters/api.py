@@ -495,6 +495,7 @@ class EditReq(BaseModel):
     scope: str = "outfit"
     n: int = 1
     prompt: str = ""                    # the person's own full instruction (power users): replaces the built one
+    lora: list[dict] | None = None      # optional [{name, strength}]; when given the LoRA is sent with the edit request
 
 
 def _edit_args(c: dict, body: EditReq) -> dict:
@@ -506,24 +507,37 @@ def _edit_args(c: dict, body: EditReq) -> dict:
     return {"base": base, "extra": extra, "garment": garment}
 
 
+def _clean_lora(lora: list[dict] | None, model: str) -> list[dict] | None:
+    if not lora:
+        return None
+    listing = studio.lora_listing(model)
+    known = studio.lora_names(listing)
+    bad = [x["name"] for x in lora if x.get("name") and known and x["name"] not in known]
+    if bad:
+        raise HTTPException(400, f"the gateway does not list the LoRA {', '.join(bad)} for {model}")
+    return [{"name": x["name"], "strength": float(x.get("strength", 1.0))} for x in lora if x.get("name")]
+
+
 @router.post("/{char_id}/edit/preview")
 async def edit_preview(char_id: str, body: EditReq):
-    """What would be sent, without sending it: the prompt, the pictures in order, the size (the prompt drawer)."""
+    """What would be sent, without sending it: the prompt, the pictures in order, the size, and the LoRAs (the prompt drawer)."""
     c = _get(char_id)
     a = _edit_args(c, body)
+    lo = _clean_lora(body.lora, c["render"]["model"])
     req = _guard(edits.build, c, a["base"], body.preset, body.value, 1, a["extra"], a["garment"]["path"] if a["garment"] else None, body.scope if a["garment"] else "",
-                 override=body.prompt, garment_worn=bool(a["garment"] and a["garment"]["worn"]))
-    return {"prompt": req["body"]["prompt"], "refs": req["ref_ids"], "size": req["body"]["size"], "model": req["body"]["model"], "depth": req["meta"]["depth"]}
+                 override=body.prompt, garment_worn=bool(a["garment"] and a["garment"]["worn"]), lora=lo)
+    return {"prompt": req["body"]["prompt"], "refs": req["ref_ids"], "size": req["body"]["size"], "model": req["body"]["model"], "depth": req["meta"]["depth"], "loras": req["meta"]["loras"]}
 
 
 @router.post("/{char_id}/edit")
 async def edit(char_id: str, body: EditReq):
     c = _get(char_id)
     a = _edit_args(c, body)
+    lo = _clean_lora(body.lora, c["render"]["model"])
     _guard(edits.build, c, a["base"], body.preset, body.value, 1, a["extra"], a["garment"]["path"] if a["garment"] else None, body.scope if a["garment"] else "",
-           override=body.prompt, garment_worn=bool(a["garment"] and a["garment"]["worn"]))        # refuse a bad request before the job starts
+           override=body.prompt, garment_worn=bool(a["garment"] and a["garment"]["worn"]), lora=lo)   # refuse a bad request before the job starts
     s, key = settings_mod.get(), settings_mod.api_key()
-    return _start(char_id, "char_edit", lambda progress: studio_edit.make_edit(char_id, body.base, body.preset, body.value, body.extra, body.garment, body.scope, body.n, body.prompt, progress, s, key))
+    return _start(char_id, "char_edit", lambda progress: studio_edit.make_edit(char_id, body.base, body.preset, body.value, body.extra, body.garment, body.scope, body.n, body.prompt, progress, s, key, lora=lo))
 
 
 class PlaceReq(BaseModel):

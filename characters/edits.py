@@ -76,8 +76,9 @@ def _meta(char: dict, body: dict, base: dict, ref_ids: list[str], op: str, prese
 
 
 def build(char: dict, base: dict, preset: str, value: str, attempt: int, extra: list[dict] | None = None, garment_path=None, garment_scope: str = "", seed: int | None = None,
-          override: str = "", extra_meta: dict | None = None, garment_worn: bool = False) -> dict:
-    """An edit of one picture (`base` is a finished media row). `extra` are more pictures of the character or the place (up to two); `garment_path` is a clothes picture for a try-on."""
+          override: str = "", extra_meta: dict | None = None, garment_worn: bool = False, lora: list[dict] | None = None) -> dict:
+    """An edit of one picture (`base` is a finished media row). `extra` are more pictures of the character or the place (up to two); `garment_path` is a clothes picture for a try-on.
+    `lora` is an optional list of {name, strength} dicts; when given the LoRA is sent as a form field so the edit inherits the style from both the source picture and the LoRA."""
     extra = (extra or [])[:MAX_EXTRA_REFS]
     refs = [media.path_of(base)] + [media.path_of(x) for x in extra]
     ref_ids = [base["id"]] + [x["id"] for x in extra]
@@ -87,8 +88,13 @@ def build(char: dict, base: dict, preset: str, value: str, attempt: int, extra: 
     if extra and not garment_path and not override.strip():
         prompt = "The first picture is the one to edit; the other pictures are references for the same person or place. " + prompt
     seed = seed if seed is not None else R.seed_for(char["id"], "edit", attempt)
+    lo = [{"name": x["name"], "strength": x.get("strength", 1.0)} for x in lora if x.get("name")] if lora else None
     body = {"model": char["render"]["model"], "size": size_of_picture(refs[0]), "n": 1, "seed": seed, "response_format": "b64_json", "prompt": prompt}
+    if lo:
+        body["lora"] = lo
     meta = _meta(char, body, base, ref_ids, "tryon" if garment_path else "edit", preset, value, {"garment_scope": garment_scope, "garment_worn": garment_worn, **(extra_meta or {})} if garment_path else extra_meta)
+    if lo:
+        meta["loras"] = lo
     return {"how": "edit", "body": body, "refs": refs, "ref_ids": ref_ids, "meta": meta}
 
 

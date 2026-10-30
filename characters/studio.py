@@ -191,7 +191,7 @@ def save_photo(char_id: str, raw: bytes) -> str:
 async def _post_image(how: str, body: dict, refs: list, base: str, key: str) -> bytes:
     async with _client(TIMEOUT_S) as c:
         if how == "edit":
-            data, files = scenes._form(body["model"], body["prompt"], body["size"], body["seed"], refs, body.get("steps"))
+            data, files = scenes._form(body["model"], body["prompt"], body["size"], body["seed"], refs, body.get("steps"), body.get("lora"))
             img = await scenes._post(c, base + "/images/edits", key, data=data, files=files)
         else:
             img = await scenes._post(c, base + "/images/generations", key, json=body)

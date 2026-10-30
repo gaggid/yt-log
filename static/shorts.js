@@ -183,14 +183,48 @@ function checksView() {
 }
 
 function castBlock() {
-  const st = S.settings, chars = (window._shChars || []).filter(c => c.kind === 'person' && c.status === 'ready'), places = (window._shChars || []).filter(c => c.kind === 'place' && c.status === 'ready');
+  const st = S.settings;
+  const chars = (window._shChars || []).filter(c => c.kind === 'person' && c.status === 'ready');
+  const places = (window._shChars || []).filter(c => c.kind === 'place' && c.status === 'ready');
   const cast = st.cast || [];
-  const slot = i => { const e = cast[i] || {}, ch = chars.find(c => c.id === e.character_id);
-    return `<div class="row mt-s" style="gap:6px"><select data-cast="${i}" style="flex:1"><option value="">${i ? 'Second character (optional)' : 'Choose a character'}</option>${chars.map(c => `<option value="${esc(c.id)}" ${c.id === e.character_id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
-      ${ch && ch.looks.length ? `<select data-castlook="${i}" style="width:auto"><option value="">canon look</option>${ch.looks.map(l => `<option value="${esc(l.id)}" ${l.id === e.look_id ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select>` : ''}</div>`; };
+  const slot = i => {
+    const e = cast[i] || {}, ch = chars.find(c => c.id === e.character_id);
+    if (!ch) return `<button class="small mt-s" data-castpick="${i}">+ ${i === 0 ? 'Choose main character' : 'Add second character (optional)'}</button>`;
+    const lkName = (ch.looks.find(l => l.id === e.look_id) || {}).name || 'canon look';
+    return `<div class="row mt-s" style="gap:8px;align-items:center">
+      ${ch.thumb ? `<img src="${esc(ch.thumb)}" style="width:52px;height:52px;object-fit:cover;border-radius:6px;flex-shrink:0">` : `<div style="width:52px;height:52px;background:#e0e0e0;border-radius:6px;flex-shrink:0"></div>`}
+      <div style="flex:1;min-width:0"><b class="small">${esc(ch.name)}</b><div class="mute small">${esc(lkName)}</div></div>
+      <button class="small" data-castpick="${i}">Change</button><button class="small bad" data-castrem="${i}">Remove</button></div>`;
+  };
   return `<div class="mt-s"><b class="small">Cast from the Characters library</b>${slot(0)}${slot(1)}
     <label class="f mt-s">Place<select id="st-place"><option value="">no fixed place</option>${places.map(c => `<option value="${esc(c.id)}" ${c.id === st.place_id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
     <div class="mute small">${chars.length ? 'Their faces come from the approved library pictures, so they look the same in every shot. Choose the cast before planning.' : 'No ready characters yet: <a href="#/characters">make one in Characters</a> (approve a portrait and a full-body picture).'}</div></div>`;
+}
+
+async function castPickerDialog(slot) {
+  const chars = (window._shChars || []).filter(c => c.kind === 'person' && c.status === 'ready');
+  if (!chars.length) { toast('No ready characters yet — make one in Characters first.', {bad: true}); return null; }
+  const cards = chars.map(c => `<div class="cast-card" data-cid="${esc(c.id)}" data-look="" style="cursor:pointer;border:2px solid transparent;border-radius:8px;padding:8px;text-align:center;background:#f5f5f5;min-width:110px;flex:0 0 auto">
+    ${c.thumb ? `<img src="${esc(c.thumb)}" style="width:80px;height:80px;object-fit:cover;border-radius:6px;display:block;margin:0 auto">` : `<div style="width:80px;height:80px;background:#ccc;border-radius:6px;margin:0 auto"></div>`}
+    <div class="small" style="margin-top:6px"><b>${esc(c.name)}</b></div>
+    ${c.looks.length ? `<div class="small mute" style="margin-top:4px;text-align:left">
+      <label style="display:block"><input type="radio" name="cpl-${esc(c.id)}" value="" checked onclick="this.closest('.cast-card').dataset.look=''"> canon</label>
+      ${c.looks.map(l => `<label style="display:block"><input type="radio" name="cpl-${esc(c.id)}" value="${esc(l.id)}" onclick="this.closest('.cast-card').dataset.look='${esc(l.id)}'"> ${esc(l.name)}</label>`).join('')}
+    </div>` : ''}
+  </div>`).join('');
+  const p = dialog({
+    title: slot === 0 ? 'Choose the main character' : 'Choose second character',
+    html: `<div style="display:flex;flex-wrap:wrap;gap:10px;max-height:60vh;overflow-y:auto">${cards}</div>`,
+    buttons: [
+      {label: 'Cancel', value: null},
+      {label: 'Select', primary: true, collect: l => { const s = l.querySelector('.cast-card.selected'); return s ? {character_id: s.dataset.cid, look_id: s.dataset.look || ''} : null; },
+       validate: v => v ? null : 'Click a character to select them'}
+    ]
+  });
+  setTimeout(() => document.querySelectorAll('.dlg .cast-card').forEach(card => {
+    card.onclick = e => { if (e.target.type === 'radio') return; document.querySelectorAll('.dlg .cast-card').forEach(c => { c.classList.remove('selected'); c.style.borderColor = 'transparent'; }); card.classList.add('selected'); card.style.borderColor = '#4f46e5'; };
+  }), 0);
+  return p;
 }
 
 function keyframesView() {
@@ -324,8 +358,21 @@ function wire() {
   all('[data-tag]').forEach(e => e.onchange = () => { const ta = q(`[data-beat="${e.dataset.tag}"]`); patch('/narration', {beats: [{id: e.dataset.tag, sentences: ta.value.split('\n'), tag: e.value}]}); });
   all('[data-voice]').forEach(e => e.onclick = () => post(e, '/voice', {beat_ids: [e.dataset.voice], only_missing: false}, 'Making the voice'));
   all('[data-shot]').forEach(e => e.onchange = () => patch('/shots/' + e.dataset.shot, {prompt: e.value}));
-  const castPatch = () => patch('/settings', {cast: [...document.querySelectorAll('[data-cast]')].map((e, i) => ({character_id: e.value, look_id: (document.querySelector(`[data-castlook="${i}"]`) || {}).value || ''})).filter(e => e.character_id)});
-  all('[data-cast]').forEach(e => e.onchange = castPatch); all('[data-castlook]').forEach(e => e.onchange = castPatch);
+  all('[data-castpick]').forEach(b => b.onclick = async () => {
+    const slot = +b.dataset.castpick;
+    const result = await castPickerDialog(slot);
+    if (!result) return;
+    const cast = [...(S.settings.cast || [])];
+    cast[slot] = result;
+    S = await act(null, () => call('/' + SID + '/settings', {method: 'PATCH', json: {cast: cast.filter(Boolean)}})) || S;
+    render();
+  });
+  all('[data-castrem]').forEach(b => b.onclick = async () => {
+    const slot = +b.dataset.castrem;
+    const cast = (S.settings.cast || []).filter((_, i) => i !== slot);
+    S = await act(null, () => call('/' + SID + '/settings', {method: 'PATCH', json: {cast}})) || S;
+    render();
+  });
   st('#st-place', 'place_id');
   all('[data-fixgo]').forEach(e => e.onclick = () => { const t = document.querySelector(`[data-fix="${e.dataset.fixgo}"]`).value; if (t.trim().length < 4) { toast('Say what to change', {bad: true}); return; } post(e, '/shots/' + e.dataset.fixgo + '/fix', {instruction: t}, 'Changing the picture'); });
   all('[data-still]').forEach(e => e.onchange = () => patch('/shots/' + e.dataset.still, {still: e.value}));

@@ -179,7 +179,7 @@ function centerView(busy) {
   const pics = v => (C.gallery[v] || []).slice().reverse();
   const card = p => `<div class="ch-pic ${C.canon[p.view] === p.id ? 'canon' : ''}">${p.url ? `<img src="${esc(p.url)}" loading="lazy" onclick="chZoom('${esc(p.url)}')">` : `<div class="ph">${p.status === 'failed' ? 'failed<br>' + esc(p.error.slice(0, 80)) : 'drawing…'}</div>`}
     <div class="mute">#${p.attempt} · seed ${p.seed ?? '-'}${p.seconds_taken ? ' · ' + Math.round(p.seconds_taken) + 's' : ''}${p.current ? '' : ' · older'}</div>
-    ${p.url && (p.how === 'draw' || p.how === 'edit') ? `<div class="row" style="margin-top:4px">${C.canon[p.view] === p.id ? '<b>Canon ✓</b>' : p.view === 'portrait' || p.view === 'body' || p.view === 'place' ? `<button class="small primary" data-canon="${p.id}" ${dis}>Use as canon</button>` : (p.approved ? '<b>Kept ✓</b>' : `<button class="small" data-canon="${p.id}" ${dis}>Keep</button>`)}</div>` : ''}</div>`;
+    ${p.url && (p.how === 'draw' || p.how === 'edit') ? `<div class="row" style="margin-top:4px;gap:4px">${C.canon[p.view] === p.id ? '<b>Canon ✓</b>' : `${p.view === 'portrait' || p.view === 'body' || p.view === 'place' ? `<button class="small primary" data-canon="${p.id}" ${dis}>Use as canon</button>` : (p.approved ? '<b>Kept ✓</b>' : `<button class="small" data-canon="${p.id}" ${dis}>Keep</button>`)} <button class="small bad" data-del="${p.id}" ${dis}>Delete</button>`}</div>` : ''}</div>`;
   const section = (v, n) => `<div class="card pad mt"><div class="row"><h3 style="margin:0">${esc(OPT.views[v].label)}</h3>${C.canon[v] ? badge('done', 'canon') : ''}<span class="sp"></span>
       <select data-n="${v}" style="width:auto">${[1, 2, 4].map(k => `<option value="${k}" ${k === n ? 'selected' : ''}>${k} new</option>`).join('')}</select><button class="small primary" data-draw="${v}" ${dis}>Draw</button></div>
       <div class="ch-views mt-s">${pics(v).map(card).join('') || '<div class="mute small">nothing drawn yet</div>'}</div></div>`;
@@ -287,9 +287,10 @@ function editsGallery(busy) {
     <div class="mute">chain ${p.depth}${p.depth >= 3 ? ' ⚠' : ''}${p.current ? '' : ' · older'}</div>${checkBadge(p)}
     ${p.url ? `<div class="row" style="margin-top:4px;gap:4px;flex-wrap:wrap"><button class="small" data-base="${p.id}">Edit this</button><button class="small ${p.kept ? 'primary' : ''}" data-keep="${p.id}" data-on="${p.kept ? 0 : 1}">${p.kept ? 'Kept ✓' : 'Keep'}</button>
       <button class="small" data-look="${p.id}">Save as look</button><button class="small" data-check="${p.id}" ${dis}>Check</button><button class="small" data-cmp="${p.id}">${CMP.includes(p.id) ? 'Compare ✓' : 'Compare'}</button>
-      ${(p.op === 'edit' || p.op === 'tryon') ? `<button class="small" data-promote="${p.id}" data-view="body">Make canon body</button>` : ''}</div>` : ''}</div>`;
+      ${(p.op === 'edit' || p.op === 'tryon') ? `<button class="small" data-promote="${p.id}" data-view="body">Make canon body</button>` : ''}
+      <button class="small bad" data-del="${p.id}" ${dis}>Delete</button></div>` : ''}</div>`;
   return `<div class="card pad mt"><div class="row"><h3 style="margin:0">Edits and looks</h3><span class="sp"></span>${CMP.length === 2 ? '<button class="small primary" id="cmp-go">Compare the two</button>' : '<span class="mute small">pick two pictures to compare</span>'}</div>
-    ${C.looks.length ? `<div class="row mt-s small" style="gap:8px;flex-wrap:wrap"><b>Looks:</b>${C.looks.map(l => `<span class="badge b-info" title="made from canon version ${l.version}">${esc(l.name)}${l.stale ? ' · older canon' : ''} <a href="#" data-lookbase="${l.item}">use</a> <a href="#" data-lookdel="${l.id}">×</a></span>`).join('')}</div>` : ''}
+    ${C.looks.length ? `<div class="row mt-s small" style="gap:8px;flex-wrap:wrap"><b>Looks:</b>${C.looks.map(l => `<span class="badge b-info" title="made from canon version ${l.version}">${esc(l.name)}${l.stale ? ' · older canon' : ''} <a href="#" data-lookbase="${l.item}">use</a> <button class="small bad" style="padding:1px 6px;font-size:11px" data-lookdel="${l.id}" title="Delete this look">×</button></span>`).join('')}</div>` : ''}
     <div class="ch-views mt-s">${list.map(card).join('')}</div></div>`;
 }
 
@@ -334,6 +335,7 @@ function wireEdit() {
   document.querySelectorAll('[data-cmp]').forEach(b => b.onclick = () => { CMP = CMP.includes(b.dataset.cmp) ? CMP.filter(i => i !== b.dataset.cmp) : [...CMP, b.dataset.cmp].slice(-2); refreshCenter(); });
   document.querySelectorAll('[data-lookbase]').forEach(a => a.onclick = ev => { ev.preventDefault(); EB = a.dataset.lookbase; render(); });
   document.querySelectorAll('[data-lookdel]').forEach(a => a.onclick = ev => { ev.preventDefault(); act(null, async () => { C = await call('/' + CID + '/looks/' + a.dataset.lookdel, {method: 'DELETE'}); render(); return true; }); });
+  document.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { if (await confirmDlg('Delete picture', 'The file is removed from disk. This cannot be undone.', 'Delete', true)) await act(null, async () => { C = await call('/item/' + b.dataset.del, {method: 'DELETE'}); render(); return true; }); });
   if ($e('cmp-go')) $e('cmp-go').onclick = () => { const [a, b] = CMP.map(id => allPics().find(p => p.id === id)); if (a && b) dialog({title: 'Compare', html: `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><div class="mute small">${esc(picLabel(a))}</div><img src="${esc(a.url)}" style="width:100%;border-radius:8px"></div><div><div class="mute small">${esc(picLabel(b))}</div><img src="${esc(b.url)}" style="width:100%;border-radius:8px"></div></div>`, buttons: [{label: 'Close', value: true, primary: true}]}); };
 }
 

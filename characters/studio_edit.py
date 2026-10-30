@@ -61,13 +61,13 @@ async def _run(char_id: str, kind: str, key: str, make_req, n: int, label: str, 
 
 
 async def make_edit(char_id: str, base_id: str, preset: str, value: str = "", extra_ids: list[str] | None = None, garment_id: str = "", scope: str = "outfit", n: int = 1,
-                    override: str = "", progress=None, s: dict | None = None, key: str = "", do_check: bool = True) -> dict:
+                    override: str = "", progress=None, s: dict | None = None, key: str = "", do_check: bool = True, lora: list[dict] | None = None) -> dict:
     char = store.get(char_id)
     base = _item(char_id, base_id)
     extra = [_item(char_id, x) for x in (extra_ids or [])]
     garment = wardrobe.usable(garment_id) if garment_id else None
     return await _run(char_id, store.EDIT, "edit", lambda a: edits.build(char, base, preset, value, a, extra, garment["path"] if garment else None, scope if garment else "",
-                                                                           override=override, garment_worn=bool(garment and garment["worn"])),
+                                                                           override=override, garment_worn=bool(garment and garment["worn"]), lora=lora),
                       n, "Dress the character" if garment else "Edit", progress, s, key, do_check)
 
 

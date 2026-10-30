@@ -83,18 +83,19 @@ def look_text(short: dict) -> str:
 
 def refs_for(short: dict, shot: dict) -> dict | None:
     """The reference pictures for the start picture of a shot, in the order the prompt names them: the people in the shot (their look or canon body; a lone person also gets the face portrait first),
-    then the place. None when the shot has no cast member (it is drawn from text)."""
+    then the place. None when the shot has no cast member (it is drawn from text). A cast member with only a portrait approved still gets references — portrait used as the sole identity anchor."""
     ids = shot.get("cast") or []
     ms = [m for m in members(short) if m["char"] and m["char"]["id"] in ids][:MAX_PEOPLE]
-    if not ms or any("portrait" not in m["canon"] or not m["wear"] for m in ms):
+    if not ms or any("portrait" not in m["canon"] for m in ms):
         return None
     pics, who = [], []
     if len(ms) == 1:
         pics.append(ms[0]["canon"]["portrait"])
         who.append((ms[0]["char"]["name"], "face"))
     for m in ms:
-        pics.append(m["wear"])
-        who.append((m["char"]["name"], "whole body" + (f", look {m['look_name']}" if m["look_name"] else "")))
+        if m["wear"]:
+            pics.append(m["wear"])
+            who.append((m["char"]["name"], "whole body" + (f", look {m['look_name']}" if m["look_name"] else "")))
     pl = place(short)
     use_place = bool(pl and pl["item"] and not shot.get("setting"))
     if use_place and len(pics) < 3:
