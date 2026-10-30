@@ -1,153 +1,132 @@
 """
-Diagnostic: runs exactly what the app runs for a face_into swap.
-Shows every field sent to the gateway and the raw response.
+Direct face-swap test — mirrors test_voice.py but for images/edits.
+Hits the gateway DIRECTLY (no app code in the HTTP path) so we can
+confirm the request format independently of the app.
 
-Usage (on the remote server, app does NOT need to be running):
-  .venv\Scripts\python.exe debug_swap.py <char_id> <ref_media_id> <portrait_media_id>
+Usage:
+  .venv\Scripts\python.exe debug_swap.py <image1_path> <image2_path>
 
-  char_id       — the character's id (ch-...)
-  ref_media_id  — media id of the uploaded office-girl reference (mr-..., kind=char_ref)
-  portrait_media_id — media id of the character portrait (mr-..., kind=gen)
+  image1 = target photo  (scene to keep — e.g. office girl)
+  image2 = face source   (face to use  — e.g. green kurta portrait)
 
-Example: get the IDs from the DB or the URL in the browser.
+Result saved to debug_swap_result.png
+
+Example:
+  .venv\Scripts\python.exe debug_swap.py "C:/Users/.../Downloads/office.jpg" "C:/Users/.../Downloads/portrait.png"
 """
-import asyncio, sys, time, json
+import asyncio
+import base64
+import sys
+import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-
-from story import settings as settings_mod
-from story3 import store as media
-from characters import edits, store as char_store
-
-# ── patch _post_job to dump everything ──────────────────────────────────────
 import httpx
-import characters.studio as studio_mod
 
-_orig_post_job = studio_mod._post_job
+sys.path.insert(0, str(Path(__file__).parent))
+from story import settings as settings_mod
 
-async def _debug_post_job(c, base, key, data, files, poll_s=4.0):
-    print("\n=== REQUEST TO GATEWAY ===")
-    print(f"  URL: {base}/images/edits")
-    print(f"  Headers: Authorization: Bearer {key[:20]}... | Prefer: respond-async")
-    print("  FORM FIELDS (data dict):")
-    for k, v in data.items():
-        print(f"    {k} = {v!r}")
-    print("  FILES:")
-    for field_name, (fname, fbytes, ctype) in files:
-        print(f"    [{field_name}] filename={fname!r}, size={len(fbytes)} bytes, content_type={ctype!r}")
+BASE_URL: str = settings_mod.get()["base_url"].rstrip("/")
+API_KEY:  str = settings_mod.api_key()
+
+LORA   = "bfs-head-swap"
+MODEL  = "qwen-image-2.1"
+PROMPT = (
+    "Change only the face. Keep the clothes, jewellery, neck, body, pose, "
+    "lighting and background of image 1 exactly as they are. "
+    "Do not copy any clothes or jewellery from image 2."
+)
+POLL_S  = 4
+LIMIT_S = 300
+
+
+def _mime(path: Path) -> str:
+    return "image/jpeg" if path.suffix.lower() in (".jpg", ".jpeg") else "image/png"
+
+
+async def _wait_job(client: httpx.AsyncClient, job_id: str) -> bytes:
+    url = BASE_URL + "/jobs/" + job_id
+    t0 = time.time()
+    while time.time() - t0 < LIMIT_S:
+        r = await client.get(url, headers={"Authorization": f"Bearer {API_KEY}"})
+        j = r.json()
+        st = j.get("status", "")
+        elapsed = time.time() - t0
+        print(f"  [{elapsed:.0f}s] status={st}")
+        if st == "succeeded":
+            data = (j.get("result") or j)["data"][0]
+            return base64.b64decode(data["b64_json"])
+        if st in ("failed", "cancelled", "canceled", "error"):
+            raise RuntimeError(f"job {st}: {j.get('error', '')}")
+        await asyncio.sleep(POLL_S)
+    raise RuntimeError("timed out")
+
+
+async def swap(img1: Path, img2: Path) -> bytes:
+    """POST images/edits with bfs-head-swap LoRA, Prefer: respond-async."""
+    data = {
+        "model":           MODEL,
+        "n":               "1",
+        "response_format": "b64_json",
+        "prompt":          PROMPT,
+        "lora":            LORA,
+    }
+    files = [
+        ("image[]", (img1.name, img1.read_bytes(), _mime(img1))),
+        ("image[]", (img2.name, img2.read_bytes(), _mime(img2))),
+    ]
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Prefer":        "respond-async",
+    }
+
+    print(f"Gateway : {BASE_URL}")
+    print(f"API key : {API_KEY[:20]}...")
+    print(f"Fields  : {list(data.keys())}")
+    print(f"Image 1 : {img1.name}  ({img1.stat().st_size // 1024} KB)  {_mime(img1)}")
+    print(f"Image 2 : {img2.name}  ({img2.stat().st_size // 1024} KB)  {_mime(img2)}")
+    print()
 
     t0 = time.time()
-    hdr = {"Authorization": f"Bearer {key}", "Prefer": "respond-async"}
-    r = await c.post(base + "/images/edits", headers=hdr, data=data, files=files)
-    elapsed = time.time() - t0
+    async with httpx.AsyncClient(timeout=LIMIT_S) as client:
+        r = await client.post(
+            BASE_URL + "/images/edits",
+            headers=headers,
+            data=data,
+            files=files,
+        )
+        print(f"Response: HTTP {r.status_code}  ({time.time() - t0:.1f}s)")
 
-    print(f"\n=== GATEWAY RESPONSE ({elapsed:.1f}s) ===")
-    print(f"  Status: {r.status_code}")
-    if r.status_code == 200:
-        print("  → Sync 200: server processed immediately (NOT async job)")
-        body = r.json()
-        print(f"  Body keys: {list(body.keys())}")
-        d = (body.get("data") or [{}])[0]
-        if d.get("b64_json"):
-            print(f"  Image returned: {len(d['b64_json'])} chars of b64 (~{len(d['b64_json'])*3//4//1024} KB)")
-        else:
-            print(f"  No image in data[0]: {d}")
-        return d
-    elif r.status_code == 202:
-        job = r.json()["id"]
-        print(f"  → Async 202: job id = {job}")
-        print("  Polling...")
-        url = base + "/jobs/" + job
-        while True:
-            await asyncio.sleep(poll_s)
-            j = await c.get(url, headers={"Authorization": f"Bearer {key}"})
-            body = j.json()
-            st = body.get("status")
-            elapsed2 = time.time() - t0
-            print(f"    [{elapsed2:.0f}s] status={st}")
-            if st == "succeeded":
-                result = (body.get("result") or {})["data"][0]
-                print(f"  ✓ DONE in {elapsed2:.0f}s, image size: ~{len(result.get('b64_json',''))*3//4//1024} KB")
-                return result
-            if st in ("failed", "cancelled"):
-                err = str(body.get("error") or "")
-                print(f"  ✗ FAILED: {err}")
-                raise RuntimeError(f"job {st}: {err}")
-    else:
-        print(f"  ✗ Unexpected status: {r.text[:300]}")
-        raise RuntimeError(f"HTTP {r.status_code}: {r.text[:160]}")
+        if r.status_code == 202:
+            job_id = r.json()["id"]
+            print(f"Job id  : {job_id}")
+            print("Polling ...")
+            return await _wait_job(client, job_id)
 
-studio_mod._post_job = _debug_post_job
+        if r.status_code == 200:
+            print("→ Sync 200 (no async job — server processed immediately)")
+            j = r.json()
+            return base64.b64decode(j["data"][0]["b64_json"])
 
-# ── also patch _post_image to print what it gets ────────────────────────────
-from story3 import scenes
+        raise RuntimeError(f"HTTP {r.status_code}: {r.text[:200]}")
 
-_orig_form = scenes._form
-
-def _debug_form(model, prompt, size, seed, files, steps=None, lora=None):
-    data, parts = _orig_form(model, prompt, size, seed, files, steps, lora)
-    return data, parts
-
-scenes._form = _debug_form
-
-# ────────────────────────────────────────────────────────────────────────────
 
 async def main():
-    if len(sys.argv) != 4:
+    if len(sys.argv) != 3:
         print(__doc__)
         sys.exit(1)
 
-    char_id, ref_id, portrait_id = sys.argv[1], sys.argv[2], sys.argv[3]
+    img1 = Path(sys.argv[1])
+    img2 = Path(sys.argv[2])
+    for p in (img1, img2):
+        if not p.exists():
+            print(f"ERROR: file not found: {p}")
+            sys.exit(1)
 
-    s = settings_mod.get()
-    key = settings_mod.api_key()
-    print(f"Gateway: {s['base_url']}")
-    print(f"API key: {key[:20]}...")
+    result = await swap(img1, img2)
 
-    char = char_store.get(char_id)
-    print(f"Character: {char['name']} | model: {char['render']['model']}")
-
-    ref = media.get(ref_id)
-    portrait = media.get(portrait_id)
-    if not ref:
-        print(f"ERROR: media id {ref_id!r} not found")
-        sys.exit(1)
-    if not portrait:
-        print(f"ERROR: media id {portrait_id!r} not found")
-        sys.exit(1)
-
-    print(f"Ref photo: {ref['file']} (kind={ref['kind']})")
-    print(f"Portrait:  {portrait['file']} (kind={portrait['kind']})")
-
-    ref_path = media.path_of(ref)
-    portrait_path = media.path_of(portrait)
-    print(f"Ref path exists: {ref_path.exists()} ({ref_path})")
-    print(f"Portrait path exists: {portrait_path.exists()} ({portrait_path})")
-
-    req = edits.build(
-        char,
-        base=ref,           # image 1 = target (office girl, body kept)
-        preset="custom",
-        value="My face into reference photo",
-        attempt=99,
-        extra=[portrait],   # image 2 = face source (green kurta, face taken)
-        swap="bfs-head-swap",
-    )
-
-    print(f"\nBuild result:")
-    print(f"  how = {req['how']}")
-    print(f"  body = {json.dumps({k: v for k, v in req['body'].items() if k != 'prompt'}, indent=2)}")
-    print(f"  prompt (first 100): {req['body'].get('prompt','')[:100]!r}")
-    print(f"  refs: {[str(p) for p in req['refs']]}")
-
-    base_url = s["base_url"].rstrip("/")
-    from characters import studio as stu
-    import base64
-    result_bytes = await stu._post_image(req["how"], req["body"], req["refs"], base_url, key)
     out = Path("debug_swap_result.png")
-    out.write_bytes(result_bytes)
-    print(f"\n✓ Result saved to {out.resolve()} ({len(result_bytes)//1024} KB)")
+    out.write_bytes(result)
+    print(f"\n✓  Saved → {out.resolve()}  ({len(result) // 1024} KB)")
 
 
 if __name__ == "__main__":

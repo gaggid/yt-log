@@ -173,8 +173,12 @@ async def _post(client: httpx.AsyncClient, url: str, key: str, **kw) -> dict:
     raise MediaError(last or "no answer from the model server")
 
 
+def _mime(p) -> str:
+    return "image/jpeg" if str(p).lower().endswith((".jpg", ".jpeg")) else "image/png"
+
+
 def _form(model: str, prompt: str, size: str | None, seed: int | None, files: list, steps: int | None = None, lora: list | None = None) -> tuple[dict, list]:
-    """Edit request: multipart, the first image is the one that is edited, then the other references. Every image goes in the field `image`."""
+    """Edit request: multipart, the first image is the one that is edited, then the other references. Every image goes in the field `image[]`."""
     import json as _json
     data: dict = {"model": model, "n": "1", "response_format": "b64_json"}
     if prompt:
@@ -190,7 +194,7 @@ def _form(model: str, prompt: str, size: str | None, seed: int | None, files: li
         data["lora"] = lora
     elif lora:
         data["lora"] = _json.dumps(lora)
-    return data, [("image", (p.name, p.read_bytes(), "image/png")) for p in files]
+    return data, [("image[]", (p.name, p.read_bytes(), _mime(p))) for p in files]
 
 
 async def draw(client: httpx.AsyncClient, s: dict, key: str, model: str, c: dict, mode: str, seed: int, plan: dict, extra_files: list | None = None,
