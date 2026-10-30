@@ -82,7 +82,7 @@ def edit_text(preset: str, value: str = "", garment_scope: str = "", has_garment
 
 def _meta(char: dict, body: dict, base: dict, ref_ids: list[str], op: str, preset: str, value: str, extra_meta: dict | None = None) -> dict:
     depth = int(base["meta"].get("depth", 0)) + 1 if base["kind"] == store.EDIT else 1
-    meta = {"view": "edit", "how": "edit", "op": op, "preset": preset, "value": value, "parent": base["id"], "depth": depth, "refs": ref_ids, "model": body["model"], "seed": body["seed"],
+    meta = {"view": "edit", "how": "edit", "op": op, "preset": preset, "value": value, "parent": base["id"], "depth": depth, "refs": ref_ids, "model": body["model"], "seed": body.get("seed"),
             "prompt": body["prompt"][:1500], "loras": [], "identity_hash": store.identity_hash(char), "version": char["version"], "style": char["render"]["style"], "size": body["size"],
             **(extra_meta or {})}
     stable = {k: v for k, v in meta.items() if k not in ("seed", "prompt")}
@@ -90,7 +90,7 @@ def _meta(char: dict, body: dict, base: dict, ref_ids: list[str], op: str, prese
     return meta
 
 
-def build(char: dict, base: dict, preset: str, value: str, attempt: int, extra: list[dict] | None = None, garment_path=None, garment_scope: str = "", seed: int | None = None,
+def build(char: dict, base: dict, preset: str, value: str, attempt: int, extra: list[dict] | None = None, garment_path=None, garment_scope: str = "",
           override: str = "", extra_meta: dict | None = None, garment_worn: bool = False, lora: list[dict] | None = None, swap: str = "") -> dict:
     """An edit of one picture (`base` is a finished media row). `extra` are more pictures of the character or the place (up to two); `garment_path` is a clothes picture for a try-on.
     `lora` is an optional list of {name, strength} dicts; when given the LoRA is sent as a form field so the edit inherits the style from both the source picture and the LoRA."""
@@ -115,9 +115,8 @@ def build(char: dict, base: dict, preset: str, value: str, attempt: int, extra: 
     prompt = override.strip() or edit_text(preset, value, garment_scope, bool(garment_path), garment_worn)
     if extra and not garment_path and not override.strip():
         prompt = "The first picture is the one to edit; the other pictures are references for the same person or place. " + prompt
-    seed = seed if seed is not None else R.seed_for(char["id"], "edit", attempt)
     lo = [{"name": x["name"], "strength": x.get("strength", 1.0)} for x in lora if x.get("name")] if lora else None
-    body = {"model": char["render"]["model"], "size": size_of_picture(refs[0]), "n": 1, "seed": seed, "response_format": "b64_json", "prompt": prompt}
+    body = {"model": char["render"]["model"], "size": size_of_picture(refs[0]), "n": 1, "response_format": "b64_json", "prompt": prompt}
     if lo:
         body["lora"] = lo
     meta = _meta(char, body, base, ref_ids, "tryon" if garment_path else "edit", preset, value, {"garment_scope": garment_scope, "garment_worn": garment_worn, **(extra_meta or {})} if garment_path else extra_meta)
@@ -135,7 +134,6 @@ def build_place(char: dict, place: dict, action: str, attempt: int, base: dict |
     refs = [media.path_of(canon["portrait"]), media.path_of(body_pic), media.path_of(place)]
     ref_ids = [canon["portrait"]["id"], body_pic["id"], place["id"]]
     prompt = override.strip() or (PLACE.replace("{v}", (action.strip().rstrip(".") or "standing naturally, looking at the camera")) + " " + R.NO_TEXT)
-    seed = seed if seed is not None else R.seed_for(char["id"], "place", attempt)
-    body = {"model": char["render"]["model"], "size": "720x1280", "n": 1, "seed": seed, "response_format": "b64_json", "prompt": prompt}
+    body = {"model": char["render"]["model"], "size": "720x1280", "n": 1, "response_format": "b64_json", "prompt": prompt}
     meta = _meta(char, body, body_pic, ref_ids, "place", "place", action, {"place": place["plan_id"], "place_item": place["id"]})
     return {"how": "edit", "body": body, "refs": refs, "ref_ids": ref_ids, "meta": meta}
