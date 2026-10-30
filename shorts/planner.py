@@ -7,7 +7,7 @@ from story.schemas import Str
 from story2 import intake, leak, lexicon, maya, safety, svara, voices
 from story2.schemas import M
 
-from . import cast, prompts as P, store, timeline
+from . import cast, models, prompts as P, store, timeline
 
 WORDS_LO, WORDS_HI = 52, 86              # spoken words in the whole short (the prompt asks for 62 to 74; this is what is accepted)
 MAX_SENTENCE_WORDS = 16
@@ -206,7 +206,7 @@ async def make_plan(short_id: str, backend, s: dict | None = None, progress=None
         plan["place"] = cast.place_text(short)
     beats = _beats_from(out, voices.current({"tts": short["settings"].get("voice")})["engine"])
     short.update(plan=plan, beats=beats, shots=[], title=plan["title"] or short["title"])
-    counts = timeline.plan_counts(beats)
+    counts = timeline.plan_counts(beats, float(short.get("settings", {}).get("target_s") or models.TARGET_S))
     all_shots: list[dict] = []
     before = None
     for i, (b, n) in enumerate(zip(beats, counts)):

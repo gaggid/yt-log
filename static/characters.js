@@ -319,12 +319,20 @@ function refBlendCard(busy) {
         ${PARTS.map(pt => `<label style="display:flex;align-items:center;gap:4px"><input type="radio" name="rb-part" value="${pt.id}" ${pt.id === 'face' ? 'checked' : ''}> <span><b>${pt.label}</b> <span class="mute">${pt.hint}</span></span></label>`).join('<br>')}
       </div>
     </div>
-    <div class="row mt-s" style="gap:8px;align-items:center">
+    <div class="row mt-s" style="gap:8px;align-items:center;flex-wrap:wrap">
       <label class="small" style="display:flex;align-items:center;gap:6px">Reference photo <input type="file" id="rb-file" accept="image/jpeg,image/png,image/webp" style="font-size:12px"></label>
       <label class="small">Face swap method <select id="rb-mode"><option value="lora">Head-swap LoRA</option><option value="prompt">Prompt only</option><option value="both">Both (compare)</option></select></label>
-      <label class="small" style="display:flex;align-items:center;gap:4px" title="face swaps only: use when the target photo has open mouth or wide eyes"><input type="checkbox" id="rb-expr"> strong expression in target</label>
-      <label class="small" style="display:flex;align-items:center;gap:4px" title="adds the detail-fix LoRA for extra sharpness"><input type="checkbox" id="rb-sharp"> sharper</label>
+      <label class="small" style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="rb-expr"> strong expression in target</label>
+      <label class="small" style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="rb-sharp"> sharper</label>
       <span id="rb-status" class="mute small"></span>
+    </div>
+    <div class="small mute mt-s" style="line-height:1.6">
+      <b>Face swap method:</b> <i>Head-swap LoRA</i> — uses a specialist model trained for face transplants; best result in most cases.
+      <i>Prompt only</i> — text instruction without the LoRA; faster, weaker identity hold.
+      <i>Both</i> — runs both and gives you two pictures to compare (~2× time).<br>
+      <b>Strong expression in target:</b> tick when the reference photo shows an open mouth, raised eyebrows or wide eyes; switches to the expression-aware variant of the LoRA.<br>
+      <b>Sharper:</b> adds a detail-fix pass on top; slows generation slightly but improves fine hair and skin texture.<br>
+      <b>Extra instruction:</b> appended to the LoRA's built-in wording. The default asks the model to leave clothes and jewellery untouched. Clear it to send no extra text; edit it to nudge a specific detail (e.g. "preserve the nose ring").
     </div>
     <label class="f mt-s small">Extra instruction for the face swap (added to the LoRA's own instruction; leave empty to send none)
       <textarea id="rb-note" rows="2" style="width:100%">${esc(RB_NOTE)}</textarea></label>
@@ -424,6 +432,7 @@ function wireEdit() {
       const r = await call('/' + CID + '/upload-ref', {method: 'POST', form: fd});
       refId = r.id;
     } catch(e) { toast('Upload failed: ' + e.message, {bad: true}); btn.disabled = false; btn.textContent = 'Apply'; return; }
+    btn.textContent = 'Apply';   // reset so act() restores 'Apply' on any edit error
     const charId = ($e('rb-base') || {}).value || EB;
     // face_into: reference photo is the base scene; character portrait is the extra ref
     const partLabel = PARTS.find(p => p.id === part)?.label || part;

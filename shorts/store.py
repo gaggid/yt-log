@@ -29,6 +29,7 @@ DEFAULT_SETTINGS = {
     "language": "hinglish",
     "cast": [],                       # characters from the Character Studio library: [{"character_id", "look_id"}], at most two people (shorts/cast.py)
     "place_id": "",                   # a place from the library
+    "target_s": 30,                   # desired video length in seconds (default 30; shorter values are supported)
 }
 
 

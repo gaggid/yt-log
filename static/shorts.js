@@ -32,7 +32,7 @@ let S = null, SID = null, pollT = null, myRoute = 0;
 /* ───────── list ───────── */
 window.viewShorts = async function () {
   const my = route_id;
-  $('#app').innerHTML = `<div class="row"><h2 style="margin:0">Shorts</h2><span class="mute">30-second vertical videos, made with Wan 2.2</span><span class="sp"></span><button class="primary" id="sh-new">+ New short</button></div>
+  $('#app').innerHTML = `<div class="row"><h2 style="margin:0">Shorts</h2><span class="mute">Vertical videos made with Wan 2.2</span><span class="sp"></span><button class="primary" id="sh-new">+ New short</button></div>
     <div class="card mt" id="sh-list"><div class="pad"><div class="skel"></div><div class="skel"></div></div></div>`;
   $('#sh-new').onclick = newShort;
   const rows = await call('').catch(e => { toast(e.message, {bad: true}); return []; });
@@ -51,9 +51,12 @@ async function newShort() {
     <div id="sh-src"><h4>What is it about</h4>
       <label class="f">Where the idea comes from<select id="sh-kind"><option value="idea">Write an idea</option><option value="story" ${stories.length ? '' : 'disabled'}>An approved story${stories.length ? '' : ' (none yet)'}</option></select></label>
       <label class="f mt-s" id="sh-idea-l">The idea, in a sentence or two<textarea id="sh-idea" placeholder="A delivery rider finds a wallet with a lakh rupees in it. What does he do?"></textarea></label>
-      <label class="f mt-s" id="sh-story-l" hidden>The story<select id="sh-story">${stories.map(s => `<option value="${esc(s.id)}">${esc(s.title)} (${esc(s.project)})</option>`).join('')}</select></label></div>`;
+      <label class="f mt-s" id="sh-story-l" hidden>The story<select id="sh-story">${stories.map(s => `<option value="${esc(s.id)}">${esc(s.title)} (${esc(s.project)})</option>`).join('')}</select></label></div>
+    <h4>Length</h4>
+    <label class="f">Video duration (seconds)<input type="number" id="sh-dur" value="30" min="10" max="30" step="1" style="width:80px">
+      <span class="small mute">10–30 seconds. The voice, shot count and timeline all adjust automatically.</span></label>`;
   const dlg = dialog({title: 'New short', html, buttons: [{label: 'Cancel', value: null}, {label: 'Create', primary: true,
-    collect: l => ({pipeline: l.querySelector('input[name=pipe]:checked').value, kind: l.querySelector('#sh-kind').value, text: l.querySelector('#sh-idea').value, candidate_id: l.querySelector('#sh-story').value}),
+    collect: l => { const dur = Math.max(10, Math.min(30, parseInt(l.querySelector('#sh-dur').value) || 30)); return {pipeline: l.querySelector('input[name=pipe]:checked').value, kind: l.querySelector('#sh-kind').value, text: l.querySelector('#sh-idea').value, candidate_id: l.querySelector('#sh-story').value, settings: {target_s: dur}}; },
     validate: v => v.pipeline !== 'remix' && v.kind === 'idea' && v.text.trim().length < 10 ? 'Write the idea in a sentence or two.' : ''}]});
   setTimeout(() => {
     const k = document.querySelector('#sh-kind'), p = () => document.querySelectorAll('input[name=pipe]');
@@ -62,7 +65,7 @@ async function newShort() {
   }, 30);
   const v = await dlg;
   if (!v) return;
-  const r = await act(null, () => call('', {method: 'POST', json: v.pipeline === 'remix' ? {pipeline: 'remix', kind: 'idea', text: ''} : v}), 'Created. Next: plan the short.');
+  const r = await act(null, () => call('', {method: 'POST', json: v.pipeline === 'remix' ? {pipeline: 'remix', kind: 'idea', text: '', settings: v.settings} : v}), 'Created. Next: plan the short.');
   if (r) location.hash = '#/short/' + r.id;
 }
 window.newShort = newShort;
@@ -152,7 +155,7 @@ function sideView() {
     <div class="row mt-s"><label class="f">Steps (empty = full quality)<input type="number" id="st-steps" value="${st.steps || ''}" min="1" max="100"></label><label class="f">Seed<input type="number" id="st-seed" value="${st.seed}"></label></div>
   </div>
   <div class="card pad mt"><h2>Steps</h2>${s.auto.steps.map((x, i) => `<div class="sh-step ${x.done ? 'done' : (!s.auto.steps.slice(0, i).some(y => !y.done) ? 'next' : '')}"><span class="n">${x.done ? '✓' : i + 1}</span>${esc(x.label)}</div>`).join('')}
-    <div class="mute small mt-s">Every shot is under ${(S.limits || {}).max_shot_s || 3} seconds on screen; the short is 30 seconds. All clips are made at full quality, one request at a time.</div></div>`;
+    <div class="mute small mt-s">Every shot is under ${(S.limits || {}).max_shot_s || 3} seconds on screen; the short is ${S.settings.target_s || 30} seconds. All clips are made at full quality, one request at a time.</div></div>`;
 }
 function voiceOptions(cur) {
   const V = window._shVoices || {};

@@ -27,7 +27,8 @@ def run(short: dict) -> dict:
         if p["code"] == "shot_too_long":
             issues.append(_issue("block", "shot_too_long", p["text"] + ". Write the shots of those beats again with more shots.", fix="fit_shots", beats=p["beats"]))
         elif p["code"] == "length":
-            issues.append(_issue("block", "length", p["text"] + (": the voice is too long, shorten the narration" if tl["total_s"] > models.TARGET_S else ": the narration is short, add a sentence"), fix=None))
+            t_s = float(short.get("settings", {}).get("target_s") or models.TARGET_S)
+            issues.append(_issue("block", "length", p["text"] + (": the voice is too long, shorten the narration" if tl["total_s"] > t_s else ": the narration is short, add a sentence"), fix=None))
         else:
             issues.append(_issue("block", p["code"], p["text"]))
     if tl["shots"] and tl["shots"][0]["seconds"] > models.HOOK_MAX_S + 1e-6:

@@ -170,7 +170,7 @@ def build(short_id: str, progress=None) -> dict:
             ass = work / "captions.ass"
             write_ass(short_events(short, tl), ass)
         out = store.media_dir(short_id, "final") / f"short-a{it['attempt']}.mp4"
-        notes = mix_and_mux(silent, voice_wav, [{"duration_s": t["span"]} for _, t in parts], ass, out, work, short["settings"], models.TARGET_S)
+        notes = mix_and_mux(silent, voice_wav, [{"duration_s": t["span"]} for _, t in parts], ass, out, work, short["settings"], float(short["settings"].get("target_s") or models.TARGET_S))
         info = frames.info(out)
         media.update(it["id"], status="done", file=f"final/{out.name}", meta={"input_hash": h, "duration_s": round(info["duration_s"], 2), "used": used, "tempo": tl["tempo"],
                                                                               "shots": len(tl["shots"]), "seconds_taken": round(time.time() - t0, 1), **notes})

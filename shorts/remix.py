@@ -356,17 +356,18 @@ def build(short_id: str, progress=None) -> dict:
             segs.append(seg)
         silent = work / "silent.mp4"
         stitch.join_segments(segs, silent, work)
-        voice_wav, bed_parts, ass = None, [{"duration_s": models.TARGET_S}], None
+        t_s = float(short["settings"].get("target_s") or models.TARGET_S)
+        voice_wav, bed_parts, ass = None, [{"duration_s": t_s}], None
         if voice_it:
             dur = float(voice_it["meta"]["duration_s"])
-            tempo = min(1.12, max(1.0, dur / (models.TARGET_S - 0.3)))
+            tempo = min(1.12, max(1.0, dur / (t_s - 0.3)))
             voice_wav = work / "voice.wav"
-            stitch.beat_audio(media.path_of(voice_it), tempo, models.TARGET_S, voice_wav)
+            stitch.beat_audio(media.path_of(voice_it), tempo, t_s, voice_wav)
             if short["settings"].get("captions", True) and video.available()["captions"]:
                 ass = work / "captions.ass"
                 stitch.write_ass(stitch.caption_events([s["text"] for s in short["beats"][0]["sentences"]], 0.0, dur / tempo), ass)
         elif r["audio"] == "none":
-            voice_wav = stitch.silence(work, models.TARGET_S)                          # the bed alone under the picture
+            voice_wav = stitch.silence(work, t_s)                                      # the bed alone under the picture
         elif r["audio"] == "original":
             voice_wav = work / "original.wav"
             wavs = []
@@ -378,7 +379,7 @@ def build(short_id: str, progress=None) -> dict:
             lst.write_text("".join(f"file '{w.name}'\n" for w in wavs), encoding="utf-8")
             frames.run(["-f", "concat", "-safe", "0", "-i", lst.name, "-c", "copy", str(voice_wav)], cwd=work)
         out = store.media_dir(short_id, "final") / f"short-a{it['attempt']}.mp4"
-        notes = stitch.mix_and_mux(silent, voice_wav, bed_parts if r["audio"] != "original" else [], ass, out, work, short["settings"], models.TARGET_S)
+        notes = stitch.mix_and_mux(silent, voice_wav, bed_parts if r["audio"] != "original" else [], ass, out, work, short["settings"], t_s)
         info = frames.info(out)
         media.update(it["id"], status="done", file=f"final/{out.name}", meta={"input_hash": h, "duration_s": round(info["duration_s"], 2), "seconds_taken": round(time.time() - t0, 1), "audio": r["audio"], **notes})
     except Exception as e:  # noqa: BLE001

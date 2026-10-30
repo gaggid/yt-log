@@ -22,33 +22,34 @@ def shots_needed(span_s: float) -> int:
     return max(1, -(-int(span_s * 100 + 0.5) // int(SAFE_SHOT_S * 100)))
 
 
-def plan_counts(beats: list[dict]) -> list[int]:
-    """Shots per beat before any voice exists: from the estimated spoken length, scaled to the whole 30 seconds."""
-    tl = _spans([estimate_voice(b) for b in beats])
+def plan_counts(beats: list[dict], target_s: float = models.TARGET_S) -> list[int]:
+    """Shots per beat before any voice exists: from the estimated spoken length, scaled to the whole target seconds."""
+    tl = _spans([estimate_voice(b) for b in beats], target_s)
     counts = [shots_needed(sp) for sp in tl["spans"]]
     if counts and tl["spans"][0] / counts[0] > models.HOOK_MAX_S:      # the first shot is short; a first beat of one long shot gets a second
         counts[0] = max(counts[0], 1 + shots_needed(tl["spans"][0] - models.HOOK_MAX_S))
     return counts
 
 
-def _spans(voice: list[float]) -> dict:
+def _spans(voice: list[float], target_s: float = models.TARGET_S) -> dict:
     n = len(voice)
     gaps = GAP_S * max(0, n - 1) + END_HOLD_S
-    tempo = min(TEMPO_MAX, max(TEMPO_MIN, sum(voice) / max(1.0, models.TARGET_S - gaps)))
+    tempo = min(TEMPO_MAX, max(TEMPO_MIN, sum(voice) / max(1.0, target_s - gaps)))
     speech = [d / tempo for d in voice]
     raw = [s + (GAP_S if i < n - 1 else END_HOLD_S) for i, s in enumerate(speech)]
     total = sum(raw)
-    scale = models.TARGET_S / total if total <= models.TARGET_S + models.TOLERANCE_S else 1.0      # too long: nothing can be squeezed in, the check says so
+    scale = target_s / total if total <= target_s + models.TOLERANCE_S else 1.0      # too long: nothing can be squeezed in, the check says so
     return {"tempo": tempo, "speech": speech, "spans": [r * scale for r in raw], "raw_total": total}
 
 
 def build(short: dict, voice: dict[str, float] | None = None) -> dict:
     """The timeline of a short. `voice` maps beat id to the real spoken seconds of its take; a beat without one is estimated (and `estimated` is true)."""
+    target_s = float(short.get("settings", {}).get("target_s") or models.TARGET_S)
     beats = short["beats"]
     voice = voice or {}
     estimated = any(not voice.get(b["id"]) for b in beats)
     ds = [float(voice.get(b["id"]) or estimate_voice(b)) for b in beats]
-    sp = _spans(ds)
+    sp = _spans(ds, target_s)
     out_beats, out_shots, problems = [], [], []
     t = 0.0
     cut_at = 0
@@ -80,6 +81,6 @@ def build(short: dict, voice: dict[str, float] | None = None) -> dict:
             need[s["beat"]] = shots_needed(sp["spans"][bi])
     if need:
         problems.append({"code": "shot_too_long", "text": "some shots would be on screen longer than " + f"{models.MAX_SHOT_S:g} seconds", "beats": need})
-    if abs(total - models.TARGET_S) > models.TOLERANCE_S:
-        problems.append({"code": "length", "text": f"the short would be {total:.1f} seconds, not {models.TARGET_S:g}"})
+    if abs(total - target_s) > models.TOLERANCE_S:
+        problems.append({"code": "length", "text": f"the short would be {total:.1f} seconds, not {target_s:g}"})
     return {"tempo": round(sp["tempo"], 4), "beats": out_beats, "shots": out_shots, "total_s": round(total, 3), "estimated": estimated, "problems": problems}
