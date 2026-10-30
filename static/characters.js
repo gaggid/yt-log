@@ -262,7 +262,7 @@ function wireCenter() {
 }
 
 /* ───────── edits, try-on, places, looks, matrix (C2, C3) ───────── */
-let EB = '', EX = [], CMP = [], WARD = null, PLACES = null, ED_OPEN = false;
+let EB = '', EX = [], CMP = [], WARD = null, PLACES = null, ED_OPEN = false, RB_FILE = null;
 const allPics = () => Object.values(C.gallery).flat().filter(p => p.url);
 const picLabel = p => `${p.view === 'edit' ? (p.op || 'edit') : p.view} #${p.attempt}${C.canon[p.view] === p.id ? ' (canon)' : ''}${p.depth ? ' · chain ' + p.depth : ''}`;
 const canonBody = () => C.canon.body || C.canon.portrait || (allPics()[0] || {}).id || '';
@@ -420,9 +420,10 @@ function wireEdit() {
     face_into:  'Replace only the face of the person in the first picture with the face from the second picture. Keep the hair (style, colour and length) from the first picture. Keep the clothes, body, pose, lighting and background from the first picture exactly. Do not copy the hair from the second picture. The result must look photorealistic and seamless.',
   };
   if ($e('rb-base')) $e('rb-base').onchange = () => { EB = $e('rb-base').value; render(); };
+  if ($e('rb-file')) $e('rb-file').onchange = () => { RB_FILE = ($e('rb-file').files || [])[0] || null; };
   if ($e('rb-run')) $e('rb-run').onclick = async () => {
     const btn = $e('rb-run');
-    const file = ($e('rb-file') || {}).files && $e('rb-file').files[0];
+    const file = RB_FILE || (($e('rb-file') || {}).files && $e('rb-file').files[0]);
     if (!file) { toast('Upload a reference photo first', {bad: true}); return; }
     const part = (document.querySelector('[name="rb-part"]:checked') || {}).value || 'face';
     btn.disabled = true; btn.textContent = 'Uploading…';
@@ -432,6 +433,7 @@ function wireEdit() {
       const r = await call('/' + CID + '/upload-ref', {method: 'POST', form: fd});
       refId = r.id;
     } catch(e) { toast('Upload failed: ' + e.message, {bad: true}); btn.disabled = false; btn.textContent = 'Apply'; return; }
+    RB_FILE = null;              // clear so the next Apply picks a fresh file
     btn.textContent = 'Apply';   // reset so act() restores 'Apply' on any edit error
     const charId = ($e('rb-base') || {}).value || EB;
     // face_into: reference photo is the base scene; character portrait is the extra ref
