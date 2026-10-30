@@ -519,6 +519,9 @@ class EditReq(BaseModel):
     scope: str = "outfit"
     n: int = 1
     prompt: str = ""                    # the person's own full instruction (power users): replaces the built one
+    swap: str = ""                      # head-swap LoRA name (bfs-head-swap...): base = target photo, extra[0] = face source; no prompt is sent
+    note: str = ""                      # with both: the text appended to the swap LoRA's own instruction (prompt then goes to the prompt-only version)
+    both: bool = False                  # with swap and prompt: make the LoRA swap and the prompt-only version
     lora: list[dict] | None = None      # optional [{name, strength}]; when given the LoRA is sent with the edit request
 
 
@@ -569,7 +572,7 @@ async def edit_preview(char_id: str, body: EditReq):
     a = _edit_args(c, body)
     lo = _clean_lora(body.lora, c["render"]["model"])
     req = _guard(edits.build, c, a["base"], body.preset, body.value, 1, a["extra"], a["garment"]["path"] if a["garment"] else None, body.scope if a["garment"] else "",
-                 override=body.prompt, garment_worn=bool(a["garment"] and a["garment"]["worn"]), lora=lo)
+                 override=body.prompt, garment_worn=bool(a["garment"] and a["garment"]["worn"]), lora=lo, swap=body.swap)
     return {"prompt": req["body"]["prompt"], "refs": req["ref_ids"], "size": req["body"]["size"], "model": req["body"]["model"], "depth": req["meta"]["depth"], "loras": req["meta"]["loras"]}
 
 
@@ -579,9 +582,9 @@ async def edit(char_id: str, body: EditReq):
     a = _edit_args(c, body)
     lo = _clean_lora(body.lora, c["render"]["model"])
     _guard(edits.build, c, a["base"], body.preset, body.value, 1, a["extra"], a["garment"]["path"] if a["garment"] else None, body.scope if a["garment"] else "",
-           override=body.prompt, garment_worn=bool(a["garment"] and a["garment"]["worn"]), lora=lo)   # refuse a bad request before the job starts
+           override=body.prompt, garment_worn=bool(a["garment"] and a["garment"]["worn"]), lora=lo, swap=body.swap)   # refuse a bad request before the job starts
     s, key = settings_mod.get(), settings_mod.api_key()
-    return _start(char_id, "char_edit", lambda progress: studio_edit.make_edit(char_id, body.base, body.preset, body.value, body.extra, body.garment, body.scope, body.n, body.prompt, progress, s, key, lora=lo))
+    return _start(char_id, "char_edit", lambda progress: studio_edit.make_edit(char_id, body.base, body.preset, body.value, body.extra, body.garment, body.scope, body.n, body.prompt, progress, s, key, lora=lo, swap=body.swap, both=body.both, swap_note=body.note))
 
 
 class PlaceReq(BaseModel):

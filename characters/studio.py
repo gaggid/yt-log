@@ -194,11 +194,43 @@ def save_photo(char_id: str, raw: bytes) -> str:
 
 # ── drawing ─────────────────────────────────────────────────────────────────
 
+async def _post_job(c: httpx.AsyncClient, base: str, key: str, data: dict, files: list, poll_s: float = 4.0) -> dict:
+    """Async jobs flow of the gateway: `Prefer: respond-async` gives 202 + a job, `GET /jobs/<id>` until it succeeds; the result is the normal response body."""
+    hdr = {"Authorization": f"Bearer {key}", "Prefer": "respond-async"}
+    try:
+        r = await c.post(base + "/images/edits", headers=hdr, data=data, files=files)
+    except httpx.ConnectError as e:
+        raise MediaError(f"the model server is not reachable ({e})") from e
+    if r.status_code == 200:                                                # the server answered at once
+        return r.json()["data"][0]
+    if r.status_code != 202:
+        raise MediaError(f"{r.status_code} {r.text[:160]}")
+    job = r.json()["id"]
+    url = base + "/jobs/" + job
+    while True:
+        await asyncio.sleep(poll_s)
+        try:
+            j = await c.get(url, headers={"Authorization": f"Bearer {key}"})
+        except httpx.ConnectError as e:
+            raise MediaError(f"the model server is not reachable ({e})") from e
+        if j.status_code != 200:
+            raise MediaError(f"job status {j.status_code} {j.text[:160]}")
+        body = j.json()
+        st = body.get("status")
+        if st == "succeeded":
+            return (body.get("result") or {})["data"][0]
+        if st in ("failed", "cancelled"):
+            raise MediaError(f"the swap {st}: {str(body.get('error') or '')[:160]}")
+
+
 async def _post_image(how: str, body: dict, refs: list, base: str, key: str) -> bytes:
     async with _client(TIMEOUT_S) as c:
         if how == "edit":
-            data, files = scenes._form(body["model"], body["prompt"], body["size"], body["seed"], refs, body.get("steps"), body.get("lora"))
-            img = await scenes._post(c, base + "/images/edits", key, data=data, files=files)
+            data, files = scenes._form(body["model"], body.get("prompt", ""), body["size"], body["seed"], refs, body.get("steps"), body.get("lora"))
+            if isinstance(body.get("lora"), str):                           # swap: ~2 minutes, so submit as a job and poll
+                img = await _post_job(c, base, key, data, files)
+            else:
+                img = await scenes._post(c, base + "/images/edits", key, data=data, files=files)
         else:
             img = await scenes._post(c, base + "/images/generations", key, json=body)
     if not img.get("b64_json"):

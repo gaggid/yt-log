@@ -296,6 +296,8 @@ function editCard(busy) {
       <button class="small" id="e-prev" ${dis}>Show the prompt</button><button class="small primary" id="e-run" ${dis}>Make the edit</button><button class="small" id="e-save-recipe">Save as recipe</button></div></div>`;
 }
 
+const RB_NOTE = 'Change only the face. Keep the clothes, jewellery, neck, body, pose, lighting and background of image 1 exactly as they are. Do not copy any clothes or jewellery from image 2.';
+
 function refBlendCard(busy) {
   if (C.kind !== 'person' || !C.canon.portrait) return '';
   const dis = busy ? 'disabled' : '';
@@ -319,8 +321,13 @@ function refBlendCard(busy) {
     </div>
     <div class="row mt-s" style="gap:8px;align-items:center">
       <label class="small" style="display:flex;align-items:center;gap:6px">Reference photo <input type="file" id="rb-file" accept="image/jpeg,image/png,image/webp" style="font-size:12px"></label>
+      <label class="small">Face swap method <select id="rb-mode"><option value="lora">Head-swap LoRA</option><option value="prompt">Prompt only</option><option value="both">Both (compare)</option></select></label>
+      <label class="small" style="display:flex;align-items:center;gap:4px" title="face swaps only: use when the target photo has open mouth or wide eyes"><input type="checkbox" id="rb-expr"> strong expression in target</label>
+      <label class="small" style="display:flex;align-items:center;gap:4px" title="adds the detail-fix LoRA for extra sharpness"><input type="checkbox" id="rb-sharp"> sharper</label>
       <span id="rb-status" class="mute small"></span>
     </div>
+    <label class="f mt-s small">Extra instruction for the face swap (added to the LoRA's own instruction; leave empty to send none)
+      <textarea id="rb-note" rows="2" style="width:100%">${esc(RB_NOTE)}</textarea></label>
     <div class="row mt-s"><button class="small primary" id="rb-run" ${dis}>Apply</button></div></div>`;
 }
 
@@ -423,6 +430,14 @@ function wireEdit() {
     const editArgs = part === 'face_into'
       ? {base: refId, preset: 'custom', value: partLabel, extra: [charId], n: 1, prompt: RB_INSTRUCTIONS[part]}
       : {base: charId, preset: 'custom', value: partLabel, extra: [refId], n: 1, prompt: RB_INSTRUCTIONS[part]};
+    // face parts: head-swap LoRA (server supplies the instruction), prompt only, or both to compare (~2 min each)
+    if (part === 'face' || part === 'face_into') {
+      const mode = ($e('rb-mode') || {}).value || 'lora';
+      const lora = (($e('rb-expr') || {}).checked ? 'bfs-head-swap-expression' : 'bfs-head-swap') + (($e('rb-sharp') || {}).checked ? ',qwen2.1-detail-fix-2.0' : '');
+      const note = (($e('rb-note') || {}).value || '').trim();            // appended by the server to the swap LoRA's own instruction
+      if (mode === 'lora') { editArgs.prompt = note; editArgs.swap = lora; }
+      else if (mode === 'both') { editArgs.swap = lora; editArgs.both = true; editArgs.note = note; }
+    }
     post(btn, '/edit', editArgs, 'Applying…');
   };
   document.querySelectorAll('[data-base]').forEach(b => b.onclick = () => { EB = b.dataset.base; render(); document.getElementById('ch-edit').scrollIntoView({behavior: 'smooth'}); });

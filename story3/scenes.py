@@ -167,7 +167,7 @@ async def _post(client: httpx.AsyncClient, url: str, key: str, **kw) -> dict:
             if r.status_code == 200:
                 return r.json()["data"][0]
             last = f"{r.status_code} {r.text[:160]}"
-            if r.status_code not in (429, 500, 502, 503, 504):
+            if r.status_code not in (429, 500, 502, 503, 504) or "image_quota_exceeded" in r.text:   # a daily quota will not clear in seconds
                 break
         await asyncio.sleep(4 * (n + 1))
     raise MediaError(last or "no answer from the model server")
@@ -178,9 +178,13 @@ def _form(model: str, prompt: str, size: str, seed: int, files: list, steps: int
     import json as _json
     w, h = size.split("x")
     data = {"model": model, "prompt": prompt, "size": size, "width": w, "height": h, "seed": str(seed), "n": "1", "response_format": "b64_json"}
+    if not prompt:                                                          # face/head swap: the server supplies the trained instruction
+        del data["prompt"]
     if steps:
         data["steps"] = str(steps)
-    if lora:
+    if isinstance(lora, str):                                               # swap LoRA: a plain name, not the JSON list
+        data["lora"] = lora
+    elif lora:
         data["lora"] = _json.dumps(lora)
     return data, [("image", (p.name, p.read_bytes(), "image/png")) for p in files]
 

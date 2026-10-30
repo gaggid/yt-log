@@ -35,6 +35,9 @@ FLATLAY = ("Show only the clothing worn by the person in this picture as a flat 
 PLACE = ("The first picture shows the person's face and the second picture the whole body; the last picture is the place. Put the person into the place: {v}. "
          "Show the whole person naturally in the scene, with the light of the place on them. " + KEEP_ID + " Same hair. Keep the same clothes.")
 MAX_EXTRA_REFS = 2
+SWAPS = {"bfs-head-swap": "Head swap", "bfs-head-swap-expression": "Head swap (strong expression)"}
+SWAP_SHARP = "qwen2.1-detail-fix-2.0"                                       # optional second name for extra sharpness
+SWAP_PIXELS = 2_000_000                                                    # ~2 MP keeps the most facial detail
 
 
 def snap(n: float) -> int:
@@ -46,6 +49,14 @@ def size_of_picture(path) -> str:
     with Image.open(path) as im:
         w, h = im.size
     f = min(1.0, (1_500_000 / (w * h)) ** 0.5)
+    return f"{snap(w * f)}x{snap(h * f)}"
+
+
+def swap_size(path) -> str:
+    """Pixel budget for a head swap (the output keeps image 1's aspect ratio)."""
+    with Image.open(path) as im:
+        w, h = im.size
+    f = (SWAP_PIXELS / (w * h)) ** 0.5
     return f"{snap(w * f)}x{snap(h * f)}"
 
 
@@ -76,9 +87,21 @@ def _meta(char: dict, body: dict, base: dict, ref_ids: list[str], op: str, prese
 
 
 def build(char: dict, base: dict, preset: str, value: str, attempt: int, extra: list[dict] | None = None, garment_path=None, garment_scope: str = "", seed: int | None = None,
-          override: str = "", extra_meta: dict | None = None, garment_worn: bool = False, lora: list[dict] | None = None) -> dict:
+          override: str = "", extra_meta: dict | None = None, garment_worn: bool = False, lora: list[dict] | None = None, swap: str = "") -> dict:
     """An edit of one picture (`base` is a finished media row). `extra` are more pictures of the character or the place (up to two); `garment_path` is a clothes picture for a try-on.
     `lora` is an optional list of {name, strength} dicts; when given the LoRA is sent as a form field so the edit inherits the style from both the source picture and the LoRA."""
+    if swap:                                                               # head swap: image 1 = target, image 2 = face source, no prompt, server defaults
+        names = [x.strip() for x in swap.split(",") if x.strip()]
+        if not names or names[0] not in SWAPS or any(x != SWAP_SHARP for x in names[1:]):
+            raise store.CharError(f"unknown swap '{swap}' (one of: {', '.join(SWAPS)}, optionally with {SWAP_SHARP})")
+        if len(extra or []) != 1:
+            raise store.CharError("a head swap needs exactly one face picture")
+        refs = [media.path_of(base), media.path_of(extra[0])]
+        seed = seed if seed is not None else R.seed_for(char["id"], "edit", attempt)
+        body = {"model": char["render"]["model"], "size": swap_size(refs[0]), "n": 1, "seed": seed, "response_format": "b64_json", "prompt": override.strip(), "lora": swap}                # the server appends this text to its own instruction
+        meta = _meta(char, body, base, [base["id"], extra[0]["id"]], "swap", "swap", SWAPS[names[0]] + (", sharpened" if len(names) > 1 else ""), {"swap": swap, "synthetic": True})
+        meta["loras"] = [{"name": x, "strength": 1.0} for x in names]
+        return {"how": "edit", "body": body, "refs": refs, "ref_ids": [base["id"], extra[0]["id"]], "meta": meta}
     extra = (extra or [])[:MAX_EXTRA_REFS]
     refs = [media.path_of(base)] + [media.path_of(x) for x in extra]
     ref_ids = [base["id"]] + [x["id"] for x in extra]
