@@ -10,6 +10,7 @@ from story2.schemas import M
 from . import cast, models, prompts as P, store, timeline
 
 WORDS_LO, WORDS_HI = 52, 86              # spoken words in the whole short (the prompt asks for 62 to 74; this is what is accepted)
+REC_LO, REC_HI = 62, 74                  # what the prompt asks for at the full 30 seconds
 MAX_SENTENCE_WORDS = 16
 MAX_HOOK_WORDS = 9
 MAX_CHARACTER_SHOTS = 4
@@ -64,15 +65,36 @@ def _profile(short: dict):
         return None
 
 
-def narration_problems(beats: list[dict], profile=None) -> list[str]:
+def target_s(short: dict) -> float:
+    return float(short.get("settings", {}).get("target_s") or models.TARGET_S)
+
+
+def word_limits(t_s: float) -> tuple[int, int, int, int]:
+    """(accepted low, accepted high, asked low, asked high) spoken words for a short of `t_s` seconds. Scaled from the 30-second figures; a shorter short is also capped by what the voice can say
+    (the fastest the timeline lets it speak), so words that pass here can fit."""
+    if t_s >= models.TARGET_S:
+        return WORDS_LO, WORDS_HI, REC_LO, REC_HI
+    hi = min(round(WORDS_HI * t_s / models.TARGET_S), int((t_s - 0.9) * timeline.TEMPO_MAX * timeline.PACE_WPS))
+    lo = max(6, round(WORDS_LO * t_s / models.TARGET_S))
+    return lo, hi, max(lo, round(REC_LO * t_s / models.TARGET_S)), max(lo, min(round(REC_HI * t_s / models.TARGET_S), hi - 1))
+
+
+def beat_range(t_s: float) -> tuple[int, int]:
+    """How many beats a short of `t_s` seconds has: 4 to 6 at 30 seconds, fewer when shorter."""
+    lo = max(2, round(t_s / 7.5))
+    return lo, max(lo + 1, round(t_s / 5))
+
+
+def narration_problems(beats: list[dict], profile=None, t_s: float = models.TARGET_S) -> list[str]:
     """What is wrong with the words, in plain terms. Used while the model writes (it is sent back) and by the checks."""
     out: list[str] = []
     sentences = [s["text"] for b in beats for s in b["sentences"]]
     n = sum(len(t.split()) for t in sentences)
     if not sentences:
         return ["there is no narration"]
-    if n < WORDS_LO or n > WORDS_HI:
-        out.append(f"the narration is {n} words; it must be between {WORDS_LO} and {WORDS_HI} so that it fills about 30 seconds")
+    lo, hi = word_limits(t_s)[:2]
+    if n < lo or n > hi:
+        out.append(f"the narration is {n} words; it must be between {lo} and {hi} so that it fills about {t_s:g} seconds")
     if len(sentences[0].split()) > MAX_HOOK_WORDS:
         out.append(f"the first sentence is {len(sentences[0].split())} words; the hook must be at most {MAX_HOOK_WORDS}")
     for t in sentences:
@@ -126,16 +148,20 @@ async def _plan_call(short: dict, backend, s: dict, note: str = "") -> PlanOut:
     if short["settings"].get("tone"):
         extra += f"\nTone: {short['settings']['tone']}"
 
+    t_s = target_s(short)
+    b_lo, b_hi = beat_range(t_s)
+    _, _, ask_lo, ask_hi = word_limits(t_s)
+
     def check(out: PlanOut) -> None:
-        if len(out.beats) < 3:
-            raise ValueError("write at least 3 beats")
+        if len(out.beats) < min(3, b_lo):
+            raise ValueError(f"write at least {min(3, b_lo)} beats")
         if caller.last_attempt:
             return                                                    # style rules never stop a run; the checks screen lists what is left
-        probs = narration_problems(_beats_from(out, cur["engine"]), prof)
+        probs = narration_problems(_beats_from(out, cur["engine"]), prof, t_s)
         if probs:
             raise ValueError("; ".join(probs[:4]))
 
-    res = await caller.call(P.plan_system(cur["engine"]), f"{source_text(short)}{extra}\n{note}\nWrite the short now.", PlanOut, validate=check)
+    res = await caller.call(P.plan_system(cur["engine"], t_s, f"{b_lo} to {b_hi}", ask_lo, ask_hi), f"{source_text(short)}{extra}\n{note}\nWrite the short now.", PlanOut, validate=check)
     return res.value
 
 
@@ -161,7 +187,7 @@ async def _shots_call(short: dict, beat: dict, count: int, backend, s: dict, bef
             raise ValueError("write the shots")
 
     cast_names = [m["char"]["name"] for m in cast.members(short) if m["char"]]
-    res = await caller.call(P.shots_system(count, MAX_CHARACTER_SHOTS, cast_names), "\n".join(ctx) + f"\n\nWrite exactly {count} shots now.", ShotsOut, validate=check)
+    res = await caller.call(P.shots_system(count, MAX_CHARACTER_SHOTS, cast_names, target_s(short)),"\n".join(ctx) + f"\n\nWrite exactly {count} shots now.", ShotsOut, validate=check)
     shots = [_shot(o) for o in res.value.shots]
     ids = cast.names(short)
     for sh in shots:                                                         # names the model wrote become library ids; a character shot with no names shows the whole cast
@@ -206,7 +232,7 @@ async def make_plan(short_id: str, backend, s: dict | None = None, progress=None
         plan["place"] = cast.place_text(short)
     beats = _beats_from(out, voices.current({"tts": short["settings"].get("voice")})["engine"])
     short.update(plan=plan, beats=beats, shots=[], title=plan["title"] or short["title"])
-    counts = timeline.plan_counts(beats, float(short.get("settings", {}).get("target_s") or models.TARGET_S))
+    counts = timeline.plan_counts(beats, target_s(short))
     all_shots: list[dict] = []
     before = None
     for i, (b, n) in enumerate(zip(beats, counts)):

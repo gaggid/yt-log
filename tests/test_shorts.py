@@ -123,12 +123,26 @@ def test_the_plan_is_sent_back_when_the_words_break_the_rules(gw):
     assert any(i["code"] == "narration" for i in issues)
 
 
-def test_checks_block_a_missing_anchor_and_text_in_pictures(gw):
+def test_checks_warn_about_a_missing_anchor_and_text_in_pictures(gw):
     short = planned(image_mode="anchor")
-    short["shots"][0]["prompt"] = "A shop sign saying OPEN in neon."
+    short["shots"][0]["prompt"] = "A shop sign saying OPEN in neon. The monitor displays a chart."
     store.save(short)
-    codes = {i["code"] for i in checks.run(store.get(short["id"]))["issues"]}
-    assert {"no_anchor", "text_in_picture"} <= codes
+    issues = checks.run(store.get(short["id"]))["issues"]
+    levels = {i["code"]: i["level"] for i in issues}
+    assert levels["no_anchor"] == "warn" and levels["text_in_picture"] == "warn"      # the start pictures are drawn when there is no upload, so neither stops Make
+    assert not any("displays" in i["text"] for i in issues)                              # a plain verb is not a request for words in the picture
+
+
+def test_a_shorter_short_asks_for_fewer_words_and_beats(gw):
+    assert planner.word_limits(30) == (52, 86, 62, 74) and planner.beat_range(30) == (4, 6)
+    lo, hi, ask_lo, ask_hi = planner.word_limits(10)
+    assert (lo, hi) == (17, 25) and lo <= ask_lo <= ask_hi < hi and planner.beat_range(10) == (2, 3)
+    fat = [{"sentences": [{"text": " ".join(["shabd"] * 58)}]}]                       # a 30-second narration is far too long for 10 seconds
+    assert any("17 and 25" in p for p in planner.narration_problems(fat, None, 10))
+    assert not any("words; it must be" in p for p in planner.narration_problems(fat, None, 30))
+    from shorts import prompts
+    p = prompts.plan_system("maya-tts", 10, "2 to 3", 21, 24)
+    assert "10-second" in p and "between 21 and 24 words" in p and "30" not in p
 
 
 def test_a_voice_that_runs_long_makes_the_checks_ask_for_more_shots(gw):

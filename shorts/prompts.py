@@ -3,13 +3,13 @@ for its sampling (story/settings.py SAMPLING)."""
 from story2 import maya, voices
 
 PLAN = """[TASK:p4_plan]
-You write 30-second vertical video shorts for Indian viewers. The video is made by an AI video model from your shot prompts and spoken by a narrator; everything is decided by you.
+You write {seconds}-second vertical video shorts for Indian viewers. The video is made by an AI video model from your shot prompts and spoken by a narrator; everything is decided by you.
 
 Return ONLY a JSON object:
 {"title": "...", "logline": "one sentence", "character": "...", "place": "...", "look": "...", "beats": [{"name": "...", "feeling": "...", "tag": "...", "narration": ["sentence", "sentence"]}]}
 
 THE NARRATION
-- 4 to 6 beats; the whole narration is between 62 and 74 words, so it takes about 30 seconds when spoken. Count the words.
+- {beats} beats; the whole narration is between {lo} and {hi} words, so it takes about {seconds} seconds when spoken. Count the words.
 - The first sentence is the hook: at most 7 words, a question or a startling fact, no greeting, no "aaj hum".
 - Every sentence is at most 12 words and carries one idea. A real question where the viewer would ask it. A short blunt sentence after a longer one. End on a payoff or a sting, not a summary.
 - The narrator speaks in the first person where it fits. Plain, spoken Hinglish in mixed script: Hindi words in Devanagari, English words in Latin letters, numbers written as words (never digits), no other script.
@@ -25,7 +25,7 @@ THE LOOK (used to write every shot, so make it concrete)
 """
 
 SHOTS = """[TASK:p4_shots]
-You plan the shots of one beat of a 30-second vertical video made by an AI video model (Wan 2.2). The cut is FAST: every shot is on screen for under three seconds, so each shot is ONE simple action and ONE camera move.
+You plan the shots of one beat of a {seconds}-second vertical video made by an AI video model (Wan 2.2). The cut is FAST: every shot is on screen for under three seconds, so each shot is ONE simple action and ONE camera move.
 
 Return ONLY a JSON object: {"shots": [{"prompt": "...", "still": "...", "camera": "...", "character": false, "cast": [], "continues": false, "setting": ""}]}
 Write EXACTLY {count} shots, in order.
@@ -43,16 +43,17 @@ A SHOT PROMPT is English, 35 to 70 words, present tense, in this order: the subj
 """
 
 
-def plan_system(engine: str) -> str:                  # replace, not format: the JSON example has braces
-    return PLAN.replace("{voice_rules}", voices.narration_rules(engine) or "Write for the ear.").replace("{tags}", ", ".join(maya.STYLE_TAGS))
+def plan_system(engine: str, target_s: float = 30.0, beats: str = "4 to 6", lo: int = 62, hi: int = 74) -> str:      # replace, not format: the JSON example has braces
+    return (PLAN.replace("{voice_rules}", voices.narration_rules(engine) or "Write for the ear.").replace("{tags}", ", ".join(maya.STYLE_TAGS))
+            .replace("{seconds}", f"{target_s:g}").replace("{beats}", beats).replace("{lo}", str(lo)).replace("{hi}", str(hi)))
 
 
 CAST_RULE = ('- "cast": the names of the cast members who are in the shot, from this list only: {names}; at most two, empty when nobody is in the shot. Their faces and clothes come from library pictures: '
              "never describe their looks, only what they do and how they stand. Set \"character\" true when \"cast\" is not empty.\n")
 
 
-def shots_system(count: int, max_character: int = 4, cast_names: list[str] | None = None) -> str:
-    text = SHOTS.replace("{count}", str(count)).replace("{max_character}", str(max_character))
+def shots_system(count: int, max_character: int = 4, cast_names: list[str] | None = None, target_s: float = 30.0) -> str:
+    text = SHOTS.replace("{count}", str(count)).replace("{max_character}", str(max_character)).replace("{seconds}", f"{target_s:g}")
     if cast_names:
         text = text.replace("- No readable text anywhere", CAST_RULE.replace("{names}", ", ".join(cast_names)) + "- No readable text anywhere", 1)
     return text

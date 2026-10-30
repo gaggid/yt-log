@@ -4,7 +4,7 @@ import re
 
 from . import avatar, cast, models, motion, pipelines as P, planner, store, timeline, voice as svoice
 
-TEXT_WORDS = re.compile(r"\b(?:text|writing|written|words?|letters?|caption|subtitles?|sign (?:saying|reading)|reads|newspaper|headline|logo|poster|banner|screen showing|displays?)\b", re.I)
+TEXT_WORDS = re.compile(r"\b(?:text|writing|written|words?|letters?|caption|subtitles?|sign (?:saying|reading)|reads|newspaper|headline|logo|poster|banner|screen showing)\b", re.I)
 
 
 def _issue(level: str, code: str, text: str, **extra) -> dict:
@@ -20,7 +20,7 @@ def run(short: dict) -> dict:
     tl = timeline.build(short, real)
     prof = planner._profile(short)
     if not no_voice:
-        for p in planner.narration_problems(short["beats"], prof):
+        for p in planner.narration_problems(short["beats"], prof, planner.target_s(short)):
             soft = p.startswith(("stock phrases", "a sentence is", "the first sentence"))
             issues.append(_issue("warn" if soft else "block", "narration", p))
     for p in tl["problems"]:
@@ -59,7 +59,7 @@ def run(short: dict) -> dict:
         issues.append(_issue(p["level"], p["code"], p["text"]))
     mode = short["settings"]["image_mode"]
     if mode == "anchor" and not short["images"].get("anchor"):
-        issues.append(_issue("block", "no_anchor", "The picture of the main character is not uploaded. Upload it or let Wan decide."))
+        issues.append(_issue("warn", "no_anchor", "The picture of the main character is not uploaded, so every start picture will be drawn by the image model. Upload it, or choose another start-pictures mode."))   # not a blocker: pipelines.start_source falls back to drawing
     if mode == "per_shot" and not short["images"]["shots"]:
         issues.append(_issue("warn", "no_shot_pictures", "No shot has a picture of your own; Wan will make them all."))
     if short["pipeline"] == "keyframe" and any(sh.get("character") for sh in short["shots"]) and not short["plan"].get("character") and mode == "wan":
