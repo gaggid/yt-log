@@ -324,6 +324,7 @@ function refBlendCard(busy) {
       <label class="small" style="display:flex;align-items:center;gap:6px" title="Uses the bfs-head-swap LoRA for face swaps; uncheck to use prompt only"><input type="checkbox" id="rb-lora" checked> Head-swap LoRA</label>
       <label class="small" style="display:flex;align-items:center;gap:6px" title="Use when the reference has an open mouth or wide eyes (bfs-head-swap-expression)"><input type="checkbox" id="rb-expr"> Expression</label>
       <label class="small" style="display:flex;align-items:center;gap:6px" title="Adds the detail-fix LoRA for sharper output (qwen2.1-detail-fix-2.0)"><input type="checkbox" id="rb-sharp"> Sharper</label>
+      <label class="small" style="display:flex;align-items:center;gap:6px" title="PureLens Realism LoRA — more photographic, less illustrated look (purelens-realism)"><input type="checkbox" id="rb-pure"> PureLens</label>
     </div>
     <div class="row mt-s"><button class="small primary" id="rb-run" ${dis}>Apply</button></div></div>`;
 }
@@ -431,8 +432,9 @@ function wireEdit() {
       : {base: charId, preset: 'custom', value: partLabel, extra: [refId], n: 1, prompt: RB_INSTRUCTIONS[part]};
     if ((part === 'face' || part === 'face_into') && ($e('rb-lora') || {checked: true}).checked) {
       const base = ($e('rb-expr') || {}).checked ? 'bfs-head-swap-expression' : 'bfs-head-swap';
-      editArgs.swap = ($e('rb-sharp') || {}).checked ? base + ',qwen2.1-detail-fix-2.0' : base;
-      editArgs.prompt = '';
+      const addons = [($e('rb-sharp') || {}).checked && 'qwen2.1-detail-fix-2.0', ($e('rb-pure') || {}).checked && 'purelens-realism'].filter(Boolean);
+      editArgs.swap = addons.length ? base + ',' + addons.join(',') : base;
+      editArgs.prompt = '';  // server uses SWAP_DEFAULT_PROMPT when empty
     }
     post(btn, '/edit', editArgs, 'Applying…');
   };
