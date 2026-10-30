@@ -22,23 +22,29 @@ def shots_needed(span_s: float) -> int:
     return max(1, -(-int(span_s * 100 + 0.5) // int(SAFE_SHOT_S * 100)))
 
 
-def plan_counts(beats: list[dict], target_s: float = models.TARGET_S) -> list[int]:
+def silent(short: dict) -> bool:
+    """A short with no voice: the narration is only the script the shots are planned from, so its words never decide how long the short is."""
+    return (short.get("settings") or {}).get("voice_mode") == "none"
+
+
+def plan_counts(beats: list[dict], target_s: float = models.TARGET_S, mute: bool = False) -> list[int]:
     """Shots per beat before any voice exists: from the estimated spoken length, scaled to the whole target seconds."""
-    tl = _spans([estimate_voice(b) for b in beats], target_s)
+    tl = _spans([estimate_voice(b) for b in beats], target_s, mute)
     counts = [shots_needed(sp) for sp in tl["spans"]]
     if counts and tl["spans"][0] / counts[0] > models.HOOK_MAX_S:      # the first shot is short; a first beat of one long shot gets a second
         counts[0] = max(counts[0], 1 + shots_needed(tl["spans"][0] - models.HOOK_MAX_S))
     return counts
 
 
-def _spans(voice: list[float], target_s: float = models.TARGET_S) -> dict:
+def _spans(voice: list[float], target_s: float = models.TARGET_S, mute: bool = False) -> dict:
+    """`mute`: no voice will be made, so the beats share the target in proportion to their words and the total is always the target (nothing can run long)."""
     n = len(voice)
     gaps = GAP_S * max(0, n - 1) + END_HOLD_S
-    tempo = min(TEMPO_MAX, max(TEMPO_MIN, sum(voice) / max(1.0, target_s - gaps)))
+    tempo = 1.0 if mute else min(TEMPO_MAX, max(TEMPO_MIN, sum(voice) / max(1.0, target_s - gaps)))
     speech = [d / tempo for d in voice]
     raw = [s + (GAP_S if i < n - 1 else END_HOLD_S) for i, s in enumerate(speech)]
     total = sum(raw)
-    scale = target_s / total if total <= target_s + models.TOLERANCE_S else 1.0      # too long: nothing can be squeezed in, the check says so
+    scale = target_s / total if (mute or total <= target_s + models.TOLERANCE_S) else 1.0      # too long: nothing can be squeezed in, the check says so
     return {"tempo": tempo, "speech": speech, "spans": [r * scale for r in raw], "raw_total": total}
 
 
@@ -49,7 +55,7 @@ def build(short: dict, voice: dict[str, float] | None = None) -> dict:
     voice = voice or {}
     estimated = any(not voice.get(b["id"]) for b in beats)
     ds = [float(voice.get(b["id"]) or estimate_voice(b)) for b in beats]
-    sp = _spans(ds, target_s)
+    sp = _spans(ds, target_s, silent(short))
     out_beats, out_shots, problems = [], [], []
     t = 0.0
     cut_at = 0

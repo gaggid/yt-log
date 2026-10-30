@@ -232,7 +232,7 @@ async def make_plan(short_id: str, backend, s: dict | None = None, progress=None
         plan["place"] = cast.place_text(short)
     beats = _beats_from(out, voices.current({"tts": short["settings"].get("voice")})["engine"])
     short.update(plan=plan, beats=beats, shots=[], title=plan["title"] or short["title"])
-    counts = timeline.plan_counts(beats, target_s(short))
+    counts = timeline.plan_counts(beats, target_s(short), timeline.silent(short))
     all_shots: list[dict] = []
     before = None
     for i, (b, n) in enumerate(zip(beats, counts)):

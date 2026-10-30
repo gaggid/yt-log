@@ -406,3 +406,11 @@ def test_api_remix_needs_a_youtube_link(client):
     r = client.patch(f"/api/shorts/{sid}/remix", json={"audio": "voiceover", "script": "यह एक छोटी कहानी है। इसमें एक किरदार है।", "rights_video": True})
     assert r.json()["remix"]["audio"] == "voiceover" and len(r.json()["beats"]) == 1
     assert client.patch(f"/api/shorts/{sid}/remix", json={"audio": "nonsense"}).status_code == 400
+
+
+def test_a_short_without_voice_is_never_too_long_for_its_words(gw):
+    short = planned()
+    short["settings"].update(target_s=10, voice_mode="none")                           # five beats of narration that would take about 30 s if spoken
+    store.save(short)
+    chk = checks.run(store.get(short["id"]))
+    assert chk["timeline"]["total_s"] == 10.0 and not any(i["code"] == "length" for i in chk["issues"])
