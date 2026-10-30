@@ -307,7 +307,11 @@ function keyframesView() {
 
 function beatsView() {
   const s = S, tl = s.timeline;
-  return s.beats.map((b, bi) => {
+  const busy = s.job.state === 'running';
+  const clipsHeader = `<div class="card pad mt"><div class="row"><h2 style="margin:0">Shots &amp; clips</h2><span class="sp"></span>
+    <button class="small" id="b-clips-missing" ${busy ? 'disabled' : ''}>Make missing clips</button>
+    <button class="primary" id="b-clips-all" ${busy ? 'disabled' : ''}>Make all clips</button></div></div>`;
+  return clipsHeader + s.beats.map((b, bi) => {
     const v = s.voice.beats.find(x => x.beat === b.id) || {};
     const take = (v.attempts || []).filter(a => a.status === 'done' && a.current).pop();
     const shots = s.shots.filter(x => x.beat === b.id);
@@ -446,6 +450,8 @@ function wire() {
   all('[data-motion-clear]').forEach(e => e.onclick = async ev => { ev.preventDefault(); await call('/shots/' + e.dataset.motionClear + '/motion', {method: 'DELETE'}); refresh(true); });
   all('[data-shot-flag]').forEach(e => e.onchange = () => patch('/shots/' + e.dataset.id, {[e.dataset.shotFlag]: e.checked}));
   all('[data-clip]').forEach(e => e.onclick = () => post(e, '/clips', {shot_ids: [e.dataset.clip], only_missing: false}, 'Making the clip'));
+  on('#b-clips-all', b => post(b, '/clips', {only_missing: false}, 'Making all clips'));
+  on('#b-clips-missing', b => post(b, '/clips', {only_missing: true}, 'Making missing clips'));
   all('[data-key]').forEach(e => e.onclick = () => post(e, '/keyframes', {shot_ids: [e.dataset.key], only_missing: false}, 'Making the keyframe'));
   all('[data-up]').forEach(e => e.onclick = () => pick('image/*', f => upload('/images/shot/' + e.dataset.up, f, e)));
   all('[data-approve]').forEach(e => e.onchange = async () => { await call('/item/' + e.dataset.approve + '/approve', {method: 'POST', json: {confirmed: e.checked}}); refresh(true); });
