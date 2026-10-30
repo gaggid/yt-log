@@ -299,10 +299,10 @@ function editCard(busy) {
 const RB_NOTE = 'Change only the face. Keep the clothes, jewellery, neck, body, pose, lighting and background of image 1 exactly as they are. Do not copy any clothes or jewellery from image 2.';
 
 const PARTS = [
-  {id: 'face',        label: 'Face from reference',            hint: 'face from reference · hair, clothes, pose, background stay from source'},
+  {id: 'face_into',   label: 'My face into reference photo',   hint: 'character\'s face placed into the reference scene · clothes, body, background all from the reference'},
+  {id: 'face',        label: 'Reference face into my photo',   hint: 'reference face placed into the source picture · clothes, hair, background stay from source'},
   {id: 'outfit',      label: 'Outfit from reference',          hint: 'outfit from reference · face, hair, skin tone, pose stay from source'},
   {id: 'background',  label: 'Background from reference',      hint: 'background from reference · person, clothes, pose stay from source'},
-  {id: 'face_into',   label: 'My face into reference photo',   hint: 'reference photo is the scene · character\'s face is placed into it, everything else from the reference stays'},
 ];
 
 function refBlendCard(busy) {
@@ -317,7 +317,7 @@ function refBlendCard(busy) {
     </div>
     <div class="mt-s small"><b>What to take from the reference:</b>
       <div class="row mt-s" style="gap:8px;flex-wrap:wrap">
-        ${PARTS.map(pt => `<label style="display:flex;align-items:center;gap:4px"><input type="radio" name="rb-part" value="${pt.id}" ${pt.id === 'face' ? 'checked' : ''}> <span><b>${pt.label}</b> <span class="mute">${pt.hint}</span></span></label>`).join('<br>')}
+        ${PARTS.map(pt => `<label style="display:flex;align-items:center;gap:4px"><input type="radio" name="rb-part" value="${pt.id}" ${pt.id === 'face_into' ? 'checked' : ''}> <span><b>${pt.label}</b> <span class="mute">${pt.hint}</span></span></label>`).join('<br>')}
       </div>
     </div>
     <div class="row mt-s" style="gap:8px;align-items:center;flex-wrap:wrap">
