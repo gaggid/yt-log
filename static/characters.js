@@ -255,7 +255,17 @@ function wireCenter() {
     const drawBtn = document.querySelector(`[data-draw="${v}"]`);
     post(drawBtn, '/generate', {...drawArgs(v), custom_prompt: result}, 'Drawing started');
   });
-  document.querySelectorAll('[data-retry]').forEach(b => b.onclick = () => act(b, async () => { await call('/item/' + b.dataset.retry + '/retry', {method: 'POST'}); await window._chLoad(true); return true; }, 'Retrying…'));
+  document.querySelectorAll('[data-retry]').forEach(b => b.onclick = async () => {
+    let note = '';
+    if (b.dataset.ask) {                      // a finished picture: say what to fix this time (can stay empty)
+      note = await dialog({title: 'Retry with the same inputs', html: `<label class="f">What should be different this time?<textarea id="td" style="min-height:110px" placeholder="Leave empty to just draw again"></textarea></label>
+        <div class="hint small mt-s">Added to the end of the same prompt; the same pictures and LoRAs are used. Say what you want to see, not what you do not want.<br>
+        <b>Eyes look wrong?</b> <i>${esc(RETRY_EYES)}</i> <a href="#" onclick="event.preventDefault();document.getElementById('td').value=${esc(JSON.stringify(RETRY_EYES))}">Use this</a></div>`,
+        buttons: [{label: 'Cancel', value: null}, {label: 'Retry', primary: true, collect: l => l.querySelector('#td').value}]});
+      if (note === null) return;
+    }
+    act(b, async () => { await call('/item/' + b.dataset.retry + '/retry', {method: 'POST', json: {note}}); await window._chLoad(true); return true; }, 'Retrying…');
+  });
   document.querySelectorAll('[data-canon]').forEach(b => b.onclick = () => act(b, async () => { await call('/item/' + b.dataset.canon + '/canon', {method: 'POST'}); await window._chLoad(true); return true; }, 'Saved'));
   const sh = document.querySelector('#ch-sheet'); if (sh) sh.onclick = () => post(sh, '/sheet', {}, 'Sheet started');
   wireEdit();
@@ -263,6 +273,8 @@ function wireCenter() {
 
 /* ───────── edits, try-on, places, looks, matrix (C2, C3) ───────── */
 let EB = '', EX = [], CMP = [], WARD = null, PLACES = null, ED_OPEN = false, RB_FILE = null;
+const RETRY_EYES = 'Both eyes sharp, natural and the same size, looking in the same direction as image 1. Clear round irises, natural eyelids, no blur or smudging around the eyes.';
+const RB = {part: 'face_into', lora: true, expr: false, sharp: false, pure: false};   // the reference-photo card's choices; the card is redrawn often and must not forget them
 const allPics = () => Object.values(C.gallery).flat().filter(p => p.url);
 const picLabel = p => `${p.view === 'edit' ? (p.op || 'edit') : p.view} #${p.attempt}${C.canon[p.view] === p.id ? ' (canon)' : ''}${p.depth ? ' · chain ' + p.depth : ''}`;
 const canonBody = () => C.canon.body || C.canon.portrait || (allPics()[0] || {}).id || '';
@@ -316,16 +328,17 @@ function refBlendCard(busy) {
     </div>
     <div class="mt-s small"><b>What to take from the reference:</b>
       <div class="row mt-s" style="gap:8px;flex-wrap:wrap">
-        ${PARTS.map(pt => `<label style="display:flex;align-items:center;gap:4px"><input type="radio" name="rb-part" value="${pt.id}" ${pt.id === 'face_into' ? 'checked' : ''}> <span><b>${pt.label}</b> <span class="mute">${pt.hint}</span></span></label>`).join('<br>')}
+        ${PARTS.map(pt => `<label style="display:flex;align-items:center;gap:4px"><input type="radio" name="rb-part" value="${pt.id}" ${pt.id === RB.part ? 'checked' : ''}> <span><b>${pt.label}</b> <span class="mute">${pt.hint}</span></span></label>`).join('<br>')}
       </div>
     </div>
     <div class="row mt-s" style="gap:12px;align-items:center;flex-wrap:wrap">
       <label class="small" style="display:flex;align-items:center;gap:6px">Reference photo <input type="file" id="rb-file" accept="image/jpeg,image/png,image/webp" style="font-size:12px"></label>
-      <label class="small" style="display:flex;align-items:center;gap:6px" title="Uses the bfs-head-swap LoRA for face swaps; uncheck to use prompt only"><input type="checkbox" id="rb-lora" checked> Head-swap LoRA</label>
-      <label class="small" style="display:flex;align-items:center;gap:6px" title="Use when the reference has an open mouth or wide eyes (bfs-head-swap-expression)"><input type="checkbox" id="rb-expr"> Expression</label>
-      <label class="small" style="display:flex;align-items:center;gap:6px" title="Adds the detail-fix LoRA for sharper output (qwen2.1-detail-fix-2.0)"><input type="checkbox" id="rb-sharp"> Sharper</label>
-      <label class="small" style="display:flex;align-items:center;gap:6px" title="PureLens Realism LoRA — more photographic, less illustrated look (purelens-realism)"><input type="checkbox" id="rb-pure"> PureLens</label>
+      <label class="small" style="display:flex;align-items:center;gap:6px" title="Uses the bfs-head-swap LoRA for face swaps; uncheck to use prompt only"><input type="checkbox" id="rb-lora" ${RB.lora ? 'checked' : ''}> Head-swap LoRA</label>
+      <label class="small" style="display:flex;align-items:center;gap:6px" title="Use when the reference has an open mouth or wide eyes (bfs-head-swap-expression)"><input type="checkbox" id="rb-expr" ${RB.expr ? 'checked' : ''}> Expression</label>
+      <label class="small" style="display:flex;align-items:center;gap:6px" title="Adds the detail-fix LoRA for sharper output (qwen2.1-detail-fix-2.0)"><input type="checkbox" id="rb-sharp" ${RB.sharp ? 'checked' : ''}> Sharper</label>
+      <label class="small" style="display:flex;align-items:center;gap:6px" title="PureLens Realism LoRA — more photographic, less illustrated look (purelens-realism)"><input type="checkbox" id="rb-pure" ${RB.pure ? 'checked' : ''}> PureLens</label>
     </div>
+    <div class="hint small mt-s" id="rb-sum"></div>
     <div class="row mt-s"><button class="small primary" id="rb-run" ${dis}>Apply</button></div></div>`;
 }
 
@@ -348,6 +361,7 @@ function editsGallery(busy) {
     ${p.status === 'failed' ? `<div class="row" style="margin-top:4px;gap:4px;flex-wrap:wrap"><button class="small" data-retry="${p.id}" ${dis}>Retry</button><button class="small bad" data-del="${p.id}" ${dis}>Delete</button></div>` : ''}
     ${p.url ? `<div class="row" style="margin-top:4px;gap:4px;flex-wrap:wrap"><button class="small" data-base="${p.id}">Edit this</button><button class="small ${p.kept ? 'primary' : ''}" data-keep="${p.id}" data-on="${p.kept ? 0 : 1}">${p.kept ? 'Kept ✓' : 'Keep'}</button>
       <button class="small" data-look="${p.id}">Save as look</button><button class="small" data-check="${p.id}" ${dis}>Check</button><button class="small" data-cmp="${p.id}">${CMP.includes(p.id) ? 'Compare ✓' : 'Compare'}</button>
+      ${p.op === 'edit' || p.op === 'swap' ? `<button class="small" data-retry="${p.id}" data-ask="1" ${dis} title="Make this again from the same pictures, prompt and LoRAs (a new random draw)">Retry</button>` : ''}
       ${(p.op === 'edit' || p.op === 'tryon') ? `<button class="small" data-promote="${p.id}" data-view="body">Make canon body</button>` : ''}
       <button class="small bad" data-del="${p.id}" ${dis}>Delete</button></div>` : ''}</div>`;
   return `<div class="card pad mt"><div class="row"><h3 style="margin:0">Edits and looks</h3><span class="sp"></span>${CMP.length === 2 ? '<button class="small primary" id="cmp-go">Compare the two</button>' : '<span class="mute small">pick two pictures to compare</span>'}</div>
@@ -410,7 +424,24 @@ function wireEdit() {
     face_into:  'Replace only the face of the person in the first picture with the face from the second picture. Keep the hair (style, colour and length) from the first picture. Keep the clothes, body, pose, lighting and background from the first picture exactly. Do not copy the hair from the second picture. The result must look photorealistic and seamless.',
   };
   if ($e('rb-base')) $e('rb-base').onchange = () => { EB = $e('rb-base').value; render(); };
-  if ($e('rb-file')) $e('rb-file').onchange = () => { RB_FILE = ($e('rb-file').files || [])[0] || null; };
+  if ($e('rb-file')) $e('rb-file').onchange = () => { RB_FILE = ($e('rb-file').files || [])[0] || null; rbSummary(); };
+  const rbSummary = () => {
+    const el = $e('rb-sum'); if (!el) return;
+    const src = allPics().find(p => p.id === (($e('rb-base') || {}).value || EB));
+    const srcName = src ? picLabel(src) : 'the source picture';
+    const file = RB_FILE || (($e('rb-file') || {}).files || [])[0];
+    const ref = file ? file.name : 'the reference photo (not chosen yet)';
+    const lora = RB.lora && (RB.part === 'face' || RB.part === 'face_into')
+      ? 'head-swap LoRA' + (RB.expr ? ' (expression)' : '') + (RB.sharp ? ' + sharper' : '') + (RB.pure ? ' + PureLens' : '') : 'prompt only';
+    el.innerHTML = RB.part === 'face_into'
+      ? `Will keep <b>${esc(ref)}</b> (body, clothes, background) and put the face of <b>${esc(srcName)}</b> into it · ${lora}`
+      : RB.part === 'face'
+        ? `Will keep <b>${esc(srcName)}</b> and put the face from <b>${esc(ref)}</b> into it · ${lora}`
+        : `Will keep <b>${esc(srcName)}</b> and take the ${esc(PARTS.find(p => p.id === RB.part).label.toLowerCase())} from <b>${esc(ref)}</b>`;
+  };
+  document.querySelectorAll('[name="rb-part"]').forEach(r => r.onchange = () => { RB.part = r.value; rbSummary(); });
+  [['rb-lora', 'lora'], ['rb-expr', 'expr'], ['rb-sharp', 'sharp'], ['rb-pure', 'pure']].forEach(([id, k]) => { if ($e(id)) $e(id).onchange = () => { RB[k] = $e(id).checked; rbSummary(); }; });
+  rbSummary();
   if ($e('rb-run')) $e('rb-run').onclick = async () => {
     const btn = $e('rb-run');
     const file = RB_FILE || (($e('rb-file') || {}).files && $e('rb-file').files[0]);

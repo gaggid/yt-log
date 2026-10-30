@@ -16,6 +16,7 @@ from story3.voice import MediaError
 from . import avatar, choices, pack, check, edits, render, requests as R, store, studio, studio_edit, wardrobe
 
 router = APIRouter(prefix="/api/characters")
+NO_CACHE = {"Cache-Control": "no-cache"}               # the browser asks again every time (cheap: 304 when the file is unchanged)
 MAX_UPLOAD = 12 * 1024 * 1024
 
 
@@ -129,7 +130,7 @@ async def wardrobe_file(name: str):
     f = (root / name).resolve()
     if root not in f.parents or not f.is_file():
         raise HTTPException(404, "file not found")
-    return FileResponse(f)
+    return FileResponse(f, headers=NO_CACHE)           # a deleted attempt's number is used again, so the same URL can hold a new picture
 
 
 @router.post("/wardrobe/{garment_id}/flatlay")
@@ -220,7 +221,7 @@ async def file(char_id: str, name: str):
     f = (root / name).resolve()
     if root not in f.parents or not f.is_file():
         raise HTTPException(404, "file not found")
-    return FileResponse(f)
+    return FileResponse(f, headers=NO_CACHE)           # a deleted attempt's number is used again, so the same URL can hold a new picture
 
 
 @router.get("/{char_id}/job")
@@ -635,14 +636,18 @@ async def keep_picture(item_id: str, on: bool = True):
     return await state(it["plan_id"])
 
 
+class RetryReq(BaseModel):
+    note: str = ""                      # extra instruction for this try, added to the end of the same prompt (for example what went wrong last time)
+
+
 @router.post("/item/{item_id}/retry")
-async def retry_item(item_id: str):
-    """Re-run a failed generate or edit attempt with the same parameters."""
+async def retry_item(item_id: str, body: RetryReq | None = None):
+    """Re-run a failed attempt, or a finished edit or head swap, as a new attempt with the same inputs (a new seed is drawn by the server)."""
     it = media.get(item_id)
     if not it:
         raise HTTPException(404, "no such picture")
-    if it["status"] != "failed":
-        raise HTTPException(400, "only failed items can be retried")
+    if it["status"] not in ("failed", "done") or (it["status"] == "done" and it["kind"] != store.EDIT):
+        raise HTTPException(400, "only failed pictures and finished edits can be retried")
     char_id = it["plan_id"]
     _get(char_id)
     m = it["meta"]
@@ -655,9 +660,13 @@ async def retry_item(item_id: str):
         refs = m.get("refs", [])
         base_id = refs[0] if refs else m.get("parent", "")
         extra_ids = [x for x in refs[1:] if x != "garment"]
+        swap = m.get("swap") or ""
+        lo = None if swap else (m.get("loras") or None)                 # a swap keeps its LoRAs in the swap string
+        note = (body.note if body else "").strip()
+        prompt = (m.get("prompt", "") + (" " + note if note else ""))[:3900]
         return _start(char_id, "char_edit", lambda p: studio_edit.make_edit(
             char_id, base_id, m.get("preset", "custom"), m.get("value", ""),
-            extra_ids, "", "", 1, m.get("prompt", ""), p, s, key))
+            extra_ids, "", "", 1, prompt, p, s, key, lora=lo, swap=swap))
     raise HTTPException(400, "this kind of item cannot be retried automatically")
 
 

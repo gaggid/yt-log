@@ -38,6 +38,7 @@ MAX_EXTRA_REFS = 2
 SWAPS = {"bfs-head-swap": "Head swap", "bfs-head-swap-expression": "Head swap (strong expression)"}
 SWAP_SHARP = "qwen2.1-detail-fix-2.0"                                       # optional add-on for sharpness
 SWAP_ADDONS = {SWAP_SHARP, "purelens-realism"}                               # allowed add-ons after the swap LoRA
+SWAP_PURELENS_STRENGTH = 0.5                                                 # the gateway's advised range is 0.6-0.8 alone; stacked on the swap LoRA it needs less
 SWAP_DEFAULT_PROMPT = ("Change only the face. Keep the clothes, jewellery, neck, body, pose, "
                        "lighting and background of image 1 exactly as they are. "
                        "Do not copy any clothes or jewellery from image 2.")
@@ -95,7 +96,12 @@ def build(char: dict, base: dict, preset: str, value: str, attempt: int, extra: 
     """An edit of one picture (`base` is a finished media row). `extra` are more pictures of the character or the place (up to two); `garment_path` is a clothes picture for a try-on.
     `lora` is an optional list of {name, strength} dicts; when given the LoRA is sent as a form field so the edit inherits the style from both the source picture and the LoRA."""
     if swap:                                                               # head swap: image 1 = target, image 2 = face source, no prompt, server defaults
-        names = [x.strip() for x in swap.split(",") if x.strip()]
+        parts = [x.strip() for x in swap.split(",") if x.strip()]
+        names = [x.split(":", 1)[0] for x in parts]
+        strengths = {x.split(":", 1)[0]: float(x.split(":", 1)[1]) for x in parts if ":" in x}
+        if "purelens-realism" in names[1:] and "purelens-realism" not in strengths:
+            strengths["purelens-realism"] = SWAP_PURELENS_STRENGTH           # at the default 1.0 it overpowers the swap and the original comes back
+            swap = ",".join(f"{n}:{strengths[n]}" if n in strengths else n for n in names)
         if not names or names[0] not in SWAPS or any(x not in SWAP_ADDONS for x in names[1:]):
             raise store.CharError(f"unknown swap '{swap}' (one of: {', '.join(SWAPS)}, optionally with {', '.join(SWAP_ADDONS)})")
         if len(extra or []) != 1:
@@ -105,7 +111,7 @@ def build(char: dict, base: dict, preset: str, value: str, attempt: int, extra: 
         body = {"model": char["render"]["model"], "n": 1, "response_format": "b64_json", "prompt": prompt, "lora": swap}
         # no size: let the server use the reference image's natural dimensions (same as direct API test, avoids upscale bleed)
         meta = _meta(char, body, base, [base["id"], extra[0]["id"]], "swap", "swap", SWAPS[names[0]] + (", sharpened" if len(names) > 1 else ""), {"swap": swap, "synthetic": True})
-        meta["loras"] = [{"name": x, "strength": 1.0} for x in names]
+        meta["loras"] = [{"name": x, "strength": strengths.get(x, 1.0)} for x in names]
         return {"how": "edit", "body": body, "refs": refs, "ref_ids": [base["id"], extra[0]["id"]], "meta": meta}
     extra = (extra or [])[:MAX_EXTRA_REFS]
     refs = [media.path_of(base)] + [media.path_of(x) for x in extra]

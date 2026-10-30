@@ -9,7 +9,7 @@ from PIL import Image
 from story3 import store as media
 from story3.voice import MediaError
 
-from . import check, edits, requests as R, store, studio, wardrobe
+from . import check, edits, reqlog, requests as R, store, studio, wardrobe
 
 MAX_MATRIX = 12
 
@@ -38,6 +38,7 @@ async def _run(char_id: str, kind: str, key: str, make_req, n: int, label: str, 
         t0 = time.time()
         try:
             data = await studio._post_image(req["how"], req["body"], req["refs"], base, api_key)
+            reqlog.record(it, req, data, seconds=time.time() - t0)
             (store.media_dir(char_id, kind) / f"{key}-a{it['attempt']}.png").write_bytes(data)
             it = media.update(it["id"], status="done", file=f"{kind}/{key}-a{it['attempt']}.png", meta={"seconds_taken": round(time.time() - t0, 1)})
             made += 1
@@ -51,6 +52,7 @@ async def _run(char_id: str, kind: str, key: str, make_req, n: int, label: str, 
             media.update(it["id"], status="failed", meta={"error": "stopped before it finished"})
             raise
         except Exception as e:  # noqa: BLE001
+            reqlog.record(it, req, None, error=str(e)[:300], seconds=time.time() - t0)
             media.update(it["id"], status="failed", meta={"error": str(e)[:300], "seconds_taken": round(time.time() - t0, 1)})
             failed.append({"error": str(e)[:200]})
             if "not reachable" in str(e):
