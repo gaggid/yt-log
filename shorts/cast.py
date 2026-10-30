@@ -96,13 +96,23 @@ def refs_for(short: dict, shot: dict) -> dict | None:
     if not ms or any("portrait" not in m["canon"] for m in ms):
         return None
     pics, who = [], []
-    if len(ms) == 1:
-        pics.append(ms[0]["canon"]["portrait"])
-        who.append((ms[0]["char"]["name"], "face"))
     for m in ms:
-        if m["wear"]:
+        if m["wear"] and m["look_name"]:
+            # An approved look is selected: it already has the correct face and clothes.
+            # Send it alone — no portrait — so the model copies everything from one picture.
             pics.append(m["wear"])
-            who.append((m["char"]["name"], "whole body" + (f", look {m['look_name']}" if m["look_name"] else "")))
+            who.append((m["char"]["name"], "face and clothes"))
+        elif m["wear"]:
+            # Canon body only (no named look): add portrait first for stronger face identity,
+            # then body for outfit reference.
+            if len(ms) == 1 and "portrait" in m["canon"]:
+                pics.append(m["canon"]["portrait"])
+                who.append((m["char"]["name"], "face"))
+            pics.append(m["wear"])
+            who.append((m["char"]["name"], "whole body"))
+        elif len(ms) == 1 and "portrait" in m["canon"]:
+            pics.append(m["canon"]["portrait"])
+            who.append((m["char"]["name"], "face"))
     pl = place(short)
     use_place = bool(pl and pl["item"] and not shot.get("setting"))
     if use_place and len(pics) < 3:

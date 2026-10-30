@@ -92,15 +92,7 @@ def edit_prompt(short: dict, shot: dict, refs: dict) -> str:
     names = [f"Picture {i} shows {w[0]} ({w[1]})." for i, w in enumerate(who, 1)]
     if refs["place"]:
         names.append(f"Picture {len(who) + 1} shows the place.")
-    if len(chars) == 1 and len(who) == 2 and who[0][1] == "face" and "body" in who[1][1]:
-        char_name = who[0][0]
-        place_n = len(who) + 1
-        identity = (f"Use Picture 1 for {char_name}'s exact face and hair only. "
-                    f"Use Picture 2 for {char_name}'s exact clothes, outfit and body — copy every detail of the outfit in Picture 2, nothing else.")
-        if refs["place"]:
-            identity += f" Picture {place_n} is the location; set the scene there."
-    else:
-        identity = "Every person keeps exactly the face, hair, skin tone, build and clothes of their own picture; if a place picture is given the scene happens there."
+    identity = "Every person keeps exactly the face, hair, skin tone, build and clothes of their own picture; if a place picture is given the scene happens there."
     plan = short["plan"]
     parts = [" ".join(names), "Create a new photograph:", (shot.get("still") or shot["prompt"]).strip()]
     if shot.get("setting"):
