@@ -301,12 +301,12 @@ function refBlendCard(busy) {
   const dis = busy ? 'disabled' : '';
   const pics = allPics();
   const PARTS = [
-    {id: 'face',       label: 'Face',       hint: 'copies face, skin tone and eyes; keeps hair, clothes, pose, background'},
-    {id: 'outfit',     label: 'Outfit',     hint: 'copies the full outfit; keeps face, hair, skin tone, pose, background'},
-    {id: 'background', label: 'Background', hint: 'copies the setting and lighting; keeps the person, clothes and pose'},
+    {id: 'face',       label: 'Face',       hint: 'face from reference · hair, clothes, pose, background stay from source'},
+    {id: 'outfit',     label: 'Outfit',     hint: 'outfit from reference · face, hair, skin tone, pose stay from source'},
+    {id: 'background', label: 'Background', hint: 'background from reference · person, clothes, pose stay from source'},
   ];
   return `<div class="card pad mt" id="ch-refblend">
-    <div class="row"><h3 style="margin:0">Take from a reference photo</h3><span class="mute small">copy one part from an uploaded photo onto this character</span></div>
+    <div class="row"><h3 style="margin:0">Take from a reference photo</h3><span class="mute small">pick what to take FROM the uploaded photo; everything else stays FROM the source picture above</span></div>
     <div class="row mt-s" style="gap:10px;flex-wrap:wrap;align-items:flex-end">
       <label class="f" style="min-width:200px">Source picture<select id="rb-base">${pics.map(p => `<option value="${p.id}" ${p.id === EB ? 'selected' : ''}>${esc(picLabel(p))}</option>`).join('')}</select></label>
       ${pics.find(p => p.id === EB) ? `<img src="${esc(pics.find(p => p.id === EB).url)}" style="height:70px;border-radius:6px">` : ''}
