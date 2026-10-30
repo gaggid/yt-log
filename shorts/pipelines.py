@@ -25,7 +25,7 @@ NEGATIVE = "blurry, low quality, static, deformed, disfigured, extra fingers, po
 KEYFRAME_FRAMES = 5
 DEFAULT_STEPS = {models.TI2V: 20, models.T2V: 20, models.I2V: 10, models.ANIMATE: 10, models.TALK: 6}
 # seconds of work per generated frame at 480x832, from the docs' timings (RTX 4060 Ti 16 GB); shorts/probe.py writes measured values over these
-SEC_PER_FRAME = {models.TI2V: 1.75, models.T2V: 0.84 * 20, models.I2V: 0.59 * 10, models.ANIMATE: 66 / 16, models.TALK: 6.0}      # TALK: a guess until the first measured run (G2)
+SEC_PER_FRAME = {models.TI2V: 1.75, models.T2V: 0.84 * 20, models.I2V: 0.59 * 10, models.ANIMATE: 66 / 16, models.TALK: 5.0}      # TALK: measured 2026-10-30: 377 s for 75 frames (a 3 s clip) on the fp8 base with block swap
 STILL_S = 60                              # one picture from the image model, with the swap of models
 OVERHEAD_S = 25                           # per request: queueing, loading, decoding, the download
 

@@ -1,5 +1,7 @@
 # Plan: talking avatars (InfiniteTalk) and character-driven Animate for Shorts
 
+> **Status 2026-10-30.** Built and pushed: InfiniteTalk on the gateway (`infinitetalk-14b`, fp8 base, workflow `wan21_infinitetalk`); avatar shots in Shorts; Avatar tab in Character Studio (voice, 3 s ready test); Animate with a library character and YouTube, Instagram or uploaded references (whole-short remix and single-shot). **Measured:** about 377 s per 3 s clip (6 sampling steps at 56 s each; the 17 GB model swaps between CPU and GPU). Owner decision: slow avatars are fine for now, used for an opening shot. **On hold: speed.** The 4-bit GGUF files (`wan2.1-i2v-14b-480p-Q4_K_M.gguf`, `Wan2_1-InfiniteTalk_Single_Q8.gguf`) are downloaded and the gateway code supports them (`block_swap` default, no LoRA merge), but the test that put the whole model on the GPU filled all 16 GB and crashed the machine. Any further speed test must keep the card under about 13 GB (block swap of about 8) and be run with the owner present. Nothing is pending on the gateway.
+
 Status: plan, nothing built. Written 2026-10-30, revised the same day after the owner's decisions.
 
 ## 1. Owner decisions (2026-10-30)
