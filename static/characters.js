@@ -301,9 +301,10 @@ function refBlendCard(busy) {
   const dis = busy ? 'disabled' : '';
   const pics = allPics();
   const PARTS = [
-    {id: 'face',       label: 'Face',       hint: 'face from reference · hair, clothes, pose, background stay from source'},
-    {id: 'outfit',     label: 'Outfit',     hint: 'outfit from reference · face, hair, skin tone, pose stay from source'},
-    {id: 'background', label: 'Background', hint: 'background from reference · person, clothes, pose stay from source'},
+    {id: 'face',        label: 'Face from reference',            hint: 'face from reference · hair, clothes, pose, background stay from source'},
+    {id: 'outfit',      label: 'Outfit from reference',          hint: 'outfit from reference · face, hair, skin tone, pose stay from source'},
+    {id: 'background',  label: 'Background from reference',      hint: 'background from reference · person, clothes, pose stay from source'},
+    {id: 'face_into',   label: 'My face into reference photo',   hint: 'reference photo is the scene · character\'s face is placed into it, everything else from the reference stays'},
   ];
   return `<div class="card pad mt" id="ch-refblend">
     <div class="row"><h3 style="margin:0">Take from a reference photo</h3><span class="mute small">pick what to take FROM the uploaded photo; everything else stays FROM the source picture above</span></div>
@@ -401,6 +402,7 @@ function wireEdit() {
     face:       'Replace only the face of the person in the first picture with the face from the second picture. Keep the hair (style, colour and length), head shape, clothes, body, pose, lighting and background from the first picture exactly. Do not copy the hair from the second picture. The result must look photorealistic and seamless.',
     outfit:     'Replace only the clothes of the person in the first picture with the outfit shown in the second picture — same colours, fabric, pattern and cut. Keep the face, hair, skin tone, body shape, pose, lighting and background from the first picture exactly. Do not copy the person wearing the clothes in the second picture.',
     background: 'Replace only the background, setting and lighting in the first picture with the background from the second picture. Keep the person exactly as they appear in the first picture: face, hair, clothes, body and pose unchanged.',
+    face_into:  'Replace only the face of the person in the first picture with the face from the second picture. Keep the hair (style, colour and length) from the first picture. Keep the clothes, body, pose, lighting and background from the first picture exactly. Do not copy the hair from the second picture. The result must look photorealistic and seamless.',
   };
   if ($e('rb-base')) $e('rb-base').onchange = () => { EB = $e('rb-base').value; render(); };
   if ($e('rb-run')) $e('rb-run').onclick = async () => {
@@ -415,8 +417,12 @@ function wireEdit() {
       const r = await call('/' + CID + '/upload-ref', {method: 'POST', form: fd});
       refId = r.id;
     } catch(e) { toast('Upload failed: ' + e.message, {bad: true}); btn.disabled = false; btn.textContent = 'Apply'; return; }
-    const baseId = ($e('rb-base') || {}).value || EB;
-    post(btn, '/edit', {base: baseId, preset: 'custom', value: 'see prompt', extra: [refId], n: 1, prompt: RB_INSTRUCTIONS[part]}, 'Applying…');
+    const charId = ($e('rb-base') || {}).value || EB;
+    // face_into: reference photo is the base scene; character portrait is the extra ref
+    const editArgs = part === 'face_into'
+      ? {base: refId, preset: 'custom', value: 'see prompt', extra: [charId], n: 1, prompt: RB_INSTRUCTIONS[part]}
+      : {base: charId, preset: 'custom', value: 'see prompt', extra: [refId], n: 1, prompt: RB_INSTRUCTIONS[part]};
+    post(btn, '/edit', editArgs, 'Applying…');
   };
   document.querySelectorAll('[data-base]').forEach(b => b.onclick = () => { EB = b.dataset.base; render(); document.getElementById('ch-edit').scrollIntoView({behavior: 'smooth'}); });
   document.querySelectorAll('[data-keep]').forEach(b => b.onclick = () => act(b, async () => { C = await call('/item/' + b.dataset.keep + '/keep?on=' + (b.dataset.on === '1'), {method: 'POST'}); render(); return true; }));
