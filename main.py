@@ -23,6 +23,7 @@ from story.api import router as story_router
 from story2.api import router as plans_router
 from story3.api import router as media_router
 from shorts.api import router as shorts_router
+from characters.api import router as characters_router
 from story.pipeline import manager
 
 STATIC = Path(__file__).with_name("static")
@@ -57,6 +58,7 @@ app.include_router(story_router)
 app.include_router(plans_router)
 app.include_router(media_router)
 app.include_router(shorts_router)
+app.include_router(characters_router)
 
 
 NO_STORE = {"Cache-Control": "no-store"}
@@ -66,7 +68,8 @@ NO_STORE = {"Cache-Control": "no-store"}
 async def root():
     """The page names plan.js with its file time, so a browser or a proxy in front (the tunnel) can never keep serving an older script after an update."""
     html = (STATIC / "index.html").read_text(encoding="utf-8").replace('src="/plan.js"', f'src="/plan.js?v={int((STATIC / "plan.js").stat().st_mtime)}"').replace(
-        'src="/shorts.js"', f'src="/shorts.js?v={int((STATIC / "shorts.js").stat().st_mtime)}"')
+        'src="/shorts.js"', f'src="/shorts.js?v={int((STATIC / "shorts.js").stat().st_mtime)}"').replace(
+        'src="/characters.js"', f'src="/characters.js?v={int((STATIC / "characters.js").stat().st_mtime)}"')
     return HTMLResponse(html, headers=NO_STORE)
 
 
@@ -78,6 +81,11 @@ async def plan_js():
 @app.get("/shorts.js")
 async def shorts_js():
     return FileResponse(STATIC / "shorts.js", media_type="application/javascript", headers=NO_STORE)
+
+
+@app.get("/characters.js")
+async def characters_js():
+    return FileResponse(STATIC / "characters.js", media_type="application/javascript", headers=NO_STORE)
 
 
 @app.get("/nxt")

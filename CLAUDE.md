@@ -45,6 +45,14 @@ No linter or build step configured. `static/plan.js` is served from disk uncache
 - `python -m shorts.probe` measures the gateway's Wan models and writes `data/shorts_probe/timings.json`, which the time estimates read. Run it first on a new gateway.
 - Tests: `tests/test_shorts.py` with `tests/shorts_fakes.py` (mock video gateway, fake chat, tone voice, tiny ffmpeg clips).
 
+## Character Studio (`characters/`, plan in [docs/PLAN_characters.md](docs/PLAN_characters.md), tasks in [docs/TASKS_characters.md](docs/TASKS_characters.md))
+
+- A library of reusable people and places (`chars` table, router `/api/characters`, `static/characters.js`). Pictures are `media` rows with `plan_id` = the character id (kinds `char_gen`, `char_sheet`). Canon = the approved portrait and full-body (places: the establishing view); canon change bumps `version`; `store.identity_hash` (slots + render + photo) marks older pictures.
+- Image requests are built only in `characters/requests.py`: draw from the slot paragraph (`describe`), sheet views by edit from the canon (up to 2 references, instruction names pictures by position, keep list). Studio jobs use the same one-job lock (`story2/jobs.py`).
+- The render style, image model and LoRA set (`characters/render.py`, default `photoreal` + `purelens-realism` 0.7 + trigger `p3r4l4ns`) are chosen at creation and LOCKED once canon exists: a different LoRA draws a different person, and an edit keeps the look of its source picture (C0 findings in docs/RUN_LOG.md). To try another look, duplicate.
+- `python -m characters.probe` measures the gateway's image models for characters (groups base, edit, multi, drift, flux, tryon, lora, lorafield); it waits while the app holds the gateway.
+- Tests: `tests/test_characters.py` with `tests/characters_fakes.py`.
+
 ## Invariants that span files
 
 - Canonical scene is source of truth; image prompts derive from it via `source_hash` and regenerating them never touches scene wording.

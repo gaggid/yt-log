@@ -17,13 +17,14 @@ Tick a task when it lands. At the end of each batch compare with the plan sectio
 - [x] C0.12 LoRA test (done 2026-10-30, see RUN_LOG): attach a realism LoRA to qwen-image-2.1 in the gateway console, then `python -m characters.probe --only lora --lora NAME`: same prompt+seed with/without (`lora` field), and an edit with the inline tag; decide if edits honour LoRAs and the default strength.
 - [x] C0.10 Compare with the plan: what C0 settled, what it left open (see the end of this file).
 
-## C1. Library and generation [plan 3, 4.1, 5]
-- [ ] store (`chars` table, media kinds), CRUD API, library grid
-- [ ] slot form with "suggest" and gap indicator; create from idea / slots / picture (consent box) / duplicate
-- [ ] generate candidates (Qwen/FLUX, seed lock, model compare), approve canon, version bump
-- [ ] render style + LoRA set per character, chosen BEFORE the canon is drawn and then locked (a later switch makes a different person: C0) (picker from /images/loras, trigger words, strength, Realism preset, `photoreal` style preset), locked across canon/looks/edits/shorts; set in the request hash
-- [ ] character sheet as separate pictures
-- [ ] tests (fake gateway), CLAUDE.md + APP_GUIDE entry
+## C1. Library and generation [plan 3, 4.1, 5]  (built 2026-10-30, tests `tests/test_characters.py`, 11 pass on a fake gateway; not yet used on the real gateway from the screen)
+- [x] store (`chars` table, media kinds `char_gen` / `char_sheet`), CRUD API (`/api/characters`), library grid (`#/characters`), studio screen (`#/character/<id>`)
+- [x] slot form with gap indicator; "Fill in the details from the idea" (chat model, vague values sent back); create from idea / slots / picture (rights box + vision reads the photo into slots) / duplicate; places (kind `place`) use the same engine
+- [x] generate candidates (Qwen or FLUX, 1/2/4 at a time, numbered attempts with seed, recipe and identity hash), approve canon (portrait + body), version bump, "older" badge when the description changed
+- [x] character sheet as separate pictures: three-quarter, side, back, six expressions, each an edit of the canon with the keep list
+- [x] render style + LoRA set per character: default `photoreal` + `purelens-realism` 0.7 with its trigger word (from the gateway listing, built-in fallback), picker from `/images/loras`, locked when canon is approved, unlisted LoRA refused before drawing
+- [x] tests (fake gateway), CLAUDE.md entry
+- [ ] not in C1 (deferred on purpose): model compare side by side and seed lock in the UI (the API takes a seed), the vision consistency check (C3), prompt drawer and recipes (C2), real-gateway run of the screen
 
 ## C2. Edit tool [plan 4.2]
 - [ ] edit with instruction and extra references, presets, keep list, lineage, compare, restore, promote to canon, chain-depth badge
