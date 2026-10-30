@@ -1,6 +1,7 @@
 """HTTP API for the Character Studio (mounted under /api/characters). Same login as the rest of the app. Everything that talks to the gateway runs as the same one-at-a-time background job as
 the other steps (story2/jobs.py), keyed by the character's id."""
 import asyncio
+import os
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
@@ -320,6 +321,33 @@ async def suggest(char_id: str, body: SuggestReq):
         c["name"] = out["name"]
     store.save(c)
     return await state(char_id)
+
+
+@router.post("/{char_id}/read-detail")
+async def read_detail(char_id: str, file: UploadFile = File(...), aspect: str = Form(...)):
+    """Read one detail (hair, outfit, accessories, face, expression) of a reference picture into the character's text slots. The picture is not kept: only the words are, and they can be edited."""
+    c = _get(char_id)
+    if c["kind"] != "person":
+        raise HTTPException(400, "details can only be read for a person")
+    if aspect not in studio.ASPECTS:
+        raise HTTPException(400, f"aspect is one of: {', '.join(studio.ASPECTS)}")
+    raw = await file.read()
+    if len(raw) > MAX_UPLOAD:
+        raise HTTPException(400, "the picture is over 12 MB")
+    if jobs.busy() or manager.busy():
+        raise HTTPException(409, "the model server is busy with another job; try again when it finishes")
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".img", delete=False) as t:
+        t.write(raw)
+    try:
+        got = await studio.read_aspect(t.name, aspect)
+    except (MediaError, ValueError, OSError) as e:
+        raise HTTPException(400, str(e))
+    finally:
+        os.unlink(t.name)
+    c["slots"] = {**c["slots"], **got["slots"]}
+    store.save(c)
+    return {**(await state(char_id)), "read": got}
 
 
 @router.post("/{char_id}/photo")

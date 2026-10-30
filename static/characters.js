@@ -94,7 +94,9 @@ window.viewCharacter = async function (id) {
   if (sessionStorage.getItem('ch-suggest-' + id)) { sessionStorage.removeItem('ch-suggest-' + id); await suggest(null); if (C && !C.gaps.length) await post(null, '/generate', {views: ['portrait'], n: 4}, 'Drawing four portraits: pick one as the canon'); }
 };
 const editing = () => ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement && document.activeElement.tagName);
-const post = (btn, path, json, ok) => act(btn, async () => { await call('/' + CID + path, {method: 'POST', json: json || {}}); await window._chLoad(true); return true; }, ok);
+const post = (btn, path, json, ok) => act(btn, async () => { await flushSlots(); await call('/' + CID + path, {method: 'POST', json: json || {}}); await window._chLoad(true); return true; }, ok);
+let PENDING = Promise.resolve();
+const flushSlots = async () => { document.querySelectorAll('[data-slot]').forEach(e => { clearTimeout(e._t); if ((C.slots[e.dataset.slot] || '') !== e.value) { const slots = {...C.slots}; slots[e.dataset.slot] = e.value; PENDING = patch({slots}); } }); await PENDING; };
 const patch = async (json) => { await act(null, async () => { C = await call('/' + CID, {method: 'PATCH', json}); render(); return true; }); };
 const hdur = s => (window.hd ? hd(s) : Math.round(s) + 's');
 
@@ -141,6 +143,7 @@ function sideView(busy) {
     <div class="row mt-s"><button class="small primary" id="ch-suggest" ${dis}>Fill the empty details</button><button class="small" id="ch-suggest-all" ${dis} title="Write every detail again; the five above stay">Write all again</button></div>
     ${C.kind === 'person' ? `<div class="row mt-s small">${C.photo ? `<img src="${esc(C.photo)}" style="width:44px;border-radius:6px"> started from a picture (${esc(C.rights.basis)})` : ''}<button class="small" id="ch-photo" ${dis}>${C.photo ? 'Change the picture' : 'Start from a picture'}</button></div>` : ''}
     ${C.kind === 'person' ? stylingBlock(dis) : ''}
+    ${C.kind === 'person' ? `<h3>Read a detail from a picture</h3><div class="row small" style="gap:6px"><select id="rd-aspect" ${dis}><option value="hair">hair (colour, streaks, style)</option><option value="outfit">outfit</option><option value="accessories">accessories</option><option value="face">face and skin</option><option value="expression">expression</option></select><button class="small" id="rd-pick" ${dis}>Choose a picture</button></div><div class="mute small">The model looks at the picture and writes the words into the matching detail; you can change them. The picture itself is not kept and is not given to the image model.</div>` : ''}
     <h3>Details</h3><div class="mute small">${C.gaps.length ? 'Fill these in: ' + C.gaps.map(esc).join(', ') + '. An image model invents what is not written.' : 'Every detail is written.'}</div>
     ${keys.map(k => `<label class="ch-slot ${C.gaps.includes(k) ? 'gap' : ''}" title="${esc(hints[k])}"><span>${esc(k)}</span><input data-slot="${k}" list="dl-slot-${k}" value="${esc(C.slots[k] || '')}" placeholder="pick or type" ${dis}>${dl('dl-slot-' + k, (OPT.choices[C.kind] || {})[k] || [])}</label>`).join('')}
     <label class="f mt-s">Personality (mood the face carries)<input id="ch-pers" value="${esc(C.personality)}" ${dis}></label>
@@ -192,9 +195,14 @@ function wire() {
   on('#ch-photo', startFromPicture);
   const val = (sel, key, conv = x => x) => { const e = document.querySelector(sel); if (e) e.onchange = () => patch({[key]: conv(e.value)}); };
   val('#ch-idea', 'idea'); val('#ch-pers', 'personality'); val('#ch-notes', 'notes'); val('#ch-tags', 'tags', v => v.split(','));
+  const rdp = $('#rd-pick'); if (rdp) rdp.onclick = () => { const f = document.createElement('input'); f.type = 'file'; f.accept = 'image/jpeg,image/png,image/webp'; f.onchange = async () => { if (!f.files[0]) return; const fd = new FormData(); fd.append('file', f.files[0]); fd.append('aspect', $('#rd-aspect').value); await act(null, async () => { C = await call('/' + CID + '/read-detail', {method: 'POST', form: fd}); render(); return true; }, 'Read: check the words in the details'); }; f.click(); };
   const sty = $('#ch-styling'); if (sty) sty.onchange = () => patch({styling: sty.value});
   const out = $('#ch-outfit'); if (out) out.onchange = () => { const o = ((OPT && OPT.outfits) || []).find(x => x.id === out.value); if (!o) return; const slots = {...C.slots}; ['top', 'bottom', 'footwear', 'accessories', 'expression'].forEach(k => { slots[k] = o[k]; }); if (o.styling && C.styling !== 'glamour') patch({slots, styling: 'glamour'}); else patch({slots}); };
-  document.querySelectorAll('[data-slot]').forEach(e => e.onchange = () => { const slots = {...C.slots}; slots[e.dataset.slot] = e.value; patch({slots}); });
+  document.querySelectorAll('[data-slot]').forEach(e => {
+    const save = () => { clearTimeout(e._t); const v = e.value; if ((C.slots[e.dataset.slot] || '') === v) return Promise.resolve(); const slots = {...C.slots}; slots[e.dataset.slot] = v; PENDING = patch({slots}); return PENDING; };
+    const quiet = () => { const v = e.value; if ((C.slots[e.dataset.slot] || '') === v) return; PENDING = call('/' + CID, {method: 'PATCH', json: {slots: {...C.slots, [e.dataset.slot]: v}}}).then(r => { C = r; }).catch(() => {}); };   // while typing: save without redrawing the panel
+    e.onchange = save; e.oninput = () => { clearTimeout(e._t); e._t = setTimeout(quiet, 700); };
+  });
   const renderPatch = async (change) => { await act(null, async () => { C = await call('/' + CID, {method: 'PATCH', json: {render: {...C.render, ...change}}}); render(); return true; }); render(); };
   const st = document.querySelector('#ch-style'); if (st) st.onchange = () => renderPatch({style: st.value, loras: OPT.styles[st.value].loras});
   const md = document.querySelector('#ch-model'); if (md) md.onchange = () => renderPatch({model: md.value, loras: []});

@@ -136,6 +136,44 @@ async def read_photo(path, s: dict | None = None, key: str = "") -> dict:
     return {"slots": describe.clean({k: v for k, v in (j.get("slots") or {}).items() if k in hints}), "personality": str(j.get("personality") or "").strip()}
 
 
+ASPECTS = {"hair": ("hair",), "outfit": ("top", "bottom", "footwear"), "accessories": ("accessories",), "face": ("face", "eyes", "skin"), "expression": ("expression",)}
+ASPECT_PROMPT = ("Look only at the {aspect} of the person (or, for an outfit, the clothes) in this picture and write it as the exact value of each slot below, for an artist who will draw it. "
+                 "Reply with ONLY JSON: {{\"slots\": {{{keys}}}}}. Describe only what you can see, in plain words an image model draws literally: exact colours (name every shade, and for hair "
+                 "say precisely where a second colour is: streaks, highlights, roots, tips), lengths, fabrics, cuts, patterns. No brand names, no guesses about what is hidden, leave a slot "
+                 "empty (\"\") when it cannot be seen. Never describe anything outside the slots.\nSlots:\n{hints}")
+
+
+async def read_aspect(path, aspect: str, s: dict | None = None, key: str = "") -> dict:
+    """The chat model with vision reads ONE detail (hair, outfit, accessories, face, expression) of a reference picture into the matching text slots. The picture is not kept and is never sent
+    to the image model: only the words go on, so the person can change them before anything is drawn."""
+    if aspect not in ASPECTS:
+        raise ValueError(f"aspect is one of: {', '.join(ASPECTS)}")
+    s = s or settings_mod.get()
+    hints = {k: v for k, v in describe.hints("person").items() if k in ASPECTS[aspect]}
+    text = ASPECT_PROMPT.replace("{aspect}", aspect).replace("{keys}", ", ".join(f'"{k}": "..."' for k in hints)).replace("{hints}", "\n".join(f"- {k}: {h}" for k, h in hints.items())).replace("{{", "{").replace("}}", "}")
+    im = Image.open(path).convert("RGB")
+    im.thumbnail((1280, 1280))
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", quality=90)
+    msg = [{"role": "user", "content": [{"type": "text", "text": text}, {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()}}]}]
+    last = ""
+    for attempt in range(3):
+        async with _client(300) as c:
+            r = await c.post(s["base_url"].rstrip("/") + "/chat/completions", headers={"Authorization": f"Bearer {key or settings_mod.api_key()}"},
+                             json={**llm.model_field(s), "messages": msg, "max_tokens": 1500 + 1000 * attempt, "temperature": 0.2})
+        if r.status_code != 200:
+            raise MediaError(f"the picture could not be read ({r.status_code}): {r.text[:160]}")
+        try:
+            j = llm.parse_json(r.json()["choices"][0]["message"].get("content") or "")
+            got = describe.clean({k: v for k, v in (j.get("slots") or {}).items() if k in hints})
+            if got:
+                return {"slots": got, "aspect": aspect}
+            last = "the model saw nothing it could describe"
+        except ValueError:
+            last = "the model sent no answer"
+    raise MediaError(last + ": try a clearer picture")
+
+
 def save_photo(char_id: str, raw: bytes) -> str:
     """Keep an uploaded picture of a person (JPEG, at most 2048 px) under the character's folder; returns its path relative to that folder."""
     im = Image.open(io.BytesIO(raw)).convert("RGB")

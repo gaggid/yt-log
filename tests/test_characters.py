@@ -216,3 +216,15 @@ def test_api_styling_is_refused_for_an_undeclared_or_young_age_and_allowed_for_a
     young = client.patch(f"/api/characters/{cid}", json={"declared": {"ethnicity": "Indian (Punjabi)", "gender": "female", "age": "17", "skin_tone": "fair", "build": "curvy"}})
     assert young.status_code == 400 and "adult age" in young.json()["detail"], "lowering the age under 21 turns it down"
     assert client.patch(f"/api/characters/{cid}", json={"styling": "weird"}).status_code == 400
+
+
+def test_a_detail_read_from_a_picture_becomes_text_in_the_matching_slots_and_the_picture_is_not_kept(client, monkeypatch):
+    async def fake_read(path, aspect, s=None, key=""):
+        assert aspect == "hair"
+        return {"slots": {"hair": "black hair with soft brown and blonde streaks, shoulder-length"}, "aspect": aspect}
+    monkeypatch.setattr(studio, "read_aspect", fake_read)
+    cid = client.post("/api/characters", json={"name": "Saira", "kind": "person", "slots": {"hair": "black", "top": "white t-shirt"}}).json()["id"]
+    r = client.post(f"/api/characters/{cid}/read-detail", files={"file": ("h.png", png_bytes(40, 40), "image/png")}, data={"aspect": "hair"})
+    assert r.status_code == 200 and r.json()["slots"]["hair"].startswith("black hair with soft brown and blonde streaks") and r.json()["slots"]["top"] == "white t-shirt"
+    assert not r.json()["photo"], "the reference picture is not stored or used as an image reference"
+    assert client.post(f"/api/characters/{cid}/read-detail", files={"file": ("h.png", png_bytes(40, 40), "image/png")}, data={"aspect": "shoes"}).status_code == 400
