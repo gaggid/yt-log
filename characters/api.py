@@ -632,6 +632,32 @@ async def keep_picture(item_id: str, on: bool = True):
     return await state(it["plan_id"])
 
 
+@router.post("/item/{item_id}/retry")
+async def retry_item(item_id: str):
+    """Re-run a failed generate or edit attempt with the same parameters."""
+    it = media.get(item_id)
+    if not it:
+        raise HTTPException(404, "no such picture")
+    if it["status"] != "failed":
+        raise HTTPException(400, "only failed items can be retried")
+    char_id = it["plan_id"]
+    _get(char_id)
+    m = it["meta"]
+    s, key = settings_mod.get(), settings_mod.api_key()
+    if it["kind"] == store.GEN:
+        return _start(char_id, "char_generate", lambda p: studio.make_views(char_id, [it["key"]], 1, p, s, key))
+    if it["kind"] == store.EDIT:
+        if m.get("op") == "tryon":
+            raise HTTPException(400, "try-on retry: use the Edit section and choose the garment again")
+        refs = m.get("refs", [])
+        base_id = refs[0] if refs else m.get("parent", "")
+        extra_ids = [x for x in refs[1:] if x != "garment"]
+        return _start(char_id, "char_edit", lambda p: studio_edit.make_edit(
+            char_id, base_id, m.get("preset", "custom"), m.get("value", ""),
+            extra_ids, "", "", 1, m.get("prompt", ""), p, s, key))
+    raise HTTPException(400, "this kind of item cannot be retried automatically")
+
+
 @router.delete("/item/{item_id}")
 async def delete_picture(item_id: str):
     """Delete one picture and free its file from disk. Refused if the picture is a canon or referenced by a saved look."""

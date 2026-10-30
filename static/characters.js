@@ -179,6 +179,7 @@ function centerView(busy) {
   const pics = v => (C.gallery[v] || []).slice().reverse();
   const card = p => `<div class="ch-pic ${C.canon[p.view] === p.id ? 'canon' : ''}">${p.url ? `<img src="${esc(p.url)}" loading="lazy" onclick="chZoom('${esc(p.url)}')">` : `<div class="ph">${p.status === 'failed' ? 'failed<br>' + esc(p.error.slice(0, 80)) : 'drawing…'}</div>`}
     <div class="mute">#${p.attempt} · seed ${p.seed ?? '-'}${p.seconds_taken ? ' · ' + Math.round(p.seconds_taken) + 's' : ''}${p.current ? '' : ' · older'}</div>
+    ${p.status === 'failed' ? `<div class="row" style="margin-top:4px;gap:4px"><button class="small" data-retry="${p.id}" ${dis}>Retry</button><button class="small bad" data-del="${p.id}" ${dis}>Delete</button></div>` : ''}
     ${p.url && (p.how === 'draw' || p.how === 'edit') ? `<div class="row" style="margin-top:4px;gap:4px">${C.canon[p.view] === p.id ? '<b>Canon ✓</b>' : `${p.view === 'portrait' || p.view === 'body' || p.view === 'place' ? `<button class="small primary" data-canon="${p.id}" ${dis}>Use as canon</button>` : (p.approved ? '<b>Kept ✓</b>' : `<button class="small" data-canon="${p.id}" ${dis}>Keep</button>`)} <button class="small bad" data-del="${p.id}" ${dis}>Delete</button>`}</div>` : ''}</div>`;
   const bodyRefPics = () => Object.values(C.gallery).flat().filter(p => p.url && p.status === 'done');
   const bodyRefSel = () => { const all = bodyRefPics(); if (!all.length) return ''; return `<label class="small" style="display:flex;align-items:center;gap:4px">Reference<select id="body-ref" style="width:auto"><option value="">Auto (canon portrait)</option>${all.map(p => `<option value="${p.id}">${esc(picLabel(p))}</option>`).join('')}</select></label>`; };
@@ -254,6 +255,7 @@ function wireCenter() {
     const drawBtn = document.querySelector(`[data-draw="${v}"]`);
     post(drawBtn, '/generate', {...drawArgs(v), custom_prompt: result}, 'Drawing started');
   });
+  document.querySelectorAll('[data-retry]').forEach(b => b.onclick = () => act(b, async () => { await call('/item/' + b.dataset.retry + '/retry', {method: 'POST'}); await window._chLoad(true); return true; }, 'Retrying…'));
   document.querySelectorAll('[data-canon]').forEach(b => b.onclick = () => act(b, async () => { await call('/item/' + b.dataset.canon + '/canon', {method: 'POST'}); await window._chLoad(true); return true; }, 'Saved'));
   const sh = document.querySelector('#ch-sheet'); if (sh) sh.onclick = () => post(sh, '/sheet', {}, 'Sheet started');
   wireEdit();
@@ -310,6 +312,7 @@ function editsGallery(busy) {
   const card = p => `<div class="ch-pic ${C.canon.body === p.id || C.canon.portrait === p.id ? 'canon' : ''}">${p.url ? `<img src="${esc(p.url)}" loading="lazy" onclick="chZoom('${esc(p.url)}')">` : `<div class="ph">${p.status === 'failed' ? 'failed<br>' + esc(p.error.slice(0, 80)) : 'drawing…'}</div>`}
     <div class="mute">${esc(p.op || 'edit')}${p.preset ? ': ' + esc(p.preset) : ''}${p.value ? ' · ' + esc(p.value.slice(0, 40)) : ''}</div>
     <div class="mute">chain ${p.depth}${p.depth >= 3 ? ' ⚠' : ''}${p.current ? '' : ' · older'}</div>${checkBadge(p)}
+    ${p.status === 'failed' ? `<div class="row" style="margin-top:4px;gap:4px;flex-wrap:wrap"><button class="small" data-retry="${p.id}" ${dis}>Retry</button><button class="small bad" data-del="${p.id}" ${dis}>Delete</button></div>` : ''}
     ${p.url ? `<div class="row" style="margin-top:4px;gap:4px;flex-wrap:wrap"><button class="small" data-base="${p.id}">Edit this</button><button class="small ${p.kept ? 'primary' : ''}" data-keep="${p.id}" data-on="${p.kept ? 0 : 1}">${p.kept ? 'Kept ✓' : 'Keep'}</button>
       <button class="small" data-look="${p.id}">Save as look</button><button class="small" data-check="${p.id}" ${dis}>Check</button><button class="small" data-cmp="${p.id}">${CMP.includes(p.id) ? 'Compare ✓' : 'Compare'}</button>
       ${(p.op === 'edit' || p.op === 'tryon') ? `<button class="small" data-promote="${p.id}" data-view="body">Make canon body</button>` : ''}
