@@ -13,15 +13,15 @@ Tick a task when it lands. At the end of each batch compare with the plan sectio
 - [x] C0.7 Run on the real gateway; saves pictures and `report.json` under `data/characters_probe/<time>/`, and writes `data/characters_probe/timings.json`.
 - [x] C0.8 Short unit test of the helpers (prompt builders, report writer) on a fake gateway, no long run.
 - [x] C0.9 Write the findings in `docs/RUN_LOG.md` and set the defaults for C1/C2 (sizes, reference count, whether edit-from-canon wins).
-- [ ] C0.11 (not yet run) Try-on test: character canon + a garment picture (flat lay drawn by Qwen, or the owner's own via `--garment`), identity and clothing fidelity; run after the main probe: `python -m characters.probe --only tryon`.
-- [ ] C0.12 LoRA test: attach a realism LoRA to qwen-image-2.1 in the gateway console, then `python -m characters.probe --only lora --lora NAME`: same prompt+seed with/without (`lora` field), and an edit with the inline tag; decide if edits honour LoRAs and the default strength.
+- [x] C0.11 Try-on test: character canon + a garment picture (flat lay drawn by Qwen, or the owner's own via `--garment`), identity and clothing fidelity; run after the main probe: `python -m characters.probe --only tryon`.
+- [x] C0.12 LoRA test (done 2026-10-30, see RUN_LOG): attach a realism LoRA to qwen-image-2.1 in the gateway console, then `python -m characters.probe --only lora --lora NAME`: same prompt+seed with/without (`lora` field), and an edit with the inline tag; decide if edits honour LoRAs and the default strength.
 - [x] C0.10 Compare with the plan: what C0 settled, what it left open (see the end of this file).
 
 ## C1. Library and generation [plan 3, 4.1, 5]
 - [ ] store (`chars` table, media kinds), CRUD API, library grid
 - [ ] slot form with "suggest" and gap indicator; create from idea / slots / picture (consent box) / duplicate
 - [ ] generate candidates (Qwen/FLUX, seed lock, model compare), approve canon, version bump
-- [ ] render style + LoRA set per character (picker from /images/loras, trigger words, strength, Realism preset, `photoreal` style preset), locked across canon/looks/edits/shorts; set in the request hash
+- [ ] render style + LoRA set per character, chosen BEFORE the canon is drawn and then locked (a later switch makes a different person: C0) (picker from /images/loras, trigger words, strength, Realism preset, `photoreal` style preset), locked across canon/looks/edits/shorts; set in the request hash
 - [ ] character sheet as separate pictures
 - [ ] tests (fake gateway), CLAUDE.md + APP_GUIDE entry
 
@@ -55,4 +55,5 @@ Left open (do not assume):
 - C0.11 try-on from a garment picture, and C0.12 realism LoRA (and whether edits honour `lora`): both need a run; the LoRA test needs the file attached in the gateway console first.
 - The identity check is too lenient to gate anything; C3 must use a feature-by-feature rubric (and calibrate against pictures looked at by a person).
 - Rendering drift (style gets glossier along a chain) is not caught by an identity check; the consistency check should also compare style/colour.
+- C0.11 try-on: works (faithful garment transfer, identity kept). C0.12 LoRA: realism comes from the draw step only; edits keep the source's look; the `lora` field on edits is accepted but its effect is unproven; render style + LoRA set must be locked before canon (plan 4.2). Open for C2: restyle a painted character to photographic by an edit instruction.
 - Whether a 2509-style edit model exists on the gateway: the listed model is `qwen-image-2.1` only; behaviour above is what it does.

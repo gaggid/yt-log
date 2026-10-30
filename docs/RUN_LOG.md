@@ -95,3 +95,10 @@ Started 2026-10-25. Each line: what was done or seen, and what is next to fix.
 - By eye: Qwen keeps clothes/pose/background instructions well; the outfit edit on FLUX kept the face, pose and framing almost exactly (best fidelity) but takes about twice as long and its licence is restricted.
 - The base look is painterly (filmic preset), not photographic; a realism look needs the `photoreal` style plus a realism LoRA (see plan 4.2).
 - Not yet run: `--only tryon` (garment picture), `--only lora --lora NAME` (needs a realism LoRA attached in the gateway console).
+
+### 2026-10-30 C0 follow-up: LoRA and try-on (pictures in data/characters_probe/20261030-094703/ and 20261030-095312/)
+
+- LoRAs listed for qwen-image-2.1: `qwen2.1-detail-fix-2.0` (default on), `purelens-realism` (trigger `p3r4l4ns`, advised strength 0.6-0.8), `raw-photo-v3`. FLUX lists none.
+- Drawing with `purelens-realism` 0.7 + trigger (49 s): clearly photographic (natural skin, camera light, plain studio), but the same prompt and seed gives a visibly different man than the painted canon (longer hair, fuller beard, thinner face; vision said 9, by eye about 6-7). So the render style and LoRA set must be chosen BEFORE the canon is drawn and then locked; switching later makes a different person.
+- Edit of the painted canon with the inline `<lora:purelens-realism:0.7>` tag: stayed painted (no realism). Edit of the realistic picture without any LoRA stayed realistic. With the `lora` multipart field: accepted (no 400) but no visible change vs plain, so not provable. Rule: an edit keeps the look of its source picture; realism comes from the draw step. Open: can an edit instruction ("turn this painting into a photograph") restyle an existing painted character? Test in C2.
+- Try-on (garment flat lay drawn by Qwen 37 s, then edit with [canon, garment] 94 s): the maroon sherwani with gold collar and cuff embroidery and cream trousers was transferred faithfully, face and pose kept, the old white sneakers kept because the garment picture had no shoes. Works as planned.

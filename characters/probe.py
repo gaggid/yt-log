@@ -87,6 +87,7 @@ class Probe:
         self.base = s["base_url"].rstrip("/")
         self.report: list[dict] = []
         self.pics: dict[str, Path | None] = {}
+        self.loras: dict[str, dict] = {}
 
     async def _call(self, model: str, prompt: str, size: str, refs: list[Path], seed: int, lora=None) -> bytes:
         """One picture. The gateway serves one request per key, so when the app is busy with its own job this waits for a free slot (up to an hour) and times only the request itself."""
@@ -97,6 +98,8 @@ class Probe:
                 async with httpx.AsyncClient(timeout=900) as c:
                     if refs:
                         data, files = scenes._form(model, prompt, size, seed, refs)
+                        if lora:
+                            data["lora"] = lora if isinstance(lora, str) else json.dumps(lora)
                         img = await scenes._post(c, self.base + "/images/edits", self.key, data=data, files=files)
                     else:
                         img = await scenes._post(c, self.base + "/images/generations", self.key,
@@ -208,9 +211,20 @@ class Probe:
             print("[lora] skipped: no body.png (run the base group first)", flush=True)
             return
         self.pics["body"] = control
-        drawn = await self._send("generate_lora_field", f"lora-{name}-draw", self.model, base_prompt("body"), SIZES["body"], [], 7, control, lora=[{"name": name, "strength": strength}])
-        edited = await self._send("edit_lora_tag", f"lora-{name}-edit-tag", self.model, f"{EDITS['outfit'][1]} <lora:{name}:{strength}>", SIZES["body"], [control], 21, control)
+        trigger = (self.loras.get(name) or {}).get("trigger", "")
+        drawn = await self._send("generate_lora_field", f"lora-{name}-draw", self.model, f"{trigger} {base_prompt('body')}".strip(), SIZES["body"], [], 7, control, lora=[{"name": name, "strength": strength}])
+        edited = await self._send("edit_lora_tag", f"lora-{name}-edit-tag", self.model, f"{trigger} {EDITS['outfit'][1]} <lora:{name}:{strength}>".strip(), SIZES["body"], [control], 21, control)
         print("[lora] compare by eye: body.png (no extra LoRA), the -draw and -edit-tag pictures; ok" if drawn and edited else "[lora] something failed, see the report", flush=True)
+
+    async def lorafield_group(self, name: str) -> None:
+        """Do edits keep a realistic picture realistic, and does the `lora` form field of /images/edits apply a LoRA? Edit the realistic picture from the lora group twice: plain, and with the field."""
+        src = latest_base(f"lora-{name}-draw.png")
+        if not src:
+            print("[lorafield] skipped: run --only lora first", flush=True)
+            return
+        trigger = (self.loras.get(name) or {}).get("trigger", "")
+        await self._send("edit_real_plain", "realedit-plain", self.model, EDITS["outfit"][1], SIZES["body"], [src], 21, src)
+        await self._send("edit_real_field", "realedit-field", self.model, f"{trigger} {EDITS['outfit'][1]}".strip(), SIZES["body"], [src], 21, src, lora=name)
 
     def save(self, models_seen: list[str]) -> None:
         summary = summarise(self.report)
@@ -236,14 +250,17 @@ async def main(args) -> None:
     print("image models the key can use:", ", ".join(f"{m['id']} ({'edit' if 'images.edits' in (m.get('capabilities') or []) else 'no edit'})" for m in images) or "(none listed)", flush=True)
     model = args.model or providers.DEFAULT_MODEL
     only = set(args.only.split(",")) if args.only else {"base", "edit", "multi", "drift", "flux", "tryon"}
+    pr_loras: dict[str, dict] = {}
     try:
         async with httpx.AsyncClient(timeout=20) as c:
             lr = await c.get(base + "/images/loras", params={"model": args.model or providers.DEFAULT_MODEL}, headers={"Authorization": f"Bearer {key}"})
+        pr_loras = {x["name"]: x for x in lr.json().get("data", [])}
         print("LoRAs attached to the model:", ", ".join(f"{x['name']} (strength {x.get('strength')}, trigger '{x.get('trigger', '')}')" for x in lr.json().get("data", [])) or "(none)",
               "| on by default:", lr.json().get("default"), flush=True)
     except Exception as e:  # noqa: BLE001
         print("LoRA listing failed:", e, flush=True)
     pr = Probe(s, key, out_dir(), model)
+    pr.loras = pr_loras
     if only & {"base", "edit", "multi", "drift", "flux"}:
         await pr.base_group()
     if "edit" in only:
@@ -257,6 +274,8 @@ async def main(args) -> None:
             print("[lora] skipped: give the LoRA's name with --lora (see GET /v1/images/loras?model=...)", flush=True)
         else:
             await pr.lora_group(args.lora, args.lora_strength)
+    if "lorafield" in only:
+        await pr.lorafield_group(args.lora or "purelens-realism")
     if "tryon" in only:
         await pr.tryon_group(Path(args.garment) if args.garment else None)
     flux = next((m["id"] for m in images if "flux" in m["id"] and "images.edits" in (m.get("capabilities") or [])), "")
