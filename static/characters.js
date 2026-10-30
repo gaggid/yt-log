@@ -298,16 +298,17 @@ function editCard(busy) {
 
 const RB_NOTE = 'Change only the face. Keep the clothes, jewellery, neck, body, pose, lighting and background of image 1 exactly as they are. Do not copy any clothes or jewellery from image 2.';
 
+const PARTS = [
+  {id: 'face',        label: 'Face from reference',            hint: 'face from reference · hair, clothes, pose, background stay from source'},
+  {id: 'outfit',      label: 'Outfit from reference',          hint: 'outfit from reference · face, hair, skin tone, pose stay from source'},
+  {id: 'background',  label: 'Background from reference',      hint: 'background from reference · person, clothes, pose stay from source'},
+  {id: 'face_into',   label: 'My face into reference photo',   hint: 'reference photo is the scene · character\'s face is placed into it, everything else from the reference stays'},
+];
+
 function refBlendCard(busy) {
   if (C.kind !== 'person' || !C.canon.portrait) return '';
   const dis = busy ? 'disabled' : '';
   const pics = allPics();
-  const PARTS = [
-    {id: 'face',        label: 'Face from reference',            hint: 'face from reference · hair, clothes, pose, background stay from source'},
-    {id: 'outfit',      label: 'Outfit from reference',          hint: 'outfit from reference · face, hair, skin tone, pose stay from source'},
-    {id: 'background',  label: 'Background from reference',      hint: 'background from reference · person, clothes, pose stay from source'},
-    {id: 'face_into',   label: 'My face into reference photo',   hint: 'reference photo is the scene · character\'s face is placed into it, everything else from the reference stays'},
-  ];
   return `<div class="card pad mt" id="ch-refblend">
     <div class="row"><h3 style="margin:0">Take from a reference photo</h3><span class="mute small">pick what to take FROM the uploaded photo; everything else stays FROM the source picture above</span></div>
     <div class="row mt-s" style="gap:10px;flex-wrap:wrap;align-items:flex-end">
