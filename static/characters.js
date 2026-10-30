@@ -194,7 +194,7 @@ function centerView(busy) {
     ${C.kind === 'person' ? `<div class="card pad mt"><div class="row"><h3 style="margin:0">Character sheet</h3><span class="mute small">three-quarter, side and back views and six expressions, each made from the canon</span><span class="sp"></span>
       <button class="small primary" id="ch-sheet" ${dis} ${haveCanon ? '' : 'disabled title="Approve a portrait and a full-body picture first"'}>Make the sheet</button></div>
       <div class="ch-views mt-s">${sheet.flatMap(v => pics(v).slice(0, 1).map(card)).join('') || '<div class="mute small">' + (haveCanon ? 'not made yet' : 'Approve a portrait and a full-body picture first.') + '</div>'}</div></div>` : ''}
-    ${editCard(busy)}${placeCard(busy)}${editsGallery(busy)}${matrixCard(busy)}`;
+    ${editCard(busy)}${refBlendCard(busy)}${placeCard(busy)}${editsGallery(busy)}${matrixCard(busy)}`;
 }
 
 window.chZoom = url => dialog({title: 'Picture', html: `<img src="${esc(url)}" style="max-width:100%;max-height:72vh;display:block;margin:auto;border-radius:8px">`, buttons: [{label: 'Close', value: true, primary: true}]});
@@ -296,6 +296,33 @@ function editCard(busy) {
       <button class="small" id="e-prev" ${dis}>Show the prompt</button><button class="small primary" id="e-run" ${dis}>Make the edit</button><button class="small" id="e-save-recipe">Save as recipe</button></div></div>`;
 }
 
+function refBlendCard(busy) {
+  if (C.kind !== 'person' || !C.canon.portrait) return '';
+  const dis = busy ? 'disabled' : '';
+  const pics = allPics();
+  const PARTS = [
+    {id: 'face',       label: 'Face',       hint: 'copies face, skin tone and eyes; keeps hair, clothes, pose, background'},
+    {id: 'outfit',     label: 'Outfit',     hint: 'copies the full outfit; keeps face, hair, skin tone, pose, background'},
+    {id: 'background', label: 'Background', hint: 'copies the setting and lighting; keeps the person, clothes and pose'},
+  ];
+  return `<div class="card pad mt" id="ch-refblend">
+    <div class="row"><h3 style="margin:0">Take from a reference photo</h3><span class="mute small">copy one part from an uploaded photo onto this character</span></div>
+    <div class="row mt-s" style="gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <label class="f" style="min-width:200px">Source picture<select id="rb-base">${pics.map(p => `<option value="${p.id}" ${p.id === EB ? 'selected' : ''}>${esc(picLabel(p))}</option>`).join('')}</select></label>
+      ${pics.find(p => p.id === EB) ? `<img src="${esc(pics.find(p => p.id === EB).url)}" style="height:70px;border-radius:6px">` : ''}
+    </div>
+    <div class="mt-s small"><b>What to take from the reference:</b>
+      <div class="row mt-s" style="gap:8px;flex-wrap:wrap">
+        ${PARTS.map(pt => `<label style="display:flex;align-items:center;gap:4px"><input type="radio" name="rb-part" value="${pt.id}" ${pt.id === 'face' ? 'checked' : ''}> <span><b>${pt.label}</b> <span class="mute">${pt.hint}</span></span></label>`).join('<br>')}
+      </div>
+    </div>
+    <div class="row mt-s" style="gap:8px;align-items:center">
+      <label class="small" style="display:flex;align-items:center;gap:6px">Reference photo <input type="file" id="rb-file" accept="image/jpeg,image/png,image/webp" style="font-size:12px"></label>
+      <span id="rb-status" class="mute small"></span>
+    </div>
+    <div class="row mt-s"><button class="small primary" id="rb-run" ${dis}>Apply</button></div></div>`;
+}
+
 function placeCard(busy) {
   if (C.kind !== 'person' || !C.canon.portrait || !C.canon.body) return '';
   return `<div class="card pad mt"><div class="row"><h3 style="margin:0">Put the character in a place</h3><span class="mute small">uses the face, the body and the place picture</span></div>
@@ -369,6 +396,28 @@ function wireEdit() {
   if ($e('e-run')) $e('e-run').onclick = () => post($e('e-run'), '/edit', args(), 'Edit started');
   if ($e('pl-run')) $e('pl-run').onclick = () => { if (!$e('pl-place').value) { toast('Choose a place first', {bad: true}); return; } post($e('pl-run'), '/place', {place: $e('pl-place').value, action: $e('pl-action').value, base: EB, n: 1}, 'Placing started'); };
   if ($e('mx-run')) $e('mx-run').onclick = () => post($e('mx-run'), '/matrix', {expressions: [...document.querySelectorAll('[data-mx]:checked')].map(x => x.dataset.mx), looks: [...document.querySelectorAll('[data-ml]:checked')].map(x => x.dataset.ml)}, 'Grid started');
+  // ref-blend card
+  const RB_INSTRUCTIONS = {
+    face:       'Replace only the face of the person in the first picture with the face from the second picture. Keep the hair (style, colour and length), head shape, clothes, body, pose, lighting and background from the first picture exactly. Do not copy the hair from the second picture. The result must look photorealistic and seamless.',
+    outfit:     'Replace only the clothes of the person in the first picture with the outfit shown in the second picture — same colours, fabric, pattern and cut. Keep the face, hair, skin tone, body shape, pose, lighting and background from the first picture exactly. Do not copy the person wearing the clothes in the second picture.',
+    background: 'Replace only the background, setting and lighting in the first picture with the background from the second picture. Keep the person exactly as they appear in the first picture: face, hair, clothes, body and pose unchanged.',
+  };
+  if ($e('rb-base')) $e('rb-base').onchange = () => { EB = $e('rb-base').value; render(); };
+  if ($e('rb-run')) $e('rb-run').onclick = async () => {
+    const btn = $e('rb-run');
+    const file = ($e('rb-file') || {}).files && $e('rb-file').files[0];
+    if (!file) { toast('Upload a reference photo first', {bad: true}); return; }
+    const part = (document.querySelector('[name="rb-part"]:checked') || {}).value || 'face';
+    btn.disabled = true; btn.textContent = 'Uploading…';
+    let refId;
+    try {
+      const fd = new FormData(); fd.append('file', file);
+      const r = await call('/' + CID + '/upload-ref', {method: 'POST', form: fd});
+      refId = r.id;
+    } catch(e) { toast('Upload failed: ' + e.message, {bad: true}); btn.disabled = false; btn.textContent = 'Apply'; return; }
+    const baseId = ($e('rb-base') || {}).value || EB;
+    post(btn, '/edit', {base: baseId, preset: 'custom', value: 'see prompt', extra: [refId], n: 1, prompt: RB_INSTRUCTIONS[part]}, 'Applying…');
+  };
   document.querySelectorAll('[data-base]').forEach(b => b.onclick = () => { EB = b.dataset.base; render(); document.getElementById('ch-edit').scrollIntoView({behavior: 'smooth'}); });
   document.querySelectorAll('[data-keep]').forEach(b => b.onclick = () => act(b, async () => { C = await call('/item/' + b.dataset.keep + '/keep?on=' + (b.dataset.on === '1'), {method: 'POST'}); render(); return true; }));
   document.querySelectorAll('[data-look]').forEach(b => b.onclick = async () => { const name = await textDlg('Save as a look', 'Name of the look', ''); if (name) await act(null, async () => { C = await call('/item/' + b.dataset.look + '/look', {method: 'POST', json: {name}}); render(); return true; }, 'Look saved'); });
