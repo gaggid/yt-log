@@ -246,6 +246,9 @@ async def make_plan(short_id: str, backend, s: dict | None = None, progress=None
             all_shots.append(sh)
         b["shot_ids"] = [sh["id"] for sh in shots]
     _limit_character_shots(all_shots)
+    if short.get("settings", {}).get("voice_mode") == "none":               # silent video: narration was only needed for shot context; discard it
+        for b in beats:
+            b["sentences"] = []
     short["shots"] = all_shots
     short["status"] = "planned"
     short["keyframes_confirmed"] = False

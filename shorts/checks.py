@@ -58,7 +58,7 @@ def run(short: dict) -> dict:
     for p in avatar.problems(short):
         issues.append(_issue(p["level"], p["code"], p["text"]))
     mode = short["settings"]["image_mode"]
-    if mode == "anchor" and not short["images"].get("anchor"):
+    if mode == "anchor" and not short["images"].get("anchor") and not any("portrait" in m["canon"] for m in cast.members(short) if m["char"]):
         issues.append(_issue("warn", "no_anchor", "The picture of the main character is not uploaded, so every start picture will be drawn by the image model. Upload it, or choose another start-pictures mode."))   # not a blocker: pipelines.start_source falls back to drawing
     if mode == "per_shot" and not short["images"]["shots"]:
         issues.append(_issue("warn", "no_shot_pictures", "No shot has a picture of your own; Wan will make them all."))

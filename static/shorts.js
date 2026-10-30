@@ -37,9 +37,16 @@ window.viewShorts = async function () {
   $('#sh-new').onclick = newShort;
   const rows = await call('').catch(e => { toast(e.message, {bad: true}); return []; });
   if (my !== route_id) return;
-  $('#sh-list').innerHTML = rows.length ? `<table><thead><tr><th>Short</th><th>Pipeline</th><th>Shots</th><th>Status</th><th>Updated</th></tr></thead><tbody>${rows.map(r => `
-    <tr class="click" onclick="location.hash='#/short/${r.id}'"><td><b>${esc(r.title)}</b></td><td>${esc(r.pipeline)}</td><td>${r.shots}</td><td>${badge(r.status === 'made' ? 'done' : 'info', r.status)}</td><td class="mute small">${fmtDate(r.updated_at)}</td></tr>`).join('')}</tbody></table>`
+  $('#sh-list').innerHTML = rows.length ? `<table><thead><tr><th>Short</th><th>Pipeline</th><th>Shots</th><th>Status</th><th>Updated</th><th></th></tr></thead><tbody>${rows.map(r => `
+    <tr class="click" onclick="location.hash='#/short/${r.id}'"><td><b>${esc(r.title)}</b></td><td>${esc(r.pipeline)}</td><td>${r.shots}</td><td>${badge(r.status === 'made' ? 'done' : 'info', r.status)}</td><td class="mute small">${fmtDate(r.updated_at)}</td><td><button class="small bad" data-del="${r.id}" data-title="${esc(r.title)}">Delete</button></td></tr>`).join('')}</tbody></table>`
     : `<div class="big-empty"><h2>Make your first short</h2><p class="mute" style="max-width:560px;margin:0 auto 16px">Pick a Wan model, give an idea or an approved story, and the app plans 11 to 13 fast shots, speaks the narration, makes every clip and puts a 30-second 9:16 video together.</p><button class="primary" onclick="newShort()">+ New short</button></div>`;
+  $('#sh-list').querySelectorAll('[data-del]').forEach(b => b.onclick = async e => {
+    e.stopPropagation();
+    if (await confirmDlg('Delete short', `Delete "${b.dataset.title}"? All its clips, pictures and voice are removed.`, 'Delete', true)) {
+      await call('/' + b.dataset.del, {method: 'DELETE'});
+      viewShorts();
+    }
+  });
 };
 
 async function newShort() {
