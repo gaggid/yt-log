@@ -118,6 +118,17 @@ function render() {
 }
 function refreshCenter() { $('#ch-job').innerHTML = jobBox(); $('#ch-center').innerHTML = centerView(C.job && C.job.state === 'running'); wireCenter(); }
 
+function stylingBlock(dis) {
+  const st = (OPT && OPT.styling) || [], glam = C.styling === 'glamour', gender = ((C.declared || {}).gender || '').toLowerCase();
+  const outfits = ((OPT && OPT.outfits) || []).filter(o => (!o.styling || (glam && !C.glamour_problem)) && (!o.gender || !gender || o.gender === gender));
+  return `<h3>Styling</h3>
+    <label class="f"><select id="ch-styling" ${dis} ${C.locked ? 'disabled' : ''}>${st.map(x => `<option value="${esc(x.id)}" ${(C.styling || '') === x.id ? 'selected' : ''}>${esc(x.label)}</option>`).join('')}</select></label>
+    ${C.styling === 'glamour' && C.glamour_problem ? `<div class="warnbox small">${esc(C.glamour_problem)}. The glamorous wording is not used until this is fixed.</div>` : ''}
+    <div class="mute small">Glamorous is for adult, invented characters: fitted, softly revealing and tasteful, always clothed. It needs a declared age of 21 or more.</div>
+    <label class="f mt-s">Quick outfit<select id="ch-outfit" ${dis}><option value="">choose to fill top, bottom, shoes and expression</option>${outfits.map(o => `<option value="${esc(o.id)}">${esc(o.label)}</option>`).join('')}</select></label>
+    <div class="mute small">The first pictures show a clean person only. Ornaments (the accessories line) are added afterwards with an accessory edit, so the face comes out right.</div>`;
+}
+
 function sideView(busy) {
   const hints = Object.fromEntries((OPT ? OPT.slots[C.kind] : []).map(x => [x.key, x.hint]));
   const decl = new Set((C.declared_keys || []).map(x => x.key));
@@ -129,6 +140,7 @@ function sideView(busy) {
     <h3>Decided by you</h3><div class="mute small">Never invented or changed by the model.</div>${declaredFields(C.kind, C.declared || {}, dis + (C.locked ? ' disabled' : ''))}
     <div class="row mt-s"><button class="small primary" id="ch-suggest" ${dis}>Fill the empty details</button><button class="small" id="ch-suggest-all" ${dis} title="Write every detail again; the five above stay">Write all again</button></div>
     ${C.kind === 'person' ? `<div class="row mt-s small">${C.photo ? `<img src="${esc(C.photo)}" style="width:44px;border-radius:6px"> started from a picture (${esc(C.rights.basis)})` : ''}<button class="small" id="ch-photo" ${dis}>${C.photo ? 'Change the picture' : 'Start from a picture'}</button></div>` : ''}
+    ${C.kind === 'person' ? stylingBlock(dis) : ''}
     <h3>Details</h3><div class="mute small">${C.gaps.length ? 'Fill these in: ' + C.gaps.map(esc).join(', ') + '. An image model invents what is not written.' : 'Every detail is written.'}</div>
     ${keys.map(k => `<label class="ch-slot ${C.gaps.includes(k) ? 'gap' : ''}" title="${esc(hints[k])}"><span>${esc(k)}</span><input data-slot="${k}" list="dl-slot-${k}" value="${esc(C.slots[k] || '')}" placeholder="pick or type" ${dis}>${dl('dl-slot-' + k, (OPT.choices[C.kind] || {})[k] || [])}</label>`).join('')}
     <label class="f mt-s">Personality (mood the face carries)<input id="ch-pers" value="${esc(C.personality)}" ${dis}></label>
@@ -180,6 +192,8 @@ function wire() {
   on('#ch-photo', startFromPicture);
   const val = (sel, key, conv = x => x) => { const e = document.querySelector(sel); if (e) e.onchange = () => patch({[key]: conv(e.value)}); };
   val('#ch-idea', 'idea'); val('#ch-pers', 'personality'); val('#ch-notes', 'notes'); val('#ch-tags', 'tags', v => v.split(','));
+  const sty = $('#ch-styling'); if (sty) sty.onchange = () => patch({styling: sty.value});
+  const out = $('#ch-outfit'); if (out) out.onchange = () => { const o = ((OPT && OPT.outfits) || []).find(x => x.id === out.value); if (!o) return; const slots = {...C.slots}; ['top', 'bottom', 'footwear', 'accessories', 'expression'].forEach(k => { slots[k] = o[k]; }); if (o.styling && C.styling !== 'glamour') patch({slots, styling: 'glamour'}); else patch({slots}); };
   document.querySelectorAll('[data-slot]').forEach(e => e.onchange = () => { const slots = {...C.slots}; slots[e.dataset.slot] = e.value; patch({slots}); });
   const renderPatch = async (change) => { await act(null, async () => { C = await call('/' + CID, {method: 'PATCH', json: {render: {...C.render, ...change}}}); render(); return true; }); render(); };
   const st = document.querySelector('#ch-style'); if (st) st.onchange = () => renderPatch({style: st.value, loras: OPT.styles[st.value].loras});

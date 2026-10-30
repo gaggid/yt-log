@@ -179,10 +179,40 @@ def test_a_head_and_shoulders_portrait_leaves_out_what_the_frame_cannot_show_and
     c = store.create("Saira", "person", slots)
     portrait = R.build(c, "portrait", 1)["body"]
     p = portrait["prompt"].lower()
-    for gone in ("trousers", "flats", "bangles", "waist-length"):
+    for gone in ("trousers", "flats", "bangles", "waist-length", "hoop earrings", "mood:"):
         assert gone not in p, gone
-    assert "hoop earrings" in p and "eyes: dark brown, almond-shaped with thick lashes" in p and "lashes eyes" not in p
+    assert "eyes: dark brown, almond-shaped with thick lashes" in p and "lashes eyes" not in p
     assert portrait["steps"] == 35
     body = R.build(c, "body", 1)["body"]["prompt"].lower()
-    assert "trousers" in body and "gold pointed-toe flats" in body and "bangles" in body, "the full-body view keeps everything"
+    assert "trousers" in body and "gold pointed-toe flats" in body, "the full-body view shows the clothes"
+    assert "bangles" not in body and "hoop earrings" not in body, "ornaments are added later by edit, the first pictures are a clean human"
     assert R.build(c, "portrait", 1)["meta"]["steps"] == 35
+
+
+def test_glamour_styling_is_for_adult_invented_characters_only_and_keeps_the_picture_tasteful(env):
+    from characters import choices
+    c = store.create("Saira", "person", SLOTS, {"declared": {"age": "25"}, "styling": "glamour"})
+    assert store.glamour_problem(c) == "" and R.GLAMOUR_LINE in R.build(c, "portrait", 1)["body"]["prompt"]
+    assert "no nudity" in R.GLAMOUR_LINE and "fully clothed" in R.GLAMOUR_LINE
+    minor = store.create("Kid", "person", SLOTS, {"declared": {"age": "17"}, "styling": "glamour"})
+    assert "adult age" in store.glamour_problem(minor) and R.GLAMOUR_LINE not in R.build(minor, "portrait", 1)["body"]["prompt"], "never for under 21"
+    noage = store.create("NoAge", "person", {k: v for k, v in SLOTS.items() if k != "age"}, {"styling": "glamour"})
+    assert store.glamour_problem(noage), "an age must be declared"
+    photo = store.create("Photo", "person", SLOTS, {"declared": {"age": "30"}, "styling": "glamour", "rights": {"basis": "own photo", "confirmed": True, "note": ""}})
+    assert "photograph" in store.glamour_problem(photo), "never for a person drawn from a photo"
+    assert all(o["styling"] in ("glamour", "") for o in choices.OUTFITS) and {o["gender"] for o in choices.OUTFITS if o["styling"] == "glamour"} == {"female", "male"}
+    lowered = " ".join(o["top"] + o["bottom"] for o in choices.OUTFITS).lower()
+    assert not any(w in lowered for w in ("nude", "naked", "lingerie", "topless", "underwear", "transparent")), "presets stay clothed"
+
+
+def test_api_styling_is_refused_for_an_undeclared_or_young_age_and_allowed_for_an_adult(client):
+    opts = client.get("/api/characters/options").json()
+    assert [x["id"] for x in opts["styling"]] == ["", "glamour"] and any(o["styling"] == "glamour" for o in opts["outfits"])
+    bad = client.post("/api/characters", json={"name": "A", "kind": "person", "styling": "glamour"})
+    assert bad.status_code == 400 and "adult age" in bad.json()["detail"], "no age declared"
+    ok = client.post("/api/characters", json={"name": "Saira", "kind": "person", "styling": "glamour", "declared": {"ethnicity": "Indian (Punjabi)", "gender": "female", "age": "25", "skin_tone": "fair", "build": "curvy"}})
+    assert ok.status_code == 200 and ok.json()["styling"] == "glamour" and ok.json()["glamour_problem"] == ""
+    cid = ok.json()["id"]
+    young = client.patch(f"/api/characters/{cid}", json={"declared": {"ethnicity": "Indian (Punjabi)", "gender": "female", "age": "17", "skin_tone": "fair", "build": "curvy"}})
+    assert young.status_code == 400 and "adult age" in young.json()["detail"], "lowering the age under 21 turns it down"
+    assert client.patch(f"/api/characters/{cid}", json={"styling": "weird"}).status_code == 400

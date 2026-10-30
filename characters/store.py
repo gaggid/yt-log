@@ -58,13 +58,28 @@ def listing(kind: str = "") -> list[dict]:
     return [_load(r) for r in rows]
 
 
+def glamour_problem(char: dict) -> str:
+    """Why glamour styling cannot be used for this character, or "" when it can. It is for adult, invented people only: a declared age of 21 or more, and never a person drawn from a
+    photograph (a photo is consent to a likeness, not to this)."""
+    from . import choices
+    if char.get("kind") != "person":
+        return "glamour styling is for people"
+    age = str((char.get("declared") or {}).get("age") or (char.get("slots") or {}).get("age") or "")
+    digits = "".join(ch for ch in age if ch.isdigit())
+    if not digits or int(digits) < choices.GLAMOUR_MIN_AGE:
+        return f"glamour styling needs a declared adult age of {choices.GLAMOUR_MIN_AGE} or more"
+    if char.get("source_photo") or (char.get("rights") or {}).get("basis") not in ("invented", None, ""):
+        return "glamour styling is only for invented characters, not for a person drawn from a photograph"
+    return ""
+
+
 def create(name: str, kind: str = "person", slots: dict | None = None, extra: dict | None = None) -> dict:
     ensure()
     if kind not in KINDS:
         raise CharError(f"kind is one of: {', '.join(KINDS)}")
     cid = f"ch-{hashlib.sha1(f'{name}{kind}{db.now()}'.encode()).hexdigest()[:8]}"
     data = {"idea": "", "slots": describe.clean(slots), "personality": "", "render": render.default(), "tags": [], "notes": "", "canon": {}, "version": 1,
-            "rights": {"basis": "invented", "confirmed": True, "note": ""}, "source_photo": "", "looks": [], "recipes": [], "declared": {}, **(extra or {})}
+            "rights": {"basis": "invented", "confirmed": True, "note": ""}, "source_photo": "", "looks": [], "recipes": [], "declared": {}, "styling": "", **(extra or {})}
     data["render"] = render.clean(data["render"])
     db.ex("INSERT INTO chars(id,name,kind,status,data,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", (cid, name.strip() or "Untitled", kind, "draft", db.jdump(data), db.now(), db.now()))
     return get(cid)

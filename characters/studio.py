@@ -86,13 +86,20 @@ PLACE_RULES = """STYLE OF THE PLACE
 - Signature details specific to the region and period (what a local would recognise at a glance), with counts."""
 
 
-async def suggest_slots(idea: str, kind: str, backend, s: dict | None = None, current: dict | None = None, declared: dict | None = None) -> dict:
+GLAMOUR_RULES = """STYLING: GLAMOROUS (an adult, invented character; the producer chose this on purpose)
+- Dress and style the person as a fashion influencer would for a glamour shoot: a fitted outfit that softly shows shoulders, collarbones, a neckline, the back, arms or legs (off-shoulder, plunging but modest V neckline, backless, thigh slit, bodycon, crop top with a high waist, a low-cut saree blouse), confident and sensual, elegant and photogenic.
+- It stays tasteful and fully clothed: never nudity, never lingerie or underwear as the outfit, no see-through fabric that shows private areas, nothing explicit. This replaces the plain "nothing sexualised" line for the outfit and expression only."""
+
+
+async def suggest_slots(idea: str, kind: str, backend, s: dict | None = None, current: dict | None = None, declared: dict | None = None, styling: str = "") -> dict:
     """The chat model writes the slots the person did not declare (and keeps the slots the person already wrote when `current` is given). The declared facts (ethnicity, gender, age, skin
     tone, build for a person; the region for a place) are written into the instruction and then forced into the slots in code, whatever the model answers."""
     hints = describe.hints(kind)
     declared = store.clean_declared(kind, declared)
     fixed = "\n".join(f"- {store.DECLARED_LABEL[k]}: {v}" for k, v in declared.items()) or "- (nothing declared)"
     system = SLOTS_SYSTEM.replace("{rules}", PERSON_RULES if kind == "person" else PLACE_RULES).replace("{declared}", fixed).replace("{kind}", kind).replace("{keys}", ", ".join(f'"{k}": "..."' for k in hints)).replace("{hints}", "\n".join(f"- {k}: {h}" for k, h in hints.items())).replace("{{", "{").replace("}}", "}")
+    if styling == "glamour" and kind == "person":
+        system += "\n\n" + GLAMOUR_RULES
     caller = llm.JsonCaller(backend, s)
 
     def check(out: SlotsOut) -> None:

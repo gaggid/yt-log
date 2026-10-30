@@ -39,3 +39,31 @@ PLACE = {
     "materials": ["weathered concrete, steel and green paint", "red brick and wood", "white marble and brass", "glass, steel and pale wood", "sandstone and terracotta", "whitewashed walls and blue doors"],
 }
 CHOICES = {"person": PERSON, "place": PLACE}
+
+# Styling: "glamour" is for adult invented characters only (see store.glamour_problem): fashion-editorial, fitted and softly revealing, fully clothed. Quick outfits fill the clothing slots at once.
+STYLING = [{"id": "", "label": "Everyday"}, {"id": "glamour", "label": "Glamorous (fitted, softly revealing, tasteful)"}]
+OUTFITS = [
+    {"id": "g-bodycon", "styling": "glamour", "gender": "female", "label": "Black bodycon mini dress", "top": "black fitted bodycon mini dress with a softly plunging V neckline and thin straps",
+     "bottom": "the dress skirt ends mid-thigh", "footwear": "black strappy high heels", "accessories": "small gold hoop earrings and a thin gold necklace", "expression": "a confident half smile with a steady gaze"},
+    {"id": "g-offshoulder", "styling": "glamour", "gender": "female", "label": "Off-shoulder crop top and high-waisted skirt", "top": "ivory off-shoulder fitted crop top that bares the shoulders and collarbones",
+     "bottom": "high-waisted satin midi skirt with a thigh-high slit in champagne", "footwear": "nude block-heel sandals", "accessories": "gold drop earrings", "expression": "a relaxed, inviting smile"},
+    {"id": "g-backless", "styling": "glamour", "gender": "female", "label": "Backless satin halter dress", "top": "emerald satin halter-neck dress with a low open back and a deep V front",
+     "bottom": "the dress falls to the floor with a high side slit", "footwear": "gold strappy heels", "accessories": "long gold earrings", "expression": "a calm, sultry gaze with softly parted lips"},
+    {"id": "g-saree", "styling": "glamour", "gender": "female", "label": "Chiffon saree with a low-cut backless blouse", "top": "deep red sleeveless backless blouse with a plunging neckline, gold border",
+     "bottom": "sheer red chiffon saree draped low on the hips in the nivi style", "footwear": "gold juttis", "accessories": "oxidised silver jhumka earrings and thin bangles", "expression": "a soft, knowing smile"},
+    {"id": "g-corset", "styling": "glamour", "gender": "female", "label": "Corset top with high-waist jeans", "top": "black satin corset-style top with a sweetheart neckline",
+     "bottom": "high-waisted light blue jeans", "footwear": "white ankle boots", "accessories": "layered gold chains", "expression": "a playful half smile"},
+    {"id": "g-beach", "styling": "glamour", "gender": "female", "label": "Beachwear: two-piece with a sheer sarong", "top": "coral two-piece swimsuit with a sheer printed sarong tied at the hip",
+     "bottom": "the sarong is tied low on the hips", "footwear": "bare feet", "accessories": "round sunglasses pushed up in the hair", "expression": "a warm, relaxed smile"},
+    {"id": "g-shirt", "styling": "glamour", "gender": "male", "label": "Open linen shirt", "top": "white linen shirt unbuttoned to the chest with the sleeves rolled up",
+     "bottom": "fitted black trousers", "footwear": "brown leather loafers", "accessories": "thin gold chain", "expression": "a calm, confident gaze with a slight smile"},
+    {"id": "g-sleeveless", "styling": "glamour", "gender": "male", "label": "Fitted sleeveless tee", "top": "fitted black sleeveless t-shirt that shows the arms and shoulders",
+     "bottom": "dark slim jeans", "footwear": "black boots", "accessories": "black wristwatch", "expression": "a relaxed half smile with a steady gaze"},
+    {"id": "g-jacket", "styling": "glamour", "gender": "male", "label": "Open-front leather jacket", "top": "black leather jacket worn open over a bare chest with a thin chain",
+     "bottom": "black slim trousers", "footwear": "black boots", "accessories": "silver ring on one hand", "expression": "a serious, smouldering look straight at the camera"},
+    {"id": "e-kurta", "styling": "", "gender": "", "label": "Cream cotton kurta", "top": "cream cotton kurta", "bottom": "white pyjama trousers", "footwear": "brown leather sandals",
+     "accessories": "none", "expression": "a warm friendly smile"},
+    {"id": "e-denim", "styling": "", "gender": "", "label": "Denim jacket and jeans", "top": "denim jacket over a white t-shirt", "bottom": "dark blue jeans", "footwear": "white sneakers",
+     "accessories": "none", "expression": "calm and confident"},
+]
+GLAMOUR_MIN_AGE = 21

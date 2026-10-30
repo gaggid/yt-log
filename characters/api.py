@@ -86,7 +86,7 @@ async def options():
     return {"styles": {k: {"label": v["label"], "loras": v["loras"]} for k, v in render.STYLES.items()}, "default_render": render.default(), "models": models, "loras": loras,
             "views": {k: {"label": v["label"], "how": v["how"], "kind": v["kind"]} for k, v in R.VIEWS.items()}, "sheet_views": list(R.SHEET_VIEWS), "rights": list(store.RIGHTS),
             "slots": {k: [{"key": a, "hint": b} for a, b in describe.SLOTS[k]] for k in store.KINDS}, "presets": list(edits.PRESETS), "scopes": edits.GARMENT_SCOPES,
-            "expressions": list(R.EXPRESSIONS), "check_pass_at": check.PASS_AT, "declared": {k: [{"key": x, "label": store.DECLARED_LABEL[x]} for x in v] for k, v in store.DECLARED.items()}, "choices": choices.CHOICES}
+            "expressions": list(R.EXPRESSIONS), "check_pass_at": check.PASS_AT, "declared": {k: [{"key": x, "label": store.DECLARED_LABEL[x]} for x in v] for k, v in store.DECLARED.items()}, "choices": choices.CHOICES, "styling": choices.STYLING, "outfits": choices.OUTFITS}
 
 
 # ── wardrobe (garment pictures, reusable on any character) ──────────────────────────────────
@@ -168,6 +168,13 @@ class CreateReq(BaseModel):
     tags: list[str] = []
     render: dict | None = None
     declared: dict | None = None
+    styling: str = ""
+
+
+def _styling(value: str) -> str:
+    if value not in {x["id"] for x in choices.STYLING}:
+        raise HTTPException(400, "styling is: " + ", ".join(x["id"] or "everyday" for x in choices.STYLING))
+    return value
 
 
 @router.post("")
@@ -176,7 +183,13 @@ async def create(body: CreateReq):
              "declared": _guard(store.clean_declared, body.kind if body.kind in store.KINDS else "person", body.declared)}
     if body.render:
         extra["render"] = body.render
+    if body.styling:
+        extra["styling"] = _styling(body.styling)
     c = _guard(store.create, body.name.strip() or "Untitled", body.kind, body.slots, extra)
+    if c["styling"] and store.glamour_problem(c):
+        why = store.glamour_problem(c)
+        store.delete(c["id"])
+        raise HTTPException(400, why)
     return await state(c["id"])
 
 
@@ -225,7 +238,7 @@ async def state(char_id: str):
         for it in media.items(char_id, kind):
             gallery.setdefault(it["key"], []).append(_view(char_id, it, ident))
     views = [v for v, spec in R.VIEWS.items() if spec["kind"] == c["kind"]]
-    return {**_card(c), "idea": c["idea"], "slots": c["slots"], "personality": c["personality"], "notes": c["notes"], "render": c["render"], "locked": store.locked(c), "canon": c["canon"],
+    return {**_card(c), "idea": c["idea"], "slots": c["slots"], "personality": c["personality"], "styling": c.get("styling", ""), "glamour_problem": store.glamour_problem(c) if c["kind"] == "person" else "", "notes": c["notes"], "render": c["render"], "locked": store.locked(c), "canon": c["canon"],
             "rights": c["rights"], "photo": f"/api/characters/file/{char_id}/{c['source_photo']}" if store.photo_path(c) else "", "gaps": describe.missing(c["kind"] if c["kind"] != "person" else "person", c["slots"]),
             "identity": R.identity_text(c), "declared": c.get("declared", {}), "declared_keys": [{"key": k, "label": store.DECLARED_LABEL[k]} for k in store.DECLARED[c["kind"]]], "looks": [{**x, "stale": x["version"] != c["version"]} for x in c["looks"]], "recipes": c.get("recipes", []), "gallery": gallery, "views": views, "job": jobs.status(char_id), "identity_hash": ident,
             "estimate_s": {"draw": 70, "edit": 110}}
@@ -240,6 +253,7 @@ class PatchReq(BaseModel):
     tags: list[str] | None = None
     render: dict | None = None
     declared: dict | None = None
+    styling: str | None = None
 
 
 @router.patch("/{char_id}")
@@ -265,6 +279,10 @@ async def patch(char_id: str, body: PatchReq):
         c["declared"] = _guard(store.clean_declared, c["kind"], p.pop("declared"))
         if c["declared"]:
             c["slots"] = store.apply_declared(c)
+    if "styling" in p and p["styling"] is not None:
+        c["styling"] = _styling(p.pop("styling"))
+    if c.get("styling") == "glamour" and store.glamour_problem(c):
+        raise HTTPException(400, store.glamour_problem(c))
     for k in ("name", "idea", "personality", "notes"):
         if k in p and p[k] is not None:
             c[k] = p[k].strip() if k == "name" else p[k]
@@ -292,7 +310,7 @@ async def suggest(char_id: str, body: SuggestReq):
         raise HTTPException(409, "the model server is busy with another job; try again when it finishes")
     s, be = _backend()
     try:
-        out = await studio.suggest_slots(idea, c["kind"], be, s, c["slots"] if body.keep else None, c["declared"])
+        out = await studio.suggest_slots(idea, c["kind"], be, s, c["slots"] if body.keep else None, c["declared"], c.get("styling", "") if not store.glamour_problem(c) else "")
     except (llm.LLMError, MediaError, ValueError) as e:
         raise HTTPException(400, f"the slots could not be written: {e}")
     c["idea"], c["slots"] = idea, out["slots"]

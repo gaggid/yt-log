@@ -43,6 +43,7 @@ def seed_for(char_id: str, view: str, attempt: int) -> int:
 
 
 STEPS = {"qwen-image-2.1": 35}                   # owner decision 2026-10-30: character pictures run at 35 steps on Qwen (faces and eyes come out cleaner than at the gateway default)
+CLEAN_VIEWS = ("portrait", "body")                # drawn from text: the person only (face, hair, skin, build, plain clothes). Jewellery, bags and other ornaments are added later with an accessory edit or a look
 HEAD_VIEWS = ("portrait",)                       # views whose frame ends at the shoulders: legs, feet, wrists and hands are not in it
 _BELOW = re.compile(r"\b(wrists?|hands?|fingers?|bangles?|bracelets?|rings?|watch(?:es)?|belts?|anklets?|toe|shoes?|sandals?|heels?|waist)\b", re.I)
 _LONG = re.compile(r"\b(?:waist|hip|knee|thigh|floor)[- ]length\b", re.I)
@@ -51,15 +52,14 @@ _LONG = re.compile(r"\b(?:waist|hip|knee|thigh|floor)[- ]length\b", re.I)
 def visible_slots(slots: dict, view: str | None) -> tuple[dict, set[str]]:
     """What the picture for `view` can show. The image model draws every word it is given, so a head-and-shoulders portrait that is told about flats and trousers tries to fit them in and
     the face comes out morphed: trousers, footwear, jewellery of the wrists and hands and hair length beyond the shoulders are left out of those views (they stay in the full-body views)."""
-    if view not in HEAD_VIEWS and not (view or "").startswith("expr_"):
+    clean = view in CLEAN_VIEWS                                  # the first pictures of a person are a clean human: no ornaments yet, they are added later by edit or a look
+    head = view in HEAD_VIEWS or (view or "").startswith("expr_")
+    if not clean and not head:
         return slots, set()
     s = dict(slots)
-    if s.get("accessories"):
-        keep = [c for c in re.split(r",| and ", s["accessories"]) if c.strip() and not _BELOW.search(c)]
-        s["accessories"] = ", ".join(x.strip() for x in keep)
-    if s.get("hair"):
+    if head and s.get("hair"):
         s["hair"] = _LONG.sub("long", s["hair"])
-    return s, set(describe.LOWER)
+    return s, (set(describe.LOWER) if head else set()) | ({"accessories"} if clean else set())
 
 
 def identity_text(char: dict, view: str | None = None) -> str:
@@ -73,12 +73,18 @@ def identity_text(char: dict, view: str | None = None) -> str:
     return f"A location in {region}. {text}" if char["kind"] == "place" and region else text
 
 
+GLAMOUR_LINE = ("Fashion-editorial glamour photograph of an adult: alluring, confident and elegant, a fitted outfit that softly shows shoulders, neckline, back or legs, tasteful and fully "
+                "clothed, no nudity, nothing explicit.")
+
+
+def glamour_on(char: dict) -> bool:
+    return char.get("styling") == "glamour" and not store.glamour_problem(char)
+
+
 def draw_prompt(char: dict, view: str, listing: dict | None = None) -> str:
     r = char["render"]
     trig = render.trigger_words(r, listing)
-    parts = [trig, VIEWS[view]["frame"], identity_text(char, view), render.look(r), NO_TEXT]
-    if char.get("personality") and char["kind"] == "person":
-        parts.insert(3, f"Mood: {char['personality'].rstrip('. ')}.")
+    parts = [trig, VIEWS[view]["frame"], GLAMOUR_LINE if (glamour_on(char) and char["kind"] == "person") else "", identity_text(char, view), render.look(r), NO_TEXT]
     return " ".join(p for p in parts if p)[:3900]
 
 
