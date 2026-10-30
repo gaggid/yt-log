@@ -637,6 +637,7 @@ def retime(plan_id: str) -> float:
                 en = t + sum(sd[:b]) if b >= a else st
                 c.execute("UPDATE scenes SET start_s=?, end_s=?, duration_s=? WHERE id=?",
                           (round(st, 2), round(en, 2), round(en - st, 2), sc["id"]))
+            c.execute("UPDATE segments SET duration_s=? WHERE id=?", (round(sum(sd), 2), seg["id"]))     # a voice take that is gone (other voice, changed wording) must not leave its old length behind
             t += sum(sd)
     return round(t, 2)
 
@@ -878,6 +879,7 @@ def _sweep_repeats(plan_id: str) -> int:
 # ── validation ──────────────────────────────────────────────────────────────
 
 def validate_storyboard(plan_id: str) -> dict:
+    retime(plan_id)                       # voice takes come and go; the scenes follow the narration as it is now, never the other way round
     plan = planner.get_plan(plan_id)
     story = planner._story_for(plan)
     prof = leak.profile(story["evidence"]["project_id"], story["evidence"]["passages"])

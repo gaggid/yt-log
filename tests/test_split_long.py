@@ -47,3 +47,16 @@ def test_the_limit_is_a_plan_setting(env):
     db.ex("UPDATE plans SET settings=? WHERE id=?", (db.jdump({**p["settings"], "max_scene_s": 3.0}), pid))
     many = storyboard.split_long(pid)
     assert many >= 1
+
+
+def test_validation_follows_the_narration_when_a_voice_take_goes_away(env, monkeypatch):
+    """Scenes retimed to a real voice take must not stay at that length when the take stops counting (other voice, changed wording): the check retimes first."""
+    pid, seg, sid = one_long_scene(env)
+    est = sum(storyboard.sentence_seconds(planner.get_plan(pid)["segments"][0], planner.WPM))
+    monkeypatch.setattr(storyboard, "real_audio", lambda plan_id: {seg["id"]: est * 0.8})
+    storyboard.retime(pid)
+    assert storyboard.get_scene(sid)["duration_s"] < est
+    monkeypatch.setattr(storyboard, "real_audio", lambda plan_id: {})
+    report = storyboard.validate_storyboard(pid)
+    assert not [i for i in report["issues"] if i["kind"] == "timing"]
+    assert abs(planner.get_plan(pid)["segments"][0]["duration_s"] - est) < 0.1
