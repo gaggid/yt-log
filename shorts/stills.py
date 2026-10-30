@@ -83,9 +83,24 @@ async def draw(body: dict, base: str, key: str) -> bytes:
 
 def edit_prompt(short: dict, shot: dict, refs: dict) -> str:
     """The start picture of a shot with a cast: the pictures are named by position, the still describes the new frame, and the people keep their own faces, hair and clothes."""
-    names = [f"Picture {i} shows {w[0]} ({w[1]})." for i, w in enumerate(refs["who"], 1)]
+    who = refs["who"]
+    chars = refs.get("chars") or []
+    # Build per-picture labels and explicit face/clothes instructions for the single-person case,
+    # where Picture 1 is the face portrait and Picture 2 is the full-body look with the chosen outfit.
+    # Without explicit attribution, the model defaults to the portrait's visible neckline/collar for
+    # the outfit instead of the full-body look picture.
+    names = [f"Picture {i} shows {w[0]} ({w[1]})." for i, w in enumerate(who, 1)]
     if refs["place"]:
-        names.append(f"Picture {len(refs['who']) + 1} shows the place.")
+        names.append(f"Picture {len(who) + 1} shows the place.")
+    if len(chars) == 1 and len(who) == 2 and who[0][1] == "face" and "body" in who[1][1]:
+        char_name = who[0][0]
+        place_n = len(who) + 1
+        identity = (f"Use Picture 1 for {char_name}'s exact face and hair only. "
+                    f"Use Picture 2 for {char_name}'s exact clothes, outfit and body — copy every detail of the outfit in Picture 2, nothing else.")
+        if refs["place"]:
+            identity += f" Picture {place_n} is the location; set the scene there."
+    else:
+        identity = "Every person keeps exactly the face, hair, skin tone, build and clothes of their own picture; if a place picture is given the scene happens there."
     plan = short["plan"]
     parts = [" ".join(names), "Create a new photograph:", (shot.get("still") or shot["prompt"]).strip()]
     if shot.get("setting"):
@@ -97,7 +112,7 @@ def edit_prompt(short: dict, shot: dict, refs: dict) -> str:
     look = cast.look_text(short) or plan.get("look")
     if look:
         parts.append(look.rstrip(". ") + ".")
-    parts.append("Every person keeps exactly the face, hair, skin tone, build and clothes of their own picture; if a place picture is given the scene happens there.")
+    parts.append(identity)
     if shot.get("avatar"):
         parts.append(AVATAR_FRAMING)
     parts.append(KEEP_OUT)
