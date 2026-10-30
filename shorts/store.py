@@ -27,6 +27,8 @@ DEFAULT_SETTINGS = {
     "bed": True,                      # the quiet sound bed under the voice
     "review_keyframes": True,         # keyframe pipeline: auto-run stops once for the contact sheet
     "language": "hinglish",
+    "cast": [],                       # characters from the Character Studio library: [{"character_id", "look_id"}], at most two people (shorts/cast.py)
+    "place_id": "",                   # a place from the library
 }
 
 

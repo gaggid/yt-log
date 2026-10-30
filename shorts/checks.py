@@ -2,7 +2,7 @@
 app can mend it, which fix applies."""
 import re
 
-from . import models, pipelines as P, planner, store, timeline, voice as svoice
+from . import cast, models, pipelines as P, planner, store, timeline, voice as svoice
 
 TEXT_WORDS = re.compile(r"\b(?:text|writing|written|words?|letters?|caption|subtitles?|sign (?:saying|reading)|reads|newspaper|headline|logo|poster|banner|screen showing|displays?)\b", re.I)
 
@@ -48,6 +48,8 @@ def run(short: dict) -> dict:
     chars = sum(1 for sh in short["shots"] if sh.get("character"))
     if chars > planner.MAX_CHARACTER_SHOTS:
         issues.append(_issue("warn", "many_character_shots", f"{chars} shots show the main character; the same face over many shots drifts. Four or fewer holds up best"))
+    for text in cast.problems(short):
+        issues.append(_issue("block", "cast", text))
     mode = short["settings"]["image_mode"]
     if mode == "anchor" and not short["images"].get("anchor"):
         issues.append(_issue("block", "no_anchor", "The picture of the main character is not uploaded. Upload it or let Wan decide."))

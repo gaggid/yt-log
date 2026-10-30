@@ -31,9 +31,12 @@ window.viewCharacters = async function () {
   const my = route_id;
   clearTimeout(pollT);
   $('#app').innerHTML = `<div class="row"><h2 style="margin:0">Characters</h2><span class="mute">a library of people and places you can reuse in every short</span><span class="sp"></span>
+    <button class="small" id="ch-import">Import pack</button>
     <select id="ch-kind" style="width:auto"><option value="">All</option><option value="person">People</option><option value="place">Places</option></select>
     <button class="primary" id="ch-new">New character</button></div><div id="ch-list"><div class="skel"></div></div>`;
   $('#ch-new').onclick = newCharacter;
+  $('#ch-import').onclick = () => { const i = document.createElement('input'); i.type = 'file'; i.accept = '.zip'; i.onchange = async () => { const fd = new FormData(); fd.append('file', i.files[0]);
+    const c = await act(null, () => call('/import', {method: 'POST', form: fd}), 'Imported'); if (c) location.hash = '#/character/' + c.id; }; i.click(); };
   const load = async () => {
     const rows = await call('?kind=' + $('#ch-kind').value).catch(e => { toast(e.message, {bad: true}); return []; });
     if (my !== route_id) return;
@@ -78,7 +81,7 @@ window.viewCharacter = async function (id) {
   window._chLoad = load;
   await loadLists();
   await load(true);
-  if (sessionStorage.getItem('ch-suggest-' + id)) { sessionStorage.removeItem('ch-suggest-' + id); suggest(null); }
+  if (sessionStorage.getItem('ch-suggest-' + id)) { sessionStorage.removeItem('ch-suggest-' + id); await suggest(null); if (C && !C.gaps.length) await post(null, '/generate', {views: ['portrait'], n: 4}, 'Drawing four portraits: pick one as the canon'); }
 };
 const editing = () => ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement && document.activeElement.tagName);
 const post = (btn, path, json, ok) => act(btn, async () => { await call('/' + CID + path, {method: 'POST', json: json || {}}); await window._chLoad(true); return true; }, ok);
@@ -98,7 +101,7 @@ function render() {
   const busy = C.job && C.job.state === 'running';
   $('#app').innerHTML = `
     <div class="row"><a href="#/characters">← Characters</a><h2 style="margin:0 0 0 8px">${esc(C.name)}</h2>${badge(C.status === 'ready' ? 'done' : 'queued', C.status)}<span class="mute small">v${C.version} · ${esc(C.kind)}</span><span class="sp"></span>
-      <button class="small" onclick="chRename()">Rename</button><button class="small" onclick="chDup(this)">Duplicate</button><button class="small bad" onclick="chDelete()">Delete</button></div>
+      <button class="small" onclick="chRename()">Rename</button><a class="small" href="/api/characters/${C.id}/pack" download><button class="small">Export pack</button></a><button class="small" onclick="chDup(this)">Duplicate</button><button class="small bad" onclick="chDelete()">Delete</button></div>
     <div id="ch-job">${jobBox()}</div>
     <div class="ch-studio"><div class="ch-side card pad">${sideView(busy)}</div><div id="ch-center">${centerView(busy)}</div></div>`;
   wire();

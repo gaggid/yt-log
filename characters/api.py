@@ -3,7 +3,7 @@ the other steps (story2/jobs.py), keyed by the character's id."""
 import asyncio
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 from story import llm, settings as settings_mod
@@ -12,7 +12,7 @@ from story2 import describe, jobs, providers
 from story3 import store as media
 from story3.voice import MediaError
 
-from . import check, edits, render, requests as R, store, studio, studio_edit, wardrobe
+from . import pack, check, edits, render, requests as R, store, studio, studio_edit, wardrobe
 
 router = APIRouter(prefix="/api/characters")
 MAX_UPLOAD = 12 * 1024 * 1024
@@ -67,7 +67,7 @@ def _view(char_id: str, it: dict, ident: str) -> dict:
 
 
 def _card(c: dict) -> dict:
-    return {"id": c["id"], "name": c["name"], "kind": c["kind"], "status": c["status"], "tags": c["tags"], "version": c["version"], "thumb": _thumb(c), "style": c["render"]["style"],
+    return {"id": c["id"], "name": c["name"], "kind": c["kind"], "status": c["status"], "tags": c["tags"], "version": c["version"], "thumb": _thumb(c), "style": c["render"]["style"], "looks": [{"id": x["id"], "name": x["name"]} for x in c["looks"]],
             "updated_at": c["updated_at"]}
 
 
@@ -141,6 +141,15 @@ async def wardrobe_flatlay(garment_id: str):
 @router.get("/wardrobe/job")
 async def wardrobe_job():
     return jobs.status("wardrobe")
+
+
+@router.post("/import")
+async def import_pack(file: UploadFile = File(...)):
+    raw = await file.read()
+    if len(raw) > 400 * 1024 * 1024:
+        raise HTTPException(400, "the pack is over 400 MB")
+    c = _guard(pack.import_pack, raw)
+    return await state(c["id"])
 
 
 # ── library ──────────────────────────────────────────────────────────────────
@@ -513,3 +522,10 @@ async def recipes(char_id: str, body: RecipesReq):
     c["recipes"] = [{"name": str(r.get("name", "")).strip()[:60], "preset": str(r.get("preset", "custom")), "value": str(r.get("value", ""))[:600]} for r in body.recipes if str(r.get("name", "")).strip()][:40]
     store.save(c)
     return await state(char_id)
+
+
+@router.get("/{char_id}/pack")
+async def export_pack(char_id: str):
+    c = _get(char_id)
+    name = "".join(ch if ch.isalnum() else "-" for ch in c["name"]).strip("-") or "character"
+    return Response(pack.export(char_id), media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{name}.character.zip"'})

@@ -27,7 +27,7 @@ THE LOOK (used to write every shot, so make it concrete)
 SHOTS = """[TASK:p4_shots]
 You plan the shots of one beat of a 30-second vertical video made by an AI video model (Wan 2.2). The cut is FAST: every shot is on screen for under three seconds, so each shot is ONE simple action and ONE camera move.
 
-Return ONLY a JSON object: {"shots": [{"prompt": "...", "still": "...", "camera": "...", "character": false, "continues": false, "setting": ""}]}
+Return ONLY a JSON object: {"shots": [{"prompt": "...", "still": "...", "camera": "...", "character": false, "cast": [], "continues": false, "setting": ""}]}
 Write EXACTLY {count} shots, in order.
 
 A SHOT PROMPT is English, 35 to 70 words, present tense, in this order: the subject, the one visible action, the place and time of day, the light, the mood. Rules:
@@ -46,5 +46,12 @@ def plan_system(engine: str) -> str:                  # replace, not format: the
     return PLAN.replace("{voice_rules}", voices.narration_rules(engine) or "Write for the ear.").replace("{tags}", ", ".join(maya.STYLE_TAGS))
 
 
-def shots_system(count: int, max_character: int = 4) -> str:
-    return SHOTS.replace("{count}", str(count)).replace("{max_character}", str(max_character))
+CAST_RULE = ('- "cast": the names of the cast members who are in the shot, from this list only: {names}; at most two, empty when nobody is in the shot. Their faces and clothes come from library pictures: '
+             "never describe their looks, only what they do and how they stand. Set \"character\" true when \"cast\" is not empty.\n")
+
+
+def shots_system(count: int, max_character: int = 4, cast_names: list[str] | None = None) -> str:
+    text = SHOTS.replace("{count}", str(count)).replace("{max_character}", str(max_character))
+    if cast_names:
+        text = text.replace("- No readable text anywhere", CAST_RULE.replace("{names}", ", ".join(cast_names)) + "- No readable text anywhere", 1)
+    return text

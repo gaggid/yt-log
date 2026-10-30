@@ -71,7 +71,7 @@ window.newShort = newShort;
 window.viewShort = async function (id) {
   SID = id; S = null; myRoute = route_id;
   $('#app').innerHTML = `<div class="card pad"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>`;
-  if (!window._shVoices) { try { const o = await api('/shorts/options'); window._shVoices = o.voices; window._shTags = o.tags; window._shOpts = o; } catch { /* the voice list stays empty; the settings show the current voice */ } }
+  if (!window._shVoices) { try { const o = await api('/shorts/options'); window._shVoices = o.voices; window._shTags = o.tags; window._shOpts = o; window._shChars = await api('/characters').catch(() => []); } catch { /* the voice list stays empty; the settings show the current voice */ } }
   await refresh(true);
 };
 
@@ -137,6 +137,7 @@ function sideView() {
   const v = window._shOpts || {};
   return `<div class="card pad"><h2>Settings</h2>
     ${remix ? '' : `<label class="f">Start pictures<select id="st-mode">${[['qwen', 'The image model draws a picture for every shot'], ['anchor', 'My picture of the main character, the rest drawn'], ['per_shot', 'My pictures for chosen shots, the rest drawn'], ['wan', 'No pictures: Wan decides (fast, rougher)']].map(([k, t]) => `<option value="${k}" ${st.image_mode === k ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+    ${castBlock()}
     ${st.image_mode === 'wan' ? '' : `<label class="f mt-s">Image model<select id="st-imodel">${(v.image_models || [{id: st.image_model, label: st.image_model}]).map(m => `<option value="${esc(m.id)}" ${st.image_model === m.id ? 'selected' : ''}>${esc(m.label)}${m.licence === 'restricted' ? ' (licence restricted)' : ''}</option>`).join('')}</select></label>`}
     <div class="mt-s small">${s.images.anchor ? `<img src="/api/shorts/file/${s.id}/${esc(s.images.anchor)}" style="width:70px;border-radius:6px;vertical-align:middle"> <button class="small" id="st-anchor">Change</button> <button class="small bad" id="st-anchor-x">Remove</button>` : `<button class="small" id="st-anchor">Upload the main character's picture</button>`}</div>
     <label class="f mt-s">Describe that character in a line (used in the shots that show them)<textarea id="st-char" style="min-height:48px">${esc(st.character_text || '')}</textarea></label>
@@ -181,6 +182,17 @@ function checksView() {
     ${S.timeline ? `<div class="mute small mt-s">${S.timeline.estimated ? 'Timing is an estimate until the voice is made.' : 'Timing follows the real voice.'} ${S.timeline.shots.length} shots, ${S.timeline.total_s}s, voice speed x${S.timeline.tempo}.</div>` : ''}</div>`;
 }
 
+function castBlock() {
+  const st = S.settings, chars = (window._shChars || []).filter(c => c.kind === 'person' && c.status === 'ready'), places = (window._shChars || []).filter(c => c.kind === 'place' && c.status === 'ready');
+  const cast = st.cast || [];
+  const slot = i => { const e = cast[i] || {}, ch = chars.find(c => c.id === e.character_id);
+    return `<div class="row mt-s" style="gap:6px"><select data-cast="${i}" style="flex:1"><option value="">${i ? 'Second character (optional)' : 'Choose a character'}</option>${chars.map(c => `<option value="${esc(c.id)}" ${c.id === e.character_id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
+      ${ch && ch.looks.length ? `<select data-castlook="${i}" style="width:auto"><option value="">canon look</option>${ch.looks.map(l => `<option value="${esc(l.id)}" ${l.id === e.look_id ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select>` : ''}</div>`; };
+  return `<div class="mt-s"><b class="small">Cast from the Characters library</b>${slot(0)}${slot(1)}
+    <label class="f mt-s">Place<select id="st-place"><option value="">no fixed place</option>${places.map(c => `<option value="${esc(c.id)}" ${c.id === st.place_id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
+    <div class="mute small">${chars.length ? 'Their faces come from the approved library pictures, so they look the same in every shot. Choose the cast before planning.' : 'No ready characters yet: <a href="#/characters">make one in Characters</a> (approve a portrait and a full-body picture).'}</div></div>`;
+}
+
 function keyframesView() {
   const s = S;
   const done = s.shots.filter(x => x.keyframe).length;
@@ -191,6 +203,7 @@ function keyframesView() {
     <div class="sh-keys">${s.shots.map(x => { const k = x.keyframes.find(y => y.id === x.keyframe) || x.keyframes.filter(y => y.status === 'done').pop();
       return `<div class="sh-key"><div class="mute">${esc(x.id)} · ${x.seconds}s · ${esc(x.begins)}</div>${k && k.url ? `<img src="${esc(k.url)}" loading="lazy">` : `<div class="sh-thumb" style="width:100%">${x.keyframes.some(y => y.status === 'failed') ? 'failed' : 'not made'}</div>`}
         <textarea data-still="${x.id}" style="min-height:70px;font-size:12px;width:100%" ${x.begins === 'upload' || x.begins === 'anchor' ? 'disabled title="This shot uses your own picture"' : ''}>${esc(x.still || x.prompt)}</textarea>
+        ${k && k.url ? `<div class="row" style="margin-top:4px"><input data-fix="${x.id}" placeholder="Change one thing…" style="flex:1;font-size:12px"><button class="small" data-fixgo="${x.id}">Fix</button></div>` : ''}
         <div class="row" style="margin-top:4px"><button class="small" data-key="${x.id}">Again</button><button class="small" data-up="${x.id}">My picture</button></div></div>`; }).join('')}</div></div>`;
 }
 
@@ -287,6 +300,10 @@ function wire() {
   all('[data-tag]').forEach(e => e.onchange = () => { const ta = q(`[data-beat="${e.dataset.tag}"]`); patch('/narration', {beats: [{id: e.dataset.tag, sentences: ta.value.split('\n'), tag: e.value}]}); });
   all('[data-voice]').forEach(e => e.onclick = () => post(e, '/voice', {beat_ids: [e.dataset.voice], only_missing: false}, 'Making the voice'));
   all('[data-shot]').forEach(e => e.onchange = () => patch('/shots/' + e.dataset.shot, {prompt: e.value}));
+  const castPatch = () => patch('/settings', {cast: [...document.querySelectorAll('[data-cast]')].map((e, i) => ({character_id: e.value, look_id: (document.querySelector(`[data-castlook="${i}"]`) || {}).value || ''})).filter(e => e.character_id)});
+  all('[data-cast]').forEach(e => e.onchange = castPatch); all('[data-castlook]').forEach(e => e.onchange = castPatch);
+  st('#st-place', 'place_id');
+  all('[data-fixgo]').forEach(e => e.onclick = () => { const t = document.querySelector(`[data-fix="${e.dataset.fixgo}"]`).value; if (t.trim().length < 4) { toast('Say what to change', {bad: true}); return; } post(e, '/shots/' + e.dataset.fixgo + '/fix', {instruction: t}, 'Changing the picture'); });
   all('[data-still]').forEach(e => e.onchange = () => patch('/shots/' + e.dataset.still, {still: e.value}));
   all('[data-shot-cam]').forEach(e => e.onchange = () => patch('/shots/' + e.dataset.shotCam, {camera: e.value}));
   all('[data-shot-flag]').forEach(e => e.onchange = () => patch('/shots/' + e.dataset.id, {[e.dataset.shotFlag]: e.checked}));
@@ -307,6 +324,6 @@ function wire() {
 
 /* option lists (voices, tags) */
 (async () => {
-  try { const o = await api('/shorts/options'); window._shVoices = o.voices; window._shTags = o.tags; window._shOpts = o; } catch { /* the screen works without; the voice list fills in on the next load */ }
+  try { const o = await api('/shorts/options'); window._shVoices = o.voices; window._shTags = o.tags; window._shOpts = o; window._shChars = await api('/characters').catch(() => []); } catch { /* the screen works without; the voice list fills in on the next load */ }
 })();
 })();

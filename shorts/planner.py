@@ -7,7 +7,7 @@ from story.schemas import Str
 from story2 import intake, leak, lexicon, maya, safety, svara, voices
 from story2.schemas import M
 
-from . import prompts as P, store, timeline
+from . import cast, prompts as P, store, timeline
 
 WORDS_LO, WORDS_HI = 52, 86              # spoken words in the whole short (the prompt asks for 62 to 74; this is what is accepted)
 MAX_SENTENCE_WORDS = 16
@@ -34,6 +34,7 @@ class PlanOut(M):
 class ShotOut(M):
     prompt: Str
     still: Str = ""
+    cast: list[Str] = []
     camera: Str = "static"
     character: bool = False
     continues: bool = False
@@ -117,6 +118,11 @@ async def _plan_call(short: dict, backend, s: dict, note: str = "") -> PlanOut:
     extra = ""
     if short["settings"].get("character_text"):
         extra += f"\nThe main character is already chosen by the producer; use exactly this description: {short['settings']['character_text']}"
+    if cast.entries(short):
+        extra += ("\nThe cast is fixed by the producer (their faces and clothes are drawn from library pictures); write the story for exactly these people and invent no other main character:\n"
+                  + cast.block(short))
+    if cast.place_text(short):
+        extra += f"\nThe main place is fixed by the producer: {cast.place_text(short)}"
     if short["settings"].get("tone"):
         extra += f"\nTone: {short['settings']['tone']}"
 
@@ -134,7 +140,7 @@ async def _plan_call(short: dict, backend, s: dict, note: str = "") -> PlanOut:
 
 
 def _shot(o: ShotOut) -> dict:
-    return {"id": "", "beat": "", "prompt": o.prompt.strip(), "still": o.still.strip(), "camera": (o.camera or "static").strip(), "character": bool(o.character), "continues": bool(o.continues),
+    return {"id": "", "beat": "", "prompt": o.prompt.strip(), "still": o.still.strip(), "cast": [x.strip() for x in o.cast if x.strip()], "camera": (o.camera or "static").strip(), "character": bool(o.character), "continues": bool(o.continues),
             "setting": o.setting.strip(), "seconds": 0.0, "frames": 0}
 
 
@@ -154,8 +160,14 @@ async def _shots_call(short: dict, beat: dict, count: int, backend, s: dict, bef
         if not out.shots:
             raise ValueError("write the shots")
 
-    res = await caller.call(P.shots_system(count, MAX_CHARACTER_SHOTS), "\n".join(ctx) + f"\n\nWrite exactly {count} shots now.", ShotsOut, validate=check)
+    cast_names = [m["char"]["name"] for m in cast.members(short) if m["char"]]
+    res = await caller.call(P.shots_system(count, MAX_CHARACTER_SHOTS, cast_names), "\n".join(ctx) + f"\n\nWrite exactly {count} shots now.", ShotsOut, validate=check)
     shots = [_shot(o) for o in res.value.shots]
+    ids = cast.names(short)
+    for sh in shots:                                                         # names the model wrote become library ids; a character shot with no names shows the whole cast
+        found = [ids[n.lower()] for n in sh["cast"] if n.lower() in ids]
+        sh["cast"] = found or (list(ids.values())[:cast.MAX_PEOPLE] if (sh["character"] and ids) else [])
+        sh["character"] = bool(sh["character"] or sh["cast"])
     while len(shots) > count:                                         # the last attempt may be off by some: trim, or repeat the last shot closer
         shots.pop()
     while len(shots) < count:
@@ -175,6 +187,7 @@ def _limit_character_shots(shots: list[dict]) -> None:
             seen += 1
             if seen > MAX_CHARACTER_SHOTS:
                 sh["character"] = False
+                sh["cast"] = []
 
 
 async def make_plan(short_id: str, backend, s: dict | None = None, progress=None) -> dict:
@@ -186,6 +199,11 @@ async def make_plan(short_id: str, backend, s: dict | None = None, progress=None
     out = await _plan_call(short, backend, s)
     plan = {"title": out.title.strip()[:90], "logline": out.logline.strip(), "character": short["settings"].get("character_text") or out.character.strip(),
             "place": out.place.strip(), "look": out.look.strip()}
+    if cast.entries(short):                                                  # the library decides who and where, not the model
+        plan["character"] = cast.block(short).replace("\n", " ") or plan["character"]
+        plan["look"] = cast.look_text(short) or plan["look"]
+    if cast.place_text(short):
+        plan["place"] = cast.place_text(short)
     beats = _beats_from(out, voices.current({"tts": short["settings"].get("voice")})["engine"])
     short.update(plan=plan, beats=beats, shots=[], title=plan["title"] or short["title"])
     counts = timeline.plan_counts(beats)

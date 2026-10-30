@@ -29,7 +29,7 @@ def keyframe_plan(short: dict, shot: dict) -> dict:
         path = store.image_path(short, rel)
         return {"source": src, "path": path, "hash": store.input_hash(src, _fingerprint(path))}
     if src == "qwen":
-        return {"source": "qwen", "path": None, "hash": P.req_hash(stills.request(short, shot, 1))}
+        return {"source": "qwen", "path": None, "hash": stills.hash_of(stills.build(short, shot, 1))}
     return {"source": "wan", "path": None, "hash": P.req_hash(P.keyframe_request(short, shot, 1))}
 
 
@@ -136,11 +136,13 @@ async def make_keyframes(short_id: str, shot_ids: list[str] | None = None, only_
         try:
             if plan["source"] == "qwen":
                 attempt = len(media.items(short_id, store.KEY, sh["id"])) + 1
-                body = stills.request(short, sh, attempt)
-                it = media.add(short_id, store.KEY, sh["id"], 0, "running", {"input_hash": plan["hash"], "source": "qwen", "seed": body["seed"], "model": body["model"], "prompt": body["prompt"][:900]})
+                req = stills.build(short, sh, attempt)
+                body = req["body"]
+                it = media.add(short_id, store.KEY, sh["id"], 0, "running", {"input_hash": plan["hash"], "source": "qwen", "seed": body["seed"], "model": body["model"], "prompt": body["prompt"][:900],
+                                                                             "how": req["how"], "refs": req["ref_ids"]})
                 t0 = time.time()
                 try:
-                    data = await stills.draw(body, base, api_key)
+                    data = await stills.send(req, base, api_key)
                     (store.media_dir(short_id, "key") / f"{sh['id']}-a{it['attempt']}.jpg").write_bytes(frames.crop_916(data, stills.SIZE))
                 except asyncio.CancelledError:
                     media.update(it["id"], status="failed", meta={"error": "stopped before it finished"})
@@ -173,6 +175,38 @@ async def make_keyframes(short_id: str, shot_ids: list[str] | None = None, only_
     if progress:
         progress(len(todo), len(todo), "done")
     return {"made": made, "failed": failed}
+
+
+async def fix_keyframe(short_id: str, shot_id: str, instruction: str, progress=None, s: dict | None = None, key: str = "") -> dict:
+    """Change one thing in the start picture of a shot by an image-edit instruction ("make the jacket red", "he looks at the camera"). The result is a new attempt of the same picture and counts as current."""
+    from characters import edits
+    base, api_key = _ctx(s, key)
+    short = store.get(short_id)
+    sh = store.shot_by_id(short, shot_id)
+    cur = chosen_keyframe(short, sh)
+    if not cur:
+        raise MediaError("this shot has no start picture to change yet")
+    if len(instruction.strip()) < 4:
+        raise MediaError("say what to change")
+    path = media.path_of(cur)
+    body = {"model": stills.model_of(short), "size": edits.size_of_picture(path), "n": 1, "seed": P.seed_for(short, sh, len(media.items(short_id, store.KEY, shot_id)) + 1), "response_format": "b64_json",
+            "prompt": instruction.strip().rstrip(".") + ". Keep everything else exactly the same: the same people with the same faces, hair and clothes, the same place, framing, light and colours. " + stills.KEEP_OUT}
+    req = {"how": "edit", "body": body, "refs": [path], "ref_ids": [cur["id"]], "versions": {}}
+    if progress:
+        progress(0, 1, "changing the picture")
+    h = keyframe_plan(short, sh)["hash"]
+    it = media.add(short_id, store.KEY, shot_id, 0, "running", {"input_hash": h, "source": "fix", "fixed_from": cur["id"], "instruction": instruction.strip()[:300], "seed": body["seed"], "model": body["model"]})
+    t0 = time.time()
+    try:
+        data = await stills.send(req, base, api_key)
+        (store.media_dir(short_id, "key") / f"{shot_id}-a{it['attempt']}.jpg").write_bytes(frames.crop_916(data, edits.size_of_picture(path)))
+    except Exception as e:  # noqa: BLE001
+        media.update(it["id"], status="failed", meta={"error": str(e)[:300], "seconds_taken": round(time.time() - t0, 1)})
+        raise
+    media.update(it["id"], status="done", file=f"key/{shot_id}-a{it['attempt']}.jpg", meta={"seconds_taken": round(time.time() - t0, 1)})
+    if progress:
+        progress(1, 1, "done")
+    return {"made": 1}
 
 
 async def make_clips(short_id: str, shot_ids: list[str] | None = None, only_missing: bool = True, progress=None, s: dict | None = None, key: str = "") -> dict:

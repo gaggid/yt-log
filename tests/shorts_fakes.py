@@ -60,6 +60,7 @@ class VideoGateway:
         self.cache: dict[tuple, bytes] = {}
         self.status_code = 202
         self.images: list[dict] = []                    # the picture requests (POST /images/generations)
+        self.pic_edits: list[dict] = []                 # the picture edit requests (POST /images/edits): prompt, number of pictures, size
 
     def mp4(self, frames: int, fps: int) -> bytes:
         k = (frames, fps)
@@ -75,6 +76,13 @@ class VideoGateway:
             body = json.loads(req.content)
             self.images.append(body)
             w, h = (int(v) for v in body["size"].split("x"))
+            return httpx.Response(200, json={"data": [{"b64_json": base64.b64encode(png_bytes(w // 8, h // 8)).decode()}]})
+        if req.method == "POST" and path.endswith("/images/edits"):
+            raw = req.content
+            size = re.search(rb'name="size"\r\n\r\n([^\r]*)\r\n', raw).group(1).decode()
+            prompt = re.search(rb'name="prompt"\r\n\r\n(.*?)\r\n--', raw, re.S).group(1).decode()
+            self.pic_edits.append({"prompt": prompt, "images": raw.count(b'name="image"'), "size": size})
+            w, h = (int(v) for v in size.split("x"))
             return httpx.Response(200, json={"data": [{"b64_json": base64.b64encode(png_bytes(w // 8, h // 8)).decode()}]})
         if req.method == "POST" and path.endswith("/video/generations"):
             body = json.loads(req.content)

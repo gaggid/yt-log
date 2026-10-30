@@ -15,7 +15,8 @@ from story2 import intake, jobs, maya, providers, voices
 from story3 import store as media
 from story3.voice import MediaError
 
-from . import auto, checks, clips, frames, models, pipelines as P, planner, remix, stitch, store, timeline, voice as svoice, wan
+from characters import store as cstore, studio_edit
+from . import auto, cast, checks, clips, frames, models, pipelines as P, planner, remix, stitch, store, timeline, voice as svoice, wan
 
 router = APIRouter(prefix="/api/shorts")
 MAX_UPLOAD = 12 * 1024 * 1024
@@ -175,6 +176,8 @@ async def state(short_id: str):
 class SettingsReq(BaseModel):
     image_mode: str | None = None
     image_model: str | None = None
+    cast: list[dict] | None = None
+    place_id: str | None = None
     size: str | None = None
     steps: int | None = None
     chain: bool | None = None
@@ -195,6 +198,21 @@ async def patch_settings(short_id: str, body: SettingsReq):
         raise HTTPException(400, f"image_mode is one of: {', '.join(IMAGE_MODES)}")
     if "image_model" in patch and patch["image_model"] not in providers.PROVIDERS:
         raise HTTPException(400, f"image_model is one of: {', '.join(providers.PROVIDERS)}")
+    if "cast" in patch:
+        patch["cast"] = [{"character_id": str(e.get("character_id", "")), "look_id": str(e.get("look_id", ""))} for e in (patch["cast"] or []) if e.get("character_id")]
+        if len(patch["cast"]) > cast.MAX_PEOPLE:
+            raise HTTPException(400, f"at most {cast.MAX_PEOPLE} characters in a short")
+        for e in patch["cast"]:
+            try:
+                cstore.get(e["character_id"])
+            except cstore.CharError as ex:
+                raise HTTPException(400, str(ex))
+    if patch.get("place_id"):
+        try:
+            if cstore.get(patch["place_id"])["kind"] != "place":
+                raise HTTPException(400, "that is not a place")
+        except cstore.CharError as ex:
+            raise HTTPException(400, str(ex))
     if "size" in patch and patch["size"] not in SIZES:
         raise HTTPException(400, f"size is one of: {', '.join(SIZES)}")
     if "size" in patch and short["pipeline"] != "quick":
@@ -544,3 +562,49 @@ async def remix_make(short_id: str):
     if chk["blockers"]:
         raise HTTPException(400, next(i["text"] for i in chk["issues"] if i["level"] == "block"))
     return _start(short_id, "short_animate", lambda progress: remix.make(short_id, progress))
+
+
+# ── the library: cast, fixes, a character as the Remix picture ──────────────────────────────────
+
+class FixReq(BaseModel):
+    instruction: str
+
+
+@router.post("/{short_id}/shots/{shot_id}/fix")
+async def fix_picture(short_id: str, shot_id: str, body: FixReq):
+    short = _get(short_id)
+    sh = _guard(store.shot_by_id, short, shot_id)
+    if not clips.chosen_keyframe(short, sh):
+        raise HTTPException(400, "this shot has no start picture to change yet")
+    if len(body.instruction.strip()) < 4:
+        raise HTTPException(400, "say what to change")
+    return _start(short_id, "short_fix", lambda progress: clips.fix_keyframe(short_id, shot_id, body.instruction, progress))
+
+
+class AnchorFromChar(BaseModel):
+    character_id: str
+    view: str = "portrait"
+
+
+@router.post("/{short_id}/images/anchor/character")
+async def anchor_from_character(short_id: str, body: AnchorFromChar):
+    """Use a library character's canon picture as the short's character picture (Remix needs one; the other pipelines use it for shots that show the main character)."""
+    short = _get(short_id)
+    try:
+        c = cstore.get(body.character_id)
+    except cstore.CharError as e:
+        raise HTTPException(404, str(e))
+    it = cstore.canon_items(c).get(body.view if body.view in ("portrait", "body") else "portrait")
+    if not it:
+        raise HTTPException(400, f"approve a {body.view} picture of {c['name']} in the Characters studio first")
+    raw = media.path_of(it).read_bytes()
+    rel = f"upload/anchor-{int(time.time())}.jpg"
+    im = Image.open(io.BytesIO(raw)).convert("RGB")
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", quality=94)
+    (store.media_dir(short_id, "upload") / rel.split("/", 1)[1]).write_bytes(buf.getvalue())
+    short["images"]["anchor"] = rel
+    if short["settings"]["image_mode"] in ("wan", "qwen"):
+        short["settings"]["image_mode"] = "anchor"
+    store.save(short)
+    return await state(short_id)

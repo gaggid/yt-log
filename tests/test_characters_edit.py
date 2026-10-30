@@ -125,3 +125,20 @@ def test_api_edit_preview_wardrobe_look_and_check(client):
     assert client.post(f"/api/characters/item/{pic['id']}/check").status_code == 200
     assert client.post(f"/api/characters/item/{pic['id']}/canon/body").json()["version"] == st["version"] + 1
     assert client.delete(f"/api/characters/wardrobe/{g['id']}").status_code == 200 and client.get("/api/characters/wardrobe").json() == []
+
+
+def test_a_pack_round_trips_a_character_with_canon_looks_and_pictures_under_a_new_id(gw):
+    from characters import pack
+    c = draw_canon(new()["id"])
+    base = store.canon_items(c)["body"]
+    run(studio_edit.make_edit(c["id"], base["id"], "outfit", "a navy blazer", s=S, key="k", do_check=False))
+    it = media.items(c["id"], store.EDIT)[0]
+    c = studio_edit.save_look(c["id"], it["id"], "Office")
+    raw = pack.export(c["id"])
+    copy = pack.import_pack(raw)
+    assert copy["id"] != c["id"] and copy["name"] == c["name"] and copy["slots"] == c["slots"] and copy["version"] == c["version"] and copy["status"] == "ready"
+    assert set(copy["canon"]) == {"portrait", "body"} and all(media.get(i)["plan_id"] == copy["id"] for i in copy["canon"].values())
+    assert copy["looks"][0]["name"] == "Office" and media.get(copy["looks"][0]["item"])["plan_id"] == copy["id"]
+    assert len(media.items(copy["id"], store.EDIT)) == 1 and (store.media_dir(copy["id"]) / media.items(copy["id"], store.EDIT)[0]["file"]).is_file()
+    with pytest.raises(store.CharError):
+        pack.import_pack(b"not a zip")
