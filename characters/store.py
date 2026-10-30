@@ -21,6 +21,9 @@ COLUMNS = ("id", "name", "kind", "status", "created_at", "updated_at")
 GEN, SHEET, EDIT = "char_gen", "char_sheet", "char_edit"
 KINDS = ("person", "place")
 RIGHTS = ("invented", "own", "consent", "licensed")          # basis for a character made from a picture of a real person: own = it is the owner, consent = the person agreed
+DECLARED = {"person": ("ethnicity", "gender", "age", "skin", "build"), "place": ("ethnicity",)}      # only the person decides these; the model never invents or changes them
+DECLARED_LABEL = {"ethnicity": "ethnicity", "gender": "gender (male or female)", "age": "age", "skin": "skin tone", "build": "build"}
+GENDER_WORDS = {"male": ("man", "boy"), "female": ("woman", "girl")}
 CANON_VIEWS = {"person": ("portrait", "body"), "place": ("place",)}
 
 
@@ -61,7 +64,7 @@ def create(name: str, kind: str = "person", slots: dict | None = None, extra: di
         raise CharError(f"kind is one of: {', '.join(KINDS)}")
     cid = f"ch-{hashlib.sha1(f'{name}{kind}{db.now()}'.encode()).hexdigest()[:8]}"
     data = {"idea": "", "slots": describe.clean(slots), "personality": "", "render": render.default(), "tags": [], "notes": "", "canon": {}, "version": 1,
-            "rights": {"basis": "invented", "confirmed": True, "note": ""}, "source_photo": "", "looks": [], "recipes": [], **(extra or {})}
+            "rights": {"basis": "invented", "confirmed": True, "note": ""}, "source_photo": "", "looks": [], "recipes": [], "declared": {}, **(extra or {})}
     data["render"] = render.clean(data["render"])
     db.ex("INSERT INTO chars(id,name,kind,status,data,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", (cid, name.strip() or "Untitled", kind, "draft", db.jdump(data), db.now(), db.now()))
     return get(cid)
@@ -112,3 +115,36 @@ def canon_items(char: dict) -> dict[str, dict]:
 def locked(char: dict) -> bool:
     """The render style, model and LoRAs cannot change once a canon picture is approved."""
     return bool(char.get("canon"))
+
+
+def clean_declared(kind: str, declared: dict | None) -> dict[str, str]:
+    d = {k: " ".join(str(v).split()).strip() for k, v in (declared or {}).items() if k in DECLARED[kind] and v is not None and str(v).strip()}
+    if "gender" in d:
+        g = d["gender"].lower()
+        if g not in GENDER_WORDS:
+            raise CharError("gender is male or female, as you declare it")
+        d["gender"] = g
+    if "age" in d and not d["age"].isdigit():
+        raise CharError("age is a number of years")
+    return d
+
+
+def missing_declared(char: dict) -> list[str]:
+    d = char.get("declared") or {}
+    return [k for k in DECLARED[char["kind"]] if not d.get(k)]
+
+
+def apply_declared(char: dict) -> dict:
+    """Write the declared facts into the slots (the slot words an image model needs: man or woman, boy or girl by age). Returns the slots."""
+    d = char.get("declared") or {}
+    slots = dict(char["slots"])
+    if d.get("ethnicity"):
+        slots["ethnicity"] = d["ethnicity"]
+    if d.get("gender"):
+        young = d.get("age", "99").isdigit() and int(d.get("age", 99)) < 18
+        slots["gender"] = GENDER_WORDS[d["gender"]][1 if young else 0]
+    for k in ("age", "skin", "build"):
+        if d.get(k):
+            slots[k] = d[k]
+    allowed = {k for k, _ in describe.SLOTS[char["kind"]]}                       # a place has no ethnicity slot: its region goes into the words (requests.identity_text)
+    return {k: v for k, v in slots.items() if v and k in allowed}

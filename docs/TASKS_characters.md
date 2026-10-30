@@ -26,22 +26,41 @@ Tick a task when it lands. At the end of each batch compare with the plan sectio
 - [x] tests (fake gateway), CLAUDE.md entry
 - [ ] not in C1 (deferred on purpose): model compare side by side and seed lock in the UI (the API takes a seed), the vision consistency check (C3), prompt drawer and recipes (C2), real-gateway run of the screen
 
-## C2. Edit tool [plan 4.2]
-- [ ] edit with instruction and extra references, presets, keep list, lineage, compare, restore, promote to canon, chain-depth badge
-- [ ] prompt drawer, recipes
-- [ ] dress from a clothes picture (try-on): upload/pick a garment, whole outfit or one piece, second garment, text note, result saved as a look; wardrobe library of garment pictures (plan 4.2)
+## C2. Edit tool [plan 4.2]  (built 2026-10-30; `tests/test_characters_edit.py`)
+- [x] edit with an instruction (presets: outfit, hair, age, expression, pose, lighting, time of day, weather, background, accessory, custom) from any picture, up to two extra references, keep list, no LoRA on edits (C0), lineage (`parent`, `depth`), chain-depth warning with "start from the canon body instead"
+- [x] compare any two pictures, keep (a flag, several allowed), promote an edited picture to canon body/portrait (version bump)
+- [x] prompt drawer: "Show the prompt" (what, which pictures, size, chain depth, nothing sent), full-instruction override, recipes (named preset + value, per character)
+- [x] dress from a clothes picture (try-on): whole outfit or one part, wardrobe library with rights box; a garment worn by a model gets the "copy ONLY the clothing, never the model" wording, and "Flat lay" makes a clean garment picture with no person in it which try-ons then use; the check verifies the face did not change
+- [ ] restyle an existing painted character to photographic by an edit instruction (open question from C0, not tested)
 
-## C3. Looks and places [plan 3, 4.2]
-- [ ] looks (wardrobe), place entities, place-the-character, consistency check (vision), variation matrix
+## C3. Looks and places [plan 3, 4.2]  (built 2026-10-30)
+- [x] looks (a named, saved edit; remembers the canon version, shows "older canon" when it changes), places as library entries (kind `place`), "Put the character in a place" (canon portrait + body or a look + the place picture = three references)
+- [x] consistency check (`characters/check.py`): feature by feature (8 features) against canon portrait + body with scoring anchors, overall = mean minus 1 per feature under 6, pass at 7; runs after each edit, on demand per picture
+- [x] expression grid (looks x expressions, at most 12)
+- [ ] calibration of the check against pictures judged by a person (C0 saw the old single-number check give 10 to a visibly different face); needs a real run (see RUN_LOG)
+- [ ] style/colour drift is not checked (only the person)
 
-## C4. Shorts integration [plan 6]
-- [ ] cast picker, planner cast block, shot `cast`, edit-based stills, fix-with-instruction, swap look, version staleness, Remix picture from library
+## C4. Shorts integration [plan 6]  (built 2026-10-30; `tests/test_shorts_cast.py`)
+- [x] cast picker in the Shorts settings (up to two characters, each with a look, and a place), planner receives the cast and place as fixed input, plan look comes from the character's render style, shots carry `cast` (library ids)
+- [x] start pictures of shots with a cast are image edits from the canon pictures (a lone person: face portrait + body or look; two people: both bodies; plus the place picture when the shot has no setting of its own), other shots are drawn from text; hash includes the reference pictures and the characters' versions, so a new canon makes the picture old
+- [x] fix with an instruction on any start picture (new attempt that counts as current); checks block a cast without canon, a missing character, or more than two people
+- [x] a library character as the Remix / main-character picture (`/images/anchor/character`)
+- [ ] swap look per shot (the look is per short today), long-form plan import/export
 
 ## C5. Power features [plan 4.2]
-- [ ] regional fix, pack export/import, collections, long-form import/export, voice test, bulk redo of drifted pictures
+- [x] pack export/import (zip with `character.json` and the pictures; always a new id; canon, looks and version kept) in the UI and API; tags serve as collections
+- [ ] regional fix (crop, edit, paste back), voice test, bulk redo of drifted pictures, long-form import/export: not built
 
 ## C6. Auto-run [plan 9]
-- [ ] "make a character from an idea" in one click; cast-driven storyboard in Shorts Auto-run
+- [x] "make a character from an idea": New character fills the details from the idea and draws four portraits to pick from
+- [ ] cast-driven storyboard inside Shorts Auto-run: Auto-run already draws start pictures from the cast through `make_keyframes` and stops at the picture check; not separately tested
+
+## Added after C1 on the owner's request (2026-10-30)
+- [x] declared facts (ethnicity, gender male/female, age, skin tone, build; a place's region) decided by the person only, forced into the slots in code, model refused until declared
+- [x] chat-model instruction: Instagram-reel-worthy, culturally authentic styling for the declared ethnicity, realistic lived-in environments for the region
+- [x] preset lists for every characteristic with free text allowed; user-chosen details kept by "Fill the empty details", "Write all again" keeps only the five declared
+- [x] try-on from a garment photo worn by a model: only the clothing migrates (strong wording + person-free flat lay)
+- [x] Settings → Storage clean-up (on demand): per project/short/character folders, older attempts, everything; previews and confirms; guards; pruning of dangling records
 
 ## C0 compared with the plan (2026-10-30)
 

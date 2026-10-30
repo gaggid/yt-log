@@ -50,12 +50,20 @@ async def look(char: dict, item: dict, s: dict | None = None, key: str = "", all
     pics = [canon["portrait"]] + ([canon["body"]] if canon.get("body") else [])
     content = [{"type": "text", "text": prompt(char, allowed)}] + [{"type": "image_url", "image_url": {"url": "data:image/png;base64," + _b64(media.path_of(p))}} for p in pics] \
         + [{"type": "image_url", "image_url": {"url": "data:image/png;base64," + _b64(media.path_of(item))}}]
-    async with _client(300) as c:
-        r = await c.post(s["base_url"].rstrip("/") + "/chat/completions", headers={"Authorization": f"Bearer {key or settings_mod.api_key()}"},
-                         json={**llm.model_field(s), "messages": [{"role": "user", "content": content}], "max_tokens": 1500, "temperature": 0})
-    if r.status_code != 200:
-        raise MediaError(f"the check was refused ({r.status_code}): {r.text[:160]}")
-    j = llm.parse_json(r.json()["choices"][0]["message"].get("content") or "")
+    j = None
+    for attempt in range(3):                                   # the vision model sometimes answers with nothing (its thinking uses the budget): ask again with more room
+        async with _client(300) as c:
+            r = await c.post(s["base_url"].rstrip("/") + "/chat/completions", headers={"Authorization": f"Bearer {key or settings_mod.api_key()}"},
+                             json={**llm.model_field(s), "messages": [{"role": "user", "content": content}], "max_tokens": 3000 + 1500 * attempt, "temperature": 0})
+        if r.status_code != 200:
+            raise MediaError(f"the check was refused ({r.status_code}): {r.text[:160]}")
+        try:
+            j = llm.parse_json(r.json()["choices"][0]["message"].get("content") or "")
+            break
+        except ValueError:
+            continue
+    if not isinstance(j, dict):
+        raise MediaError("the check model sent no answer")
     scores = {k: max(0.0, min(10.0, float(j.get(k, 0)))) for k in FEATURES}
     score = overall(scores)
     return {"features": scores, "score": score, "ok": score >= PASS_AT, "differences": [str(x) for x in (j.get("differences") or []) if str(x).strip().lower() not in ("none", "n/a")][:5],

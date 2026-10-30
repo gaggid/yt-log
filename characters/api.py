@@ -12,7 +12,7 @@ from story2 import describe, jobs, providers
 from story3 import store as media
 from story3.voice import MediaError
 
-from . import pack, check, edits, render, requests as R, store, studio, studio_edit, wardrobe
+from . import choices, pack, check, edits, render, requests as R, store, studio, studio_edit, wardrobe
 
 router = APIRouter(prefix="/api/characters")
 MAX_UPLOAD = 12 * 1024 * 1024
@@ -86,7 +86,7 @@ async def options():
     return {"styles": {k: {"label": v["label"], "loras": v["loras"]} for k, v in render.STYLES.items()}, "default_render": render.default(), "models": models, "loras": loras,
             "views": {k: {"label": v["label"], "how": v["how"], "kind": v["kind"]} for k, v in R.VIEWS.items()}, "sheet_views": list(R.SHEET_VIEWS), "rights": list(store.RIGHTS),
             "slots": {k: [{"key": a, "hint": b} for a, b in describe.SLOTS[k]] for k in store.KINDS}, "presets": list(edits.PRESETS), "scopes": edits.GARMENT_SCOPES,
-            "expressions": list(R.EXPRESSIONS), "check_pass_at": check.PASS_AT}
+            "expressions": list(R.EXPRESSIONS), "check_pass_at": check.PASS_AT, "declared": {k: [{"key": x, "label": store.DECLARED_LABEL[x]} for x in v] for k, v in store.DECLARED.items()}, "choices": choices.CHOICES}
 
 
 # ── wardrobe (garment pictures, reusable on any character) ──────────────────────────────────
@@ -167,11 +167,13 @@ class CreateReq(BaseModel):
     personality: str = ""
     tags: list[str] = []
     render: dict | None = None
+    declared: dict | None = None
 
 
 @router.post("")
 async def create(body: CreateReq):
-    extra = {"idea": body.idea.strip(), "personality": body.personality.strip(), "tags": [t.strip() for t in body.tags if t.strip()]}
+    extra = {"idea": body.idea.strip(), "personality": body.personality.strip(), "tags": [t.strip() for t in body.tags if t.strip()],
+             "declared": _guard(store.clean_declared, body.kind if body.kind in store.KINDS else "person", body.declared)}
     if body.render:
         extra["render"] = body.render
     c = _guard(store.create, body.name.strip() or "Untitled", body.kind, body.slots, extra)
@@ -225,7 +227,7 @@ async def state(char_id: str):
     views = [v for v, spec in R.VIEWS.items() if spec["kind"] == c["kind"]]
     return {**_card(c), "idea": c["idea"], "slots": c["slots"], "personality": c["personality"], "notes": c["notes"], "render": c["render"], "locked": store.locked(c), "canon": c["canon"],
             "rights": c["rights"], "photo": f"/api/characters/file/{char_id}/{c['source_photo']}" if store.photo_path(c) else "", "gaps": describe.missing(c["kind"] if c["kind"] != "person" else "person", c["slots"]),
-            "identity": R.identity_text(c), "looks": [{**x, "stale": x["version"] != c["version"]} for x in c["looks"]], "recipes": c.get("recipes", []), "gallery": gallery, "views": views, "job": jobs.status(char_id), "identity_hash": ident,
+            "identity": R.identity_text(c), "declared": c.get("declared", {}), "declared_keys": [{"key": k, "label": store.DECLARED_LABEL[k]} for k in store.DECLARED[c["kind"]]], "looks": [{**x, "stale": x["version"] != c["version"]} for x in c["looks"]], "recipes": c.get("recipes", []), "gallery": gallery, "views": views, "job": jobs.status(char_id), "identity_hash": ident,
             "estimate_s": {"draw": 70, "edit": 110}}
 
 
@@ -237,6 +239,7 @@ class PatchReq(BaseModel):
     notes: str | None = None
     tags: list[str] | None = None
     render: dict | None = None
+    declared: dict | None = None
 
 
 @router.patch("/{char_id}")
@@ -258,6 +261,10 @@ async def patch(char_id: str, body: PatchReq):
         c["slots"] = describe.clean(p.pop("slots"))
         if c["slots"] != old and store.locked(c):
             c["version"] += 0                       # a changed description is kept; pictures drawn from the old one show as 'older' until a new canon is approved
+    if "declared" in p:
+        c["declared"] = _guard(store.clean_declared, c["kind"], p.pop("declared"))
+        if c["declared"]:
+            c["slots"] = store.apply_declared(c)
     for k in ("name", "idea", "personality", "notes"):
         if k in p and p[k] is not None:
             c[k] = p[k].strip() if k == "name" else p[k]
@@ -269,7 +276,7 @@ async def patch(char_id: str, body: PatchReq):
 
 class SuggestReq(BaseModel):
     idea: str = ""
-    keep: bool = True                  # keep the slots the person already wrote
+    keep: bool = True                  # keep every detail the person already chose or typed, and write only the empty ones; false writes all again (the declared facts always stay)
 
 
 @router.post("/{char_id}/suggest")
@@ -278,11 +285,14 @@ async def suggest(char_id: str, body: SuggestReq):
     idea = (body.idea or c["idea"]).strip()
     if len(idea) < 5:
         raise HTTPException(400, "write the idea in a sentence first")
+    gaps = store.missing_declared(c)
+    if gaps:
+        raise HTTPException(400, "say these first, they are decided by you and never invented: " + ", ".join(store.DECLARED_LABEL[k] for k in gaps))
     if jobs.busy() or manager.busy():
         raise HTTPException(409, "the model server is busy with another job; try again when it finishes")
     s, be = _backend()
     try:
-        out = await studio.suggest_slots(idea, c["kind"], be, s, c["slots"] if body.keep else None)
+        out = await studio.suggest_slots(idea, c["kind"], be, s, c["slots"] if body.keep else None, c["declared"])
     except (llm.LLMError, MediaError, ValueError) as e:
         raise HTTPException(400, f"the slots could not be written: {e}")
     c["idea"], c["slots"] = idea, out["slots"]

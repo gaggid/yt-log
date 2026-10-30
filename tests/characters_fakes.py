@@ -56,11 +56,12 @@ class SlotsChat:
     """Answers [TASK:char_slots]: the first reply has vague slots when `vague_first`, then good ones."""
 
     def __init__(self, vague_first: bool = False):
-        self.calls, self.vague_first = [], vague_first
+        self.calls, self.systems, self.vague_first = [], [], vague_first
 
     async def complete(self, messages, max_tokens, params=None):
         from story.llm import LLMResult
         self.calls.append(messages[-1]["content"])
+        self.systems.append(messages[0]["content"])
         slots = dict(SLOTS)
         if self.vague_first and len(self.calls) == 1:
             slots["top"], slots["hair"] = "casual clothes", "normal"

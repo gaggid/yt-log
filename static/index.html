@@ -108,6 +108,7 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:8px;
 <script src="/plan.js"></script>
 <script src="/shorts.js"></script>
 <script src="/characters.js"></script>
+<script src="/storage.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -692,6 +693,8 @@ async function viewSettings() {
     <div class="card pad mt"><h4 style="margin-top:0">Speed history (used for time estimates)</h4>
       ${perf.length ? `<table><thead><tr><th>Model</th><th>Stage</th><th>Calls</th><th>Avg time</th><th>Output speed</th><th>Tokens in / out</th></tr></thead><tbody>${perf.map(p => `<tr><td class="small">${esc(p.model)}</td><td>${esc(p.stage)}</td><td>${p.calls}</td><td>${hd(p.avg_s)}</td><td>${p.out_tok_s} tok/s</td><td class="small">${num(p.tokens_in)} / ${num(p.tokens_out)}</td></tr>`).join('')}</tbody></table>
       <p class="mute small mt-s">Every finished step adds to this, so estimates get better with use.</p>` : '<p class="mute">No steps recorded yet. Estimates use typical speeds until you have run something.</p>'}</div>`;
+  $('#app').insertAdjacentHTML('beforeend', '<div id="storage-card"></div>');
+  if (window.mountStorage) window.mountStorage();
   showDerived(s);
 }
 function showDerived(s) { const d = s.derived; $('#derived').innerHTML = `Usable window: <b>${num(d.usable_tokens)}</b> tokens · input room per request before instructions: <b>${num(d.input_limit)}</b> · effective chunk size: <b>${num(d.effective_chunk_tokens)}</b>${d.warnings.map(w => `<div style="color:var(--warn)">⚠ ${esc(w)}</div>`).join('')}`; }

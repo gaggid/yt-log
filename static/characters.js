@@ -49,19 +49,29 @@ window.viewCharacters = async function () {
   load();
 };
 
+const dl = (id, list) => `<datalist id="${id}">${list.map(x => `<option value="${esc(x)}">`).join('')}</datalist>`;
+const choiceInput = (kind, key, value = '', extra = '') => `<input list="dl-${kind}-${key}" data-declared="${key}" value="${esc(value)}" placeholder="pick or type your own" ${extra}>${dl(`dl-${kind}-${key}`, (OPT.choices[kind] || {})[key] || [])}`;
+const declaredFields = (kind, d = {}, dis = '') => OPT.declared[kind].map(x => x.key === 'gender'
+  ? `<label class="f mt-s">${esc(x.label)}<select data-declared="gender" ${dis}><option value="">choose…</option><option value="male" ${d.gender === 'male' ? 'selected' : ''}>male</option><option value="female" ${d.gender === 'female' ? 'selected' : ''}>female</option></select></label>`
+  : `<label class="f mt-s">${esc(kind === 'place' && x.key === 'ethnicity' ? 'region or culture of the place' : x.label)}${choiceInput(kind, x.key, d[x.key] || '', dis)}</label>`).join('');
+const readDeclared = root => Object.fromEntries([...root.querySelectorAll('[data-declared]')].map(e => [e.dataset.declared, e.value.trim()]).filter(([, v]) => v));
+
 async function newCharacter() {
   OPT = OPT || await call('/options');
   const html = `<label class="f">Name<input id="n-name" placeholder="Raju, the night-shift courier"></label>
     <label class="f mt-s">What is it<select id="n-kind"><option value="person">A person</option><option value="place">A place</option></select></label>
-    <label class="f mt-s">The idea, in a sentence or two<textarea id="n-idea" placeholder="A tired thirty-year-old delivery rider, quiet humour, always in a yellow jacket"></textarea></label>
+    <div id="n-declared"><div class="small mute mt-s">You decide these; the app never invents them. Pick from the list or type your own.</div>${declaredFields('person')}</div>
+    <label class="f mt-s">The idea, in a sentence or two<textarea id="n-idea" placeholder="A confident delivery rider who films reels between orders, always in a yellow jacket"></textarea></label>
     <label class="f mt-s">Look<select id="n-style">${Object.entries(OPT.styles).map(([k, v]) => `<option value="${k}">${esc(v.label)}</option>`).join('')}</select></label>
     <p class="mute small">The look (and its LoRAs) is locked once you approve a picture: the same description in another look draws a different person.</p>`;
-  const v = await dialog({title: 'New character', html, buttons: [{label: 'Cancel', value: null}, {label: 'Create', primary: true,
-    collect: l => ({name: l.querySelector('#n-name').value, kind: l.querySelector('#n-kind').value, idea: l.querySelector('#n-idea').value, style: l.querySelector('#n-style').value}),
-    validate: x => x.idea.trim().length < 5 ? 'Write the idea in a sentence.' : ''}]});
+  const layer = dialog({title: 'New character', html, buttons: [{label: 'Cancel', value: null}, {label: 'Create', primary: true,
+    collect: l => ({name: l.querySelector('#n-name').value, kind: l.querySelector('#n-kind').value, idea: l.querySelector('#n-idea').value, style: l.querySelector('#n-style').value, declared: readDeclared(l.querySelector('#n-declared'))}),
+    validate: x => x.idea.trim().length < 5 ? 'Write the idea in a sentence.' : OPT.declared[x.kind].find(d => !x.declared[d.key]) ? 'Say the ' + OPT.declared[x.kind].find(d => !x.declared[d.key]).label + '.' : ''}]});
+  setTimeout(() => { const k = document.querySelector('#n-kind'); if (k) k.onchange = () => { document.querySelector('#n-declared').innerHTML = '<div class="small mute mt-s">You decide these; the app never invents them. Pick from the list or type your own.</div>' + declaredFields(k.value); }; }, 30);
+  const v = await layer;
   if (!v) return;
   const st = OPT.styles[v.style];
-  const c = await act(null, () => call('', {method: 'POST', json: {name: v.name, kind: v.kind, idea: v.idea, render: {style: v.style, model: OPT.default_render.model, loras: st.loras}}}));
+  const c = await act(null, () => call('', {method: 'POST', json: {name: v.name, kind: v.kind, idea: v.idea, declared: v.declared, render: {style: v.style, model: OPT.default_render.model, loras: st.loras}}}));
   if (c) { sessionStorage.setItem('ch-suggest-' + c.id, '1'); location.hash = '#/character/' + c.id; }
 }
 
@@ -110,15 +120,17 @@ function refreshCenter() { $('#ch-job').innerHTML = jobBox(); $('#ch-center').in
 
 function sideView(busy) {
   const hints = Object.fromEntries((OPT ? OPT.slots[C.kind] : []).map(x => [x.key, x.hint]));
-  const keys = Object.keys(hints);
+  const decl = new Set((C.declared_keys || []).map(x => x.key));
+  const keys = Object.keys(hints).filter(k => !decl.has(k));
   const r = C.render, loras = (OPT && OPT.loras[r.model]) || [];
   const dis = busy ? 'disabled' : '';
   return `<h3 style="margin-top:0">Idea</h3>
     <textarea id="ch-idea" style="min-height:64px" ${dis}>${esc(C.idea)}</textarea>
-    <div class="row mt-s"><button class="small primary" id="ch-suggest" ${dis}>Fill in the details from the idea</button></div>
+    <h3>Decided by you</h3><div class="mute small">Never invented or changed by the model.</div>${declaredFields(C.kind, C.declared || {}, dis + (C.locked ? ' disabled' : ''))}
+    <div class="row mt-s"><button class="small primary" id="ch-suggest" ${dis}>Fill the empty details</button><button class="small" id="ch-suggest-all" ${dis} title="Write every detail again; the five above stay">Write all again</button></div>
     ${C.kind === 'person' ? `<div class="row mt-s small">${C.photo ? `<img src="${esc(C.photo)}" style="width:44px;border-radius:6px"> started from a picture (${esc(C.rights.basis)})` : ''}<button class="small" id="ch-photo" ${dis}>${C.photo ? 'Change the picture' : 'Start from a picture'}</button></div>` : ''}
     <h3>Details</h3><div class="mute small">${C.gaps.length ? 'Fill these in: ' + C.gaps.map(esc).join(', ') + '. An image model invents what is not written.' : 'Every detail is written.'}</div>
-    ${keys.map(k => `<label class="ch-slot ${C.gaps.includes(k) ? 'gap' : ''}" title="${esc(hints[k])}"><span>${esc(k)}</span><input data-slot="${k}" value="${esc(C.slots[k] || '')}" ${dis}></label>`).join('')}
+    ${keys.map(k => `<label class="ch-slot ${C.gaps.includes(k) ? 'gap' : ''}" title="${esc(hints[k])}"><span>${esc(k)}</span><input data-slot="${k}" list="dl-slot-${k}" value="${esc(C.slots[k] || '')}" placeholder="pick or type" ${dis}>${dl('dl-slot-' + k, (OPT.choices[C.kind] || {})[k] || [])}</label>`).join('')}
     <label class="f mt-s">Personality (mood the face carries)<input id="ch-pers" value="${esc(C.personality)}" ${dis}></label>
     <label class="f mt-s">Tags (comma separated)<input id="ch-tags" value="${esc(C.tags.join(', '))}" ${dis}></label>
     <label class="f mt-s">Notes<textarea id="ch-notes" style="min-height:44px" ${dis}>${esc(C.notes)}</textarea></label>
@@ -156,14 +168,15 @@ window.chRename = async () => { const t = await textDlg('Rename', 'Name', C.name
 window.chDup = btn => act(btn, async () => { const c = await call('/' + CID + '/duplicate', {method: 'POST'}); location.hash = '#/character/' + c.id; return true; }, 'Copied');
 window.chDelete = async () => { if (await confirmDlg('Delete this character', 'Its pictures are deleted too. Shorts that used it keep their own pictures.', 'Delete', true)) { await act(null, () => call('/' + CID, {method: 'DELETE'})); location.hash = '#/characters'; } };
 
-async function suggest(btn) {
+async function suggest(btn, keep = true) {
   const idea = ($('#ch-idea') || {}).value || C.idea;
-  await act(btn, async () => { C = await call('/' + CID + '/suggest', {method: 'POST', json: {idea}}); render(); return true; }, 'Details written: check them, then draw');
+  return act(btn, async () => { C = await call('/' + CID + '/suggest', {method: 'POST', json: {idea, keep}}); render(); return true; }, 'Details written: check them, then draw');
 }
 
 function wire() {
   const on = (sel, fn) => { const e = document.querySelector(sel); if (e) e.onclick = () => fn(e); };
-  on('#ch-suggest', b => suggest(b));
+  on('#ch-suggest', b => suggest(b, true)); on('#ch-suggest-all', b => suggest(b, false));
+  document.querySelectorAll('#ch-side [data-declared], .ch-side [data-declared]').forEach(e => e.onchange = () => patch({declared: readDeclared(document.querySelector('.ch-side'))}));
   on('#ch-photo', startFromPicture);
   const val = (sel, key, conv = x => x) => { const e = document.querySelector(sel); if (e) e.onchange = () => patch({[key]: conv(e.value)}); };
   val('#ch-idea', 'idea'); val('#ch-pers', 'personality'); val('#ch-notes', 'notes'); val('#ch-tags', 'tags', v => v.split(','));

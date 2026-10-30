@@ -46,7 +46,9 @@ def identity_text(char: dict) -> str:
     slots = dict(char["slots"])
     if char["kind"] == "person" and not slots.get("ethnicity"):
         slots["ethnicity"] = "Indian"
-    return describe.describe(char["kind"], slots)
+    text = describe.describe(char["kind"], slots)
+    region = (char.get("declared") or {}).get("ethnicity")
+    return f"A location in {region}. {text}" if char["kind"] == "place" and region else text
 
 
 def draw_prompt(char: dict, view: str, listing: dict | None = None) -> str:

@@ -62,18 +62,36 @@ class SlotsOut(BaseModel):
 
 
 SLOTS_SYSTEM = """[TASK:char_slots]
-You design one {kind} for a video studio from a short idea. Reply with ONLY a JSON object: {{"name": "...", "personality": "one line", "slots": {{{keys}}}}}.
-Every slot gets a concrete value an image model can draw exactly (colours, materials, counts, lengths); never a vague word such as normal, average, typical, casual, nice or beautiful.
+You are the casting and styling director for a studio that makes Instagram-reel-worthy video. Design one {kind} from the producer's idea. Reply with ONLY a JSON object: {{"name": "...", "personality": "one line", "slots": {{{keys}}}}}.
+
+FIXED BY THE PRODUCER (copy these exactly, never change or contradict them):
+{declared}
+
+{rules}
+Every slot gets a concrete value an image model can draw exactly (colours, materials, counts, lengths); never a vague word such as normal, average, typical, casual, nice, beautiful or stylish on its own.
 Slots:
 {hints}
-Rules: invented people are Indian unless the idea says otherwise; "accessories" may be the word none; no brand names, no logos, no readable text on clothes; nothing graphic.
-"personality" is a short phrase for the mood the face and posture usually carry (it is not drawn as text)."""
+No brand names, no logos, no readable text on clothes or signs; nothing graphic or sexualised. "personality" is a short phrase for the mood the face and posture usually carry (it is not drawn as text)."""
+
+PERSON_RULES = """STYLE OF THE PERSON
+- Reel-worthy and photogenic: a striking, expressive face, well groomed, confident posture, a clear signature detail that is memorable at a glance (a colour, a jacket, a hairstyle, a piece of jewellery).
+- Current, fashionable, culturally authentic styling for this ethnicity and region as seen on real social media today: real clothing, hair and grooming people of that community actually wear, with colours that pop on camera. No caricature, no costume, no stereotype.
+- Realistic, not fantasy: believable proportions, natural skin, everyday-plausible outfit that still looks styled.
+- Everything you write must suit the fixed facts above (hair type and facial features natural for that ethnicity; clothes that fit the build and age)."""
+
+PLACE_RULES = """STYLE OF THE PLACE
+- A real, lived-in, photographable location that really exists in the region and culture named above: real architecture, real materials, real objects, real light. No fantasy, no studio set, no invented landmarks.
+- Reel-worthy: a strong composition with depth, leading lines, a distinctive colour palette and golden-hour or practical-light atmosphere; clean enough to film but with believable wear.
+- Signature details specific to the region and period (what a local would recognise at a glance), with counts."""
 
 
-async def suggest_slots(idea: str, kind: str, backend, s: dict | None = None, current: dict | None = None) -> dict:
-    """The chat model fills every slot from the idea (and keeps the slots the person already wrote when `current` is given)."""
+async def suggest_slots(idea: str, kind: str, backend, s: dict | None = None, current: dict | None = None, declared: dict | None = None) -> dict:
+    """The chat model writes the slots the person did not declare (and keeps the slots the person already wrote when `current` is given). The declared facts (ethnicity, gender, age, skin
+    tone, build for a person; the region for a place) are written into the instruction and then forced into the slots in code, whatever the model answers."""
     hints = describe.hints(kind)
-    system = SLOTS_SYSTEM.replace("{kind}", kind).replace("{keys}", ", ".join(f'"{k}": "..."' for k in hints)).replace("{hints}", "\n".join(f"- {k}: {h}" for k, h in hints.items())).replace("{{", "{").replace("}}", "}")
+    declared = store.clean_declared(kind, declared)
+    fixed = "\n".join(f"- {store.DECLARED_LABEL[k]}: {v}" for k, v in declared.items()) or "- (nothing declared)"
+    system = SLOTS_SYSTEM.replace("{rules}", PERSON_RULES if kind == "person" else PLACE_RULES).replace("{declared}", fixed).replace("{kind}", kind).replace("{keys}", ", ".join(f'"{k}": "..."' for k in hints)).replace("{hints}", "\n".join(f"- {k}: {h}" for k, h in hints.items())).replace("{{", "{").replace("}}", "}")
     caller = llm.JsonCaller(backend, s)
 
     def check(out: SlotsOut) -> None:
@@ -86,6 +104,7 @@ async def suggest_slots(idea: str, kind: str, backend, s: dict | None = None, cu
     res = await caller.call(system, user, SlotsOut, validate=check)
     slots = describe.clean({k: v for k, v in res.value.slots.items() if k in hints})
     slots.update(kept)
+    slots = store.apply_declared({"declared": declared, "slots": slots, "kind": kind}) or slots          # the person's declared facts win over anything the model wrote
     return {"slots": slots, "name": res.value.name.strip(), "personality": res.value.personality.strip(), "gaps": describe.missing(kind, slots)}
 
 

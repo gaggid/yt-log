@@ -145,9 +145,9 @@ def test_api_library_idea_draw_canon_lock_and_photo_rights(client):
     o = client.get("/api/characters/options").json()
     assert o["default_render"]["loras"][0]["name"] == "purelens-realism" and "portrait" in o["views"]
     assert any(x["name"] == "purelens-realism" and x["trigger"] == "p3r4l4ns" for x in o["loras"]["qwen-image-2.1"])
-    cid = client.post("/api/characters", json={"name": "", "kind": "person", "idea": "a tired courier in a yellow jacket"}).json()["id"]
+    cid = client.post("/api/characters", json={"name": "", "kind": "person", "idea": "a tired courier in a yellow jacket", "declared": {"ethnicity": "Indian (Punjabi)", "gender": "male", "age": "30", "skin": "wheatish", "build": "lean and athletic"}}).json()["id"]
     st = client.post(f"/api/characters/{cid}/suggest", json={}).json()
-    assert st["name"] == "Raju" and not st["gaps"] and st["slots"]["hair"] == SLOTS["hair"] and "Indian man" in st["identity"]
+    assert st["name"] == "Raju" and not st["gaps"] and st["slots"]["hair"] == SLOTS["hair"] and "Indian (Punjabi) man" in st["identity"] and st["slots"]["skin"] == "wheatish"
     assert client.post(f"/api/characters/{cid}/generate", json={"views": ["body"], "n": 1}).status_code == 200
     assert wait_job(client, cid)["state"] == "done"
     assert client.post(f"/api/characters/{cid}/generate", json={"views": ["portrait"], "n": 1}).status_code == 200
