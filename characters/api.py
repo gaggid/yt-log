@@ -573,7 +573,7 @@ async def edit_preview(char_id: str, body: EditReq):
     lo = _clean_lora(body.lora, c["render"]["model"])
     req = _guard(edits.build, c, a["base"], body.preset, body.value, 1, a["extra"], a["garment"]["path"] if a["garment"] else None, body.scope if a["garment"] else "",
                  override=body.prompt, garment_worn=bool(a["garment"] and a["garment"]["worn"]), lora=lo, swap=body.swap)
-    return {"prompt": req["body"]["prompt"], "refs": req["ref_ids"], "size": req["body"]["size"], "model": req["body"]["model"], "depth": req["meta"]["depth"], "loras": req["meta"]["loras"]}
+    return {"prompt": req["body"]["prompt"], "refs": req["ref_ids"], "size": req["body"].get("size"), "model": req["body"]["model"], "depth": req["meta"]["depth"], "loras": req["meta"]["loras"]}
 
 
 @router.post("/{char_id}/edit")
