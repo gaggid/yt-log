@@ -67,8 +67,13 @@ def _view(char_id: str, it: dict, ident: str) -> dict:
             "check": m.get("check"), "refs": m.get("refs", [])}
 
 
+def _look_thumb(char: dict, lk: dict) -> str:
+    it = studio_edit.look_item(char, lk["id"])
+    return f"/api/characters/file/{char['id']}/{it['file']}" if it else ""
+
 def _card(c: dict) -> dict:
-    return {"id": c["id"], "name": c["name"], "kind": c["kind"], "status": c["status"], "tags": c["tags"], "version": c["version"], "thumb": _thumb(c), "style": c["render"]["style"], "looks": [{"id": x["id"], "name": x["name"]} for x in c["looks"]],
+    return {"id": c["id"], "name": c["name"], "kind": c["kind"], "status": c["status"], "tags": c["tags"], "version": c["version"], "thumb": _thumb(c), "style": c["render"]["style"],
+            "looks": [{"id": x["id"], "name": x["name"], "thumb": _look_thumb(c, x)} for x in c["looks"]],
             "updated_at": c["updated_at"]}
 
 
@@ -436,6 +441,23 @@ class GenerateReq(BaseModel):
     n: int = 2
     seed: int | None = None
     extra: str = ""
+    body_ref: str = ""
+    custom_prompt: str = ""
+
+
+@router.post("/{char_id}/generate/preview")
+async def generate_preview(char_id: str, body: GenerateReq):
+    """Return the prompt that would be sent, without generating. Used by the UI to let the user edit before confirming."""
+    c = _get(char_id)
+    for v in body.views:
+        if v not in R.VIEWS or R.VIEWS[v]["kind"] != c["kind"]:
+            raise HTTPException(400, f"'{v}' is not a view of a {c['kind']}")
+    s = settings_mod.get()
+    key = settings_mod.api_key()
+    listing = studio.lora_listing(c["render"]["model"], s, key) if c["render"]["loras"] else {}
+    ref_item = media.get(body.body_ref) if body.body_ref and "body" in body.views else None
+    req = R.build(c, body.views[0], 1, listing, extra=body.extra, ref_item=ref_item)
+    return {"prompt": req["body"]["prompt"], "how": req["how"], "model": req["body"]["model"]}
 
 
 @router.post("/{char_id}/generate")
@@ -451,7 +473,9 @@ async def generate(char_id: str, body: GenerateReq):
         raise HTTPException(400, "fill in these details first (an image model invents what is not written): " + ", ".join(gaps))
     s = settings_mod.get()
     key = settings_mod.api_key()
-    return _start(char_id, "char_generate", lambda progress: studio.make_views(char_id, body.views, body.n, progress, s, key, body.seed, body.extra))
+    body_ref = body.body_ref
+    custom_prompt = body.custom_prompt
+    return _start(char_id, "char_generate", lambda progress: studio.make_views(char_id, body.views, body.n, progress, s, key, body.seed, body.extra, body_ref, custom_prompt))
 
 
 @router.post("/{char_id}/sheet")

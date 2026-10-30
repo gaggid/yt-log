@@ -106,8 +106,10 @@ def photo_prompt(char: dict) -> str:
             "Keep exactly the same face, hair, skin tone and age. " + NO_TEXT)
 
 
-def build(char: dict, view: str, attempt: int, listing: dict | None = None, seed: int | None = None, extra: str = "") -> dict:
-    """{how, body, refs (pictures to send, in order), ref_ids, meta}. `refs` are paths of the canon (or the source photo); the request is refused when a canon picture is missing."""
+def build(char: dict, view: str, attempt: int, listing: dict | None = None, seed: int | None = None, extra: str = "", ref_item: dict | None = None, custom_prompt: str = "") -> dict:
+    """{how, body, refs (pictures to send, in order), ref_ids, meta}. `refs` are paths of the canon (or the source photo); the request is refused when a canon picture is missing.
+    `ref_item`: override the reference picture for body view (a media item dict); defaults to the canon portrait.
+    `custom_prompt`: if set, replaces the auto-built prompt entirely."""
     if view not in VIEWS:
         raise store.CharError(f"unknown view '{view}'")
     v = VIEWS[view]
@@ -126,11 +128,12 @@ def build(char: dict, view: str, attempt: int, listing: dict | None = None, seed
         ref_ids = ["photo"]
     elif how == "draw":
         canon = store.canon_items(char)
-        if view == "body" and char["kind"] == "person" and canon.get("portrait"):
-            # portrait is approved: edit from it so the full-body picture shows the same face
+        ref_for_body = ref_item or canon.get("portrait")
+        if view == "body" and char["kind"] == "person" and ref_for_body:
+            # use the chosen (or canon) portrait as reference so the full-body keeps the same face
             how = "edit"
-            paths = [media.path_of(canon["portrait"])]
-            ref_ids = [canon["portrait"]["id"]]
+            paths = [media.path_of(ref_for_body)]
+            ref_ids = [ref_for_body["id"]]
             body["prompt"] = ("The picture shows the person's face and upper body. "
                               f"{VIEWS['body']['frame']} "
                               "Keep exactly the same face, hair, skin tone, build and clothing. "
@@ -151,7 +154,9 @@ def build(char: dict, view: str, attempt: int, listing: dict | None = None, seed
             paths.append(media.path_of(it))
             ref_ids.append(it["id"])
         body["prompt"] = edit_prompt(char, view, extra)
-    meta = {"view": view, "how": how, "model": r["model"], "seed": seed, "prompt": body["prompt"][:1500], "loras": r["loras"] if how == "draw" else [], "refs": ref_ids,
+    if custom_prompt:
+        body["prompt"] = custom_prompt[:3900]
+    meta ={"view": view, "how": how, "model": r["model"], "seed": seed, "prompt": body["prompt"][:1500], "loras": r["loras"] if how == "draw" else [], "refs": ref_ids,
             "identity_hash": store.identity_hash(char), "version": char["version"], "style": r["style"], "steps": body.get("steps")}
     meta["input_hash"] = hashlib.sha1(json.dumps({k: v for k, v in {**meta, "seed": 0}.items() if k not in ("prompt",)} | {"prompt": body["prompt"]}, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]
     return {"how": how, "body": body, "refs": paths, "ref_ids": ref_ids, "meta": meta}

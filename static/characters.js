@@ -180,8 +180,12 @@ function centerView(busy) {
   const card = p => `<div class="ch-pic ${C.canon[p.view] === p.id ? 'canon' : ''}">${p.url ? `<img src="${esc(p.url)}" loading="lazy" onclick="chZoom('${esc(p.url)}')">` : `<div class="ph">${p.status === 'failed' ? 'failed<br>' + esc(p.error.slice(0, 80)) : 'drawing…'}</div>`}
     <div class="mute">#${p.attempt} · seed ${p.seed ?? '-'}${p.seconds_taken ? ' · ' + Math.round(p.seconds_taken) + 's' : ''}${p.current ? '' : ' · older'}</div>
     ${p.url && (p.how === 'draw' || p.how === 'edit') ? `<div class="row" style="margin-top:4px;gap:4px">${C.canon[p.view] === p.id ? '<b>Canon ✓</b>' : `${p.view === 'portrait' || p.view === 'body' || p.view === 'place' ? `<button class="small primary" data-canon="${p.id}" ${dis}>Use as canon</button>` : (p.approved ? '<b>Kept ✓</b>' : `<button class="small" data-canon="${p.id}" ${dis}>Keep</button>`)} <button class="small bad" data-del="${p.id}" ${dis}>Delete</button>`}</div>` : ''}</div>`;
+  const bodyRefPics = () => Object.values(C.gallery).flat().filter(p => p.url && p.status === 'done');
+  const bodyRefSel = () => { const all = bodyRefPics(); if (!all.length) return ''; return `<label class="small" style="display:flex;align-items:center;gap:4px">Reference<select id="body-ref" style="width:auto"><option value="">Auto (canon portrait)</option>${all.map(p => `<option value="${p.id}">${esc(picLabel(p))}</option>`).join('')}</select></label>`; };
   const section = (v, n) => `<div class="card pad mt"><div class="row"><h3 style="margin:0">${esc(OPT.views[v].label)}</h3>${C.canon[v] ? badge('done', 'canon') : ''}<span class="sp"></span>
-      <select data-n="${v}" style="width:auto">${[1, 2, 4].map(k => `<option value="${k}" ${k === n ? 'selected' : ''}>${k} new</option>`).join('')}</select><button class="small primary" data-draw="${v}" ${dis}>Draw</button></div>
+      ${v === 'body' && C.kind === 'person' ? bodyRefSel() : ''}
+      <select data-n="${v}" style="width:auto">${[1, 2, 4].map(k => `<option value="${k}" ${k === n ? 'selected' : ''}>${k} new</option>`).join('')}</select>
+      <button class="small" data-editprompt="${v}" ${dis}>Edit prompt</button><button class="small primary" data-draw="${v}" ${dis}>Draw</button></div>
       <div class="ch-views mt-s">${pics(v).map(card).join('') || '<div class="mute small">nothing drawn yet</div>'}</div></div>`;
   const haveCanon = C.kind === 'person' && C.canon.portrait && C.canon.body;
   return `<div class="mute small" title="The text the image model gets for the subject">${esc(C.identity || 'Write the details on the left.')}</div>
@@ -228,8 +232,27 @@ function wire() {
   if (add) add.onchange = () => { if (!add.value) return; const l = OPT.loras[C.render.model].find(x => x.name === add.value); renderPatch({loras: [...C.render.loras, {name: l.name, strength: Math.min(l.strength, 0.8)}].slice(0, 4)}); };
   wireCenter();
 }
+function drawArgs(v) {
+  const ref = v === 'body' && $e('body-ref') ? $e('body-ref').value : '';
+  return {views: [v], n: +document.querySelector(`[data-n="${v}"]`).value, body_ref: ref};
+}
 function wireCenter() {
-  document.querySelectorAll('[data-draw]').forEach(b => b.onclick = () => post(b, '/generate', {views: [b.dataset.draw], n: +document.querySelector(`[data-n="${b.dataset.draw}"]`).value}, 'Drawing started'));
+  document.querySelectorAll('[data-draw]').forEach(b => b.onclick = () => post(b, '/generate', drawArgs(b.dataset.draw), 'Drawing started'));
+  document.querySelectorAll('[data-editprompt]').forEach(b => b.onclick = async () => {
+    const v = b.dataset.editprompt;
+    b.disabled = true; b.textContent = '…';
+    let pr; try { pr = await call('/' + CID + '/generate/preview', {method: 'POST', json: drawArgs(v)}); } catch(e) { toast(e.message, {bad: true}); } finally { b.disabled = false; b.textContent = 'Edit prompt'; }
+    if (!pr) return;
+    const result = await dialog({
+      title: `Prompt for ${OPT.views[v].label}`,
+      html: `<div class="mute small mb-s">${esc(pr.model)} · ${pr.how} mode. Edit below, then click Draw.</div>
+             <textarea id="ep-txt" style="min-height:160px;width:100%;box-sizing:border-box;font-size:13px">${esc(pr.prompt)}</textarea>`,
+      buttons: [{label: 'Cancel', value: null}, {label: 'Draw with this prompt', primary: true, collect: l => l.querySelector('#ep-txt').value.trim(), validate: v => v ? null : 'Prompt is empty'}]
+    });
+    if (!result) return;
+    const drawBtn = document.querySelector(`[data-draw="${v}"]`);
+    post(drawBtn, '/generate', {...drawArgs(v), custom_prompt: result}, 'Drawing started');
+  });
   document.querySelectorAll('[data-canon]').forEach(b => b.onclick = () => act(b, async () => { await call('/item/' + b.dataset.canon + '/canon', {method: 'POST'}); await window._chLoad(true); return true; }, 'Saved'));
   const sh = document.querySelector('#ch-sheet'); if (sh) sh.onclick = () => post(sh, '/sheet', {}, 'Sheet started');
   wireEdit();

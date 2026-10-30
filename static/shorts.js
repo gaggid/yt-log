@@ -204,26 +204,79 @@ function castBlock() {
 async function castPickerDialog(slot) {
   const chars = (window._shChars || []).filter(c => c.kind === 'person' && c.status === 'ready');
   if (!chars.length) { toast('No ready characters yet — make one in Characters first.', {bad: true}); return null; }
-  const cards = chars.map(c => `<div class="cast-card" data-cid="${esc(c.id)}" data-look="" style="cursor:pointer;border:2px solid transparent;border-radius:8px;padding:8px;text-align:center;background:#f5f5f5;min-width:110px;flex:0 0 auto">
-    ${c.thumb ? `<img src="${esc(c.thumb)}" style="width:80px;height:80px;object-fit:cover;border-radius:6px;display:block;margin:0 auto">` : `<div style="width:80px;height:80px;background:#ccc;border-radius:6px;margin:0 auto"></div>`}
-    <div class="small" style="margin-top:6px"><b>${esc(c.name)}</b></div>
-    ${c.looks.length ? `<div class="small mute" style="margin-top:4px;text-align:left">
-      <label style="display:block"><input type="radio" name="cpl-${esc(c.id)}" value="" checked onclick="this.closest('.cast-card').dataset.look=''"> canon</label>
-      ${c.looks.map(l => `<label style="display:block"><input type="radio" name="cpl-${esc(c.id)}" value="${esc(l.id)}" onclick="this.closest('.cast-card').dataset.look='${esc(l.id)}'"> ${esc(l.name)}</label>`).join('')}
-    </div>` : ''}
-  </div>`).join('');
+
+  let chosen = null; // {character_id, look_id}
+
+  const thumbImg = (url, w, h) => url
+    ? `<img src="${esc(url)}" style="width:${w}px;height:${h}px;object-fit:cover;border-radius:6px;display:block">`
+    : `<div style="width:${w}px;height:${h}px;background:#ccc;border-radius:6px"></div>`;
+
+  const charGrid = () => `<div style="display:flex;flex-wrap:wrap;gap:12px;max-height:65vh;overflow-y:auto;padding:4px">
+    ${chars.map(c => `<div class="cp-char" data-cid="${esc(c.id)}" style="cursor:pointer;border:2px solid #e0e0e0;border-radius:8px;padding:10px;text-align:center;width:120px;box-sizing:border-box">
+      <div style="display:flex;justify-content:center">${thumbImg(c.thumb, 100, 100)}</div>
+      <div class="small" style="margin-top:6px;font-weight:600">${esc(c.name)}</div>
+      <div class="mute small">${c.looks.length} look${c.looks.length !== 1 ? 's' : ''}</div>
+    </div>`).join('')}
+  </div>`;
+
+  const lookGrid = c => {
+    const items = [
+      {id: '', label: 'Canon look', thumb: c.thumb},
+      ...c.looks.filter(l => l.thumb).map(l => ({id: l.id, label: l.name, thumb: l.thumb}))
+    ];
+    return `<div style="display:flex;gap:12px;height:65vh">
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-content:flex-start;overflow-y:auto;flex:1;padding:4px">
+        ${items.map(it => `<div class="cp-look" data-lid="${esc(it.id)}" data-url="${esc(it.thumb)}" style="cursor:pointer;border:2px solid #e0e0e0;border-radius:8px;padding:8px;text-align:center;width:130px;box-sizing:border-box">
+          <div style="display:flex;justify-content:center">${thumbImg(it.thumb, 110, 145)}</div>
+          <div class="small" style="margin-top:6px">${esc(it.label)}</div>
+        </div>`).join('')}
+      </div>
+      <div style="flex:0 0 220px;display:flex;flex-direction:column;align-items:center;background:#f5f5f5;border-radius:8px;padding:10px;overflow:hidden">
+        <div class="mute small" id="cp-prev-lbl">Click a look to preview</div>
+        <img id="cp-prev-img" src="" style="max-width:200px;max-height:calc(65vh - 40px);border-radius:6px;margin-top:8px;display:none;object-fit:contain">
+      </div>
+    </div>`;
+  };
+
+  const setTitle = t => { const h = document.querySelector('.dlg h2'); if (h) h.textContent = t; };
+  const setBody = html => { const b = document.querySelector('.dlg .dlg-body'); if (b) b.innerHTML = html; };
+
+  const wireLooks = c => {
+    document.querySelector('#cp-back').onclick = () => { chosen = null; setTitle(slot === 0 ? 'Choose the main character' : 'Choose second character'); setBody(charGrid()); setTimeout(wireChars, 0); };
+    document.querySelectorAll('.dlg .cp-look').forEach(card => {
+      card.onclick = () => {
+        document.querySelectorAll('.dlg .cp-look').forEach(x => x.style.borderColor = '#e0e0e0');
+        card.style.borderColor = '#4f46e5';
+        chosen = {character_id: c.id, look_id: card.dataset.lid};
+        const img = document.querySelector('#cp-prev-img'), lbl = document.querySelector('#cp-prev-lbl');
+        if (card.dataset.url) { img.src = card.dataset.url; img.style.display = 'block'; lbl.textContent = card.querySelector('.small').textContent; }
+      };
+    });
+  };
+
+  const wireChars = () => {
+    document.querySelectorAll('.dlg .cp-char').forEach(card => {
+      card.onclick = () => {
+        const c = chars.find(x => x.id === card.dataset.cid); if (!c) return;
+        chosen = {character_id: c.id, look_id: ''};
+        setTitle(c.name + ' — choose a look');
+        setBody(`<button class="small" id="cp-back" style="margin-bottom:10px">← All characters</button>${lookGrid(c)}`);
+        setTimeout(() => wireLooks(c), 0);
+      };
+    });
+  };
+
   const p = dialog({
     title: slot === 0 ? 'Choose the main character' : 'Choose second character',
-    html: `<div style="display:flex;flex-wrap:wrap;gap:10px;max-height:60vh;overflow-y:auto">${cards}</div>`,
+    html: charGrid(),
     buttons: [
       {label: 'Cancel', value: null},
-      {label: 'Select', primary: true, collect: l => { const s = l.querySelector('.cast-card.selected'); return s ? {character_id: s.dataset.cid, look_id: s.dataset.look || ''} : null; },
-       validate: v => v ? null : 'Click a character to select them'}
+      {label: 'Select', primary: true,
+       collect: () => chosen,
+       validate: v => v ? null : 'Choose a character first'}
     ]
   });
-  setTimeout(() => document.querySelectorAll('.dlg .cast-card').forEach(card => {
-    card.onclick = e => { if (e.target.type === 'radio') return; document.querySelectorAll('.dlg .cast-card').forEach(c => { c.classList.remove('selected'); c.style.borderColor = 'transparent'; }); card.classList.add('selected'); card.style.borderColor = '#4f46e5'; };
-  }), 0);
+  setTimeout(wireChars, 0);
   return p;
 }
 

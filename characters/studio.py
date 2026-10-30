@@ -74,16 +74,22 @@ Slots:
 No brand names, no logos, no readable text on clothes or signs; nothing graphic or sexualised. "personality" is a short phrase for the mood the face and posture usually carry (it is not drawn as text)."""
 
 PERSON_RULES = """STYLE OF THE PERSON
-- Reel-worthy and photogenic: a striking, expressive face, well groomed, confident posture, a clear signature detail that is memorable at a glance (a colour, a jacket, a hairstyle, a piece of jewellery).
-- Current, fashionable, culturally authentic styling for this ethnicity and region as seen on real social media today: real clothing, hair and grooming people of that community actually wear, with colours that pop on camera. No caricature, no costume, no stereotype.
-- Realistic, not fantasy: believable proportions, natural skin, everyday-plausible outfit that still looks styled.
-- The image model draws every word literally, so write only what can be seen and keep each slot to its own job: `eyes` is the eye COLOUR only ("dark brown"), eye shape and lashes belong in `face`; `expression` is a plain look of the face ("a calm half smile"), never a metaphor ("a twinkle in her eyes", "eyes full of stars"); no detail of a body part that a head-and-shoulders picture would not show except in its own slot (shoes only in `footwear`, trousers only in `bottom`).
-- Everything you write must suit the fixed facts above (hair type and facial features natural for that ethnicity; clothes that fit the build and age)."""
+- ERA: 2024–2026 urban contemporary. Think young professional, content creator, or college student in a metro city — the look that appears in Indian Instagram reels and urban lifestyle shoots today.
+- CLOTHING DEFAULT: smart-casual western or global-contemporary. For women: fitted blazer, crop top, straight-leg jeans, mini skirt, co-ord set, oversized shirt, slip dress, cargo pants, trench coat. For men: slim-fit chinos, fitted crew-neck, bomber jacket, linen shirt with rolled sleeves, jogger-and-sneaker. Solid colours or subtle prints; fits that show the silhouette. NOT: kurta, saree, salwar, dupatta, churidar, ethnic embroidery, block prints — unless the producer's idea explicitly asks for ethnic or traditional.
+- ONE ETHNIC ACCENT (optional): a single detail may be Indian-contemporary — a gold jhumka, a silk scarf, a Nehru-collar jacket — never a full ethnic outfit.
+- GROOMING: clean, polished, well-maintained. Hair styled (not loose and windswept unless the idea says so); skin clear; makeup natural-to-glam depending on age and vibe.
+- Reel-worthy and photogenic: a striking face, confident posture, a clear signature detail memorable at a glance (a colour, a cut, a piece of jewellery). No caricature, no costume, no stereotype.
+- The image model draws every word literally: keep each slot to its own job. `eyes` = eye COLOUR only ("dark brown"); `expression` = plain face look ("a calm half smile"), never a metaphor; no detail of a body part a head-and-shoulders frame cannot show except in its own slot (shoes only in `footwear`, trousers only in `bottom`).
+- Everything must suit the fixed facts above (build, age, declared ethnicity)."""
 
 PLACE_RULES = """STYLE OF THE PLACE
-- A real, lived-in, photographable location that really exists in the region and culture named above: real architecture, real materials, real objects, real light. No fantasy, no studio set, no invented landmarks.
-- Reel-worthy: a strong composition with depth, leading lines, a distinctive colour palette and golden-hour or practical-light atmosphere; clean enough to film but with believable wear.
-- Signature details specific to the region and period (what a local would recognise at a glance), with counts."""
+- ERA: 2024–2026 urban contemporary. Think upper-middle-class city apartment, co-working space, modern café, new-build housing society, or a fresh boutique hotel — the kind of space that appears in Instagram home-tour reels and urban lifestyle magazines today.
+- MATERIALS: clean-painted walls (white, warm grey, sage, dusty pink), engineered wood or laminate floors, matte or large-format porcelain tiles, powder-coated steel frames, tempered glass, fabric upholstery in solid muted tones. NOT: old teak, terracotta tiles, dhurrie rugs, jhoola swings, brass diyas, block prints, or hand-woven anything — unless the producer's idea explicitly asks for heritage or traditional.
+- FURNITURE: modular sofas, platform beds, floating shelves, pendant lights, indoor plants in ceramic pots, slim-profile dining tables, ergonomic chairs, under-cabinet LED strips. The look is curated-minimal: a few design pieces, not cluttered.
+- COLOUR PALETTE: two or three base neutrals plus one accent (terracotta, teal, mustard, blush) used sparingly in a cushion, artwork or planter — not in the architecture.
+- ONE REGIONAL ACCENT (optional, at most one): a single handloom throw, a framed block-print artwork, a brass accent lamp, a Warli-pattern mug — never multiple traditional objects at once.
+- LIGHT: large windows with sheer curtains, warm LED panel or track lighting, ring-light softness; no oil lamp or diya light unless explicitly requested.
+- Reel-worthy: strong composition, depth, leading lines; photogenic without being fantasy."""
 
 
 GLAMOUR_RULES = """STYLING: GLAMOROUS (an adult, invented character; the producer chose this on purpose)
@@ -204,7 +210,7 @@ def _kind_of(view: str) -> str:
     return store.GEN if R.VIEWS[view]["how"] == "draw" else store.SHEET
 
 
-async def make_views(char_id: str, views: list[str], n: int = 1, progress=None, s: dict | None = None, key: str = "", seed: int | None = None, extra: str = "") -> dict:
+async def make_views(char_id: str, views: list[str], n: int = 1, progress=None, s: dict | None = None, key: str = "", seed: int | None = None, extra: str = "", body_ref_id: str = "", custom_prompt: str = "") -> dict:
     """Draw `n` new attempts of each view, one request at a time. A failed picture is recorded and the job goes on (it stops when the gateway is not reachable)."""
     base, api_key = _ctx(s, key)
     char = store.get(char_id)
@@ -221,7 +227,8 @@ async def make_views(char_id: str, views: list[str], n: int = 1, progress=None, 
             kind = _kind_of(view)
             attempt = len(media.items(char_id, kind, view)) + 1
             try:
-                req = R.build(char, view, attempt, listing, seed=None if seed is None else seed + attempt - 1, extra=extra)
+                ref_item = media.get(body_ref_id) if body_ref_id and view == "body" else None
+                req = R.build(char, view, attempt, listing, seed=None if seed is None else seed + attempt - 1, extra=extra, ref_item=ref_item, custom_prompt=custom_prompt)
             except store.CharError as e:
                 failed.append({"view": view, "error": str(e)})
                 break
