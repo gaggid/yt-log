@@ -184,6 +184,7 @@ class SettingsReq(BaseModel):
     chain: bool | None = None
     seed: int | None = None
     voice: dict | None = None
+    voice_mode: str | None = None
     captions: bool | None = None
     bed: bool | None = None
     review_keyframes: bool | None = None
@@ -220,6 +221,8 @@ async def patch_settings(short_id: str, body: SettingsReq):
         patch.pop("size")                                               # only the 5B pipeline has the sharper size
     if "steps" in patch and patch["steps"] is not None and not 1 <= patch["steps"] <= 100:
         raise HTTPException(400, "steps is between 1 and 100")
+    if "voice_mode" in patch and patch["voice_mode"] not in ("narration", "none"):
+        raise HTTPException(400, "voice_mode is one of: narration, none")
     if "voice" in patch:
         try:
             patch["voice"] = voices.choose({}, patch["voice"].get("engine", ""), patch["voice"].get("voice"))["tts"]
