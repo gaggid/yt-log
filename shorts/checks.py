@@ -15,12 +15,14 @@ def run(short: dict) -> dict:
     issues: list[dict] = []
     if not short["shots"]:
         return {"ok": False, "issues": [_issue("block", "no_plan", "Plan the short first.")], "blockers": 1, "warnings": 0, "timeline": None}
-    real = svoice.real_seconds(short)
+    no_voice = short.get("settings", {}).get("voice_mode") == "none"
+    real = {} if no_voice else svoice.real_seconds(short)
     tl = timeline.build(short, real)
     prof = planner._profile(short)
-    for p in planner.narration_problems(short["beats"], prof):
-        soft = p.startswith(("stock phrases", "a sentence is", "the first sentence"))
-        issues.append(_issue("warn" if soft else "block", "narration", p))
+    if not no_voice:
+        for p in planner.narration_problems(short["beats"], prof):
+            soft = p.startswith(("stock phrases", "a sentence is", "the first sentence"))
+            issues.append(_issue("warn" if soft else "block", "narration", p))
     for p in tl["problems"]:
         if p["code"] == "shot_too_long":
             issues.append(_issue("block", "shot_too_long", p["text"] + ". Write the shots of those beats again with more shots.", fix="fit_shots", beats=p["beats"]))

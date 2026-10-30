@@ -127,13 +127,14 @@ def build(short_id: str, progress=None) -> dict:
     avail = video.available()
     if not avail["ffmpeg"]:
         raise MediaError("ffmpeg was not found")
-    voices = {b["id"]: svoice.chosen(short, b) for b in short["beats"]}
+    no_voice = short.get("settings", {}).get("voice_mode") == "none"
+    voices = {} if no_voice else {b["id"]: svoice.chosen(short, b) for b in short["beats"]}
     tl = timeline.build(short, {k: v["meta"]["duration_s"] for k, v in voices.items()})
     bad = [p for p in tl["problems"] if p["code"] in ("shot_too_long", "length")]
     if bad:
         raise MediaError("; ".join(p["text"] for p in bad) + ": fix this on the checks list first")
     chosen = {sh["id"]: clips.chosen_clip(short, sh) for sh in short["shots"]}
-    used = {"clips": {k: v["id"] for k, v in chosen.items()}, "voice": {k: v["id"] for k, v in voices.items()}}
+    used = {"clips": {k: v["id"] for k, v in chosen.items()}, "voice": {} if no_voice else {k: v["id"] for k, v in voices.items()}}
     h = final_hash(short, tl, used)
     for it in media.items(short_id, store.FINAL, "final"):
         if it["status"] == "done" and it["meta"].get("input_hash") == h and it["file"]:
@@ -153,17 +154,19 @@ def build(short_id: str, progress=None) -> dict:
             progress(len(tl["shots"]), len(tl["shots"]) + 2, "joining the shots and the voice")
         silent = work / "silent.mp4"
         join_segments(segs, silent, work)
+        voice_wav = None
         parts = []
-        for i, (b, t) in enumerate(zip(short["beats"], tl["beats"])):
-            wav = work / f"v{i:02d}.wav"
-            beat_audio(media.path_of(voices[b["id"]]), tl["tempo"], t["span"], wav)
-            parts.append((wav, t))
-        lst = work / "voice.txt"
-        lst.write_text("".join(f"file '{p.name}'\n" for p, _ in parts), encoding="utf-8")
-        voice_wav = work / "voice.wav"
-        _ffmpeg(["-f", "concat", "-safe", "0", "-i", lst.name, "-c", "copy", str(voice_wav)], cwd=work)
+        if not no_voice:
+            for i, (b, t) in enumerate(zip(short["beats"], tl["beats"])):
+                wav = work / f"v{i:02d}.wav"
+                beat_audio(media.path_of(voices[b["id"]]), tl["tempo"], t["span"], wav)
+                parts.append((wav, t))
+            lst = work / "voice.txt"
+            lst.write_text("".join(f"file '{p.name}'\n" for p, _ in parts), encoding="utf-8")
+            voice_wav = work / "voice.wav"
+            _ffmpeg(["-f", "concat", "-safe", "0", "-i", lst.name, "-c", "copy", str(voice_wav)], cwd=work)
         ass = None
-        if short["settings"].get("captions", True) and avail["captions"]:
+        if not no_voice and short["settings"].get("captions", True) and avail["captions"]:
             ass = work / "captions.ass"
             write_ass(short_events(short, tl), ass)
         out = store.media_dir(short_id, "final") / f"short-a{it['attempt']}.mp4"

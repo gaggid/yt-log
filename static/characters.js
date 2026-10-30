@@ -233,11 +233,12 @@ function wire() {
   wireCenter();
 }
 function drawArgs(v) {
-  const ref = v === 'body' && $e('body-ref') ? $e('body-ref').value : '';
-  return {views: [v], n: +document.querySelector(`[data-n="${v}"]`).value, body_ref: ref};
+  const refEl = v === 'body' ? $e('body-ref') : null;
+  const nEl = document.querySelector(`[data-n="${v}"]`);
+  return {views: [v], n: nEl ? +nEl.value : 1, body_ref: refEl ? refEl.value : ''};
 }
 function wireCenter() {
-  document.querySelectorAll('[data-draw]').forEach(b => b.onclick = () => post(b, '/generate', drawArgs(b.dataset.draw), 'Drawing started'));
+  document.querySelectorAll('[data-draw]').forEach(b => b.onclick = () => { try { post(b, '/generate', drawArgs(b.dataset.draw), 'Drawing started'); } catch(e) { toast(e.message, {bad: true}); } });
   document.querySelectorAll('[data-editprompt]').forEach(b => b.onclick = async () => {
     const v = b.dataset.editprompt;
     b.disabled = true; b.textContent = '…';

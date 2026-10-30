@@ -43,6 +43,8 @@ def real_seconds(short: dict) -> dict[str, float]:
 
 
 def missing(short: dict) -> list[dict]:
+    if short.get("settings", {}).get("voice_mode") == "none":
+        return []
     return [b for b in short["beats"] if not chosen(short, b)]
 
 

@@ -34,7 +34,8 @@ def steps(short: dict) -> list[dict]:
         add("final", "Put the short together", short.get("status") == "made" and _final_ok(short))
         return out
     add("plan", "Plan the short", short["shots"])
-    add("voice", "Make the voice", short["beats"] and not svoice.missing(short))
+    if short.get("settings", {}).get("voice_mode") != "none":
+        add("voice", "Make the voice", short["beats"] and not svoice.missing(short))
     tl_ok = bool(short["shots"]) and not [p for p in checks.run(short)["issues"] if p["code"] == "shot_too_long"]
     add("fit", "Fit the shots to the voice", tl_ok and short["beats"] and not svoice.missing(short))
     if P.keyframes_on(short):
@@ -74,7 +75,7 @@ async def run(short_id: str, backend, s: dict, progress, key: str = "") -> str:
         await planner.make_plan(short_id, backend, s, sub("plan"))
         did.append("planned")
         short = store.get(short_id)
-    if svoice.missing(short):
+    if short.get("settings", {}).get("voice_mode") != "none" and svoice.missing(short):
         res = await svoice.make(short_id, progress=sub("voice"), s=s, key=key)
         did.append(f"voice ({res['made']} made)")
         if res["failed"]:

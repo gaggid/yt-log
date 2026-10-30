@@ -142,7 +142,8 @@ function sideView() {
     <div class="mt-s small">${s.images.anchor ? `<img src="/api/shorts/file/${s.id}/${esc(s.images.anchor)}" style="width:70px;border-radius:6px;vertical-align:middle"> <button class="small" id="st-anchor">Change</button> <button class="small bad" id="st-anchor-x">Remove</button>` : `<button class="small" id="st-anchor">Upload the main character's picture</button>`}</div>
     <label class="f mt-s">Describe that character in a line (used in the shots that show them)<textarea id="st-char" style="min-height:48px">${esc(st.character_text || '')}</textarea></label>
     <label class="f mt-s">Tone (optional)<input id="st-tone" value="${esc(st.tone || '')}" placeholder="funny, tense, warm..."></label>`}
-    <label class="f mt-s">Voice<select id="st-voice">${voiceOptions(st.voice)}</select></label>
+    <label class="f mt-s">Audio<select id="st-vmode"><option value="narration" ${(st.voice_mode || 'narration') === 'narration' ? 'selected' : ''}>Narration voice (generated)</option><option value="none" ${st.voice_mode === 'none' ? 'selected' : ''}>No voice — video only (silent or background music)</option></select></label>
+    ${(st.voice_mode || 'narration') !== 'none' ? `<label class="f mt-s">Voice<select id="st-voice">${voiceOptions(st.voice)}</select></label>` : ''}
     ${s.pipeline === 'quick' ? `<label class="f mt-s">Picture size<select id="st-size"><option value="480x832" ${st.size === '480x832' ? 'selected' : ''}>480x832 (about 20 min)</option><option value="704x1280" ${st.size === '704x1280' ? 'selected' : ''}>704x1280 sharper (about an hour)</option></select></label>
       <label class="row mt-s"><input type="checkbox" id="st-chain" ${st.chain ? 'checked' : ''}> A shot marked "continues" starts from the last frame of the one before</label>` : ''}
     ${s.keyframes_on ? `<label class="row mt-s"><input type="checkbox" id="st-review" ${st.review_keyframes ? 'checked' : ''}> Stop to look at the start pictures before animating</label>` : ''}
@@ -397,6 +398,7 @@ function wire() {
   const st = (id, key, conv = v => v) => { const e = q(id); if (e) e.onchange = () => patch('/settings', {[key]: conv(e.type === 'checkbox' ? e.checked : e.value)}); };
   st('#st-mode', 'image_mode'); st('#st-imodel', 'image_model'); st('#st-char', 'character_text'); st('#st-tone', 'tone'); st('#st-size', 'size'); st('#st-chain', 'chain'); st('#st-review', 'review_keyframes');
   st('#st-cap', 'captions'); st('#st-bed', 'bed'); st('#st-steps', 'steps', v => v === '' ? null : +v); st('#st-seed', 'seed', v => +v || 0);
+  const vm = q('#st-vmode'); if (vm) vm.onchange = () => patch('/settings', {voice_mode: vm.value});
   const vs = q('#st-voice'); if (vs) vs.onchange = () => { const [engine, voice] = vs.value.split('|'); patch('/settings', {voice: {engine, voice}}); };
   on('#st-anchor', () => pick('image/*', f => upload('/images/anchor', f))); on('#st-anchor2', () => pick('image/*', f => upload('/images/anchor', f)));
   on('#st-anchor-x', async () => { S = await call('/' + SID + '/images/anchor', {method: 'DELETE'}); render(); });
