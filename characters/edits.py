@@ -101,9 +101,9 @@ def build(char: dict, base: dict, preset: str, value: str, attempt: int, extra: 
         if len(extra or []) != 1:
             raise store.CharError("a head swap needs exactly one face picture")
         refs = [media.path_of(base), media.path_of(extra[0])]
-        seed = seed if seed is not None else R.seed_for(char["id"], "edit", attempt)
         prompt = override.strip() or SWAP_DEFAULT_PROMPT                     # always send the clothes-preservation hint; user can override
-        body = {"model": char["render"]["model"], "size": swap_size(refs[0]), "n": 1, "seed": seed, "response_format": "b64_json", "prompt": prompt, "lora": swap}
+        body = {"model": char["render"]["model"], "n": 1, "response_format": "b64_json", "prompt": prompt, "lora": swap}
+        # no size: let the server use the reference image's natural dimensions (same as direct API test, avoids upscale bleed)
         meta = _meta(char, body, base, [base["id"], extra[0]["id"]], "swap", "swap", SWAPS[names[0]] + (", sharpened" if len(names) > 1 else ""), {"swap": swap, "synthetic": True})
         meta["loras"] = [{"name": x, "strength": 1.0} for x in names]
         return {"how": "edit", "body": body, "refs": refs, "ref_ids": [base["id"], extra[0]["id"]], "meta": meta}
