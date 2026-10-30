@@ -173,13 +173,17 @@ async def _post(client: httpx.AsyncClient, url: str, key: str, **kw) -> dict:
     raise MediaError(last or "no answer from the model server")
 
 
-def _form(model: str, prompt: str, size: str, seed: int, files: list, steps: int | None = None, lora: list | None = None) -> tuple[dict, list]:
+def _form(model: str, prompt: str, size: str | None, seed: int | None, files: list, steps: int | None = None, lora: list | None = None) -> tuple[dict, list]:
     """Edit request: multipart, the first image is the one that is edited, then the other references. Every image goes in the field `image`."""
     import json as _json
-    w, h = size.split("x")
-    data = {"model": model, "prompt": prompt, "size": size, "width": w, "height": h, "seed": str(seed), "n": "1", "response_format": "b64_json"}
-    if not prompt:                                                          # face/head swap: the server supplies the trained instruction
-        del data["prompt"]
+    data: dict = {"model": model, "n": "1", "response_format": "b64_json"}
+    if prompt:
+        data["prompt"] = prompt
+    if size:
+        w, h = size.split("x")
+        data.update({"size": size, "width": w, "height": h})
+    if seed is not None:
+        data["seed"] = str(seed)
     if steps:
         data["steps"] = str(steps)
     if isinstance(lora, str):                                               # swap LoRA: a plain name, not the JSON list

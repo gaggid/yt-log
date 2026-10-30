@@ -226,7 +226,7 @@ async def _post_job(c: httpx.AsyncClient, base: str, key: str, data: dict, files
 async def _post_image(how: str, body: dict, refs: list, base: str, key: str) -> bytes:
     async with _client(TIMEOUT_S) as c:
         if how == "edit":
-            data, files = scenes._form(body["model"], body.get("prompt", ""), body["size"], body["seed"], refs, body.get("steps"), body.get("lora"))
+            data, files = scenes._form(body["model"], body.get("prompt", ""), body.get("size"), body.get("seed"), refs, body.get("steps"), body.get("lora"))
             if isinstance(body.get("lora"), str):                           # swap: ~2 minutes, so submit as a job and poll
                 img = await _post_job(c, base, key, data, files)
             else:
