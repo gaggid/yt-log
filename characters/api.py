@@ -542,6 +542,26 @@ def _clean_lora(lora: list[dict] | None, model: str) -> list[dict] | None:
     return [{"name": x["name"], "strength": float(x.get("strength", 1.0))} for x in lora if x.get("name")]
 
 
+@router.post("/{char_id}/upload-ref")
+async def upload_ref(char_id: str, file: UploadFile):
+    """Store an external photo as a reference picture for this character's edits."""
+    import time
+    from pathlib import Path
+    _get(char_id)
+    data = await file.read()
+    if len(data) > MAX_UPLOAD:
+        raise HTTPException(413, "file too large")
+    ext = (Path(file.filename or "ref.jpg").suffix.lower() or ".jpg").lstrip(".")
+    if ext not in ("jpg", "jpeg", "png", "webp"):
+        raise HTTPException(400, "jpeg, png or webp only")
+    ref_dir = store.media_dir(char_id, "refs")
+    fname = f"ref-{int(time.time() * 1000)}.{ext}"
+    (ref_dir / fname).write_bytes(data)
+    it = media.add(char_id, "char_ref", "ref", 0, "done", {})
+    media.update(it["id"], file=f"refs/{fname}")
+    return {"id": it["id"], "url": f"/api/characters/file/{char_id}/refs/{fname}"}
+
+
 @router.post("/{char_id}/edit/preview")
 async def edit_preview(char_id: str, body: EditReq):
     """What would be sent, without sending it: the prompt, the pictures in order, the size, and the LoRAs (the prompt drawer)."""

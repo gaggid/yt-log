@@ -260,7 +260,7 @@ function wireCenter() {
 }
 
 /* ───────── edits, try-on, places, looks, matrix (C2, C3) ───────── */
-let EB = '', EX = [], CMP = [], WARD = null, PLACES = null;
+let EB = '', EX = [], CMP = [], WARD = null, PLACES = null, ED_OPEN = false;
 const allPics = () => Object.values(C.gallery).flat().filter(p => p.url);
 const picLabel = p => `${p.view === 'edit' ? (p.op || 'edit') : p.view} #${p.attempt}${C.canon[p.view] === p.id ? ' (canon)' : ''}${p.depth ? ' · chain ' + p.depth : ''}`;
 const canonBody = () => C.canon.body || C.canon.portrait || (allPics()[0] || {}).id || '';
@@ -285,8 +285,9 @@ function editCard(busy) {
       <label class="f">Dress in clothes from a picture<select id="e-garment"><option value="">— none —</option>${(WARD || []).map(g => `<option value="${g.id}">${esc(g.name)}${g.worn ? (g.flat ? ' (flat lay ready)' : ' (worn by a model)') : ''}</option>`).join('')}</select></label>
       <label class="f">Which part<select id="e-scope">${Object.entries(OPT.scopes).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</select></label>
       <button class="small" id="e-wardrobe">Wardrobe…</button></div>
-    <details class="mt-s"><summary class="small">Extra reference pictures and the full prompt (power)</summary>
-      <div class="small mt-s">Extra pictures (up to two): ${pics.filter(p => p.id !== EB).slice(-12).map(p => `<label style="margin-right:8px"><input type="checkbox" data-ex="${p.id}" ${EX.includes(p.id) ? 'checked' : ''}> ${esc(picLabel(p))}</label>`).join('') || 'none yet'}</div>
+    <details class="mt-s" ${ED_OPEN ? 'open' : ''}><summary class="small">Extra reference pictures and the full prompt (power)</summary>
+      <div class="small mt-s" id="e-ex-list">Extra pictures (up to two): ${pics.filter(p => p.id !== EB).slice(-12).map(p => `<label style="margin-right:8px"><input type="checkbox" data-ex="${p.id}" ${EX.includes(p.id) ? 'checked' : ''}> ${esc(picLabel(p))}</label>`).join('') || 'none yet'}</div>
+      <div class="small mt-s">Or upload a new reference: <input type="file" id="e-ref-file" accept="image/jpeg,image/png,image/webp" style="font-size:12px"></div>
       <label class="f mt-s">Your own full instruction (replaces the built one)<textarea id="e-prompt" style="min-height:60px"></textarea></label>
       <div id="e-preview" class="hint small mt-s" hidden></div></details>
     <div class="row mt-s"><select id="e-n" style="width:auto">${[1, 2, 4].map(k => `<option value="${k}">${k} picture${k > 1 ? 's' : ''}</option>`).join('')}</select>
@@ -336,7 +337,21 @@ async function loadLists() {
 function wireEdit() {
   const $e = id => document.getElementById(id);
   const args = () => ({base: EB, preset: $e('e-preset').value, value: $e('e-value').value, extra: EX.slice(0, 2), garment: $e('e-garment').value, scope: $e('e-scope').value, n: +$e('e-n').value, prompt: $e('e-prompt').value});
+  const det = document.querySelector('#ch-edit details');
+  if (det) det.ontoggle = () => { ED_OPEN = det.open; };
   if ($e('e-base')) $e('e-base').onchange = () => { EB = $e('e-base').value; render(); };
+  if ($e('e-ref-file')) $e('e-ref-file').onchange = async () => {
+    const f = $e('e-ref-file').files[0]; if (!f) return;
+    const fd = new FormData(); fd.append('file', f);
+    try {
+      const r = await call('/' + CID + '/upload-ref', {method: 'POST', form: fd});
+      EX = [...EX, r.id].slice(-2);
+      const box = document.getElementById('e-ex-list');
+      if (box) box.innerHTML += `<label style="margin-right:8px"><input type="checkbox" checked disabled> uploaded: ${esc(f.name)}</label>`;
+      toast('Reference uploaded');
+    } catch(e) { toast(e.message, {bad: true}); }
+    $e('e-ref-file').value = '';
+  };
   if ($e('e-rebase')) $e('e-rebase').onclick = () => { EB = canonBody(); render(); };
   document.querySelectorAll('[data-ex]').forEach(x => x.onchange = () => { EX = x.checked ? [...EX, x.dataset.ex].slice(-2) : EX.filter(i => i !== x.dataset.ex); });
   if ($e('e-recipe')) $e('e-recipe').onchange = () => { const r = C.recipes[+$e('e-recipe').value]; if (r) { $e('e-preset').value = r.preset; $e('e-value').value = r.value; } };
