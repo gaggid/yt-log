@@ -152,7 +152,7 @@ def test_a_voice_that_runs_long_makes_the_checks_ask_for_more_shots(gw):
 
 @needs_ffmpeg
 def test_quick_pipeline_end_to_end(gw):
-    short = planned("quick")
+    short = planned("quick", image_mode="wan")
     sid = short["id"]
     run(svoice.make(sid, s=S, key="k"))
     assert not svoice.missing(store.get(sid))
@@ -172,7 +172,7 @@ def test_quick_pipeline_end_to_end(gw):
 
 @needs_ffmpeg
 def test_keyframe_pipeline_makes_stills_first_then_animates_each(gw, env):
-    short = planned("keyframe")
+    short = planned("keyframe", image_mode="wan")
     sid = short["id"]
     run(svoice.make(sid, s=S, key="k"))
     mine = env / "mine.png"
@@ -196,8 +196,50 @@ def test_keyframe_pipeline_makes_stills_first_then_animates_each(gw, env):
     assert abs(frames.info(store.media_dir(sid) / final["file"])["duration_s"] - 30.0) < 0.2
 
 
+@needs_ffmpeg
+@pytest.mark.parametrize("pipeline", ["keyframe", "quick"])
+def test_the_image_model_draws_the_start_pictures_then_wan_animates_them(gw, env, pipeline):
+    short = planned(pipeline)
+    sid = short["id"]
+    assert short["settings"]["image_mode"] == "qwen" and all(sh["still"] for sh in short["shots"]) and P.keyframes_on(short)
+    run(svoice.make(sid, s=S, key="k"))
+    n = len(short["shots"])
+    assert run(clips.make_clips(sid, s=S, key="k"))["skipped"], "clips wait for the start pictures"
+    kf = run(clips.make_keyframes(sid, s=S, key="k"))
+    assert kf["made"] == n and not kf["failed"] and len(gw.images) == n
+    assert not [r for r in gw.requests if r["model"] == models.T2V], "Wan is not asked for pictures"
+    assert all(r["model"] == "qwen-image-2.1" and r["size"] == "720x1280" and "A courier stands over a dropped wallet" in r["prompt"] and "No text" in r["prompt"] for r in gw.images)
+    assert "yellow delivery jacket" in gw.images[0]["prompt"] and "yellow delivery jacket" not in gw.images[1]["prompt"], "the character block is only in the shots that show them"
+    rows = clips.shot_rows(store.get(sid))
+    assert all(r["keyframe"] and r["keyframes"][0]["url"] for r in rows)
+    res = run(clips.make_clips(sid, s=S, key="k"))
+    assert res["made"] == n
+    video = [r for r in gw.requests if r["model"] == (models.I2V if pipeline == "keyframe" else models.TI2V)]
+    assert len(video) == n and all(r["image"].startswith("data:image/jpeg") for r in video)
+    # editing a still prompt makes that picture (and its clip) old; redoing it keeps the old attempt
+    short = store.get(sid)
+    short["shots"][0]["still"] += " Heavy rain."
+    store.save(short)
+    short = store.get(sid)
+    assert not clips.chosen_keyframe(short, short["shots"][0]) and not clips.chosen_clip(short, short["shots"][0])
+    run(clips.make_keyframes(sid, ["s1"], s=S, key="k"))
+    assert len(gw.images) == n + 1 and len(media.items(sid, store.KEY, "s1")) == 2 and clips.chosen_keyframe(store.get(sid), store.get(sid)["shots"][0])
+
+
+def test_a_picture_of_the_users_wins_over_the_image_model(gw, env):
+    short = planned("keyframe")
+    sid = short["id"]
+    short["images"]["shots"]["s1"] = "upload/mine.png"
+    (store.media_dir(sid, "upload") / "mine.png").write_bytes(png_bytes())
+    store.save(short)
+    short = store.get(sid)
+    assert P.start_source(short, short["shots"][0]) == "upload" and P.start_source(short, short["shots"][1]) == "qwen"
+    run(clips.make_keyframes(sid, s=S, key="k"))
+    assert len(gw.images) == len(short["shots"]) - 1
+
+
 def test_changing_a_prompt_makes_its_clip_old(gw):
-    short = planned("quick")
+    short = planned("quick", image_mode="wan")
     sid = short["id"]
     run(svoice.make(sid, s=S, key="k"))
     run(clips.make_clips(sid, ["s1"], s=S, key="k"))
@@ -211,7 +253,7 @@ def test_changing_a_prompt_makes_its_clip_old(gw):
 
 
 def test_a_running_attempt_is_picked_up_again_after_a_restart(gw):
-    short = planned("quick")
+    short = planned("quick", image_mode="wan")
     sid = short["id"]
     run(svoice.make(sid, s=S, key="k"))
     run(clips.make_clips(sid, ["s1"], s=S, key="k"))
@@ -335,7 +377,7 @@ def test_api_auto_run_stops_at_the_keyframe_checkpoint(client):
     sid = client.post("/api/shorts", json={"pipeline": "keyframe", "kind": "idea", "text": "A courier finds a wallet with a lakh rupees."}).json()["id"]
     assert client.post(f"/api/shorts/{sid}/auto").status_code == 200
     j = wait_job(client, sid, 120)
-    assert j["state"] == "done" and "Look at the keyframes" in j["note"], j
+    assert j["state"] == "done" and "Look at the start pictures" in j["note"], j
     st = client.get(f"/api/shorts/{sid}").json()
     assert st["auto"]["next"] == "review" and all(s["keyframe"] for s in st["shots"])
     assert not any(r["model"] == models.I2V for r in client.gw.requests), "nothing is animated before the keyframes are confirmed"

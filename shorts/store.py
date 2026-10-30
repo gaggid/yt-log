@@ -16,7 +16,8 @@ COLUMNS = ("id", "title", "pipeline", "status", "created_at", "updated_at")
 KEY, CLIP, VOICE, FINAL = "short_key", "short_clip", "short_voice", "short_final"
 
 DEFAULT_SETTINGS = {
-    "image_mode": "wan",              # wan (Wan decides) | anchor (one picture of the main character) | per_shot (a picture per shot, missing ones made by Wan)
+    "image_mode": "qwen",             # qwen (the image model draws every start picture) | anchor (the user's picture of the main character, the rest drawn) | per_shot (the user's picture for chosen shots, the rest drawn) | wan (no start pictures: Wan decides)
+    "image_model": "qwen-image-2.1",  # the gateway's image model that draws the start pictures
     "size": "480x832",
     "steps": None,                    # None = the model's final-quality default (shorts/pipelines.py)
     "chain": True,                    # quick pipeline: a shot marked "continues" starts from the last frame of the one before

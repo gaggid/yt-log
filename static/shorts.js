@@ -71,7 +71,7 @@ window.newShort = newShort;
 window.viewShort = async function (id) {
   SID = id; S = null; myRoute = route_id;
   $('#app').innerHTML = `<div class="card pad"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>`;
-  if (!window._shVoices) { try { const o = await api('/shorts/options'); window._shVoices = o.voices; window._shTags = o.tags; } catch { /* the voice list stays empty; the settings show the current voice */ } }
+  if (!window._shVoices) { try { const o = await api('/shorts/options'); window._shVoices = o.voices; window._shTags = o.tags; window._shOpts = o; } catch { /* the voice list stays empty; the settings show the current voice */ } }
   await refresh(true);
 };
 
@@ -136,14 +136,15 @@ function sideView() {
   const s = S, st = s.settings, remix = s.pipeline === 'remix';
   const v = window._shOpts || {};
   return `<div class="card pad"><h2>Settings</h2>
-    ${remix ? '' : `<label class="f">Pictures<select id="st-mode"><option value="wan" ${st.image_mode === 'wan' ? 'selected' : ''}>Wan decides every picture</option><option value="anchor" ${st.image_mode === 'anchor' ? 'selected' : ''}>My picture of the main character</option><option value="per_shot" ${st.image_mode === 'per_shot' ? 'selected' : ''}>A picture for chosen shots</option></select></label>
+    ${remix ? '' : `<label class="f">Start pictures<select id="st-mode">${[['qwen', 'The image model draws a picture for every shot'], ['anchor', 'My picture of the main character, the rest drawn'], ['per_shot', 'My pictures for chosen shots, the rest drawn'], ['wan', 'No pictures: Wan decides (fast, rougher)']].map(([k, t]) => `<option value="${k}" ${st.image_mode === k ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+    ${st.image_mode === 'wan' ? '' : `<label class="f mt-s">Image model<select id="st-imodel">${(v.image_models || [{id: st.image_model, label: st.image_model}]).map(m => `<option value="${esc(m.id)}" ${st.image_model === m.id ? 'selected' : ''}>${esc(m.label)}${m.licence === 'restricted' ? ' (licence restricted)' : ''}</option>`).join('')}</select></label>`}
     <div class="mt-s small">${s.images.anchor ? `<img src="/api/shorts/file/${s.id}/${esc(s.images.anchor)}" style="width:70px;border-radius:6px;vertical-align:middle"> <button class="small" id="st-anchor">Change</button> <button class="small bad" id="st-anchor-x">Remove</button>` : `<button class="small" id="st-anchor">Upload the main character's picture</button>`}</div>
     <label class="f mt-s">Describe that character in a line (used in the shots that show them)<textarea id="st-char" style="min-height:48px">${esc(st.character_text || '')}</textarea></label>
     <label class="f mt-s">Tone (optional)<input id="st-tone" value="${esc(st.tone || '')}" placeholder="funny, tense, warm..."></label>`}
     <label class="f mt-s">Voice<select id="st-voice">${voiceOptions(st.voice)}</select></label>
     ${s.pipeline === 'quick' ? `<label class="f mt-s">Picture size<select id="st-size"><option value="480x832" ${st.size === '480x832' ? 'selected' : ''}>480x832 (about 20 min)</option><option value="704x1280" ${st.size === '704x1280' ? 'selected' : ''}>704x1280 sharper (about an hour)</option></select></label>
       <label class="row mt-s"><input type="checkbox" id="st-chain" ${st.chain ? 'checked' : ''}> A shot marked "continues" starts from the last frame of the one before</label>` : ''}
-    ${s.pipeline === 'keyframe' ? `<label class="row mt-s"><input type="checkbox" id="st-review" ${st.review_keyframes ? 'checked' : ''}> Stop to look at the keyframes before animating</label>` : ''}
+    ${s.keyframes_on ? `<label class="row mt-s"><input type="checkbox" id="st-review" ${st.review_keyframes ? 'checked' : ''}> Stop to look at the start pictures before animating</label>` : ''}
     <label class="row mt-s"><input type="checkbox" id="st-cap" ${st.captions ? 'checked' : ''}> Burn captions into the video</label>
     <label class="row mt-s"><input type="checkbox" id="st-bed" ${st.bed ? 'checked' : ''}> Quiet sound bed under the voice</label>
     <div class="row mt-s"><label class="f">Steps (empty = full quality)<input type="number" id="st-steps" value="${st.steps || ''}" min="1" max="100"></label><label class="f">Seed<input type="number" id="st-seed" value="${st.seed}"></label></div>
@@ -167,7 +168,7 @@ function planView() {
       <div class="grid g2 mt-s"><label class="f">The main character<textarea data-plan="character" style="min-height:60px">${esc(p.character || '')}</textarea></label>
       <label class="f">The main place<textarea data-plan="place" style="min-height:60px">${esc(p.place || '')}</textarea></label></div>
       <label class="f mt-s">The look (added to every shot)<input data-plan="look" value="${esc(p.look || '')}"></label>` : `<p class="mute">The model writes a hook, four to six beats of Hinglish narration and the shots. It takes a minute or two.</p>`}</div>
-    ${has ? checksView() + (s.pipeline === 'keyframe' ? keyframesView() : '') + beatsView() : ''}`;
+    ${has ? checksView() + (s.keyframes_on ? keyframesView() : '') + beatsView() : ''}`;
 }
 
 function checksView() {
@@ -183,12 +184,13 @@ function checksView() {
 function keyframesView() {
   const s = S;
   const done = s.shots.filter(x => x.keyframe).length;
-  return `<div class="card pad mt"><div class="row"><h2 style="margin:0">Keyframes</h2><span class="mute small">${done} of ${s.shots.length}</span><span class="sp"></span>
-    <button class="small" id="b-keys">${done ? 'Make the missing ones' : 'Make the keyframes'}</button>
-    <button class="small ${s.keyframes_confirmed ? '' : 'primary'}" id="b-keys-ok">${s.keyframes_confirmed ? 'Confirmed ✓ (undo)' : 'Keyframes are good'}</button></div>
-    <p class="mute small">One still per shot. Your own pictures are used as they are; the rest are made by Wan. Look at them now: animating is the long wait.</p>
+  return `<div class="card pad mt"><div class="row"><h2 style="margin:0">Start pictures (storyboard)</h2><span class="mute small">${done} of ${s.shots.length}</span><span class="sp"></span>
+    <button class="small" id="b-keys">${done ? 'Make the missing ones' : 'Draw the start pictures'}</button>
+    <button class="small ${s.keyframes_confirmed ? '' : 'primary'}" id="b-keys-ok">${s.keyframes_confirmed ? 'Confirmed ✓ (undo)' : 'Pictures are good'}</button></div>
+    <p class="mute small">One picture per shot, drawn from the picture prompt under it (edit the prompt, then press Again). Your own pictures are used as they are. Look at them now: animating is the long wait.</p>
     <div class="sh-keys">${s.shots.map(x => { const k = x.keyframes.find(y => y.id === x.keyframe) || x.keyframes.filter(y => y.status === 'done').pop();
       return `<div class="sh-key"><div class="mute">${esc(x.id)} · ${x.seconds}s · ${esc(x.begins)}</div>${k && k.url ? `<img src="${esc(k.url)}" loading="lazy">` : `<div class="sh-thumb" style="width:100%">${x.keyframes.some(y => y.status === 'failed') ? 'failed' : 'not made'}</div>`}
+        <textarea data-still="${x.id}" style="min-height:70px;font-size:12px;width:100%" ${x.begins === 'upload' || x.begins === 'anchor' ? 'disabled title="This shot uses your own picture"' : ''}>${esc(x.still || x.prompt)}</textarea>
         <div class="row" style="margin-top:4px"><button class="small" data-key="${x.id}">Again</button><button class="small" data-up="${x.id}">My picture</button></div></div>`; }).join('')}</div></div>`;
 }
 
@@ -269,7 +271,7 @@ function wire() {
   const q = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)];
   const on = (sel, fn) => { const e = q(sel); if (e) e.onclick = () => fn(e); };
   const st = (id, key, conv = v => v) => { const e = q(id); if (e) e.onchange = () => patch('/settings', {[key]: conv(e.type === 'checkbox' ? e.checked : e.value)}); };
-  st('#st-mode', 'image_mode'); st('#st-char', 'character_text'); st('#st-tone', 'tone'); st('#st-size', 'size'); st('#st-chain', 'chain'); st('#st-review', 'review_keyframes');
+  st('#st-mode', 'image_mode'); st('#st-imodel', 'image_model'); st('#st-char', 'character_text'); st('#st-tone', 'tone'); st('#st-size', 'size'); st('#st-chain', 'chain'); st('#st-review', 'review_keyframes');
   st('#st-cap', 'captions'); st('#st-bed', 'bed'); st('#st-steps', 'steps', v => v === '' ? null : +v); st('#st-seed', 'seed', v => +v || 0);
   const vs = q('#st-voice'); if (vs) vs.onchange = () => { const [engine, voice] = vs.value.split('|'); patch('/settings', {voice: {engine, voice}}); };
   on('#st-anchor', () => pick('image/*', f => upload('/images/anchor', f))); on('#st-anchor2', () => pick('image/*', f => upload('/images/anchor', f)));
@@ -285,6 +287,7 @@ function wire() {
   all('[data-tag]').forEach(e => e.onchange = () => { const ta = q(`[data-beat="${e.dataset.tag}"]`); patch('/narration', {beats: [{id: e.dataset.tag, sentences: ta.value.split('\n'), tag: e.value}]}); });
   all('[data-voice]').forEach(e => e.onclick = () => post(e, '/voice', {beat_ids: [e.dataset.voice], only_missing: false}, 'Making the voice'));
   all('[data-shot]').forEach(e => e.onchange = () => patch('/shots/' + e.dataset.shot, {prompt: e.value}));
+  all('[data-still]').forEach(e => e.onchange = () => patch('/shots/' + e.dataset.still, {still: e.value}));
   all('[data-shot-cam]').forEach(e => e.onchange = () => patch('/shots/' + e.dataset.shotCam, {camera: e.value}));
   all('[data-shot-flag]').forEach(e => e.onchange = () => patch('/shots/' + e.dataset.id, {[e.dataset.shotFlag]: e.checked}));
   all('[data-clip]').forEach(e => e.onclick = () => post(e, '/clips', {shot_ids: [e.dataset.clip], only_missing: false}, 'Making the clip'));
@@ -304,6 +307,6 @@ function wire() {
 
 /* option lists (voices, tags) */
 (async () => {
-  try { const o = await api('/shorts/options'); window._shVoices = o.voices; window._shTags = o.tags; } catch { /* the screen works without; the voice list fills in on the next load */ }
+  try { const o = await api('/shorts/options'); window._shVoices = o.voices; window._shTags = o.tags; window._shOpts = o; } catch { /* the screen works without; the voice list fills in on the next load */ }
 })();
 })();

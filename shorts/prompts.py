@@ -27,11 +27,12 @@ THE LOOK (used to write every shot, so make it concrete)
 SHOTS = """[TASK:p4_shots]
 You plan the shots of one beat of a 30-second vertical video made by an AI video model (Wan 2.2). The cut is FAST: every shot is on screen for under three seconds, so each shot is ONE simple action and ONE camera move.
 
-Return ONLY a JSON object: {"shots": [{"prompt": "...", "camera": "...", "character": false, "continues": false, "setting": ""}]}
+Return ONLY a JSON object: {"shots": [{"prompt": "...", "still": "...", "camera": "...", "character": false, "continues": false, "setting": ""}]}
 Write EXACTLY {count} shots, in order.
 
 A SHOT PROMPT is English, 35 to 70 words, present tense, in this order: the subject, the one visible action, the place and time of day, the light, the mood. Rules:
 - Describe only what the camera sees. One action, slow to medium speed. No crowds, no fast complicated motion, no cuts inside the shot.
+- "still" is the FIRST FRAME of the shot as a single photograph, English, 30 to 55 words, nothing moving: who or what is in the frame, where they stand, the pose, the framing (close-up, wide...), the light and the colours, the mood. It is drawn by an image model and shown to the producer before any video is made, so it must be concrete and complete on its own. Do not describe the person when "character" is true (the description is added for you); do not describe motion.
 - No readable text anywhere: no signs, screens with words, newspapers, logos, subtitles. Write "a blank sign" if a sign is needed.
 - "camera" is one move from: static, slow push in, slow pull back, pan left, pan right, tilt up, tilt down, low angle, over the shoulder, close-up, wide, handheld. Vary it from shot to shot.
 - "character": true when the shot shows the main person. Then do NOT describe the person in the prompt; the exact description is added for you. Show the person from the front or side so the face can be seen, in at most {max_character} shots of the whole short.

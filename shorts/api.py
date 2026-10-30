@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from story import db, llm, settings as settings_mod
 from story.pipeline import manager
-from story2 import intake, jobs, maya, voices
+from story2 import intake, jobs, maya, providers, voices
 from story3 import store as media
 from story3.voice import MediaError
 
@@ -20,7 +20,7 @@ from . import auto, checks, clips, frames, models, pipelines as P, planner, remi
 router = APIRouter(prefix="/api/shorts")
 MAX_UPLOAD = 12 * 1024 * 1024
 MAX_VIDEO_UPLOAD = 400 * 1024 * 1024
-IMAGE_MODES = ("wan", "anchor", "per_shot")
+IMAGE_MODES = ("qwen", "anchor", "per_shot", "wan")
 SIZES = (models.SIZE_PORTRAIT, models.SIZE_SHARP)
 
 
@@ -60,12 +60,13 @@ async def options():
     s = settings_mod.get()
     listed = await wan.models(s["base_url"], settings_mod.api_key())
     ids = {m.get("id") for m in listed}
+    await asyncio.to_thread(providers.refresh, s, settings_mod.api_key())
     pipes = {}
     for k, p in P.PIPELINES.items():
         have = [m in ids for m in p["models"]] if listed else []
         pipes[k] = {"label": p["label"], "about": p["about"], "models": p["models"], "available": (all(have) if listed else None),
                     "missing": [m for m, h in zip(p["models"], have) if not h] if listed else []}
-    return {"pipelines": pipes, "voices": voices.public(), "image_modes": IMAGE_MODES, "sizes": SIZES, "gateway_video_models": sorted(i for i in ids if i), "tags": list(maya.STYLE_TAGS),
+    return {"pipelines": pipes, "voices": voices.public(), "image_modes": IMAGE_MODES, "image_models": [{"id": k, "label": v["label"], "default": v["default"], "licence": v["licence"]["status"]} for k, v in providers.PROVIDERS.items()], "sizes": SIZES, "gateway_video_models": sorted(i for i in ids if i), "tags": list(maya.STYLE_TAGS),
             "limits": {"target_s": models.TARGET_S, "max_shot_s": models.MAX_SHOT_S}}
 
 
@@ -153,7 +154,7 @@ async def state(short_id: str):
     real = svoice.real_seconds(short)
     tl = timeline.build(short, real) if short["shots"] else None
     out = {"id": short["id"], "title": short["title"], "pipeline": short["pipeline"], "pipeline_label": P.pipeline(short)["label"], "status": short["status"], "source": short["source"],
-           "settings": short["settings"], "plan": short["plan"], "beats": short["beats"], "images": short["images"], "keyframes_confirmed": short.get("keyframes_confirmed", False),
+           "settings": short["settings"], "plan": short["plan"], "beats": short["beats"], "images": short["images"], "keyframes_confirmed": short.get("keyframes_confirmed", False), "keyframes_on": P.keyframes_on(short),
            "job": jobs.status(short_id), "estimate_s": P.estimate_s(short) if (short["shots"] or short["pipeline"] == "remix") else 0,
            "voice": svoice.state(short), "auto": auto.state(short), "final": stitch.final_state(short_id)}
     if short["pipeline"] == "remix":
@@ -173,6 +174,7 @@ async def state(short_id: str):
 
 class SettingsReq(BaseModel):
     image_mode: str | None = None
+    image_model: str | None = None
     size: str | None = None
     steps: int | None = None
     chain: bool | None = None
@@ -191,6 +193,8 @@ async def patch_settings(short_id: str, body: SettingsReq):
     patch = body.model_dump(exclude_unset=True)
     if "image_mode" in patch and patch["image_mode"] not in IMAGE_MODES:
         raise HTTPException(400, f"image_mode is one of: {', '.join(IMAGE_MODES)}")
+    if "image_model" in patch and patch["image_model"] not in providers.PROVIDERS:
+        raise HTTPException(400, f"image_model is one of: {', '.join(providers.PROVIDERS)}")
     if "size" in patch and patch["size"] not in SIZES:
         raise HTTPException(400, f"size is one of: {', '.join(SIZES)}")
     if "size" in patch and short["pipeline"] != "quick":
@@ -260,6 +264,7 @@ async def patch_narration(short_id: str, body: NarrationReq):
 class ShotPatch(BaseModel):
     prompt: str | None = None
     camera: str | None = None
+    still: str | None = None
     character: bool | None = None
     continues: bool | None = None
     setting: str | None = None
@@ -297,7 +302,7 @@ async def _save_image(short_id: str, file: UploadFile, name: str) -> str:
 async def upload_anchor(short_id: str, file: UploadFile = File(...)):
     short = _get(short_id)
     short["images"]["anchor"] = await _save_image(short_id, file, "anchor")
-    if short["settings"]["image_mode"] == "wan":
+    if short["settings"]["image_mode"] in ("wan", "qwen"):
         short["settings"]["image_mode"] = "anchor"
     store.save(short)
     return await state(short_id)
@@ -308,7 +313,7 @@ async def delete_anchor(short_id: str):
     short = _get(short_id)
     short["images"]["anchor"] = ""
     if short["settings"]["image_mode"] == "anchor":
-        short["settings"]["image_mode"] = "wan"
+        short["settings"]["image_mode"] = "qwen"
     store.save(short)
     return await state(short_id)
 
@@ -318,7 +323,7 @@ async def upload_shot_image(short_id: str, shot_id: str, file: UploadFile = File
     short = _get(short_id)
     _guard(store.shot_by_id, short, shot_id)
     short["images"]["shots"][shot_id] = await _save_image(short_id, file, shot_id)
-    if short["settings"]["image_mode"] == "wan":
+    if short["settings"]["image_mode"] in ("wan", "qwen"):
         short["settings"]["image_mode"] = "per_shot"
     store.save(short)
     return await state(short_id)
@@ -383,8 +388,8 @@ class ShotsReq(BaseModel):
 @router.post("/{short_id}/keyframes")
 async def make_keyframes(short_id: str, body: ShotsReq | None = None):
     body = body or ShotsReq()
-    if _get(short_id)["pipeline"] != "keyframe":
-        raise HTTPException(400, "only the keyframe pipeline has keyframes")
+    if not P.keyframes_on(_get(short_id)):
+        raise HTTPException(400, "this short has no start pictures (Wan decides every picture)")
     return _start(short_id, "short_keyframes", lambda progress: clips.make_keyframes(short_id, body.shot_ids, body.only_missing, progress))
 
 

@@ -1,6 +1,7 @@
 """Stand-ins for the Shorts tests: a video gateway (httpx mock transport), a chat model that answers the two Shorts tasks, a voice that speaks a tone of the right length, and tiny
 real MP4 files made by ffmpeg."""
 import io
+import base64
 import json
 import math
 import re
@@ -58,6 +59,7 @@ class VideoGateway:
         self.tmp, self.requests, self.jobs, self.fail_first, self.under_api, self.listed = tmp, [], {}, fail_first, video_under_api, listed
         self.cache: dict[tuple, bytes] = {}
         self.status_code = 202
+        self.images: list[dict] = []                    # the picture requests (POST /images/generations)
 
     def mp4(self, frames: int, fps: int) -> bytes:
         k = (frames, fps)
@@ -69,6 +71,11 @@ class VideoGateway:
         path = req.url.path
         if req.method == "GET" and path.endswith("/models"):
             return httpx.Response(200, json={"data": [{"id": m, "type": "video"} for m in self.listed] + [{"id": "gemma", "type": "chat"}]})
+        if req.method == "POST" and path.endswith("/images/generations"):
+            body = json.loads(req.content)
+            self.images.append(body)
+            w, h = (int(v) for v in body["size"].split("x"))
+            return httpx.Response(200, json={"data": [{"b64_json": base64.b64encode(png_bytes(w // 8, h // 8)).decode()}]})
         if req.method == "POST" and path.endswith("/video/generations"):
             body = json.loads(req.content)
             if self.fail_first > 0:
@@ -110,6 +117,8 @@ class VideoGateway:
         transport = httpx.MockTransport(self.handler)
         monkeypatch.setattr(wan, "_client", lambda timeout: REAL_CLIENT(transport=transport, timeout=timeout))
         monkeypatch.setattr(wan, "POLL_S", 0)
+        from shorts import stills
+        monkeypatch.setattr(stills, "_client", lambda timeout: REAL_CLIENT(transport=transport, timeout=timeout))
         return self
 
 
@@ -133,7 +142,7 @@ class FakeChat:
                     "place": "A rainy city street at night with orange streetlights.", "look": "cinematic, shallow depth of field, handheld", "beats": beats}
         elif task == "p4_shots":
             n = int(re.search(r"EXACTLY (\d+) shots", system).group(1)) + self.extra_shots
-            body = {"shots": [{"prompt": f"The courier stops and looks down at a wallet on the wet road, shot {i + 1}.", "camera": ["slow push in", "static", "pan left", "close-up"][i % 4], "character": i % 2 == 0,
+            body = {"shots": [{"prompt": f"The courier stops and looks down at a wallet on the wet road, shot {i + 1}.", "still": f"A courier stands over a dropped wallet on a wet road at night, orange light, frame {i + 1}.", "camera": ["slow push in", "static", "pan left", "close-up"][i % 4], "character": i % 2 == 0,
                                "continues": i % 3 == 1, "setting": ""} for i in range(n)]}
         else:
             raise AssertionError("unexpected task " + task)

@@ -1,11 +1,11 @@
 """Auto-run: every unfinished step of a short, in order, as one background job. It stops at the first thing it cannot settle (a failed check, a failed clip, a missing input, the keyframe
 checkpoint of the keyframe pipeline) and says which; everything finished is kept, and pressing it again resumes. `steps()` is also what the screen's "Next:" bar reads.
 
-Order, quick and keyframe: plan, voice, fit the shots to the voice, [keyframes, look at them], clips, put together.
+Order, quick and keyframe: plan, voice, fit the shots to the voice, [start pictures, look at them], clips, put together.
 Order, remix: (link, window and the rights boxes are done by hand) voice-over, animate, put together."""
 from story3 import store as media
 
-from . import checks, clips, planner, remix, stitch, store, voice as svoice
+from . import checks, clips, pipelines as P, planner, remix, stitch, store, voice as svoice
 
 
 def changed_since(short: dict, final: dict) -> bool:
@@ -37,9 +37,9 @@ def steps(short: dict) -> list[dict]:
     add("voice", "Make the voice", short["beats"] and not svoice.missing(short))
     tl_ok = bool(short["shots"]) and not [p for p in checks.run(short)["issues"] if p["code"] == "shot_too_long"]
     add("fit", "Fit the shots to the voice", tl_ok and short["beats"] and not svoice.missing(short))
-    if short["pipeline"] == "keyframe":
-        add("keyframes", "Make the keyframes", short["shots"] and all(clips.chosen_keyframe(short, sh) for sh in short["shots"]))
-        add("review", "Look at the keyframes", short.get("keyframes_confirmed") or not short["settings"].get("review_keyframes", True), optional=not short["settings"].get("review_keyframes", True))
+    if P.keyframes_on(short):
+        add("keyframes", "Make the start pictures", short["shots"] and all(clips.chosen_keyframe(short, sh) for sh in short["shots"]))
+        add("review", "Look at the start pictures", short.get("keyframes_confirmed") or not short["settings"].get("review_keyframes", True), optional=not short["settings"].get("review_keyframes", True))
     add("clips", "Make the clips", short["shots"] and all(clips.chosen_clip(short, sh) for sh in short["shots"]))
     add("final", "Put the short together", short.get("status") == "made" and _final_ok(short))
     return out
@@ -91,15 +91,15 @@ async def run(short_id: str, backend, s: dict, progress, key: str = "") -> str:
     if not chk["ok"]:
         first = next(i for i in chk["issues"] if i["level"] == "block")
         return f"Stopped at the checks: {first['text']}"
-    if short["pipeline"] == "keyframe":
+    if P.keyframes_on(short):
         if not all(clips.chosen_keyframe(short, sh) for sh in short["shots"]):
             res = await clips.make_keyframes(short_id, progress=sub("keyframes"), s=s, key=key)
-            did.append(f"keyframes ({res['made']} made)")
+            did.append(f"start pictures ({res['made']} made)")
             if res["failed"]:
-                return f"Stopped at the keyframes: shot {res['failed'][0]['shot']}: {res['failed'][0]['error']}"
+                return f"Stopped at the start pictures: shot {res['failed'][0]['shot']}: {res['failed'][0]['error']}"
             short = store.get(short_id)
         if short["settings"].get("review_keyframes", True) and not short.get("keyframes_confirmed"):
-            return "Done so far: " + ", ".join(did or ["nothing new"]) + ". Look at the keyframes, replace any you do not like, press 'Keyframes are good', then press Auto-run again."
+            return "Done so far: " + ", ".join(did or ["nothing new"]) + ". Look at the start pictures, redo or replace any you do not like, press 'Pictures are good', then press Auto-run again."
     if not all(clips.chosen_clip(short, sh) for sh in short["shots"]):
         res = await clips.make_clips(short_id, progress=sub("clips"), s=s, key=key)
         did.append(f"clips ({res['made']} made)")

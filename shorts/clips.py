@@ -8,7 +8,7 @@ from story import settings as settings_mod
 from story3 import store as media
 from story3.voice import MediaError
 
-from . import frames, models, pipelines as P, store, wan
+from . import frames, models, pipelines as P, stills, store, wan
 
 
 def _fingerprint(path) -> str:
@@ -28,6 +28,8 @@ def keyframe_plan(short: dict, shot: dict) -> dict:
         rel = short["images"]["shots"].get(shot["id"]) if src == "upload" else short["images"].get("anchor")
         path = store.image_path(short, rel)
         return {"source": src, "path": path, "hash": store.input_hash(src, _fingerprint(path))}
+    if src == "qwen":
+        return {"source": "qwen", "path": None, "hash": P.req_hash(stills.request(short, shot, 1))}
     return {"source": "wan", "path": None, "hash": P.req_hash(P.keyframe_request(short, shot, 1))}
 
 
@@ -38,13 +40,14 @@ def chosen_keyframe(short: dict, shot: dict) -> dict | None:
 def clip_plan(short: dict, shot: dict) -> dict | None:
     """What the clip of a shot is made from: its request builder, its input hash and the picture it needs. None when the picture it needs does not exist yet."""
     size = short["settings"].get("size") or models.SIZE_PORTRAIT
-    if short["pipeline"] == "keyframe":
+    if P.keyframes_on(short):
         kf = chosen_keyframe(short, shot)
         if not kf:
             return None
         token = f"key:{kf['id']}"
-        build = lambda attempt, image: P.animate_request(short, shot, attempt, image)            # noqa: E731
-        load = lambda: wan.data_url(media.path_of(kf).read_bytes(), "image/jpeg")                # noqa: E731
+        make = P.animate_request if short["pipeline"] == "keyframe" else P.quick_request
+        build = lambda attempt, image: make(short, shot, attempt, image)                         # noqa: E731
+        load = lambda: _jpeg_url(media.path_of(kf).read_bytes(), size if short["pipeline"] == "quick" else models.SIZE_PORTRAIT)   # noqa: E731
         return {"token": token, "hash": P.req_hash(P.animate_request(short, shot, 1, token)), "build": build, "load": load, "source": "keyframe"}
     src = P.start_source(short, shot)
     if src in ("upload", "anchor"):
@@ -121,7 +124,7 @@ def _ctx(s: dict | None, key: str) -> tuple[str, str]:
 
 
 async def make_keyframes(short_id: str, shot_ids: list[str] | None = None, only_missing: bool = True, progress=None, s: dict | None = None, key: str = "") -> dict:
-    """A still for every shot of a keyframe short. The user's pictures are used as they are (cropped to 9:16); the rest are made by Wan."""
+    """A start picture for every shot. The user's pictures are used as they are (cropped to 9:16); the rest are drawn by the image model (or, with image mode "wan", made by Wan)."""
     base, api_key = _ctx(s, key)
     short = store.get(short_id)
     todo = [sh for sh in short["shots"] if (not shot_ids or sh["id"] in shot_ids) and (not only_missing or not chosen_keyframe(short, sh))]
@@ -131,7 +134,22 @@ async def make_keyframes(short_id: str, shot_ids: list[str] | None = None, only_
             progress(i, len(todo), f"keyframe {i + 1} of {len(todo)}")
         plan = keyframe_plan(short, sh)
         try:
-            if plan["source"] != "wan":
+            if plan["source"] == "qwen":
+                attempt = len(media.items(short_id, store.KEY, sh["id"])) + 1
+                body = stills.request(short, sh, attempt)
+                it = media.add(short_id, store.KEY, sh["id"], 0, "running", {"input_hash": plan["hash"], "source": "qwen", "seed": body["seed"], "model": body["model"], "prompt": body["prompt"][:900]})
+                t0 = time.time()
+                try:
+                    data = await stills.draw(body, base, api_key)
+                    (store.media_dir(short_id, "key") / f"{sh['id']}-a{it['attempt']}.jpg").write_bytes(frames.crop_916(data, stills.SIZE))
+                except asyncio.CancelledError:
+                    media.update(it["id"], status="failed", meta={"error": "stopped before it finished"})
+                    raise
+                except Exception as e:
+                    media.update(it["id"], status="failed", meta={"error": str(e)[:300], "seconds_taken": round(time.time() - t0, 1)})
+                    raise
+                media.update(it["id"], status="done", file=f"key/{sh['id']}-a{it['attempt']}.jpg", meta={"seconds_taken": round(time.time() - t0, 1)})
+            elif plan["source"] != "wan":
                 it = media.add(short_id, store.KEY, sh["id"], 0, "running", {"input_hash": plan["hash"], "source": plan["source"]})
                 (store.media_dir(short_id, "key") / f"{sh['id']}-a{it['attempt']}.jpg").write_bytes(frames.crop_916(plan["path"].read_bytes(), models.SIZE_PORTRAIT))
                 media.update(it["id"], status="done", file=f"key/{sh['id']}-a{it['attempt']}.jpg")
@@ -203,7 +221,7 @@ def _view(short_id: str, it: dict) -> dict:
 def shot_rows(short: dict) -> list[dict]:
     rows = []
     for sh in short["shots"]:
-        kp = keyframe_plan(short, sh) if short["pipeline"] == "keyframe" else None
+        kp = keyframe_plan(short, sh) if P.keyframes_on(short) else None
         cp = clip_plan(short, sh)
         keys = media.items(short["id"], store.KEY, sh["id"])
         clips = media.items(short["id"], store.CLIP, sh["id"])

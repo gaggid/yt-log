@@ -2,6 +2,8 @@
 
 Written 2026-10-29, revised the same day after the owner's answers (section 2). Status: S1 to S7 built on 2026-10-29 and tested on a fake gateway (`tests/test_shorts.py`); S0 (`python -m shorts.probe`) and the first real run are for the owner. Pipelines B and D, the vision check and the 704x1280 test on the 14B models are not built. Source of the model facts: https://llm.tripfick.com/docs (Wan 2.2 section). Numbers marked "docs" are from there; "estimate" are ours and must be measured in task S0.
 
+> **Update 2026-10-30 (owner decision): start pictures come from the image model, not from Wan.** Image mode `qwen` is the default. The shot list carries a `still` prompt per shot (first frame as a photograph); `shorts/stills.py` draws it with Qwen Image (`/images/generations`, 720x1280, model selectable from the gateway's image models); the contact sheet is the storyboard the person approves before the 14B/5B models animate it. Both the keyframe and the quick pipeline use it (`pipelines.keyframes_on`). Uploads (anchor / per shot) still override; mode `wan` keeps the old text-only behaviour. Where this plan says "Wan makes the keyframes", read "the image model makes them". "Wan 2.2 only" now means every *moving* picture.
+
 ## 1. Goal and non-goals
 
 A new section of the app, **Shorts**, that plans and makes a 30-second vertical (9:16, 1080x1920 final) video. Every moving picture comes from a Wan 2.2 model on the gateway. The user picks a pipeline; the pipeline decides which Wan model runs, because the five models need different inputs and give different results.

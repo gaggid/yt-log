@@ -1,7 +1,7 @@
 """The pipelines and the video requests they send. A pipeline is a way of getting one clip per shot out of Wan:
 
-* quick     - Wan 2.2 5B (`wan-2.2-ti2v-5b`). Text or picture per shot, one model, about 20 minutes. A shot marked "continues" starts from the last frame of the one before.
-* keyframe  - a still per shot first (the user's picture, or Wan: a 5-frame text-to-video request whose last frame is kept), looked at by a person, then each still is
+* quick     - Wan 2.2 5B (`wan-2.2-ti2v-5b`). Each shot starts from a still picture (Qwen Image, or the user's), looked at first, unless image mode is "wan" (text only; a shot marked "continues" then starts from the last frame of the one before).
+* keyframe  - a still per shot first (the user's picture, or the image model's (Qwen Image) from the shot's `still` prompt; with image mode "wan", a 5-frame text-to-video request whose last frame is kept), looked at by a person, then each still is
               animated with `wan-2.2-i2v-a14b` at full quality. Every shot starts from its own picture, so nothing drifts.
 * remix     - `wan-2.2-animate-2`: a YouTube video's motion, performed by the character in the user's picture (shorts/remix.py).
 
@@ -26,6 +26,7 @@ KEYFRAME_FRAMES = 5
 DEFAULT_STEPS = {models.TI2V: 20, models.T2V: 20, models.I2V: 10, models.ANIMATE: 10}
 # seconds of work per generated frame at 480x832, from the docs' timings (RTX 4060 Ti 16 GB); shorts/probe.py writes measured values over these
 SEC_PER_FRAME = {models.TI2V: 1.75, models.T2V: 0.84 * 20, models.I2V: 0.59 * 10, models.ANIMATE: 66 / 16}
+STILL_S = 60                              # one picture from the image model, with the swap of models
 OVERHEAD_S = 25                           # per request: queueing, loading, decoding, the download
 
 
@@ -40,15 +41,22 @@ def pipeline(short: dict) -> dict:
 
 def start_source(short: dict, shot: dict) -> str:
     """`upload` (the user gave a picture for this shot), `anchor` (the user's picture of the main character, for shots that show them), `prev` (the last frame of the shot before, quick
-    pipeline only) or `text` (Wan decides)."""
+    pipeline only), `qwen` (the image model draws the start picture) or `text` (Wan decides)."""
     imgs = short["images"]
     if store.image_path(short, imgs["shots"].get(shot["id"], "")):
         return "upload"
-    if short["settings"]["image_mode"] == "anchor" and shot.get("character") and store.image_path(short, imgs.get("anchor", "")):
+    if short["settings"]["image_mode"] != "wan" and shot.get("character") and store.image_path(short, imgs.get("anchor", "")):
         return "anchor"
+    if keyframes_on(short):
+        return "qwen" if short["settings"]["image_mode"] != "wan" else "text"
     if short["pipeline"] == "quick" and short["settings"].get("chain") and shot.get("continues") and short["shots"] and short["shots"][0]["id"] != shot["id"]:
         return "prev"
     return "text"
+
+
+def keyframes_on(short: dict) -> bool:
+    """Whether every shot gets a start picture first, looked at by a person before the long wait: always in the keyframe pipeline, and in the quick one unless Wan is asked to decide."""
+    return short["pipeline"] == "keyframe" or (short["pipeline"] == "quick" and short["settings"]["image_mode"] != "wan")
 
 
 def compose(short: dict, shot: dict, with_picture: bool = False) -> str:
@@ -140,6 +148,8 @@ def estimate_s(short: dict) -> int:
     total = 0.0
     for sh in short["shots"]:
         secs = sh.get("seconds") or models.MAX_SHOT_S
+        if start_source(short, sh) == "qwen":
+            total += STILL_S
         if short["pipeline"] == "quick":
             total += request_seconds(models.TI2V, models.gen_frames(secs, models.TI2V), short)
         else:

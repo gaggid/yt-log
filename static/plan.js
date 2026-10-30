@@ -86,7 +86,7 @@ window.newPlan = async function (cid, status) {
 
 window.viewPlan = async function (id) {
   const my = route_id;
-  let P = null, PV = {}, LK = null, MS = null, RS = null, SS = null, CL = null, GS = null, VS = null, TH = null, AU = null, PF = 'open', VOPT = {captions: false, gaps: false}, sig = '', seenRun = false;
+  let P = null, PV = {}, LK = null, MS = null, RS = null, SS = null, CL = null, GS = null, VS = null, TH = null, PUB = null, AU = null, PF = 'open', VOPT = {captions: false, gaps: false}, sig = '', seenRun = false;
   const app = $('#app');
   const busyJob = () => P && P.job && P.job.state === 'running';
   const errHint = e => /failed to load|model_load_failed|llama-server exited|\b503\b/i.test(e || '') ? 'The model server could not load the chat model. Most often another model worker (a voice worker) is still holding the GPU memory: end it or restart the model server, then press Try again.'
@@ -112,7 +112,7 @@ window.viewPlan = async function (id) {
   };
   async function load(force) {
     const [p, m] = await Promise.all([api('/plans/' + id), api('/media/' + id).catch(() => null)]);
-    LK = m && m.likeness; MS = m && m.voice; RS = m && m.refs; SS = m && m.scenes; CL = m && m.clips; GS = m && m.graphics; VS = m && m.video; TH = m && m.thumbnail; AU = m && m.auto;
+    LK = m && m.likeness; MS = m && m.voice; RS = m && m.refs; SS = m && m.scenes; CL = m && m.clips; GS = m && m.graphics; VS = m && m.video; TH = m && m.thumbnail; PUB = m && m.publish; AU = m && m.auto;
     const s = JSON.stringify([LK, AU && [AU.next, AU.remaining], TH && [TH.done, TH.attempts], VS && [VS.done, VS.ready, VS.blockers.length, VS.warnings.length, VS.changes ? VS.changes.changed.length + ":" + VS.changes.stale.length : 0, VS.videos.map(v => v.id + v.current)], GS && [GS.approved, GS.needs_build, GS.thin, GS.scenes.map(r => r.items.map(a => a.id + a.approved + a.current))], SS && [SS.approved, SS.needs_choice, SS.needs_picture, SS.settings, SS.trial, SS.scenes.map(r => r.candidates.map(a => a.id + a.status + a.approved + a.current + (a.score ? a.score.total : '')))], CL && [CL.enabled, CL.total, CL.approved, CL.done, CL.scenes.map(r => r.approved + (r.best || ''))], RS && [RS.approved, RS.skipped, RS.without_pictures, RS.assets.map(r => r.candidates.map(a => a.id + a.status + a.approved + a.current + (a.score ? a.score.total : '')))], MS && [MS.have, MS.approved, MS.export.current, MS.segments.map(r => r.attempts.map(a => a.id + a.status + a.approved + a.current))], p.cast_gaps && p.cast_gaps.map(g => g.id + g.missing.join()), p.settings.visual_style, p.style && [p.style.registry_stale, p.style.storyboard_stale], p.rev, p.job.state, p.job.done, p.job.label, p.segments.map(x => x.rev), p.scenes.map(x => [x.rev, x.stale, x.start_s, x.status, x.locked, x.data && x.data.motion_clip]), p.assets.map(x => x.rev), p.validation ? 1 : 0, p.narrator.name, p.content_hash, p.approval && p.approval.state, p.exports.length, ((p.validation || {}).scores || {}).computed_at]);
     const changed = s !== sig; P = p;
     if (changed || force) { sig = s; if (!editing() || force) render(); }
@@ -512,7 +512,7 @@ Be concrete: colours, materials, numbers. Leave empty to skip.`); if (v === null
     const dis = running ? 'disabled' : '';
     const DRAFT = window._drafts = window._drafts || {}, MODELS = (SS && SS.model_info) || {};
     const steps = [['Story', true], ['Blueprint', !!p.blueprint], ['Narration', p.segments.length && p.blueprint && !missingBeats.length], ['Characters', charsDone], ['Storyboard', p.scenes.length && !segNoScene.length && !sbStale], ['References', refsDone], ['Image prompts', compiled && !promptStale],
-      ['Checked', checked && !errors.length], ['Reviewed', reviewed], ['Approved', approved], ['Exported', exported], ['Voice', voiceDone], ...(picsOn ? [['Scene pictures', picsDone]] : []), ...(gfxOn ? [['Graphics', gfxDone]] : []), ...(vidOn ? [['Draft video', vidDone]] : []), ...(vidOn ? [['Title', !!(p.settings.video_title || '').trim()], ['Publish pack', !!(m && m.publish && m.publish.title)]] : [])];
+      ['Checked', checked && !errors.length], ['Reviewed', reviewed], ['Approved', approved], ['Exported', exported], ['Voice', voiceDone], ...(picsOn ? [['Scene pictures', picsDone]] : []), ...(gfxOn ? [['Graphics', gfxDone]] : []), ...(vidOn ? [['Draft video', vidDone]] : []), ...(vidOn ? [['Title', !!(p.settings.video_title || '').trim()], ['Publish pack', !!(PUB && PUB.title)]] : [])];
     const firstOpen = steps.findIndex(s => !s[1]);
     const sceneAt = wid => p.scenes.find(x => x.id === wid) || null;
     const groups = []; for (const i of issues) { const k = i.part + '|' + i.kind + '|' + (i.kind === 'repeat' ? '' : i.text); let g = groups.find(x => x.k === k); if (!g) groups.push(g = {k, i, where: []}); g.where.push(i.where); }

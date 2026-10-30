@@ -33,6 +33,7 @@ class PlanOut(M):
 
 class ShotOut(M):
     prompt: Str
+    still: Str = ""
     camera: Str = "static"
     character: bool = False
     continues: bool = False
@@ -133,7 +134,7 @@ async def _plan_call(short: dict, backend, s: dict, note: str = "") -> PlanOut:
 
 
 def _shot(o: ShotOut) -> dict:
-    return {"id": "", "beat": "", "prompt": o.prompt.strip(), "camera": (o.camera or "static").strip(), "character": bool(o.character), "continues": bool(o.continues),
+    return {"id": "", "beat": "", "prompt": o.prompt.strip(), "still": o.still.strip(), "camera": (o.camera or "static").strip(), "character": bool(o.character), "continues": bool(o.continues),
             "setting": o.setting.strip(), "seconds": 0.0, "frames": 0}
 
 
@@ -160,6 +161,7 @@ async def _shots_call(short: dict, beat: dict, count: int, backend, s: dict, bef
     while len(shots) < count:
         last = dict(shots[-1])
         last["prompt"] = last["prompt"] + " A closer detail of the same moment."
+        last["still"] = ""
         last["camera"] = "close-up"
         last["continues"] = True
         shots.append(last)
