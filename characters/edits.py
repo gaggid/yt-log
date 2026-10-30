@@ -83,7 +83,7 @@ def edit_text(preset: str, value: str = "", garment_scope: str = "", has_garment
 def _meta(char: dict, body: dict, base: dict, ref_ids: list[str], op: str, preset: str, value: str, extra_meta: dict | None = None) -> dict:
     depth = int(base["meta"].get("depth", 0)) + 1 if base["kind"] == store.EDIT else 1
     meta = {"view": "edit", "how": "edit", "op": op, "preset": preset, "value": value, "parent": base["id"], "depth": depth, "refs": ref_ids, "model": body["model"], "seed": body.get("seed"),
-            "prompt": body["prompt"][:1500], "loras": [], "identity_hash": store.identity_hash(char), "version": char["version"], "style": char["render"]["style"], "size": body["size"],
+            "prompt": body["prompt"][:1500], "loras": [], "identity_hash": store.identity_hash(char), "version": char["version"], "style": char["render"]["style"], "size": body.get("size"),
             **(extra_meta or {})}
     stable = {k: v for k, v in meta.items() if k not in ("seed", "prompt")}
     meta["input_hash"] = hashlib.sha1(json.dumps({**stable, "prompt": body["prompt"]}, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]
