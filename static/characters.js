@@ -419,9 +419,10 @@ function wireEdit() {
     } catch(e) { toast('Upload failed: ' + e.message, {bad: true}); btn.disabled = false; btn.textContent = 'Apply'; return; }
     const charId = ($e('rb-base') || {}).value || EB;
     // face_into: reference photo is the base scene; character portrait is the extra ref
+    const partLabel = PARTS.find(p => p.id === part)?.label || part;
     const editArgs = part === 'face_into'
-      ? {base: refId, preset: 'custom', value: 'see prompt', extra: [charId], n: 1, prompt: RB_INSTRUCTIONS[part]}
-      : {base: charId, preset: 'custom', value: 'see prompt', extra: [refId], n: 1, prompt: RB_INSTRUCTIONS[part]};
+      ? {base: refId, preset: 'custom', value: partLabel, extra: [charId], n: 1, prompt: RB_INSTRUCTIONS[part]}
+      : {base: charId, preset: 'custom', value: partLabel, extra: [refId], n: 1, prompt: RB_INSTRUCTIONS[part]};
     post(btn, '/edit', editArgs, 'Applying…');
   };
   document.querySelectorAll('[data-base]').forEach(b => b.onclick = () => { EB = b.dataset.base; render(); document.getElementById('ch-edit').scrollIntoView({behavior: 'smooth'}); });
