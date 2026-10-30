@@ -109,8 +109,9 @@ def checklist(short: dict) -> dict:
     missing = []
     if not short["shots"]:
         missing.append("plan the short first")
+    no_voice = short.get("settings", {}).get("voice_mode") == "none"
     for b in short["beats"]:
-        if not svoice.chosen(short, b):
+        if not no_voice and not svoice.chosen(short, b):
             missing.append(f"voice for beat {b['id']}")
     for sh in short["shots"]:
         if not clips.chosen_clip(short, sh):

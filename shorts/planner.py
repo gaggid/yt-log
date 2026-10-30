@@ -155,6 +155,8 @@ async def _plan_call(short: dict, backend, s: dict, note: str = "") -> PlanOut:
     def check(out: PlanOut) -> None:
         if len(out.beats) < min(3, b_lo):
             raise ValueError(f"write at least {min(3, b_lo)} beats")
+        if len(out.beats) > b_hi and not caller.last_attempt:
+            raise ValueError(f"write at most {b_hi} beats for a {t_s:g}-second short; you wrote {len(out.beats)}")
         if caller.last_attempt:
             return                                                    # style rules never stop a run; the checks screen lists what is left
         probs = narration_problems(_beats_from(out, cur["engine"]), prof, t_s)
