@@ -76,6 +76,7 @@ window.viewCharacter = async function (id) {
     if (C.job && C.job.state === 'running') pollT = setTimeout(() => load(false), 3000);
   };
   window._chLoad = load;
+  await loadLists();
   await load(true);
   if (sessionStorage.getItem('ch-suggest-' + id)) { sessionStorage.removeItem('ch-suggest-' + id); suggest(null); }
 };
@@ -143,7 +144,8 @@ function centerView(busy) {
     ${draw.map(v => section(v, 2)).join('')}
     ${C.kind === 'person' ? `<div class="card pad mt"><div class="row"><h3 style="margin:0">Character sheet</h3><span class="mute small">three-quarter, side and back views and six expressions, each made from the canon</span><span class="sp"></span>
       <button class="small primary" id="ch-sheet" ${dis} ${haveCanon ? '' : 'disabled title="Approve a portrait and a full-body picture first"'}>Make the sheet</button></div>
-      <div class="ch-views mt-s">${sheet.flatMap(v => pics(v).slice(0, 1).map(card)).join('') || '<div class="mute small">' + (haveCanon ? 'not made yet' : 'Approve a portrait and a full-body picture first.') + '</div>'}</div></div>` : ''}`;
+      <div class="ch-views mt-s">${sheet.flatMap(v => pics(v).slice(0, 1).map(card)).join('') || '<div class="mute small">' + (haveCanon ? 'not made yet' : 'Approve a portrait and a full-body picture first.') + '</div>'}</div></div>` : ''}
+    ${editCard(busy)}${placeCard(busy)}${editsGallery(busy)}${matrixCard(busy)}`;
 }
 
 window.chZoom = url => dialog({title: 'Picture', html: `<img src="${esc(url)}" style="max-width:100%;max-height:72vh;display:block;margin:auto;border-radius:8px">`, buttons: [{label: 'Close', value: true, primary: true}]});
@@ -176,6 +178,133 @@ function wireCenter() {
   document.querySelectorAll('[data-draw]').forEach(b => b.onclick = () => post(b, '/generate', {views: [b.dataset.draw], n: +document.querySelector(`[data-n="${b.dataset.draw}"]`).value}, 'Drawing started'));
   document.querySelectorAll('[data-canon]').forEach(b => b.onclick = () => act(b, async () => { await call('/item/' + b.dataset.canon + '/canon', {method: 'POST'}); await window._chLoad(true); return true; }, 'Saved'));
   const sh = document.querySelector('#ch-sheet'); if (sh) sh.onclick = () => post(sh, '/sheet', {}, 'Sheet started');
+  wireEdit();
+}
+
+/* ───────── edits, try-on, places, looks, matrix (C2, C3) ───────── */
+let EB = '', EX = [], CMP = [], WARD = null, PLACES = null;
+const allPics = () => Object.values(C.gallery).flat().filter(p => p.url);
+const picLabel = p => `${p.view === 'edit' ? (p.op || 'edit') : p.view} #${p.attempt}${C.canon[p.view] === p.id ? ' (canon)' : ''}${p.depth ? ' · chain ' + p.depth : ''}`;
+const canonBody = () => C.canon.body || C.canon.portrait || (allPics()[0] || {}).id || '';
+const checkBadge = p => p.check ? `<span class="badge ${p.check.ok ? 'b-done' : 'b-failed'}" title="${esc((p.check.differences || []).join('; ') || 'matches the canon')}">same person ${p.check.score}/10</span>` : '';
+
+function editCard(busy) {
+  if (C.kind !== 'person' || !C.canon.portrait) return '';
+  if (!EB || !allPics().some(p => p.id === EB)) EB = canonBody();
+  const dis = busy ? 'disabled' : '';
+  const pics = allPics();
+  const base = pics.find(p => p.id === EB);
+  const chain = base && base.depth >= 3 ? `<div class="warnbox small mt-s">This picture is ${base.depth} edits away from the canon; faces drift along a chain. <button class="small" id="e-rebase">Start from the canon body instead</button></div>` : '';
+  return `<div class="card pad mt" id="ch-edit"><div class="row"><h3 style="margin:0">Edit with Qwen</h3><span class="mute small">change one thing, keep the person</span></div>
+    <div class="row mt-s" style="gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <label class="f" style="min-width:200px">Start from<select id="e-base">${pics.map(p => `<option value="${p.id}" ${p.id === EB ? 'selected' : ''}>${esc(picLabel(p))}</option>`).join('')}</select></label>
+      ${base ? `<img src="${esc(base.url)}" style="height:90px;border-radius:6px">` : ''}</div>${chain}
+    <div class="row mt-s" style="gap:10px;flex-wrap:wrap">
+      <label class="f">What<select id="e-preset">${OPT.presets.map(k => `<option value="${k}">${esc(k.replace('_', ' '))}</option>`).join('')}</select></label>
+      <label class="f" style="flex:1;min-width:220px">Change it to<input id="e-value" placeholder="e.g. a dark green kurta with beige trousers"></label>
+      <label class="f">Recipes<select id="e-recipe"><option value="">—</option>${C.recipes.map((r, i) => `<option value="${i}">${esc(r.name)}</option>`).join('')}</select></label></div>
+    <div class="row mt-s" style="gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <label class="f">Dress in clothes from a picture<select id="e-garment"><option value="">— none —</option>${(WARD || []).map(g => `<option value="${g.id}">${esc(g.name)}${g.worn ? (g.flat ? ' (flat lay ready)' : ' (worn by a model)') : ''}</option>`).join('')}</select></label>
+      <label class="f">Which part<select id="e-scope">${Object.entries(OPT.scopes).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</select></label>
+      <button class="small" id="e-wardrobe">Wardrobe…</button></div>
+    <details class="mt-s"><summary class="small">Extra reference pictures and the full prompt (power)</summary>
+      <div class="small mt-s">Extra pictures (up to two): ${pics.filter(p => p.id !== EB).slice(-12).map(p => `<label style="margin-right:8px"><input type="checkbox" data-ex="${p.id}" ${EX.includes(p.id) ? 'checked' : ''}> ${esc(picLabel(p))}</label>`).join('') || 'none yet'}</div>
+      <label class="f mt-s">Your own full instruction (replaces the built one)<textarea id="e-prompt" style="min-height:60px"></textarea></label>
+      <div id="e-preview" class="hint small mt-s" hidden></div></details>
+    <div class="row mt-s"><select id="e-n" style="width:auto">${[1, 2, 4].map(k => `<option value="${k}">${k} picture${k > 1 ? 's' : ''}</option>`).join('')}</select>
+      <button class="small" id="e-prev" ${dis}>Show the prompt</button><button class="small primary" id="e-run" ${dis}>Make the edit</button><button class="small" id="e-save-recipe">Save as recipe</button></div></div>`;
+}
+
+function placeCard(busy) {
+  if (C.kind !== 'person' || !C.canon.portrait || !C.canon.body) return '';
+  return `<div class="card pad mt"><div class="row"><h3 style="margin:0">Put the character in a place</h3><span class="mute small">uses the face, the body and the place picture</span></div>
+    <div class="row mt-s" style="gap:10px;flex-wrap:wrap;align-items:flex-end"><label class="f">Place<select id="pl-place"><option value="">— choose —</option>${(PLACES || []).map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></label>
+      <label class="f" style="flex:1;min-width:220px">What is the person doing<input id="pl-action" placeholder="leaning on a steel pillar, looking at the track"></label>
+      <button class="small primary" id="pl-run" ${busy ? 'disabled' : ''}>Place them</button></div>
+    ${PLACES && !PLACES.length ? '<div class="mute small mt-s">No place with an approved picture yet: make one in Characters → New character → A place.</div>' : ''}</div>`;
+}
+
+function editsGallery(busy) {
+  const list = (C.gallery.edit || []).slice().reverse();
+  if (!list.length && !C.looks.length) return '';
+  const dis = busy ? 'disabled' : '';
+  const card = p => `<div class="ch-pic ${C.canon.body === p.id || C.canon.portrait === p.id ? 'canon' : ''}">${p.url ? `<img src="${esc(p.url)}" loading="lazy" onclick="chZoom('${esc(p.url)}')">` : `<div class="ph">${p.status === 'failed' ? 'failed<br>' + esc(p.error.slice(0, 80)) : 'drawing…'}</div>`}
+    <div class="mute">${esc(p.op || 'edit')}${p.preset ? ': ' + esc(p.preset) : ''}${p.value ? ' · ' + esc(p.value.slice(0, 40)) : ''}</div>
+    <div class="mute">chain ${p.depth}${p.depth >= 3 ? ' ⚠' : ''}${p.current ? '' : ' · older'}</div>${checkBadge(p)}
+    ${p.url ? `<div class="row" style="margin-top:4px;gap:4px;flex-wrap:wrap"><button class="small" data-base="${p.id}">Edit this</button><button class="small ${p.kept ? 'primary' : ''}" data-keep="${p.id}" data-on="${p.kept ? 0 : 1}">${p.kept ? 'Kept ✓' : 'Keep'}</button>
+      <button class="small" data-look="${p.id}">Save as look</button><button class="small" data-check="${p.id}" ${dis}>Check</button><button class="small" data-cmp="${p.id}">${CMP.includes(p.id) ? 'Compare ✓' : 'Compare'}</button>
+      ${(p.op === 'edit' || p.op === 'tryon') ? `<button class="small" data-promote="${p.id}" data-view="body">Make canon body</button>` : ''}</div>` : ''}</div>`;
+  return `<div class="card pad mt"><div class="row"><h3 style="margin:0">Edits and looks</h3><span class="sp"></span>${CMP.length === 2 ? '<button class="small primary" id="cmp-go">Compare the two</button>' : '<span class="mute small">pick two pictures to compare</span>'}</div>
+    ${C.looks.length ? `<div class="row mt-s small" style="gap:8px;flex-wrap:wrap"><b>Looks:</b>${C.looks.map(l => `<span class="badge b-info" title="made from canon version ${l.version}">${esc(l.name)}${l.stale ? ' · older canon' : ''} <a href="#" data-lookbase="${l.item}">use</a> <a href="#" data-lookdel="${l.id}">×</a></span>`).join('')}</div>` : ''}
+    <div class="ch-views mt-s">${list.map(card).join('')}</div></div>`;
+}
+
+function matrixCard(busy) {
+  if (C.kind !== 'person' || !C.canon.portrait) return '';
+  return `<div class="card pad mt"><div class="row"><h3 style="margin:0">Expression grid</h3><span class="mute small">one picture per look and expression (at most 12)</span></div>
+    <div class="small mt-s">${OPT.expressions.map(e => `<label style="margin-right:10px"><input type="checkbox" data-mx="${e}" ${['smile', 'angry', 'worried'].includes(e) ? 'checked' : ''}> ${esc(e)}</label>`).join('')}</div>
+    ${C.looks.length ? `<div class="small mt-s">Looks: ${C.looks.map(l => `<label style="margin-right:10px"><input type="checkbox" data-ml="${l.id}"> ${esc(l.name)}</label>`).join('')} <span class="mute">(none ticked = the canon portrait)</span></div>` : ''}
+    <div class="row mt-s"><button class="small primary" id="mx-run" ${busy ? 'disabled' : ''}>Make the grid</button></div></div>`;
+}
+
+async function loadLists() {
+  WARD = await call('/wardrobe').catch(() => []);
+  const ps = await call('?kind=place').catch(() => []);
+  PLACES = [];
+  for (const p of ps) { if (p.status === 'ready') PLACES.push(p); }
+}
+
+function wireEdit() {
+  const $e = id => document.getElementById(id);
+  const args = () => ({base: EB, preset: $e('e-preset').value, value: $e('e-value').value, extra: EX.slice(0, 2), garment: $e('e-garment').value, scope: $e('e-scope').value, n: +$e('e-n').value, prompt: $e('e-prompt').value});
+  if ($e('e-base')) $e('e-base').onchange = () => { EB = $e('e-base').value; render(); };
+  if ($e('e-rebase')) $e('e-rebase').onclick = () => { EB = canonBody(); render(); };
+  document.querySelectorAll('[data-ex]').forEach(x => x.onchange = () => { EX = x.checked ? [...EX, x.dataset.ex].slice(-2) : EX.filter(i => i !== x.dataset.ex); });
+  if ($e('e-recipe')) $e('e-recipe').onchange = () => { const r = C.recipes[+$e('e-recipe').value]; if (r) { $e('e-preset').value = r.preset; $e('e-value').value = r.value; } };
+  if ($e('e-save-recipe')) $e('e-save-recipe').onclick = async () => {
+    const name = await textDlg('Save as recipe', 'Name', ''); if (!name) return;
+    const rec = [...C.recipes, {name, preset: $e('e-preset').value, value: $e('e-value').value}];
+    await act(null, async () => { C = await call('/' + CID + '/recipes', {method: 'PUT', json: {recipes: rec}}); render(); return true; }, 'Saved');
+  };
+  if ($e('e-wardrobe')) $e('e-wardrobe').onclick = wardrobeDialog;
+  if ($e('e-prev')) $e('e-prev').onclick = b => act($e('e-prev'), async () => { const r = await call('/' + CID + '/edit/preview', {method: 'POST', json: args()}); const box = $e('e-preview'); box.hidden = false;
+    box.innerHTML = `<b>${esc(r.model)} · ${esc(r.size)} · ${r.refs.length} picture${r.refs.length > 1 ? 's' : ''} · chain ${r.depth}</b><div style="white-space:pre-wrap;margin-top:4px">${esc(r.prompt)}</div>`; document.querySelector('#ch-edit details').open = true; return true; });
+  if ($e('e-run')) $e('e-run').onclick = () => post($e('e-run'), '/edit', args(), 'Edit started');
+  if ($e('pl-run')) $e('pl-run').onclick = () => { if (!$e('pl-place').value) { toast('Choose a place first', {bad: true}); return; } post($e('pl-run'), '/place', {place: $e('pl-place').value, action: $e('pl-action').value, base: EB, n: 1}, 'Placing started'); };
+  if ($e('mx-run')) $e('mx-run').onclick = () => post($e('mx-run'), '/matrix', {expressions: [...document.querySelectorAll('[data-mx]:checked')].map(x => x.dataset.mx), looks: [...document.querySelectorAll('[data-ml]:checked')].map(x => x.dataset.ml)}, 'Grid started');
+  document.querySelectorAll('[data-base]').forEach(b => b.onclick = () => { EB = b.dataset.base; render(); document.getElementById('ch-edit').scrollIntoView({behavior: 'smooth'}); });
+  document.querySelectorAll('[data-keep]').forEach(b => b.onclick = () => act(b, async () => { C = await call('/item/' + b.dataset.keep + '/keep?on=' + (b.dataset.on === '1'), {method: 'POST'}); render(); return true; }));
+  document.querySelectorAll('[data-look]').forEach(b => b.onclick = async () => { const name = await textDlg('Save as a look', 'Name of the look', ''); if (name) await act(null, async () => { C = await call('/item/' + b.dataset.look + '/look', {method: 'POST', json: {name}}); render(); return true; }, 'Look saved'); });
+  document.querySelectorAll('[data-check]').forEach(b => b.onclick = () => act(b, async () => { C = await call('/item/' + b.dataset.check + '/check', {method: 'POST'}); render(); return true; }, 'Checked'));
+  document.querySelectorAll('[data-promote]').forEach(b => b.onclick = async () => { if (await confirmDlg('Make this the canon body', 'Every later picture is made from it, and looks made from the old canon show as older.', 'Make canon')) await act(null, async () => { C = await call('/item/' + b.dataset.promote + '/canon/' + b.dataset.view, {method: 'POST'}); render(); return true; }, 'Canon changed'); });
+  document.querySelectorAll('[data-cmp]').forEach(b => b.onclick = () => { CMP = CMP.includes(b.dataset.cmp) ? CMP.filter(i => i !== b.dataset.cmp) : [...CMP, b.dataset.cmp].slice(-2); refreshCenter(); });
+  document.querySelectorAll('[data-lookbase]').forEach(a => a.onclick = ev => { ev.preventDefault(); EB = a.dataset.lookbase; render(); });
+  document.querySelectorAll('[data-lookdel]').forEach(a => a.onclick = ev => { ev.preventDefault(); act(null, async () => { C = await call('/' + CID + '/looks/' + a.dataset.lookdel, {method: 'DELETE'}); render(); return true; }); });
+  if ($e('cmp-go')) $e('cmp-go').onclick = () => { const [a, b] = CMP.map(id => allPics().find(p => p.id === id)); if (a && b) dialog({title: 'Compare', html: `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><div class="mute small">${esc(picLabel(a))}</div><img src="${esc(a.url)}" style="width:100%;border-radius:8px"></div><div><div class="mute small">${esc(picLabel(b))}</div><img src="${esc(b.url)}" style="width:100%;border-radius:8px"></div></div>`, buttons: [{label: 'Close', value: true, primary: true}]}); };
+}
+
+async function wardrobeDialog() {
+  WARD = await call('/wardrobe').catch(() => []);
+  const html = `<div class="small mute">Pictures of clothes you can put on any character. A photo of someone wearing the clothes is fine: only the clothing is copied, never the person. For a worn photo, press "Flat lay" to make a clean picture of just the clothes (recommended).</div>
+    <div class="ch-views mt-s">${WARD.map(g => `<div class="ch-pic"><img src="${esc(g.url)}" onclick="chZoom('${esc(g.url)}')"><div><b>${esc(g.name)}</b> ${g.worn ? '<span class="mute">worn by a model</span>' : ''}${g.flat ? ' ✓ flat lay' : ''}</div>
+      <div class="row" style="gap:4px;margin-top:4px">${g.worn && !g.flat ? `<button class="small" data-flat="${g.id}">Flat lay</button>` : ''}<button class="small bad" data-gdel="${g.id}">Delete</button></div></div>`).join('') || '<div class="mute small">No garments yet.</div>'}</div>
+    <h4>Add clothes</h4><label class="f">Name<input id="g-name" placeholder="Maroon sherwani"></label>
+    <label class="f mt-s">Picture<input type="file" id="g-file" accept="image/jpeg,image/png,image/webp"></label>
+    <label class="row mt-s"><input type="checkbox" id="g-worn"> A person is wearing them in this picture</label>
+    <label class="f mt-s">Whose picture is it<select id="g-basis"><option value="own">Mine</option><option value="licensed">Licensed or free to use</option><option value="invented">An invented or drawn outfit</option></select></label>
+    <label class="row mt-s"><input type="checkbox" id="g-ok"> I confirm this is true</label>`;
+  const layer = dialog({title: 'Wardrobe', html, buttons: [{label: 'Close', value: null}, {label: 'Add', primary: true,
+    collect: l => ({name: l.querySelector('#g-name').value, file: l.querySelector('#g-file').files[0], worn: l.querySelector('#g-worn').checked, basis: l.querySelector('#g-basis').value, ok: l.querySelector('#g-ok').checked}),
+    validate: x => !x.file ? 'Choose a picture.' : !x.ok ? 'Tick the box to confirm.' : ''}]});
+  setTimeout(() => {
+    document.querySelectorAll('[data-gdel]').forEach(b => b.onclick = async () => { await act(null, () => call('/wardrobe/' + b.dataset.gdel, {method: 'DELETE'})); document.querySelector('.dlg')?.remove(); wardrobeDialog(); });
+    document.querySelectorAll('[data-flat]').forEach(b => b.onclick = async () => { await act(null, () => call('/wardrobe/' + b.dataset.flat + '/flatlay', {method: 'POST'}), () => 'Making the flat lay: about two minutes'); document.querySelector('.dlg')?.remove(); });
+  }, 50);
+  const v = await layer;
+  if (!v) { await loadLists(); render(); return; }
+  const fd = new FormData(); fd.append('file', v.file); fd.append('name', v.name); fd.append('basis', v.basis); fd.append('confirmed', 'true'); fd.append('worn', v.worn ? 'true' : 'false');
+  await act(null, () => call('/wardrobe', {method: 'POST', form: fd}), 'Added');
+  await loadLists(); render();
 }
 
 async function startFromPicture() {

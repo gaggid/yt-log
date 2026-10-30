@@ -12,7 +12,7 @@ from story2 import describe, jobs, providers
 from story3 import store as media
 from story3.voice import MediaError
 
-from . import render, requests as R, store, studio
+from . import check, edits, render, requests as R, store, studio, studio_edit, wardrobe
 
 router = APIRouter(prefix="/api/characters")
 MAX_UPLOAD = 12 * 1024 * 1024
@@ -61,7 +61,9 @@ def _view(char_id: str, it: dict, ident: str) -> dict:
     m = it["meta"]
     return {"id": it["id"], "view": it["key"], "attempt": it["attempt"], "status": it["status"], "approved": it["approved"], "error": m.get("error", ""),
             "url": f"/api/characters/file/{char_id}/{it['file']}" if it["file"] else "", "seed": m.get("seed"), "seconds_taken": m.get("seconds_taken"), "prompt": m.get("prompt", ""),
-            "how": m.get("how", ""), "loras": m.get("loras", []), "model": m.get("model", ""), "style": m.get("style", ""), "version": m.get("version"), "current": m.get("identity_hash") == ident}
+            "how": m.get("how", ""), "loras": m.get("loras", []), "model": m.get("model", ""), "style": m.get("style", ""), "version": m.get("version"), "current": m.get("identity_hash") == ident,
+            "kind": it["kind"], "op": m.get("op", ""), "preset": m.get("preset", ""), "value": m.get("value", ""), "depth": m.get("depth", 0), "parent": m.get("parent", ""), "kept": bool(m.get("kept")),
+            "check": m.get("check"), "refs": m.get("refs", [])}
 
 
 def _card(c: dict) -> dict:
@@ -83,7 +85,62 @@ async def options():
                      "default": n in (listing.get("__default__") or {}).get("names", [])} for n in studio.lora_names(listing)]
     return {"styles": {k: {"label": v["label"], "loras": v["loras"]} for k, v in render.STYLES.items()}, "default_render": render.default(), "models": models, "loras": loras,
             "views": {k: {"label": v["label"], "how": v["how"], "kind": v["kind"]} for k, v in R.VIEWS.items()}, "sheet_views": list(R.SHEET_VIEWS), "rights": list(store.RIGHTS),
-            "slots": {k: [{"key": a, "hint": b} for a, b in describe.SLOTS[k]] for k in store.KINDS}}
+            "slots": {k: [{"key": a, "hint": b} for a, b in describe.SLOTS[k]] for k in store.KINDS}, "presets": list(edits.PRESETS), "scopes": edits.GARMENT_SCOPES,
+            "expressions": list(R.EXPRESSIONS), "check_pass_at": check.PASS_AT}
+
+
+# ── wardrobe (garment pictures, reusable on any character) ──────────────────────────────────
+
+@router.get("/wardrobe")
+async def wardrobe_list():
+    return wardrobe.listing()
+
+
+@router.post("/wardrobe")
+async def wardrobe_add(file: UploadFile = File(...), name: str = Form(""), basis: str = Form(""), confirmed: bool = Form(False), worn: bool = Form(False), tags: str = Form("")):
+    if basis not in store.RIGHTS or not confirmed:
+        raise HTTPException(400, "confirm that the picture is yours, licensed, or of an invented outfit")
+    raw = await file.read()
+    if len(raw) > MAX_UPLOAD:
+        raise HTTPException(400, "the picture is over 12 MB")
+    try:
+        return wardrobe.add(raw, name, basis, tags.split(","), worn)
+    except store.CharError as e:
+        raise HTTPException(400, str(e))
+    except Exception:  # noqa: BLE001
+        raise HTTPException(400, "that file is not a picture the app can read (PNG, JPEG or WebP)")
+
+
+@router.delete("/wardrobe/{garment_id}")
+async def wardrobe_delete(garment_id: str):
+    _guard(wardrobe.delete, garment_id)
+    return {"ok": True}
+
+
+@router.get("/wardrobe/file/{name:path}")
+async def wardrobe_file(name: str):
+    root = store.media_dir(wardrobe.OWNER).resolve()
+    f = (root / name).resolve()
+    if root not in f.parents or not f.is_file():
+        raise HTTPException(404, "file not found")
+    return FileResponse(f)
+
+
+@router.post("/wardrobe/{garment_id}/flatlay")
+async def wardrobe_flatlay(garment_id: str):
+    _guard(wardrobe.get, garment_id)
+    if manager.busy():
+        raise HTTPException(409, "story processing is running; wait for it to finish (the model server answers one request at a time)")
+    s, key = settings_mod.get(), settings_mod.api_key()
+    try:
+        return jobs.start("wardrobe", "char_flatlay", lambda progress: studio_edit.make_flatlay(garment_id, progress, s, key))
+    except jobs.JobBusy as e:
+        raise HTTPException(409, str(e))
+
+
+@router.get("/wardrobe/job")
+async def wardrobe_job():
+    return jobs.status("wardrobe")
 
 
 # ── library ──────────────────────────────────────────────────────────────────
@@ -153,13 +210,13 @@ async def state(char_id: str):
     c = _get(char_id)
     ident = store.identity_hash(c)
     gallery: dict[str, list] = {}
-    for kind in (store.GEN, store.SHEET):
+    for kind in (store.GEN, store.SHEET, store.EDIT):
         for it in media.items(char_id, kind):
             gallery.setdefault(it["key"], []).append(_view(char_id, it, ident))
     views = [v for v, spec in R.VIEWS.items() if spec["kind"] == c["kind"]]
     return {**_card(c), "idea": c["idea"], "slots": c["slots"], "personality": c["personality"], "notes": c["notes"], "render": c["render"], "locked": store.locked(c), "canon": c["canon"],
             "rights": c["rights"], "photo": f"/api/characters/file/{char_id}/{c['source_photo']}" if store.photo_path(c) else "", "gaps": describe.missing(c["kind"] if c["kind"] != "person" else "person", c["slots"]),
-            "identity": R.identity_text(c), "gallery": gallery, "views": views, "job": jobs.status(char_id), "identity_hash": ident,
+            "identity": R.identity_text(c), "looks": [{**x, "stale": x["version"] != c["version"]} for x in c["looks"]], "recipes": c.get("recipes", []), "gallery": gallery, "views": views, "job": jobs.status(char_id), "identity_hash": ident,
             "estimate_s": {"draw": 70, "edit": 110}}
 
 
@@ -306,4 +363,153 @@ async def canon(item_id: str):
 async def un_canon(char_id: str, view: str):
     _get(char_id)
     _guard(studio.clear_canon, char_id, view)
+    return await state(char_id)
+
+
+# ── edits, try-on, places, checks, looks (C2, C3) ───────────────────────────────────────────
+
+class EditReq(BaseModel):
+    base: str
+    preset: str = "custom"
+    value: str = ""
+    extra: list[str] = []
+    garment: str = ""
+    scope: str = "outfit"
+    n: int = 1
+    prompt: str = ""                    # the person's own full instruction (power users): replaces the built one
+
+
+def _edit_args(c: dict, body: EditReq) -> dict:
+    if not 1 <= body.n <= 4:
+        raise HTTPException(400, "n is between 1 and 4")
+    base = _guard(studio_edit._item, c["id"], body.base)
+    extra = [_guard(studio_edit._item, c["id"], x) for x in body.extra]
+    garment = _guard(wardrobe.usable, body.garment) if body.garment else None
+    return {"base": base, "extra": extra, "garment": garment}
+
+
+@router.post("/{char_id}/edit/preview")
+async def edit_preview(char_id: str, body: EditReq):
+    """What would be sent, without sending it: the prompt, the pictures in order, the size (the prompt drawer)."""
+    c = _get(char_id)
+    a = _edit_args(c, body)
+    req = _guard(edits.build, c, a["base"], body.preset, body.value, 1, a["extra"], a["garment"]["path"] if a["garment"] else None, body.scope if a["garment"] else "",
+                 override=body.prompt, garment_worn=bool(a["garment"] and a["garment"]["worn"]))
+    return {"prompt": req["body"]["prompt"], "refs": req["ref_ids"], "size": req["body"]["size"], "model": req["body"]["model"], "depth": req["meta"]["depth"]}
+
+
+@router.post("/{char_id}/edit")
+async def edit(char_id: str, body: EditReq):
+    c = _get(char_id)
+    a = _edit_args(c, body)
+    _guard(edits.build, c, a["base"], body.preset, body.value, 1, a["extra"], a["garment"]["path"] if a["garment"] else None, body.scope if a["garment"] else "",
+           override=body.prompt, garment_worn=bool(a["garment"] and a["garment"]["worn"]))        # refuse a bad request before the job starts
+    s, key = settings_mod.get(), settings_mod.api_key()
+    return _start(char_id, "char_edit", lambda progress: studio_edit.make_edit(char_id, body.base, body.preset, body.value, body.extra, body.garment, body.scope, body.n, body.prompt, progress, s, key))
+
+
+class PlaceReq(BaseModel):
+    place: str
+    action: str = ""
+    base: str = ""
+    n: int = 1
+    prompt: str = ""
+
+
+@router.post("/{char_id}/place")
+async def place_character(char_id: str, body: PlaceReq):
+    c = _get(char_id)
+    if c["kind"] != "person":
+        raise HTTPException(400, "only a person can be placed in a place")
+    if not 1 <= body.n <= 4:
+        raise HTTPException(400, "n is between 1 and 4")
+    pl = _guard(studio_edit.place_picture, body.place)
+    if body.base:
+        _guard(studio_edit._item, char_id, body.base)
+    _guard(edits.build_place, c, pl, body.action, 1, None, override=body.prompt)
+    s, key = settings_mod.get(), settings_mod.api_key()
+    return _start(char_id, "char_place", lambda progress: studio_edit.make_place(char_id, body.place, body.action, body.base, body.n, body.prompt, progress, s, key))
+
+
+@router.post("/item/{item_id}/check")
+async def check_picture(item_id: str):
+    it = media.get(item_id)
+    if not it:
+        raise HTTPException(404, "no such picture")
+    c = _get(it["plan_id"])
+    if jobs.busy() or manager.busy():
+        raise HTTPException(409, "the model server is busy with another job; try again when it finishes")
+    try:
+        await studio_edit.check_item(c["id"], item_id)
+    except (MediaError, store.CharError, ValueError) as e:
+        raise HTTPException(400, str(e))
+    return await state(c["id"])
+
+
+@router.post("/item/{item_id}/keep")
+async def keep_picture(item_id: str, on: bool = True):
+    it = media.get(item_id)
+    if not it:
+        raise HTTPException(404, "no such picture")
+    _get(it["plan_id"])
+    _guard(studio_edit.keep, it["plan_id"], item_id, on)
+    return await state(it["plan_id"])
+
+
+class LookReq(BaseModel):
+    name: str = ""
+
+
+@router.post("/item/{item_id}/look")
+async def save_look(item_id: str, body: LookReq):
+    it = media.get(item_id)
+    if not it:
+        raise HTTPException(404, "no such picture")
+    _get(it["plan_id"])
+    _guard(studio_edit.save_look, it["plan_id"], item_id, body.name)
+    return await state(it["plan_id"])
+
+
+@router.delete("/{char_id}/looks/{look_id}")
+async def delete_look(char_id: str, look_id: str):
+    _get(char_id)
+    _guard(studio_edit.delete_look, char_id, look_id)
+    return await state(char_id)
+
+
+@router.post("/item/{item_id}/canon/{view}")
+async def promote(item_id: str, view: str):
+    it = media.get(item_id)
+    if not it:
+        raise HTTPException(404, "no such picture")
+    _get(it["plan_id"])
+    _guard(studio_edit.set_canon_view, it["plan_id"], item_id, view)
+    return await state(it["plan_id"])
+
+
+class MatrixReq(BaseModel):
+    looks: list[str] = []
+    expressions: list[str] = ["smile", "angry", "worried"]
+
+
+@router.post("/{char_id}/matrix")
+async def matrix(char_id: str, body: MatrixReq):
+    c = _get(char_id)
+    if not store.canon_items(c).get("portrait"):
+        raise HTTPException(400, "approve a portrait first")
+    s, key = settings_mod.get(), settings_mod.api_key()
+    if not body.expressions:
+        raise HTTPException(400, "choose at least one expression")
+    return _start(char_id, "char_matrix", lambda progress: studio_edit.make_matrix(char_id, body.looks, body.expressions, progress, s, key))
+
+
+class RecipesReq(BaseModel):
+    recipes: list[dict]
+
+
+@router.put("/{char_id}/recipes")
+async def recipes(char_id: str, body: RecipesReq):
+    c = _get(char_id)
+    c["recipes"] = [{"name": str(r.get("name", "")).strip()[:60], "preset": str(r.get("preset", "custom")), "value": str(r.get("value", ""))[:600]} for r in body.recipes if str(r.get("name", "")).strip()][:40]
+    store.save(c)
     return await state(char_id)
