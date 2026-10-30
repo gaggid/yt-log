@@ -105,3 +105,36 @@ def test_a_library_character_can_be_the_short_picture_and_settings_are_validated
         assert st["settings"]["cast"][0]["character_id"] == raju["id"]
         st = c.post(f"/api/shorts/{sid}/images/anchor/character", json={"character_id": raju["id"], "view": "portrait"}).json()
         assert st["images"]["anchor"].startswith("upload/anchor-") and st["settings"]["image_mode"] == "anchor"
+
+
+def test_remix_uses_a_library_character_and_goes_old_when_its_picture_changes(gw, env):
+    from shorts import remix
+    raju = make_char()
+    short = store.create("Remix", "remix", {"kind": "idea", "text": "", "candidate_id": "", "facts": ""}, {}, {"remix": dict(remix.DEFAULT)})
+    sid = short["id"]
+    drive = store.media_dir(sid, "remix") / "driving1.mp4"
+    drive.write_bytes(b"x" * 100)
+    short = store.get(sid)
+    short["remix"].update(character_id=raju["id"], source="remix/source.mp4", driving=["remix/driving1.mp4"], prompt="A man in a yellow kurta on a platform.", rights_video=True)
+    store.save(short)
+    short = store.get(sid)
+    codes = {i["code"] for i in remix.check(short)["issues"]}
+    assert "no_character" not in codes and "rights_character" not in codes, "a library character needs no uploaded picture and no extra rights box"
+    assert remix.character(short)["label"] == "Raju" and remix.picture(short).is_file()
+    h1 = remix.input_hash(short, 0)
+    c2 = cstore.get(raju["id"])
+    c2["version"] += 1                                                              # what approving another canon picture does
+    cstore.save(c2)
+    assert remix.input_hash(store.get(sid), 0) != h1, "a new character version makes the clip old"
+    short["remix"]["character_id"] = "ch-missing"
+    store.save(short)
+    assert "no_character" in {i["code"] for i in remix.check(store.get(sid))["issues"]}
+
+
+def test_instagram_links_are_taken_and_other_hosts_are_not():
+    from shorts import remix
+    assert remix.check_url("https://www.instagram.com/reel/Cxyz123/").startswith("https://www.instagram.com")
+    assert remix.check_url("https://youtu.be/abc")
+    for bad in ("https://evil.com/instagram.com", "https://instagram.com.evil.com/reel/x", "file:///c:/x.mp4"):
+        with pytest.raises(Exception):
+            remix.check_url(bad)

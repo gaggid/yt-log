@@ -20,6 +20,10 @@ def model_of(short: dict) -> str:
     return short["settings"].get("image_model") or DEFAULT_MODEL
 
 
+AVATAR_FRAMING = ("The person faces the camera straight on, waist-up, looking into the lens, mouth relaxed and just slightly open as if about to speak, both hands visible and relaxed in front "
+                  "of the body, a steady uncluttered background.")
+
+
 def prompt(short: dict, shot: dict) -> str:
     """The picture prompt: the person (when the shot shows them), the still, the place, the camera and the look, then what to keep out (this model has no negative prompt)."""
     plan = short["plan"]
@@ -34,6 +38,8 @@ def prompt(short: dict, shot: dict) -> str:
         parts.append(f"Camera: {shot['camera'].rstrip('. ')}.")
     if plan.get("look"):
         parts.append(plan["look"].rstrip(". ") + ".")
+    if shot.get("avatar"):
+        parts.append(AVATAR_FRAMING)
     parts.append(KEEP_OUT)
     return " ".join(parts)[:3900]
 
@@ -76,6 +82,8 @@ def edit_prompt(short: dict, shot: dict, refs: dict) -> str:
     if look:
         parts.append(look.rstrip(". ") + ".")
     parts.append("Every person keeps exactly the face, hair, skin tone, build and clothes of their own picture; if a place picture is given the scene happens there.")
+    if shot.get("avatar"):
+        parts.append(AVATAR_FRAMING)
     parts.append(KEEP_OUT)
     return " ".join(parts)[:3900]
 

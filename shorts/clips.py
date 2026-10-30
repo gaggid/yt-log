@@ -8,7 +8,7 @@ from story import settings as settings_mod
 from story3 import store as media
 from story3.voice import MediaError
 
-from . import frames, models, pipelines as P, stills, store, wan
+from . import avatar, frames, models, pipelines as P, stills, store, wan
 
 
 def _fingerprint(path) -> str:
@@ -44,6 +44,14 @@ def clip_plan(short: dict, shot: dict) -> dict | None:
         kf = chosen_keyframe(short, shot)
         if not kf:
             return None
+        if avatar.is_avatar(shot):
+            info = avatar.slice_info(short, shot)
+            if not info:
+                return None
+            token = f"key:{kf['id']}|{avatar.token(info)}"
+            return {"token": token, "hash": P.req_hash(P.avatar_request(short, shot, 1, f"key:{kf['id']}", avatar.token(info))),
+                    "build": lambda attempt, image: P.avatar_request(short, shot, attempt, image, avatar.audio_url(info)),
+                    "load": lambda: _jpeg_url(media.path_of(kf).read_bytes(), models.SIZE_PORTRAIT), "source": "avatar"}
         token = f"key:{kf['id']}"
         make = P.animate_request if short["pipeline"] == "keyframe" else P.quick_request
         build = lambda attempt, image: make(short, shot, attempt, image)                         # noqa: E731

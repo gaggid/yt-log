@@ -23,9 +23,9 @@ PIPELINES = {
 }
 NEGATIVE = "blurry, low quality, static, deformed, disfigured, extra fingers, poorly drawn hands, jpeg artifacts, text, watermark, logo, subtitles, signature"
 KEYFRAME_FRAMES = 5
-DEFAULT_STEPS = {models.TI2V: 20, models.T2V: 20, models.I2V: 10, models.ANIMATE: 10}
+DEFAULT_STEPS = {models.TI2V: 20, models.T2V: 20, models.I2V: 10, models.ANIMATE: 10, models.TALK: 6}
 # seconds of work per generated frame at 480x832, from the docs' timings (RTX 4060 Ti 16 GB); shorts/probe.py writes measured values over these
-SEC_PER_FRAME = {models.TI2V: 1.75, models.T2V: 0.84 * 20, models.I2V: 0.59 * 10, models.ANIMATE: 66 / 16}
+SEC_PER_FRAME = {models.TI2V: 1.75, models.T2V: 0.84 * 20, models.I2V: 0.59 * 10, models.ANIMATE: 66 / 16, models.TALK: 6.0}      # TALK: a guess until the first measured run (G2)
 STILL_S = 60                              # one picture from the image model, with the swap of models
 OVERHEAD_S = 25                           # per request: queueing, loading, decoding, the download
 
@@ -112,6 +112,13 @@ def animate_request(short: dict, shot: dict, attempt: int, image: str) -> dict:
             "seed": seed_for(short, shot, attempt), "response_format": "mp4"}
 
 
+def avatar_request(short: dict, shot: dict, attempt: int, image: str, audio: str) -> dict:
+    """A talking avatar shot: the start picture speaks the shot's slice of the voice (InfiniteTalk). `audio` is a wav data URL. The speed LoRA is the gateway's default for this model: the
+    4-step version is what makes it practical, and unlike Wan S2V it keeps the lip movement."""
+    return {"model": models.TALK, "prompt": compose(short, shot, True), "negative_prompt": NEGATIVE, "image": image, "audio": audio, "size": models.SIZE_PORTRAIT,
+            "duration": round(shot["seconds"] + 0.2, 2), "fps": models.MODELS[models.TALK]["fps"], "steps": steps_of(short, models.TALK), "seed": seed_for(short, shot, attempt), "response_format": "mp4"}
+
+
 def req_hash(body: dict) -> str:
     """What a clip was made from, without the seed (a new seed is the same input made again) and with the picture reduced to a fingerprint."""
     b = {k: v for k, v in body.items() if k not in ("seed",)}
@@ -150,7 +157,9 @@ def estimate_s(short: dict) -> int:
         secs = sh.get("seconds") or models.MAX_SHOT_S
         if start_source(short, sh) == "qwen":
             total += STILL_S
-        if short["pipeline"] == "quick":
+        if sh.get("avatar"):
+            total += request_seconds(models.TALK, models.gen_frames(secs + 0.2, models.TALK), short)
+        elif short["pipeline"] == "quick":
             total += request_seconds(models.TI2V, models.gen_frames(secs, models.TI2V), short)
         else:
             if start_source(short, sh) == "text":

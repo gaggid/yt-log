@@ -230,7 +230,8 @@ function shotView(x) {
   return `<div class="sh-shot"><div class="sh-thumb">${media}</div><div>
     <div class="row small"><b>${esc(x.id)}</b><span class="mute">${x.seconds}s · starts: ${esc(x.begins)}</span>${x.old_clip ? badge('warn', 'clip is old') : ''}<span class="sp"></span>
       <label><input type="checkbox" data-shot-flag="character" data-id="${x.id}" ${x.character ? 'checked' : ''}> shows the main character</label>
-      <label><input type="checkbox" data-shot-flag="continues" data-id="${x.id}" ${x.continues ? 'checked' : ''}> continues</label></div>
+      <label><input type="checkbox" data-shot-flag="continues" data-id="${x.id}" ${x.continues ? 'checked' : ''}> continues</label>
+      <label title="The person in this shot's picture speaks the voice with lip sync (InfiniteTalk). Needs a library character in the shot and the beat's voice."><input type="checkbox" data-shot-flag="avatar" data-id="${x.id}" ${x.avatar ? 'checked' : ''}> talking avatar</label></div>
     <textarea data-shot="${x.id}" style="min-height:64px;font-size:13px">${esc(x.prompt)}</textarea>
     <div class="row small mt-s"><label class="row">Camera <input data-shot-cam="${x.id}" value="${esc(x.camera)}" style="width:150px"></label>
       <button class="small" data-clip="${x.id}">${clip ? 'Make again' : 'Make this clip'}</button><button class="small" data-up="${x.id}">My picture</button>
@@ -239,11 +240,19 @@ function shotView(x) {
 }
 
 /* remix pipeline */
+function rxCharacter(r) {
+  const chars = (window._shChars || []).filter(c => c.kind === 'person' && c.status === 'ready'), ch = chars.find(c => c.id === r.character_id);
+  return `<div class="row" style="gap:6px"><label class="f" style="flex:1">Character from the library<select id="rx-char"><option value="">none: I upload a picture</option>${chars.map(c => `<option value="${esc(c.id)}" ${c.id === r.character_id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
+    ${ch && ch.looks.length ? `<label class="f">Look<select id="rx-look"><option value="">canon (full body)</option>${ch.looks.map(l => `<option value="${esc(l.id)}" ${l.id === r.look_id ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select></label>` : ''}</div>
+    ${r.character_id && !r.character_ok ? '<div class="warnbox">This character has no approved full-body picture yet: approve one in Characters.</div>' : ''}
+    ${r.character_id && r.character_ok ? '<div class="mute small">Its approved picture performs the motion. A new approved picture makes an earlier clip old.</div>' : ''}`;
+}
+
 function remixView() {
   const s = S, r = s.remix, ck = r.check;
   const sugg = (r.suggest || []).map(w => `<button class="small" data-sugg="${w.start}" title="${w.cuts} cuts, ${w.slow_s}s slow">from ${mm(w.start)} · ${w.cuts} cuts${w.slow_s ? ' · ' + w.slow_s + 's slow' : ' · fast'}</button>`).join('');
   return `<div class="card pad"><h2>1. The video</h2>
-    <div class="row"><input id="rx-url" placeholder="https://www.youtube.com/watch?v=..." value="${esc(r.url || '')}" style="flex:1;min-width:240px"><button class="primary" id="rx-fetch">Fetch the video</button><button id="rx-upload" class="small">or upload a file</button></div>
+    <div class="row"><input id="rx-url" placeholder="YouTube or Instagram link, https://..." value="${esc(r.url || '')}" style="flex:1;min-width:240px"><button class="primary" id="rx-fetch">Fetch the video</button><button id="rx-upload" class="small">or upload a file</button></div>
     ${r.source ? `<div class="mt-s small">${esc((r.info || {}).title || '')} · ${mm((r.info || {}).duration_s || 0)} long · ${(r.cuts || []).length} cuts found</div>
       <div class="mt-s">${vid(r.source_url, 'style="max-height:260px"')}</div>
       <h4>Pick the 30 seconds</h4><div class="sh-sugg small">Suggested (the fastest-cut stretches): ${sugg || '<span class="mute">none found</span>'}</div>
@@ -254,7 +263,7 @@ function remixView() {
       ${r.driving.length ? `<div class="mt-s small ok">Window ready: from ${mm(r.start)}, ${r.window_cuts ? r.window_cuts.length : 0} cuts. ${(r.slow || []).length ? `<span class="warn">${r.slow.length} stretch(es) over three seconds without a cut.</span>` : 'Fast-cut all the way.'}</div>` : ''}` : ''}
     <p class="mute small">The character in your picture performs the motion of this video. The video's own background is not kept: the background comes from your picture and the description below.</p></div>
     <div class="card pad mt"><h2>2. The character</h2>
-      <div class="row">${s.images.anchor ? `<img src="/api/shorts/file/${s.id}/${esc(s.images.anchor)}" style="width:90px;border-radius:8px">` : ''}<button id="st-anchor2">${s.images.anchor ? 'Change the picture' : 'Upload the character picture'}</button></div>
+      ${rxCharacter(r)}<div class="row mt-s">${!r.character_id && s.images.anchor ? `<img src="/api/shorts/file/${s.id}/${esc(s.images.anchor)}" style="width:90px;border-radius:8px">` : ''}${r.character_id ? '' : `<button id="st-anchor2">${s.images.anchor ? 'Change the picture' : 'or upload a picture of your own'}</button>`}</div>
       <label class="f mt-s">Describe the character and the background (what they wear, where they are)<textarea id="rx-prompt">${esc(r.prompt)}</textarea></label>
       <div class="row mt-s"><label class="f" style="flex:1">What the motion looks like (optional)<input id="rx-motion" value="${esc(r.motion_prompt)}"></label><label class="f">Pose strength (0 to 10)<input type="number" id="rx-pose" value="${r.pose_strength}" min="0" max="10" step="0.5"></label></div></div>
     <div class="card pad mt"><h2>3. Sound</h2>
@@ -262,7 +271,7 @@ function remixView() {
       ${r.audio === 'voiceover' ? `<label class="f mt-s">Voice-over<textarea id="rx-script" style="min-height:90px">${esc(r.script)}</textarea></label><div class="row mt-s"><button id="b-voice-all" class="small">Make the voice-over</button>${s.voice.beats[0] && s.voice.beats[0].chosen ? `<audio controls src="${esc((s.voice.beats[0].attempts.filter(a => a.status === 'done' && a.current).pop() || {}).url || '')}" style="height:30px"></audio>` : '<span class="mute small">not made yet</span>'}</div>` : ''}</div>
     <div class="card pad mt"><h2>4. Rights</h2>
       <label class="row"><input type="checkbox" id="rx-r1" ${r.rights_video ? 'checked' : ''}> I have the right to use this video.</label>
-      <label class="row mt-s"><input type="checkbox" id="rx-r2" ${r.rights_character ? 'checked' : ''}> The picture is my own, an invented or a licensed character, not a private person.</label>
+      <label class="row mt-s"><input type="checkbox" id="rx-r2" ${r.rights_character ? 'checked' : ''}> The picture I uploaded is my own, an invented or a licensed character, not a private person (not needed for a library character).</label>
       <div class="mute small mt-s">The downloaded video is only used as the motion guide. It is kept on this machine, never exported and never uploaded.</div></div>
     <div class="card pad mt"><div class="row"><h2 style="margin:0">Animate</h2>${ck.ok ? badge('good', 'ready') : badge('problem', ck.blockers + ' to fix')}<span class="sp"></span><button class="primary" id="rx-make" ${ck.ok && s.job.state !== 'running' ? '' : 'disabled'}>Animate (about ${hd(s.estimate_s)})</button></div>
       ${ck.issues.map(i => `<div class="${i.level === 'block' ? 'errbox' : 'warnbox'}">${esc(i.text)}</div>`).join('')}
@@ -318,6 +327,7 @@ function wire() {
   on('#rx-window', () => win(+q('#rx-start').value || 0));
   all('[data-sugg]').forEach(e => e.onclick = () => win(+e.dataset.sugg));
   const rx = (id, key, conv = v => v) => { const e = q(id); if (e) e.onchange = () => patch('/remix', {[key]: conv(e.type === 'checkbox' ? e.checked : e.value)}); };
+  rx('#rx-char', 'character_id'); rx('#rx-look', 'look_id');
   rx('#rx-prompt', 'prompt'); rx('#rx-motion', 'motion_prompt'); rx('#rx-pose', 'pose_strength', v => +v); rx('#rx-audio', 'audio'); rx('#rx-script', 'script'); rx('#rx-r1', 'rights_video'); rx('#rx-r2', 'rights_character');
   on('#rx-make', b => post(b, '/remix/make', {}, 'Animating'));
 }

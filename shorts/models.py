@@ -12,16 +12,16 @@ MIN_SHOT_S = 1.2
 SIZE_PORTRAIT = "480x832"             # every pipeline asks for 9:16; the 5B can also do the sharper size below
 SIZE_SHARP = "704x1280"
 
-T2V, I2V, TI2V, S2V, ANIMATE = "wan-2.2-t2v-a14b", "wan-2.2-i2v-a14b", "wan-2.2-ti2v-5b", "wan-2.2-s2v-14b", "wan-2.2-animate-2"
+T2V, I2V, TI2V, ANIMATE, TALK = "wan-2.2-t2v-a14b", "wan-2.2-i2v-a14b", "wan-2.2-ti2v-5b", "wan-2.2-animate-2", "infinitetalk-14b"      # TALK: InfiniteTalk, a picture speaks the voice (owner decision 2026-10-30: not Wan S2V, too slow)
 
 MODELS: dict[str, dict] = {
     TI2V: {"label": "Wan 2.2 5B (text or picture)", "fps": 24, "max_frames": 241, "image": "optional", "mode": "image-to-video"},
     T2V: {"label": "Wan 2.2 text to video 14B", "fps": 16, "max_frames": 161, "image": "none", "mode": "text-to-video"},
     I2V: {"label": "Wan 2.2 picture to video 14B", "fps": 16, "max_frames": 161, "image": "required", "mode": "image-to-video"},
-    S2V: {"label": "Wan 2.2 speech to video 14B", "fps": 16, "max_frames": 481, "image": "required", "mode": "speech-to-video"},
+    TALK: {"label": "InfiniteTalk (talking avatar)", "fps": 25, "max_frames": 1500, "image": "required", "mode": "speech-to-video"},
     ANIMATE: {"label": "Wan 2.2 character animation", "fps": 30, "max_frames": 481, "image": "required", "mode": "character-animation"},
 }
-ALIASES = {"wan": TI2V, "wan2.2": TI2V, "wan-t2v": T2V, "wan-i2v": I2V, "wan-s2v": S2V, "wan-animate": ANIMATE}
+ALIASES = {"wan": TI2V, "wan2.2": TI2V, "wan-t2v": T2V, "wan-i2v": I2V, "wan-infinitetalk": TALK, "wan-animate": ANIMATE}
 
 
 def canon(model: str) -> str:

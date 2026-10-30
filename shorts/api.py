@@ -160,7 +160,8 @@ async def state(short_id: str):
            "voice": svoice.state(short), "auto": auto.state(short), "final": stitch.final_state(short_id)}
     if short["pipeline"] == "remix":
         r = remix.data(short)
-        out.update(shots=[], remix={**r, "cuts": r["cuts"][:400], "check": remix.check(short), "parts": [p["id"] if p else None for p in remix.chosen_parts(short)],
+        ch = remix.character(short)
+        out.update(shots=[], remix={**r, "character_label": ch["label"] if ch else "", "character_ok": bool(ch and ch["path"]), "cuts": r["cuts"][:400], "check": remix.check(short), "parts": [p["id"] if p else None for p in remix.chosen_parts(short)],
                                     "source_url": f"/api/shorts/file/{short_id}/{r['source']}" if r["source"] else "",
                                     "driving_urls": [f"/api/shorts/file/{short_id}/{d}" for d in r["driving"]],
                                     "part_clips": [[clips._view(short_id, i) for i in media.items(short_id, store.CLIP, f"remix-{n + 1}")] for n in range(r["segments"])]},
@@ -286,6 +287,7 @@ class ShotPatch(BaseModel):
     character: bool | None = None
     continues: bool | None = None
     setting: str | None = None
+    avatar: bool | None = None                     # a talking avatar shot (InfiniteTalk): its picture speaks the voice
 
 
 @router.patch("/{short_id}/shots/{shot_id}")
@@ -473,6 +475,8 @@ class RemixPatch(BaseModel):
     script: str | None = None
     rights_video: bool | None = None
     rights_character: bool | None = None
+    character_id: str | None = None                 # a library character ("" = use the uploaded picture)
+    look_id: str | None = None
 
 
 @router.patch("/{short_id}/remix")
@@ -485,6 +489,19 @@ async def patch_remix(short_id: str, body: RemixPatch):
         raise HTTPException(400, f"audio is one of: {', '.join(remix.KEEP_AUDIO)}")
     if "pose_strength" in p and not 0 <= p["pose_strength"] <= 10:
         raise HTTPException(400, "pose strength is between 0 and 10")
+    if p.get("character_id"):
+        try:
+            c = cstore.get(p["character_id"])
+        except cstore.CharError as e:
+            raise HTTPException(404, str(e))
+        if c["kind"] != "person":
+            raise HTTPException(400, "a place cannot be animated; choose a person")
+        if p.get("look_id") and not any(x["id"] == p["look_id"] for x in c["looks"]):
+            raise HTTPException(400, "this character has no such look")
+    if "character_id" in p and not p["character_id"]:
+        p["look_id"] = ""
+    elif "character_id" in p and "look_id" not in p:
+        p["look_id"] = ""
     r = remix.data(short)
     r.update(p)
     short["remix"] = r

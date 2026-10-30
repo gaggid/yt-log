@@ -1,4 +1,5 @@
-"""Pipeline E, remix: a YouTube video's motion performed by the character in the user's picture, made with `wan-2.2-animate-2`.
+"""Pipeline E, remix: a video's motion (YouTube, Instagram or an uploaded file) performed by a character, made with `wan-2.2-animate-2`. The character is a library character (and
+its look) or a picture the person uploads.
 
 What it is and is not (docs: https://llm.tripfick.com/docs): the model copies the motion and expressions of a driving video onto the reference character; the prompt describes the
 character and the background, so the result is the character from the picture, in a background from the picture and prompt, moving like the person in the video. It is not the
@@ -14,13 +15,16 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import config
+from characters import store as cstore, studio_edit
 from story import settings as settings_mod
 from story3 import store as media, video
 from story3.voice import MediaError
 
 from . import clips, frames, models, pipelines as P, stitch, store, wan
 
-HOSTS = ("youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be")
+HOSTS = ("youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be", "instagram.com", "www.instagram.com", "instagr.am")
+COOKIES = "cookies.txt"                            # optional, in data/: exported browser cookies for sites that ask for a login (Instagram often does); never uploaded or logged
 WINDOW_S = 30.0
 DRIVING_FPS = 16                                   # 30 s of 16 fps is 480 frames, inside the model's 481 cap
 DRIVING_SIZE = models.SIZE_PORTRAIT
@@ -29,7 +33,7 @@ MAX_SOURCE_S = 3 * 3600
 ANALYSE_S = 900                                    # the cut map and the window suggestions read at most this much of the video
 KEEP_AUDIO = ("none", "original", "voiceover")
 DEFAULT = {"url": "", "info": {}, "source": "", "start": 0.0, "fit": "crop", "cuts": [], "suggest": [], "driving": [], "segments": 1, "audio": "none", "script": "", "prompt": "",
-           "motion_prompt": "", "pose_strength": 1.0, "rights_video": False, "rights_character": False, "length": WINDOW_S}
+           "motion_prompt": "", "pose_strength": 1.0, "rights_video": False, "rights_character": False, "length": WINDOW_S, "character_id": "", "look_id": ""}
 
 
 def data(short: dict) -> dict:
@@ -39,20 +43,22 @@ def data(short: dict) -> dict:
 def check_url(url: str) -> str:
     u = urlsplit((url or "").strip())
     if u.scheme not in ("http", "https") or (u.hostname or "").lower() not in HOSTS:
-        raise MediaError("paste a YouTube link (youtube.com or youtu.be)")
+        raise MediaError("paste a YouTube or Instagram link (youtube.com, youtu.be, instagram.com), or upload the video file")
     return u.geturl()
 
 
 def _ytdlp(args: list[str], timeout: int) -> subprocess.CompletedProcess:
     ff = str(Path(video.FFMPEG).parent) if Path(video.FFMPEG).is_file() else ""
-    cmd = [sys.executable, "-m", "yt_dlp", "--no-playlist", "--no-warnings", "--no-progress", *(["--ffmpeg-location", ff] if ff else []), *args]
+    cookies = config.DATA_DIR / COOKIES
+    cmd = [sys.executable, "-m", "yt_dlp", "--no-playlist", "--no-warnings", "--no-progress", *(["--ffmpeg-location", ff] if ff else []), *(["--cookies", str(cookies)] if cookies.is_file() else []), *args]
     r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     if r.returncode != 0:
         err = (r.stderr or r.stdout or "").strip()
         if "No module named" in err and "yt_dlp" in err:
             raise MediaError("yt-dlp is not installed: run .venv\\Scripts\\python.exe -m pip install -r requirements.txt, then restart the app")
         last = err.splitlines()[-1] if err else str(r.returncode)
-        raise MediaError(f"the video could not be fetched: {last[:240]}. You can also upload the video file instead")
+        login = " Instagram often needs a login: export your browser cookies to data/cookies.txt (Netscape format) and try again." if "instagram" in err.lower() and any(w in err.lower() for w in ("login", "cookies", "rate-limit", "empty media")) else ""
+        raise MediaError(f"the video could not be fetched: {last[:240]}.{login} You can also upload the video file instead")
     return r
 
 
@@ -163,14 +169,38 @@ def prepare(short_id: str, start: float, fit: str = "crop", segments: int = 1) -
     return store.save(short)
 
 
+# ── the character ────────────────────────────────────────────────────────────
+
+def character(short: dict) -> dict | None:
+    """The library character chosen for this remix (with its picture), or None when the person uploaded a picture instead."""
+    r = data(short)
+    if not r.get("character_id"):
+        return None
+    try:
+        c = cstore.get(r["character_id"])
+    except cstore.CharError:
+        return {"char": None, "path": None, "label": "", "version": 0}
+    it = studio_edit.look_item(c, r["look_id"]) if r.get("look_id") else None
+    it = it or cstore.canon_items(c).get("body") or cstore.canon_items(c).get("portrait")
+    look = next((x["name"] for x in c["looks"] if x["id"] == r.get("look_id")), "")
+    return {"char": c, "path": media.path_of(it) if it else None, "label": c["name"] + (f" ({look})" if look else ""), "version": c["version"]}
+
+
+def picture(short: dict) -> Path | None:
+    ch = character(short)
+    if ch is not None:
+        return ch["path"]
+    return store.image_path(short, short["images"].get("anchor", ""))
+
+
 # ── the request ──────────────────────────────────────────────────────────────
 
 def request(short: dict, n: int, attempt: int = 1) -> dict:
     r = data(short)
-    image = store.image_path(short, short["images"].get("anchor", ""))
+    image = picture(short)
     drive = store.image_path(short, r["driving"][n]) if n < len(r["driving"]) else None
     if not image:
-        raise MediaError("upload the picture of your character first")
+        raise MediaError("choose a character from the library, or upload the picture of your character first")
     if not drive:
         raise MediaError("choose the window of the video first")
     seg_len = WINDOW_S / max(1, r["segments"])
@@ -185,9 +215,11 @@ def request(short: dict, n: int, attempt: int = 1) -> dict:
 
 def input_hash(short: dict, n: int) -> str:
     r = data(short)
-    image = store.image_path(short, short["images"].get("anchor", ""))
+    image = picture(short)
     drive = store.image_path(short, r["driving"][n]) if n < len(r["driving"]) else None
-    return store.input_hash("remix", r["prompt"], r["motion_prompt"], r["pose_strength"], r["audio"] == "original", clips._fingerprint(image) if image else "", clips._fingerprint(drive) if drive else "")
+    ch = character(short)
+    return store.input_hash("remix", r["prompt"], r["motion_prompt"], r["pose_strength"], r["audio"] == "original", clips._fingerprint(image) if image else "", clips._fingerprint(drive) if drive else "",
+                            [r["character_id"], r["look_id"], ch["version"]] if ch else "")
 
 
 def estimate_s(short: dict) -> int:
@@ -207,12 +239,17 @@ def check(short: dict) -> dict:
         issues.append({"level": level, "code": code, "text": text})
     if not r["rights_video"]:
         add("block", "rights_video", "Confirm that you have the right to use the video.")
-    if not r["rights_character"]:
+    ch = character(short)
+    if ch is None and not r["rights_character"]:
         add("block", "rights_character", "Confirm that the picture is your own, an invented or a licensed character, not a private person.")
-    if not store.image_path(short, short["images"].get("anchor", "")):
-        add("block", "no_character", "Upload the picture of your character.")
+    if ch is not None and ch["char"] is None:
+        add("block", "no_character", "The chosen character is not in the library any more; choose another.")
+    elif ch is not None and not ch["path"]:
+        add("block", "no_character", f"{ch['label']} has no approved full-body picture yet: approve one in the Characters studio.")
+    elif ch is None and not picture(short):
+        add("block", "no_character", "Choose a character from the library or upload the picture of your character.")
     if not r["source"]:
-        add("block", "no_video", "Paste the YouTube link and fetch the video.")
+        add("block", "no_video", "Paste the YouTube or Instagram link and fetch the video, or upload a video file.")
     elif not r["driving"]:
         add("block", "no_window", "Choose the 30-second window of the video.")
     if not r["prompt"].strip():
