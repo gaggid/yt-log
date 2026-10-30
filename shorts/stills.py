@@ -108,20 +108,19 @@ def build(short: dict, shot: dict, attempt: int) -> dict:
     """{how, body, refs (paths), ref_ids, versions}: an edit from the cast's pictures when the shot has a cast member, else the plain text request."""
     from . import store as sstore
     refs = cast.refs_for(short, shot)
-    if shot.get("character"):
+    if not refs and shot.get("character"):
+        # No cast configured but shot is tagged as showing a character: use the uploaded anchor image
+        # (if any) so the person's face and outfit come from the user's own photo rather than from
+        # the text description (which may name a different outfit like the Character Studio canon).
         anchor = sstore.image_path(short, short["images"].get("anchor", ""))
         if anchor:
-            # User uploaded their own reference photo: use it as the sole identity anchor so face AND outfit
-            # come from the upload, not Character Studio canon (which may have a different outfit).
-            # This applies whether or not cast refs exist — character=True shots always use the anchor.
-            char_name = (refs["who"][0][0] if refs and refs["who"] else None) or "the character"
             pl = cast.place(short)
             place_item = pl["item"] if (pl and pl.get("item") and not shot.get("setting")) else None
             from story3 import store as media
             place_paths = [media.path_of(place_item)] if place_item else []
             place_ids = [place_item["id"]] if place_item else []
             refs = {"paths": [anchor] + place_paths, "ids": [str(anchor)] + place_ids,
-                    "who": [(char_name, "face and clothes")], "place": bool(place_item), "versions": {}}
+                    "who": [("the character", "face and clothes")], "place": bool(place_item), "versions": {}}
     if not refs:
         return {"how": "draw", "body": request(short, shot, attempt), "refs": [], "ref_ids": [], "versions": {}}
     body = {"model": model_of(short), "prompt": edit_prompt(short, shot, refs), "size": SIZE, "n": 1, "seed": P.seed_for(short, shot, attempt), "response_format": "b64_json"}

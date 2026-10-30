@@ -86,6 +86,13 @@ def refs_for(short: dict, shot: dict) -> dict | None:
     then the place. None when the shot has no cast member (it is drawn from text). A cast member with only a portrait approved still gets references — portrait used as the sole identity anchor."""
     ids = shot.get("cast") or []
     ms = [m for m in members(short) if m["char"] and m["char"]["id"] in ids][:MAX_PEOPLE]
+    if not ms and shot.get("character"):
+        # Shot is tagged as showing the character but cast list is empty (model omitted the name, or
+        # _limit_character_shots cleared it before we get here — but character=True means it should show someone).
+        # If there is exactly one cast member in the short, use them automatically.
+        all_ms = [m for m in members(short) if m["char"]]
+        if len(all_ms) == 1:
+            ms = all_ms
     if not ms or any("portrait" not in m["canon"] for m in ms):
         return None
     pics, who = [], []
