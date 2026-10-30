@@ -106,11 +106,22 @@ def edit_prompt(short: dict, shot: dict, refs: dict) -> str:
 
 def build(short: dict, shot: dict, attempt: int) -> dict:
     """{how, body, refs (paths), ref_ids, versions}: an edit from the cast's pictures when the shot has a cast member, else the plain text request."""
+    from . import store as sstore
     refs = cast.refs_for(short, shot)
+    if refs and shot.get("character"):
+        anchor = sstore.image_path(short, short["images"].get("anchor", ""))
+        if anchor:
+            # User uploaded their own reference photo: use it as the sole identity anchor so face AND outfit
+            # come from the upload, not Character Studio canon (which may have a different outfit).
+            char_name = refs["who"][0][0] if refs["who"] else "the character"
+            place_paths = [refs["paths"][-1]] if refs["place"] else []
+            refs = {**refs, "paths": [anchor] + place_paths, "who": [(char_name, "face and clothes")],
+                    "ref_ids": [str(anchor)] + refs["ref_ids"][-1:] if refs["place"] else [str(anchor)],
+                    "versions": {}}
     if not refs:
         return {"how": "draw", "body": request(short, shot, attempt), "refs": [], "ref_ids": [], "versions": {}}
     body = {"model": model_of(short), "prompt": edit_prompt(short, shot, refs), "size": SIZE, "n": 1, "seed": P.seed_for(short, shot, attempt), "response_format": "b64_json"}
-    return {"how": "edit", "body": body, "refs": refs["paths"], "ref_ids": refs["ids"], "versions": refs["versions"]}
+    return {"how": "edit", "body": body, "refs": refs["paths"], "ref_ids": refs["ref_ids"], "versions": refs["versions"]}
 
 
 def hash_of(req: dict) -> str:

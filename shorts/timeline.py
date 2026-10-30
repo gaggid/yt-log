@@ -18,8 +18,11 @@ def estimate_voice(beat: dict) -> float:
 
 
 def shots_needed(span_s: float) -> int:
-    """How many shots a stretch of `span_s` seconds needs so none is longer than the safe length."""
-    return max(1, -(-int(span_s * 100 + 0.5) // int(SAFE_SHOT_S * 100)))
+    """How many shots a stretch of `span_s` seconds needs: at least enough to keep each under SAFE_SHOT_S,
+    but not so many that any shot falls below MIN_SHOT_S."""
+    by_max = max(1, -(-int(span_s * 100 + 0.5) // int(SAFE_SHOT_S * 100)))
+    by_min = max(1, int(span_s / models.MIN_SHOT_S))
+    return min(by_max, by_min)
 
 
 def silent(short: dict) -> bool:

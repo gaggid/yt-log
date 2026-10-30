@@ -8,7 +8,7 @@ OUT_FPS = 30
 OUT_SIZE = (1080, 1920)
 MAX_SHOT_S = 3.0                      # owner rule: no shot is on screen longer than this
 HOOK_MAX_S = 2.0                      # the first shot is shorter still
-MIN_SHOT_S = 1.2
+MIN_SHOT_S = 1.5
 SIZE_PORTRAIT = "480x832"             # every pipeline asks for 9:16; the 5B can also do the sharper size below
 SIZE_SHARP = "704x1280"
 
