@@ -4,7 +4,7 @@ import asyncio
 import io
 import time
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from PIL import Image
 from pydantic import BaseModel
@@ -16,7 +16,7 @@ from story3 import store as media
 from story3.voice import MediaError
 
 from characters import store as cstore, studio_edit
-from . import auto, cast, checks, clips, frames, models, pipelines as P, planner, remix, stitch, store, timeline, voice as svoice, wan
+from . import auto, cast, checks, clips, frames, models, motion, pipelines as P, planner, remix, stitch, store, timeline, voice as svoice, wan
 
 router = APIRouter(prefix="/api/shorts")
 MAX_UPLOAD = 12 * 1024 * 1024
@@ -513,6 +513,46 @@ async def patch_remix(short_id: str, body: RemixPatch):
 
 class FetchReq(BaseModel):
     url: str
+
+
+@router.post("/{short_id}/shots/{shot_id}/motion")
+async def shot_motion(short_id: str, shot_id: str, url: str = Form(""), start: float = Form(0.0), rights: bool = Form(False), file: UploadFile | None = File(None)):
+    """A reference video (a file, or a YouTube or Instagram link) drives the movement of this one shot. A file is cut at once; a link is downloaded as a job."""
+    short = _get(short_id)
+    _guard(store.shot_by_id, short, shot_id)
+    if not rights:
+        raise HTTPException(400, "confirm that you have the right to use this video")
+    if file is not None and file.filename:
+        d = store.media_dir(short_id, "motion")
+        path = d / f"{shot_id}-src.mp4"
+        size = 0
+        with open(path, "wb") as f:
+            while chunk := await file.read(1 << 20):
+                size += len(chunk)
+                if size > MAX_VIDEO_UPLOAD:
+                    f.close()
+                    path.unlink(missing_ok=True)
+                    raise HTTPException(400, "the video is over 400 MB")
+                f.write(chunk)
+        try:
+            await asyncio.to_thread(motion.prepare, short_id, shot_id, path, start, file.filename or "", "", True)
+        except MediaError as e:
+            raise HTTPException(400, str(e))
+        finally:
+            path.unlink(missing_ok=True)
+        return await state(short_id)
+    if not url.strip():
+        raise HTTPException(400, "give a link or a video file")
+    _guard(remix.check_url, url)
+    return _start(short_id, "short_motion", lambda progress: asyncio.to_thread(motion.fetch_link, short_id, shot_id, url, start, True, lambda d, t, l="": progress(d, t, l)))
+
+
+@router.delete("/{short_id}/shots/{shot_id}/motion")
+async def shot_motion_clear(short_id: str, shot_id: str):
+    short = _get(short_id)
+    _guard(store.shot_by_id, short, shot_id)
+    motion.clear(short_id, shot_id)
+    return await state(short_id)
 
 
 @router.post("/{short_id}/remix/fetch")

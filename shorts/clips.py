@@ -44,6 +44,15 @@ def clip_plan(short: dict, shot: dict) -> dict | None:
         kf = chosen_keyframe(short, shot)
         if not kf:
             return None
+        from . import motion                                                                        # motion imports remix, which imports this module
+        if motion.of(shot) and not avatar.is_avatar(shot):
+            drive = motion.drive_path(short, shot)
+            if not drive:
+                return None
+            tk = f"motion:{_fingerprint(drive)}"
+            return {"token": f"key:{kf['id']}|{tk}", "hash": P.req_hash(motion.request(short, shot, 1, f"key:{kf['id']}", tk)),
+                    "build": lambda attempt, image: motion.request(short, shot, attempt, image, wan.data_url(drive.read_bytes(), "video/mp4")),
+                    "load": lambda: _jpeg_url(media.path_of(kf).read_bytes(), models.SIZE_PORTRAIT), "source": "motion"}
         if avatar.is_avatar(shot):
             info = avatar.slice_info(short, shot)
             if not info:

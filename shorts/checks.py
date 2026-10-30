@@ -2,7 +2,7 @@
 app can mend it, which fix applies."""
 import re
 
-from . import avatar, cast, models, pipelines as P, planner, store, timeline, voice as svoice
+from . import avatar, cast, models, motion, pipelines as P, planner, store, timeline, voice as svoice
 
 TEXT_WORDS = re.compile(r"\b(?:text|writing|written|words?|letters?|caption|subtitles?|sign (?:saying|reading)|reads|newspaper|headline|logo|poster|banner|screen showing|displays?)\b", re.I)
 
@@ -50,6 +50,8 @@ def run(short: dict) -> dict:
         issues.append(_issue("warn", "many_character_shots", f"{chars} shots show the main character; the same face over many shots drifts. Four or fewer holds up best"))
     for text in cast.problems(short):
         issues.append(_issue("block", "cast", text))
+    for p in motion.problems(short):
+        issues.append(_issue(p["level"], p["code"], p["text"]))
     for p in avatar.problems(short):
         issues.append(_issue(p["level"], p["code"], p["text"]))
     mode = short["settings"]["image_mode"]

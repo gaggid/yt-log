@@ -231,7 +231,8 @@ function shotView(x) {
     <div class="row small"><b>${esc(x.id)}</b><span class="mute">${x.seconds}s · starts: ${esc(x.begins)}</span>${x.old_clip ? badge('warn', 'clip is old') : ''}<span class="sp"></span>
       <label><input type="checkbox" data-shot-flag="character" data-id="${x.id}" ${x.character ? 'checked' : ''}> shows the main character</label>
       <label><input type="checkbox" data-shot-flag="continues" data-id="${x.id}" ${x.continues ? 'checked' : ''}> continues</label>
-      <label title="The person in this shot's picture speaks the voice with lip sync (InfiniteTalk). Needs a library character in the shot and the beat's voice."><input type="checkbox" data-shot-flag="avatar" data-id="${x.id}" ${x.avatar ? 'checked' : ''}> talking avatar</label></div>
+      <label title="The person in this shot's picture speaks the voice with lip sync (InfiniteTalk). Needs a library character in the shot and the beat's voice."><input type="checkbox" data-shot-flag="avatar" data-id="${x.id}" ${x.avatar ? 'checked' : ''}> talking avatar</label>
+      ${x.motion && x.motion.file ? `<span class="small">${badge('good', 'moves like: ' + esc(x.motion.title || 'a video'))} <a href="#" data-motion-clear="${x.id}">remove</a></span>` : `<button class="small" data-motion="${x.id}" title="A video (file, YouTube or Instagram link) drives how the person in this shot moves (Wan Animate). 2 to 3 seconds of it are used.">movement from a video…</button>`}</div>
     <textarea data-shot="${x.id}" style="min-height:64px;font-size:13px">${esc(x.prompt)}</textarea>
     <div class="row small mt-s"><label class="row">Camera <input data-shot-cam="${x.id}" value="${esc(x.camera)}" style="width:150px"></label>
       <button class="small" data-clip="${x.id}">${clip ? 'Make again' : 'Make this clip'}</button><button class="small" data-up="${x.id}">My picture</button>
@@ -288,6 +289,20 @@ function finalView() {
     ${f.attempts.filter(a => a.status === 'failed').slice(-1).map(a => `<div class="errbox">${esc(a.error)}</div>`).join('')}</div>`;
 }
 
+async function motionDialog(shotId) {
+  const html = `<p class="small">The person in this shot will move like the person in the video: 2 to 3 seconds of it are used. The video is only a movement guide; it stays on this machine and is never exported or uploaded. The background and clothes come from your start picture.</p>
+    <label class="f">YouTube or Instagram link<input id="m-url" placeholder="https://..."></label>
+    <label class="f mt-s">or a video file<input type="file" id="m-file" accept="video/*"></label>
+    <label class="f mt-s">Start at (seconds)<input type="number" id="m-start" value="0" min="0" step="0.5"></label>
+    <label class="row mt-s"><input type="checkbox" id="m-ok"> I have the right to use this video.</label>`;
+  const v = await dialog({title: 'Movement from a video', html, buttons: [{label: 'Cancel', value: null}, {label: 'Use it', primary: true,
+    collect: l => ({url: l.querySelector('#m-url').value.trim(), file: l.querySelector('#m-file').files[0], start: +l.querySelector('#m-start').value || 0, ok: l.querySelector('#m-ok').checked}),
+    validate: x => !x.ok ? 'Tick the box to confirm.' : (!x.url && !x.file) ? 'Paste a link or choose a file.' : ''}]});
+  if (!v) return;
+  const fd = new FormData(); fd.append('rights', 'true'); fd.append('start', v.start); if (v.file) fd.append('file', v.file); else fd.append('url', v.url);
+  await act(null, async () => { const r = await call('/' + SID + '/shots/' + shotId + '/motion', {method: 'POST', form: fd}); if (v.file) { S = r; render(); } else await refresh(true); return true; }, v.file ? 'Movement ready' : 'Fetching the video');
+}
+
 /* ───────── wiring ───────── */
 function wire() {
   const q = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)];
@@ -315,6 +330,8 @@ function wire() {
   all('[data-fixgo]').forEach(e => e.onclick = () => { const t = document.querySelector(`[data-fix="${e.dataset.fixgo}"]`).value; if (t.trim().length < 4) { toast('Say what to change', {bad: true}); return; } post(e, '/shots/' + e.dataset.fixgo + '/fix', {instruction: t}, 'Changing the picture'); });
   all('[data-still]').forEach(e => e.onchange = () => patch('/shots/' + e.dataset.still, {still: e.value}));
   all('[data-shot-cam]').forEach(e => e.onchange = () => patch('/shots/' + e.dataset.shotCam, {camera: e.value}));
+  all('[data-motion]').forEach(e => e.onclick = () => motionDialog(e.dataset.motion));
+  all('[data-motion-clear]').forEach(e => e.onclick = async ev => { ev.preventDefault(); await call('/shots/' + e.dataset.motionClear + '/motion', {method: 'DELETE'}); refresh(true); });
   all('[data-shot-flag]').forEach(e => e.onchange = () => patch('/shots/' + e.dataset.id, {[e.dataset.shotFlag]: e.checked}));
   all('[data-clip]').forEach(e => e.onclick = () => post(e, '/clips', {shot_ids: [e.dataset.clip], only_missing: false}, 'Making the clip'));
   all('[data-key]').forEach(e => e.onclick = () => post(e, '/keyframes', {shot_ids: [e.dataset.key], only_missing: false}, 'Making the keyframe'));

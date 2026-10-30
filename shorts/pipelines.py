@@ -159,6 +159,8 @@ def estimate_s(short: dict) -> int:
             total += STILL_S
         if sh.get("avatar"):
             total += request_seconds(models.TALK, models.gen_frames(secs + 0.2, models.TALK), short)
+        elif isinstance(sh.get("motion"), dict) and sh["motion"].get("file"):
+            total += request_seconds(models.ANIMATE, int((secs + 0.2) * 16), short)
         elif short["pipeline"] == "quick":
             total += request_seconds(models.TI2V, models.gen_frames(secs, models.TI2V), short)
         else:
