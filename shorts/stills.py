@@ -105,6 +105,8 @@ def edit_prompt(short: dict, shot: dict, refs: dict) -> str:
     if look:
         parts.append(look.rstrip(". ") + ".")
     parts.append(identity)
+    if refs["who"]:
+        parts.append("Ignore any clothing, colour or outfit words in the photograph description above — the person's exact appearance comes from their picture only.")
     if shot.get("avatar"):
         parts.append(AVATAR_FRAMING)
     parts.append(KEEP_OUT)
