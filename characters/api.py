@@ -574,6 +574,27 @@ async def keep_picture(item_id: str, on: bool = True):
     return await state(it["plan_id"])
 
 
+@router.delete("/item/{item_id}")
+async def delete_picture(item_id: str):
+    """Delete one picture and free its file from disk. Refused if the picture is a canon or referenced by a saved look."""
+    it = media.get(item_id)
+    if not it:
+        raise HTTPException(404, "no such picture")
+    c = _get(it["plan_id"])
+    if item_id in store.canon_items(c).values():
+        raise HTTPException(400, "this picture is the canon for its view; un-canon it first before deleting")
+    look_items = {lk["item"] for lk in c["looks"]}
+    if item_id in look_items:
+        raise HTTPException(400, "this picture is used by a saved look; delete the look first")
+    av_look_id = (c.get("avatar") or {}).get("look_id", "")
+    if av_look_id and studio_edit.look_item(c, av_look_id) and studio_edit.look_item(c, av_look_id)["id"] == item_id:
+        raise HTTPException(400, "this picture is set as the avatar picture; change the avatar picture first")
+    if it["status"] == "running":
+        raise HTTPException(409, "this picture is still being generated; cancel the job first")
+    media.delete(item_id)
+    return await state(it["plan_id"])
+
+
 class LookReq(BaseModel):
     name: str = ""
 

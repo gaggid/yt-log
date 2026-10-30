@@ -77,6 +77,17 @@ def approve(item_id: str, on: bool = True) -> dict:
     return get(item_id)
 
 
+def delete(item_id: str) -> None:
+    """Remove one media row and its file from disk. The caller must verify the item is not canon or referenced by a look."""
+    it = get(item_id)
+    if not it:
+        return
+    if it["file"]:
+        p = media_dir(it["plan_id"]) / it["file"]
+        p.unlink(missing_ok=True)
+    db.ex("DELETE FROM media WHERE id=?", (item_id,))
+
+
 def path_of(it: dict) -> Path:
     return media_dir(it["plan_id"]) / it["file"]
 
