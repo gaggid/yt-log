@@ -115,13 +115,13 @@ def build(short: dict, shot: dict, attempt: int) -> dict:
             # come from the upload, not Character Studio canon (which may have a different outfit).
             char_name = refs["who"][0][0] if refs["who"] else "the character"
             place_paths = [refs["paths"][-1]] if refs["place"] else []
-            refs = {**refs, "paths": [anchor] + place_paths, "who": [(char_name, "face and clothes")],
-                    "ref_ids": [str(anchor)] + refs["ref_ids"][-1:] if refs["place"] else [str(anchor)],
-                    "versions": {}}
+            place_ids = [refs["ids"][-1]] if refs["place"] else []
+            refs = {**refs, "paths": [anchor] + place_paths, "ids": [str(anchor)] + place_ids,
+                    "who": [(char_name, "face and clothes")], "versions": {}}
     if not refs:
         return {"how": "draw", "body": request(short, shot, attempt), "refs": [], "ref_ids": [], "versions": {}}
     body = {"model": model_of(short), "prompt": edit_prompt(short, shot, refs), "size": SIZE, "n": 1, "seed": P.seed_for(short, shot, attempt), "response_format": "b64_json"}
-    return {"how": "edit", "body": body, "refs": refs["paths"], "ref_ids": refs["ref_ids"], "versions": refs["versions"]}
+    return {"how": "edit", "body": body, "refs": refs["paths"], "ref_ids": refs["ids"], "versions": refs["versions"]}
 
 
 def hash_of(req: dict) -> str:
