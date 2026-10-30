@@ -296,7 +296,6 @@ function editCard(busy) {
       <button class="small" id="e-prev" ${dis}>Show the prompt</button><button class="small primary" id="e-run" ${dis}>Make the edit</button><button class="small" id="e-save-recipe">Save as recipe</button></div></div>`;
 }
 
-const RB_NOTE = 'Change only the face. Keep the clothes, jewellery, neck, body, pose, lighting and background of image 1 exactly as they are. Do not copy any clothes or jewellery from image 2.';
 
 const PARTS = [
   {id: 'face_into',   label: 'My face into reference photo',   hint: 'character\'s face placed into the reference scene · clothes, body, background all from the reference'},
@@ -320,23 +319,12 @@ function refBlendCard(busy) {
         ${PARTS.map(pt => `<label style="display:flex;align-items:center;gap:4px"><input type="radio" name="rb-part" value="${pt.id}" ${pt.id === 'face_into' ? 'checked' : ''}> <span><b>${pt.label}</b> <span class="mute">${pt.hint}</span></span></label>`).join('<br>')}
       </div>
     </div>
-    <div class="row mt-s" style="gap:8px;align-items:center;flex-wrap:wrap">
+    <div class="row mt-s" style="gap:12px;align-items:center;flex-wrap:wrap">
       <label class="small" style="display:flex;align-items:center;gap:6px">Reference photo <input type="file" id="rb-file" accept="image/jpeg,image/png,image/webp" style="font-size:12px"></label>
-      <label class="small">Face swap method <select id="rb-mode"><option value="lora">Head-swap LoRA</option><option value="prompt">Prompt only</option><option value="both">Both (compare)</option></select></label>
-      <label class="small" style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="rb-expr"> strong expression in target</label>
-      <label class="small" style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="rb-sharp"> sharper</label>
-      <span id="rb-status" class="mute small"></span>
+      <label class="small" style="display:flex;align-items:center;gap:6px" title="Uses the bfs-head-swap LoRA for face swaps; uncheck to use prompt only"><input type="checkbox" id="rb-lora" checked> Head-swap LoRA</label>
+      <label class="small" style="display:flex;align-items:center;gap:6px" title="Use when the reference has an open mouth or wide eyes (bfs-head-swap-expression)"><input type="checkbox" id="rb-expr"> Expression</label>
+      <label class="small" style="display:flex;align-items:center;gap:6px" title="Adds the detail-fix LoRA for sharper output (qwen2.1-detail-fix-2.0)"><input type="checkbox" id="rb-sharp"> Sharper</label>
     </div>
-    <div class="small mute mt-s" style="line-height:1.6">
-      <b>Face swap method:</b> <i>Head-swap LoRA</i> — uses a specialist model trained for face transplants; best result in most cases.
-      <i>Prompt only</i> — text instruction without the LoRA; faster, weaker identity hold.
-      <i>Both</i> — runs both and gives you two pictures to compare (~2× time).<br>
-      <b>Strong expression in target:</b> tick when the reference photo shows an open mouth, raised eyebrows or wide eyes; switches to the expression-aware variant of the LoRA.<br>
-      <b>Sharper:</b> adds a detail-fix pass on top; slows generation slightly but improves fine hair and skin texture.<br>
-      <b>Extra instruction:</b> appended to the LoRA's built-in wording. The default asks the model to leave clothes and jewellery untouched. Clear it to send no extra text; edit it to nudge a specific detail (e.g. "preserve the nose ring").
-    </div>
-    <label class="f mt-s small">Extra instruction for the face swap (added to the LoRA's own instruction; leave empty to send none)
-      <textarea id="rb-note" rows="2" style="width:100%">${esc(RB_NOTE)}</textarea></label>
     <div class="row mt-s"><button class="small primary" id="rb-run" ${dis}>Apply</button></div></div>`;
 }
 
@@ -434,21 +422,17 @@ function wireEdit() {
       const r = await call('/' + CID + '/upload-ref', {method: 'POST', form: fd});
       refId = r.id;
     } catch(e) { toast('Upload failed: ' + e.message, {bad: true}); btn.disabled = false; btn.textContent = 'Apply'; return; }
-    RB_FILE = null;              // clear so the next Apply picks a fresh file
-    btn.textContent = 'Apply';   // reset so act() restores 'Apply' on any edit error
+    RB_FILE = null;
+    btn.textContent = 'Apply';
     const charId = ($e('rb-base') || {}).value || EB;
-    // face_into: reference photo is the base scene; character portrait is the extra ref
     const partLabel = PARTS.find(p => p.id === part)?.label || part;
     const editArgs = part === 'face_into'
       ? {base: refId, preset: 'custom', value: partLabel, extra: [charId], n: 1, prompt: RB_INSTRUCTIONS[part]}
       : {base: charId, preset: 'custom', value: partLabel, extra: [refId], n: 1, prompt: RB_INSTRUCTIONS[part]};
-    // face parts: head-swap LoRA (server supplies the instruction), prompt only, or both to compare (~2 min each)
-    if (part === 'face' || part === 'face_into') {
-      const mode = ($e('rb-mode') || {}).value || 'lora';
-      const lora = (($e('rb-expr') || {}).checked ? 'bfs-head-swap-expression' : 'bfs-head-swap') + (($e('rb-sharp') || {}).checked ? ',qwen2.1-detail-fix-2.0' : '');
-      const note = (($e('rb-note') || {}).value || '').trim();            // appended by the server to the swap LoRA's own instruction
-      if (mode === 'lora') { editArgs.prompt = note; editArgs.swap = lora; }
-      else if (mode === 'both') { editArgs.swap = lora; editArgs.both = true; editArgs.note = note; }
+    if ((part === 'face' || part === 'face_into') && ($e('rb-lora') || {checked: true}).checked) {
+      const base = ($e('rb-expr') || {}).checked ? 'bfs-head-swap-expression' : 'bfs-head-swap';
+      editArgs.swap = ($e('rb-sharp') || {}).checked ? base + ',qwen2.1-detail-fix-2.0' : base;
+      editArgs.prompt = '';
     }
     post(btn, '/edit', editArgs, 'Applying…');
   };
