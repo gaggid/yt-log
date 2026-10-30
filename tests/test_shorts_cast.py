@@ -138,3 +138,12 @@ def test_instagram_links_are_taken_and_other_hosts_are_not():
     for bad in ("https://evil.com/instagram.com", "https://instagram.com.evil.com/reel/x", "file:///c:/x.mp4"):
         with pytest.raises(Exception):
             remix.check_url(bad)
+
+
+def test_a_close_up_leaves_out_the_shoes_and_trousers_of_the_character_but_a_wide_shot_keeps_them():
+    from shorts import stills
+    text = "Saira, 25, in a green silk tunic, cream wide-leg trousers and gold pointed-toe flats, with gold hoop earrings"
+    close = stills.framed_character(text, {"camera": "close-up", "still": "She looks into the lens."})
+    assert "trousers" not in close and "flats" not in close and "tunic" in close and "earrings" in close
+    assert stills.framed_character(text, {"camera": "wide shot, full body", "still": "She walks."}) == text
+    assert stills.framed_character(text, {"camera": "", "still": ""}) == text, "no framing named: nothing is left out"

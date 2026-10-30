@@ -170,3 +170,19 @@ def test_api_library_idea_draw_canon_lock_and_photo_rights(client):
     copy = client.post(f"/api/characters/{cid}/duplicate").json()
     assert copy["id"] != cid and not copy["locked"] and copy["slots"] == st["slots"] and not copy["canon"]
     assert client.delete(f"/api/characters/{cid}").status_code == 200 and client.get(f"/api/characters/{cid}").status_code == 404
+
+
+def test_a_head_and_shoulders_portrait_leaves_out_what_the_frame_cannot_show_and_runs_at_35_steps(env):
+    """Qwen draws every word it is given: trousers, flats, wrist jewellery and waist-length hair in a portrait made the face morph (Saira, 2026-10-30)."""
+    slots = {**SLOTS, "bottom": "high-waisted wide-leg trousers in cream cotton", "footwear": "gold pointed-toe flats", "hair": "deep black, waist-length, soft waves",
+             "accessories": "large gold hoop earrings and a stack of thin gold bangles on one wrist", "eyes": "dark brown, almond-shaped with thick lashes"}
+    c = store.create("Saira", "person", slots)
+    portrait = R.build(c, "portrait", 1)["body"]
+    p = portrait["prompt"].lower()
+    for gone in ("trousers", "flats", "bangles", "waist-length"):
+        assert gone not in p, gone
+    assert "hoop earrings" in p and "eyes: dark brown, almond-shaped with thick lashes" in p and "lashes eyes" not in p
+    assert portrait["steps"] == 35
+    body = R.build(c, "body", 1)["body"]["prompt"].lower()
+    assert "trousers" in body and "gold pointed-toe flats" in body and "bangles" in body, "the full-body view keeps everything"
+    assert R.build(c, "portrait", 1)["meta"]["steps"] == 35

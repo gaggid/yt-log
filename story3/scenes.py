@@ -173,10 +173,12 @@ async def _post(client: httpx.AsyncClient, url: str, key: str, **kw) -> dict:
     raise MediaError(last or "no answer from the model server")
 
 
-def _form(model: str, prompt: str, size: str, seed: int, files: list) -> tuple[dict, list]:
+def _form(model: str, prompt: str, size: str, seed: int, files: list, steps: int | None = None) -> tuple[dict, list]:
     """Edit request: multipart, the first image is the one that is edited, then the other references. Every image goes in the field `image`."""
     w, h = size.split("x")
     data = {"model": model, "prompt": prompt, "size": size, "width": w, "height": h, "seed": str(seed), "n": "1", "response_format": "b64_json"}
+    if steps:
+        data["steps"] = str(steps)
     return data, [("image", (p.name, p.read_bytes(), "image/png")) for p in files]
 
 

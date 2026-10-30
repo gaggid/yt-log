@@ -77,6 +77,7 @@ PERSON_RULES = """STYLE OF THE PERSON
 - Reel-worthy and photogenic: a striking, expressive face, well groomed, confident posture, a clear signature detail that is memorable at a glance (a colour, a jacket, a hairstyle, a piece of jewellery).
 - Current, fashionable, culturally authentic styling for this ethnicity and region as seen on real social media today: real clothing, hair and grooming people of that community actually wear, with colours that pop on camera. No caricature, no costume, no stereotype.
 - Realistic, not fantasy: believable proportions, natural skin, everyday-plausible outfit that still looks styled.
+- The image model draws every word literally, so write only what can be seen and keep each slot to its own job: `eyes` is the eye COLOUR only ("dark brown"), eye shape and lashes belong in `face`; `expression` is a plain look of the face ("a calm half smile"), never a metaphor ("a twinkle in her eyes", "eyes full of stars"); no detail of a body part that a head-and-shoulders picture would not show except in its own slot (shoes only in `footwear`, trousers only in `bottom`).
 - Everything you write must suit the fixed facts above (hair type and facial features natural for that ethnicity; clothes that fit the build and age)."""
 
 PLACE_RULES = """STYLE OF THE PLACE
@@ -145,7 +146,7 @@ def save_photo(char_id: str, raw: bytes) -> str:
 async def _post_image(how: str, body: dict, refs: list, base: str, key: str) -> bytes:
     async with _client(TIMEOUT_S) as c:
         if how == "edit":
-            data, files = scenes._form(body["model"], body["prompt"], body["size"], body["seed"], refs)
+            data, files = scenes._form(body["model"], body["prompt"], body["size"], body["seed"], refs, body.get("steps"))
             img = await scenes._post(c, base + "/images/edits", key, data=data, files=files)
         else:
             img = await scenes._post(c, base + "/images/generations", key, json=body)

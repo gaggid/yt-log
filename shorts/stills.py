@@ -2,6 +2,7 @@
 the planner (the person can edit it). It is drawn 9:16, looked at by a person, and only then animated by Wan, so a wrong idea dies before the long wait. The character, the place and the
 look the plan fixed are added by code, like in the Wan prompts."""
 import base64
+import re
 
 import httpx
 
@@ -20,6 +21,21 @@ def model_of(short: dict) -> str:
     return short["settings"].get("image_model") or DEFAULT_MODEL
 
 
+_TIGHT = re.compile(r"close[- ]?up|medium shot|medium close|waist|chest|bust|portrait|head and shoulders|over[- ]the[- ]shoulder|selfie|talking head", re.I)
+_FULL = re.compile(r"full[- ]body|full[- ]length|wide shot|wide angle|establishing|head to (?:toe|foot|feet)|walking|running|feet|shoes", re.I)
+_LEGS = re.compile(r"\b(shoes?|footwear|sandals?|sneakers?|flats|heels?|boots?|loafers?|chappals?|juttis?|slippers?|barefoot|trousers|pants|jeans|leggings|skirt|dhoti|lungi|socks?|ankles?|legs?)\b", re.I)
+
+
+def framed_character(text: str, shot: dict) -> str:
+    """The character paragraph without the parts of the body the shot's framing cannot show: the image model draws every word, so shoes and trousers in a close-up are forced into the
+    frame and the face comes out morphed. Full-body and wide shots keep everything."""
+    frame = f"{shot.get('camera', '')} {shot.get('still', '')}"
+    if not _TIGHT.search(frame) or _FULL.search(frame):
+        return text
+    keep = [c for c in re.split(r"(?<=[.;])\s+|,\s+| and ", text) if c.strip() and not _LEGS.search(c)]
+    return ", ".join(x.strip(" .") for x in keep) or text
+
+
 AVATAR_FRAMING = ("The person faces the camera straight on, waist-up, looking into the lens, mouth relaxed and just slightly open as if about to speak, both hands visible and relaxed in front "
                   "of the body, a steady uncluttered background.")
 
@@ -29,7 +45,7 @@ def prompt(short: dict, shot: dict) -> str:
     plan = short["plan"]
     parts = []
     if shot.get("character") and plan.get("character"):
-        parts.append(plan["character"].rstrip(". ") + ".")
+        parts.append(framed_character(plan["character"], shot).rstrip(". ") + ".")
     parts.append((shot.get("still") or shot["prompt"]).strip())
     setting = shot.get("setting") or plan.get("place")
     if setting:

@@ -3,6 +3,7 @@ the recipe. Prompt order follows the research notes (docs/PLAN_characters.md 13)
 keep out. Qwen runs at cfg 1 on this gateway, so exclusions are plain sentences; FLUX honours a negative prompt and gets one."""
 import hashlib
 import json
+import re
 import zlib
 
 from story2 import describe, providers
@@ -41,12 +42,33 @@ def seed_for(char_id: str, view: str, attempt: int) -> int:
     return (zlib.crc32(f"{char_id}:{view}".encode()) + 101 * (attempt - 1)) % (2 ** 32)
 
 
-def identity_text(char: dict) -> str:
-    """The one fixed paragraph about the subject, composed from the slots; an empty ethnicity slot of a person means Indian (the app's default)."""
+STEPS = {"qwen-image-2.1": 35}                   # owner decision 2026-10-30: character pictures run at 35 steps on Qwen (faces and eyes come out cleaner than at the gateway default)
+HEAD_VIEWS = ("portrait",)                       # views whose frame ends at the shoulders: legs, feet, wrists and hands are not in it
+_BELOW = re.compile(r"\b(wrists?|hands?|fingers?|bangles?|bracelets?|rings?|watch(?:es)?|belts?|anklets?|toe|shoes?|sandals?|heels?|waist)\b", re.I)
+_LONG = re.compile(r"\b(?:waist|hip|knee|thigh|floor)[- ]length\b", re.I)
+
+
+def visible_slots(slots: dict, view: str | None) -> tuple[dict, set[str]]:
+    """What the picture for `view` can show. The image model draws every word it is given, so a head-and-shoulders portrait that is told about flats and trousers tries to fit them in and
+    the face comes out morphed: trousers, footwear, jewellery of the wrists and hands and hair length beyond the shoulders are left out of those views (they stay in the full-body views)."""
+    if view not in HEAD_VIEWS and not (view or "").startswith("expr_"):
+        return slots, set()
+    s = dict(slots)
+    if s.get("accessories"):
+        keep = [c for c in re.split(r",| and ", s["accessories"]) if c.strip() and not _BELOW.search(c)]
+        s["accessories"] = ", ".join(x.strip() for x in keep)
+    if s.get("hair"):
+        s["hair"] = _LONG.sub("long", s["hair"])
+    return s, set(describe.LOWER)
+
+
+def identity_text(char: dict, view: str | None = None) -> str:
+    """The one fixed paragraph about the subject, composed from the slots (for a head-and-shoulders view only the part the frame shows); an empty ethnicity slot of a person means Indian."""
     slots = dict(char["slots"])
     if char["kind"] == "person" and not slots.get("ethnicity"):
         slots["ethnicity"] = "Indian"
-    text = describe.describe(char["kind"], slots)
+    slots, hide = visible_slots(slots, view) if char["kind"] == "person" else (slots, set())
+    text = describe.describe(char["kind"], slots, hide)
     region = (char.get("declared") or {}).get("ethnicity")
     return f"A location in {region}. {text}" if char["kind"] == "place" and region else text
 
@@ -54,7 +76,7 @@ def identity_text(char: dict) -> str:
 def draw_prompt(char: dict, view: str, listing: dict | None = None) -> str:
     r = char["render"]
     trig = render.trigger_words(r, listing)
-    parts = [trig, VIEWS[view]["frame"], identity_text(char), render.look(r), NO_TEXT]
+    parts = [trig, VIEWS[view]["frame"], identity_text(char, view), render.look(r), NO_TEXT]
     if char.get("personality") and char["kind"] == "person":
         parts.insert(3, f"Mood: {char['personality'].rstrip('. ')}.")
     return " ".join(p for p in parts if p)[:3900]
@@ -88,6 +110,8 @@ def build(char: dict, view: str, attempt: int, listing: dict | None = None, seed
     r = char["render"]
     seed = seed if seed is not None else seed_for(char["id"], view, attempt)
     body = {"model": r["model"], "size": v["size"], "n": 1, "seed": seed, "response_format": "b64_json"}
+    if STEPS.get(r["model"]):
+        body["steps"] = STEPS[r["model"]]
     paths, ref_ids = [], []
     how = v["how"]
     photo = store.photo_path(char) if (view == "portrait" and char["kind"] == "person") else None
@@ -111,6 +135,6 @@ def build(char: dict, view: str, attempt: int, listing: dict | None = None, seed
             ref_ids.append(it["id"])
         body["prompt"] = edit_prompt(char, view, extra)
     meta = {"view": view, "how": how, "model": r["model"], "seed": seed, "prompt": body["prompt"][:1500], "loras": r["loras"] if how == "draw" else [], "refs": ref_ids,
-            "identity_hash": store.identity_hash(char), "version": char["version"], "style": r["style"]}
+            "identity_hash": store.identity_hash(char), "version": char["version"], "style": r["style"], "steps": body.get("steps")}
     meta["input_hash"] = hashlib.sha1(json.dumps({k: v for k, v in {**meta, "seed": 0}.items() if k not in ("prompt",)} | {"prompt": body["prompt"]}, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]
     return {"how": how, "body": body, "refs": paths, "ref_ids": ref_ids, "meta": meta}

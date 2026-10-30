@@ -102,7 +102,7 @@ def describe(kind: str, ap: dict | None, hide: set[str] | frozenset = frozenset(
     g = lambda k: ap.get(k, "")
     if kind in ("person", "narrator"):
         bits = [", ".join(x for x in (f"{g('ethnicity')} {g('gender')}".strip(), (g("age") + " years old") if g("age") and g("age").isdigit() else g("age"), g("build")) if x)]
-        bits += [f"{g('skin')} skin" if g("skin") else "", g("face"), g("hair") and f"hair: {g('hair')}", g("eyes") and f"{g('eyes')} eyes"]
+        bits += [f"{g('skin')} skin" if g("skin") else "", g("face"), g("hair") and f"hair: {g('hair')}", g("eyes") and (f"eyes: {g('eyes')}" if ("eye" in g("eyes").lower() or "," in g("eyes") or len(g("eyes").split()) > 3) else f"{g('eyes')} eyes")]
         wear = ", ".join(x for x in (g("top"), g("bottom"), g("footwear")) if x)
         bits += [f"wearing {wear}" if wear else ""]
         if g("accessories") and g("accessories").lower() != "none":
