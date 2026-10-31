@@ -524,6 +524,7 @@ class EditReq(BaseModel):
     note: str = ""                      # with both: the text appended to the swap LoRA's own instruction (prompt then goes to the prompt-only version)
     both: bool = False                  # with swap and prompt: make the LoRA swap and the prompt-only version
     lora: list[dict] | None = None      # optional [{name, strength}]; when given the LoRA is sent with the edit request
+    flatten: bool = False               # extra[0] shows the outfit on a person: make a flat lay of it first (outfit from a reference photo)
 
 
 def _edit_args(c: dict, body: EditReq) -> dict:
@@ -585,7 +586,7 @@ async def edit(char_id: str, body: EditReq):
     _guard(edits.build, c, a["base"], body.preset, body.value, 1, a["extra"], a["garment"]["path"] if a["garment"] else None, body.scope if a["garment"] else "",
            override=body.prompt, garment_worn=bool(a["garment"] and a["garment"]["worn"]), lora=lo, swap=body.swap)   # refuse a bad request before the job starts
     s, key = settings_mod.get(), settings_mod.api_key()
-    return _start(char_id, "char_edit", lambda progress: studio_edit.make_edit(char_id, body.base, body.preset, body.value, body.extra, body.garment, body.scope, body.n, body.prompt, progress, s, key, lora=lo, swap=body.swap, both=body.both, swap_note=body.note))
+    return _start(char_id, "char_edit", lambda progress: studio_edit.make_edit(char_id, body.base, body.preset, body.value, body.extra, body.garment, body.scope, body.n, body.prompt, progress, s, key, lora=lo, swap=body.swap, both=body.both, swap_note=body.note, flatten=body.flatten))
 
 
 class PlaceReq(BaseModel):

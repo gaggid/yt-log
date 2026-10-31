@@ -461,6 +461,7 @@ function wireEdit() {
     const editArgs = part === 'face_into'
       ? {base: refId, preset: 'custom', value: partLabel, extra: [charId], n: 1, prompt: RB_INSTRUCTIONS[part]}
       : {base: charId, preset: 'custom', value: partLabel, extra: [refId], n: 1, prompt: RB_INSTRUCTIONS[part]};
+    if (part === 'outfit') editArgs.flatten = true;   // a photo of a person wearing it is edited itself unless it is turned into a flat lay first
     if ((part === 'face' || part === 'face_into') && ($e('rb-lora') || {checked: true}).checked) {
       const base = ($e('rb-expr') || {}).checked ? 'bfs-head-swap-expression' : 'bfs-head-swap';
       const addons = [($e('rb-sharp') || {}).checked && 'qwen2.1-detail-fix-2.0', ($e('rb-pure') || {}).checked && 'purelens-realism'].filter(Boolean);

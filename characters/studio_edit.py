@@ -62,8 +62,17 @@ async def _run(char_id: str, kind: str, key: str, make_req, n: int, label: str, 
     return {"made": made, "failed": failed}
 
 
+async def _flat_reference(char_id: str, item: dict, s: dict | None, key: str) -> dict:
+    """A flat lay of the outfit in a reference picture, saved as a reference picture of the character like an upload."""
+    data = await flatlay_png(media.path_of(item), s, key)
+    it = media.add(char_id, "char_ref", "ref", 0, "done", {"flat_of": item["id"]})
+    name = f"ref-flat-{int(time.time() * 1000)}.png"
+    (store.media_dir(char_id, "refs") / name).write_bytes(data)
+    return media.update(it["id"], file=f"refs/{name}")
+
+
 async def make_edit(char_id: str, base_id: str, preset: str, value: str = "", extra_ids: list[str] | None = None, garment_id: str = "", scope: str = "outfit", n: int = 1,
-                    override: str = "", progress=None, s: dict | None = None, key: str = "", do_check: bool = True, lora: list[dict] | None = None, swap: str = "", both: bool = False, swap_note: str = "") -> dict:
+                    override: str = "", progress=None, s: dict | None = None, key: str = "", do_check: bool = True, lora: list[dict] | None = None, swap: str = "", both: bool = False, swap_note: str = "", flatten: bool = False) -> dict:
     if both and swap and override.strip():                                 # compare: the head-swap LoRA first, then the same swap by prompt only
         a = await make_edit(char_id, base_id, preset, value, extra_ids, garment_id, scope, n, swap_note, progress, s, key, do_check, lora, swap)
         b = await make_edit(char_id, base_id, preset, value, extra_ids, garment_id, scope, n, override, progress, s, key, do_check, lora, "")
@@ -72,6 +81,15 @@ async def make_edit(char_id: str, base_id: str, preset: str, value: str = "", ex
     base = _item(char_id, base_id)
     extra = [_item(char_id, x) for x in (extra_ids or [])]
     garment = wardrobe.usable(garment_id) if garment_id else None
+    if garment and garment["worn"]:                                          # a photo of a model wearing it: make the flat lay first (kept in the wardrobe, reused next time)
+        if progress:
+            progress(0, max(1, n), "Making a flat lay of the clothing first (about two minutes)")
+        await make_flatlay(garment_id, None, s, key)
+        garment = wardrobe.usable(garment_id)
+    if flatten and extra:                                                    # the reference photo shows the outfit on a person: use a flat lay of it instead
+        if progress:
+            progress(0, max(1, n), "Making a flat lay of the outfit in the reference photo first (about two minutes)")
+        extra = [await _flat_reference(char_id, extra[0], s, key)] + extra[1:]
     return await _run(char_id, store.EDIT, "edit", lambda a: edits.build(char, base, preset, value, a, extra, garment["path"] if garment else None, scope if garment else "",
                                                                            override=override, garment_worn=bool(garment and garment["worn"]), lora=lora, swap=swap),
                       n, "Dress the character" if garment else ("Swap the head" if swap else "Edit"), progress, s, key, do_check)
@@ -95,15 +113,21 @@ async def make_place(char_id: str, place_id: str, action: str, base_id: str = ""
     return await _run(char_id, store.EDIT, "edit", lambda a: edits.build_place(char, place, action, a, base, override=override), n, "Place the character", progress, s, key, do_check)
 
 
+async def flatlay_png(path, s: dict | None = None, key: str = "") -> bytes:
+    """The clothing a person wears in a picture, as a flat lay with no person in it. An edit that takes a picture of a person wearing the outfit as its second picture edits THAT picture
+    (the model, the room and the pose stay and the first person's clothes appear on her), so every outfit goes through a flat lay first."""
+    base, api_key = studio._ctx(s, key)
+    body = {"model": "qwen-image-2.1", "size": edits.size_of_picture(path), "n": 1, "seed": 7, "response_format": "b64_json", "prompt": edits.FLATLAY}
+    return await studio._post_image("edit", body, [path], base, api_key)
+
+
 async def make_flatlay(garment_id: str, progress=None, s: dict | None = None, key: str = "") -> dict:
     """A worn-garment photo becomes a flat lay with no person in it, kept as its own garment (source = the photo), so a try-on can never carry the model across."""
     src = wardrobe.get(garment_id)
-    base, api_key = studio._ctx(s, key)
     path = media.path_of(src)
     if progress:
         progress(0, 1, "Making a flat lay of the clothing")
-    body = {"model": "qwen-image-2.1", "size": edits.size_of_picture(path), "n": 1, "seed": 7, "response_format": "b64_json", "prompt": edits.FLATLAY}
-    data = await studio._post_image("edit", body, [path], base, api_key)
+    data = await flatlay_png(path, s, key)
     out = wardrobe.add(data, (src["meta"].get("name") or "Garment") + " (flat lay)", src["meta"].get("basis") or "invented", src["meta"].get("tags"), worn=False, source=garment_id)
     if progress:
         progress(1, 1, "done")

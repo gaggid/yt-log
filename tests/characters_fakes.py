@@ -33,7 +33,7 @@ class ImageGateway:
             raw = req.content
             fields = dict(re.findall(rb'name="(\w+)"\r\n\r\n([^\r]*)\r\n', raw))
             prompt = re.search(rb'name="prompt"\r\n\r\n(.*?)\r\n--', raw, re.S)
-            self.edits.append({"fields": {k.decode(): v.decode() for k, v in fields.items()}, "images": raw.count(b'name="image"'), "prompt": prompt.group(1).decode() if prompt else ""})
+            self.edits.append({"fields": {k.decode(): v.decode() for k, v in fields.items()}, "images": raw.count(b'name="image'), "prompt": prompt.group(1).decode() if prompt else ""})
             w, h = (int(v) for v in fields[b"size"].decode().split("x"))
             return httpx.Response(200, json={"data": [{"b64_json": base64.b64encode(png_bytes(w // 8, h // 8)).decode()}]})
         if path.endswith("/chat/completions"):

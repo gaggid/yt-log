@@ -23,23 +23,37 @@ def test_an_edit_keeps_the_source_look_sends_no_lora_and_counts_the_chain(gw):
         edits.edit_text("outfit", "")
 
 
-def test_a_worn_garment_gets_the_strong_wording_and_a_flat_lay_removes_the_model_entirely(gw):
+def test_a_worn_garment_is_turned_into_a_flat_lay_first_so_the_model_never_comes_across(gw):
     c = draw_canon(new()["id"])
     base = store.canon_items(c)["body"]
     g = wardrobe.add(png_bytes(), "Sherwani on a model", "licensed", ["wedding"], worn=True)
+    before = len(gw.edits)
     run(studio_edit.make_edit(c["id"], base["id"], "outfit", "", garment_id=g["id"], scope="top", s=S, key="k", do_check=False))
+    assert len(gw.edits) == before + 2                                                # the flat lay, then the try-on
+    assert "No person, no mannequin" in gw.edits[-2]["prompt"]
     e = gw.edits[-1]
-    assert e["images"] == 2 and "Copy ONLY the clothing" in e["prompt"] and "Never copy the model" in e["prompt"] and "top (shirt, jacket, kurta)" in e["prompt"] and "Keep the other clothes" in e["prompt"]
-    run(studio_edit.make_flatlay(g["id"], s=S, key="k"))
-    assert "No person, no mannequin" in gw.edits[-1]["prompt"]
+    assert e["images"] == 2 and "Dress the person from the first picture" in e["prompt"] and "Copy ONLY the clothing" not in e["prompt"] and "top (shirt, jacket, kurta)" in e["prompt"]
     flat = [x for x in wardrobe.listing() if x["source"] == g["id"]]
     assert len(flat) == 1 and not flat[0]["worn"]
     assert wardrobe.usable(g["id"])["id"] == flat[0]["id"] and wardrobe.usable(g["id"])["worn"] is False
     run(studio_edit.make_edit(c["id"], base["id"], "outfit", "", garment_id=g["id"], s=S, key="k", do_check=False))
-    last = gw.edits[-1]["prompt"]
-    assert "Dress the person from the first picture" in last and "Copy ONLY the clothing" not in last, "the flat lay has no person, so no worn-photo wording is needed"
+    assert len(gw.edits) == before + 3                                                # the flat lay is reused, not made again
     with pytest.raises(store.CharError):
         wardrobe.add(png_bytes(), "x", "stolen")
+
+
+def test_the_outfit_from_a_reference_photo_goes_through_a_flat_lay_first(gw):
+    c = draw_canon(new()["id"])
+    base = store.canon_items(c)["body"]
+    ref = media.add(c["id"], "char_ref", "ref", 0, "done", {})
+    (store.media_dir(c["id"], "refs") / "ref-1.png").write_bytes(png_bytes())
+    media.update(ref["id"], file="refs/ref-1.png")
+    before = len(gw.edits)
+    run(studio_edit.make_edit(c["id"], base["id"], "custom", "Outfit from reference", [ref["id"]], s=S, key="k", do_check=False, flatten=True))
+    assert len(gw.edits) == before + 2 and "No person, no mannequin" in gw.edits[-2]["prompt"]
+    made = media.items(c["id"], store.EDIT)[-1]
+    flat_ref = media.get(made["meta"]["refs"][1])
+    assert flat_ref["meta"]["flat_of"] == ref["id"]                                    # the edit used the flat lay, which is kept as a reference picture
 
 
 def test_the_character_in_a_place_uses_three_references(gw):

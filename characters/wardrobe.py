@@ -58,6 +58,11 @@ def path(gid: str):
 
 
 def delete(gid: str) -> None:
+    """Delete a garment and the flat lay made from it (a flat lay without its photo would be left over in the list)."""
     it = get(gid)
+    for other in [i for i in media.items(OWNER, KIND) if i["meta"].get("source") == gid]:
+        if other["file"]:
+            media.path_of(other).unlink(missing_ok=True)
+        db.ex("DELETE FROM media WHERE id=?", (other["id"],))
     media.path_of(it).unlink(missing_ok=True)
     db.ex("DELETE FROM media WHERE plan_id=? AND kind=? AND key=?", (OWNER, KIND, gid))
