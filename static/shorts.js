@@ -327,6 +327,7 @@ function beatsView() {
 function shotView(x) {
   const clip = x.clips.find(c => c.id === x.clip) || null;
   const key = x.keyframes.find(c => c.id === x.keyframe) || null;
+  const needsKey = S.keyframes_on && !key;
   const media = clip && clip.url ? vid(clip.url, 'muted loop') : key && key.url ? `<img src="${esc(key.url)}">` : (x.clips.some(c => c.status === 'failed') ? 'failed' : 'no clip yet');
   const failed = x.clips.filter(c => c.status === 'failed').pop();
   return `<div class="sh-shot"><div class="sh-thumb">${media}</div><div>
@@ -337,7 +338,8 @@ function shotView(x) {
       ${x.motion && x.motion.file ? `<span class="small">${badge('good', 'moves like: ' + esc(x.motion.title || 'a video'))} <a href="#" data-motion-clear="${x.id}">remove</a></span>` : `<button class="small" data-motion="${x.id}" title="A video (file, YouTube or Instagram link) drives how the person in this shot moves (Wan Animate). 2 to 3 seconds of it are used.">movement from a video…</button>`}</div>
     <textarea data-shot="${x.id}" style="min-height:64px;font-size:13px">${esc(x.prompt)}</textarea>
     <div class="row small mt-s"><label class="row">Camera <input data-shot-cam="${x.id}" value="${esc(x.camera)}" style="width:150px"></label>
-      <button class="small" data-clip="${x.id}">${clip ? 'Make again' : 'Make this clip'}</button><button class="small" data-up="${x.id}">My picture</button>
+      <button class="small" data-clip="${x.id}" ${needsKey ? 'disabled title="Draw the start picture first (Again button above)"' : ''}>${clip ? 'Make again' : 'Make this clip'}</button><button class="small" data-up="${x.id}">My picture</button>
+      ${needsKey ? `<span class="mute">↑ draw start picture first</span>` : ''}
       ${clip ? `<label><input type="checkbox" data-approve="${clip.id}" ${clip.approved ? 'checked' : ''}> keep this one</label>` : ''}
       ${failed && !clip ? `<span class="err">${esc(failed.error)}</span>` : ''}</div></div></div>`;
 }
