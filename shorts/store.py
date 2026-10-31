@@ -108,10 +108,14 @@ def image_path(short: dict, rel: str) -> Path | None:
 # ── which attempt counts ────────────────────────────────────────────────────
 
 def chosen(short_id: str, kind: str, key: str, need: str = "") -> dict | None:
-    """The approved attempt of (kind, key), else the latest finished one. `need` (a hash) restricts to attempts made from the same inputs."""
-    its = [i for i in media.items(short_id, kind, key) if i["status"] == "done" and i["file"] and (not need or i["meta"].get("input_hash") == need)]
-    ok = [i for i in its if i["approved"]]
-    return (ok or its[-1:] or [None])[0]
+    """The approved attempt of (kind, key), else the latest finished one. `need` (a hash) restricts to attempts made from the same inputs.
+    Approved items bypass the hash filter — the user confirmed them, so code-driven hash changes don't invalidate them."""
+    all_done = [i for i in media.items(short_id, kind, key) if i["status"] == "done" and i["file"]]
+    ok = [i for i in all_done if i["approved"]]
+    if ok:
+        return ok[0]
+    its = [i for i in all_done if not need or i["meta"].get("input_hash") == need]
+    return (its[-1:] or [None])[0]
 
 
 def input_hash(*parts) -> str:
