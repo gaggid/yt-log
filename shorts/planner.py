@@ -7,7 +7,7 @@ from story.schemas import Str
 from story2 import intake, leak, lexicon, maya, safety, svara, voices
 from story2.schemas import M
 
-from . import cast, models, prompts as P, store, timeline
+from . import cast, formats, models, prompts as P, store, subjects as subj, timeline
 
 WORDS_LO, WORDS_HI = 52, 86              # spoken words in the whole short (the prompt asks for 62 to 74; this is what is accepted)
 REC_LO, REC_HI = 62, 74                  # what the prompt asks for at the full 30 seconds
@@ -26,6 +26,8 @@ class SBeat(M):
 class PlanOut(M):
     title: Str
     logline: Str = ""
+    format: Str = ""
+    subjects: list[subj.SubjectOut] = []
     character: Str = ""
     place: Str = ""
     look: Str = ""
@@ -36,6 +38,7 @@ class ShotOut(M):
     prompt: Str
     still: Str = ""
     cast: list[Str] = []
+    subjects: list[Str] = []
     camera: Str = "static"
     character: bool = False
     continues: bool = False
@@ -63,6 +66,15 @@ def _profile(short: dict):
         return leak.profile(ev["project_id"], ev["passages"])
     except intake.IntakeError:
         return None
+
+
+def chosen_format(short: dict, said: str = "") -> str:
+    """The producer's choice when there is one, else what the model decided, else explainer (it invents no person)."""
+    pick = (short.get("settings", {}).get("format") or formats.AUTO).strip().lower()
+    if formats.valid(pick):
+        return pick
+    said = (said or "").strip().lower()
+    return said if formats.valid(said) else "explainer"
 
 
 def target_s(short: dict) -> float:
@@ -163,22 +175,24 @@ async def _plan_call(short: dict, backend, s: dict, note: str = "") -> PlanOut:
         if probs:
             raise ValueError("; ".join(probs[:4]))
 
-    res = await caller.call(P.plan_system(cur["engine"], t_s, f"{b_lo} to {b_hi}", ask_lo, ask_hi), f"{source_text(short)}{extra}\n{note}\nWrite the short now.", PlanOut, validate=check)
+    res = await caller.call(P.plan_system(cur["engine"], t_s, f"{b_lo} to {b_hi}", ask_lo, ask_hi, short["settings"].get("format") or formats.AUTO), f"{source_text(short)}{extra}\n{note}\nWrite the short now.", PlanOut, validate=check)
     return res.value
 
 
 def _shot(o: ShotOut) -> dict:
-    return {"id": "", "beat": "", "prompt": o.prompt.strip(), "still": o.still.strip(), "cast": [x.strip() for x in o.cast if x.strip()], "camera": (o.camera or "static").strip(), "character": bool(o.character), "continues": bool(o.continues),
+    return {"id": "", "beat": "", "prompt": o.prompt.strip(), "still": o.still.strip(), "cast": [x.strip() for x in o.cast if x.strip()], "subjects": [x.strip() for x in o.subjects if x.strip()], "camera": (o.camera or "static").strip(), "character": bool(o.character), "continues": bool(o.continues),
             "setting": o.setting.strip(), "seconds": 0.0, "frames": 0}
 
 
 async def _shots_call(short: dict, beat: dict, count: int, backend, s: dict, before: dict | None) -> list[dict]:
     plan = short["plan"]
     caller = llm.JsonCaller(backend, s)
-    ctx = [f"WHOLE SHORT: {plan.get('title', '')} - {plan.get('logline', '')}",
+    ctx = [f"WHOLE SHORT: {plan.get('title', '')} - {plan.get('logline', '')}", f"FORMAT: {plan.get('format') or 'story'}",
            f"MAIN PLACE: {plan.get('place', '')}", f"MAIN CHARACTER (added to character shots for you): {plan.get('character', '') or 'none'}", f"LOOK: {plan.get('look', '')}",
            "THE WHOLE NARRATION:\n" + "\n".join(f"- ({b['name']}) " + " ".join(x["text"] for x in b["sentences"]) for b in short["beats"]),
            f"THIS BEAT ({beat['name']}, feeling: {beat['feeling'] or 'neutral'}): " + " ".join(x["text"] for x in beat["sentences"])]
+    if subj.of(short):
+        ctx.append("THE SUBJECTS (name them exactly in the shots they appear in):\n" + "\n".join(f"- {x['name']} ({x['kind'] or 'subject'}): {x['visual']}" for x in subj.of(short)))
     if before:
         ctx.append(f"THE SHOT BEFORE THIS BEAT: {before['prompt']} (camera: {before['camera']})")
 
@@ -189,7 +203,7 @@ async def _shots_call(short: dict, beat: dict, count: int, backend, s: dict, bef
             raise ValueError("write the shots")
 
     cast_names = [m["char"]["name"] for m in cast.members(short) if m["char"]]
-    res = await caller.call(P.shots_system(count, MAX_CHARACTER_SHOTS, cast_names, target_s(short)),"\n".join(ctx) + f"\n\nWrite exactly {count} shots now.", ShotsOut, validate=check)
+    res = await caller.call(P.shots_system(count, MAX_CHARACTER_SHOTS, cast_names, target_s(short), plan.get("format") or "story", bool(subj.of(short))),"\n".join(ctx) + f"\n\nWrite exactly {count} shots now.", ShotsOut, validate=check)
     shots = [_shot(o) for o in res.value.shots]
     ids = cast.names(short)
     for sh in shots:                                                         # names the model wrote become library ids; a character shot with no names shows the whole cast
@@ -225,7 +239,10 @@ async def make_plan(short_id: str, backend, s: dict | None = None, progress=None
     if progress:
         progress(0, 1, "writing the story and the narration")
     out = await _plan_call(short, backend, s)
-    plan = {"title": out.title.strip()[:90], "logline": out.logline.strip(), "character": short["settings"].get("character_text") or out.character.strip(),
+    fmt = chosen_format(short, out.format)
+    fixed = bool(short["settings"].get("character_text") or cast.entries(short))          # a person the producer fixed is kept in any format
+    plan = {"title": out.title.strip()[:90], "logline": out.logline.strip(), "format": fmt, "subjects": subj.clean([x.model_dump() for x in out.subjects]),
+            "character": short["settings"].get("character_text") or (out.character.strip() if formats.allows_character(fmt) else ""),
             "place": out.place.strip(), "look": out.look.strip()}
     if cast.entries(short):                                                  # the library decides who and where, not the model
         plan["character"] = cast.block(short).replace("\n", " ") or plan["character"]
@@ -247,6 +264,9 @@ async def make_plan(short_id: str, backend, s: dict | None = None, progress=None
             sh["beat"] = b["id"]
             all_shots.append(sh)
         b["shot_ids"] = [sh["id"] for sh in shots]
+    if not formats.allows_character(fmt) and not fixed:                      # no invented main person in a documentary, an explainer or a comparison
+        for sh in all_shots:
+            sh["character"], sh["cast"] = False, []
     _limit_character_shots(all_shots)
     if short.get("settings", {}).get("voice_mode") == "none":               # silent video: narration was only needed for shot context; discard it
         for b in beats:

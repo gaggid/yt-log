@@ -414,3 +414,50 @@ def test_a_short_without_voice_is_never_too_long_for_its_words(gw):
     store.save(short)
     chk = checks.run(store.get(short["id"]))
     assert chk["timeline"]["total_s"] == 10.0 and not any(i["code"] == "length" for i in chk["issues"])
+
+
+# ── format and subjects ──────────────────────────────────────────────────────
+
+JETS = [{"name": "Chinese J-20 stealth fighter", "kind": "machine", "visual": "A twin-engine stealth fighter with canards, dark grey finish and a red and yellow star roundel."},
+        {"name": "Indian Air Force Su-30MKI", "kind": "machine", "visual": "A twin-engine grey fighter with the orange, white and green roundel of the Indian Air Force."}]
+
+
+def test_a_facts_article_is_a_documentary_with_its_subjects_and_no_invented_person(gw):
+    chat = FakeChat(plan_extra={"format": "comparison", "subjects": JETS}, shot_extra={"subjects": ["Chinese J-20 stealth fighter"]})
+    short = new_short()
+    short = run(planner.make_plan(short["id"], chat, S))
+    assert short["plan"]["format"] == "comparison" and [x["name"] for x in short["plan"]["subjects"]] == [j["name"] for j in JETS]
+    assert short["plan"]["character"] == "" and not any(sh["character"] for sh in short["shots"])      # the fake model still asked for a character in half the shots
+    shots_system = next(c for c in chat.calls if c["task"] == "p4_shots")
+    assert "Format comparison" in shots_system["system"] and "THE SUBJECTS" in shots_system["user"] and "Chinese J-20 stealth fighter" in shots_system["user"]
+    from shorts import stills
+    assert "red and yellow star roundel" in stills.prompt(short, short["shots"][0])
+
+
+def test_the_producer_can_force_the_format_and_a_story_keeps_its_person(gw):
+    short = new_short(format="story")
+    short = run(planner.make_plan(short["id"], FakeChat(plan_extra={"format": "documentary"}), S))
+    assert short["plan"]["format"] == "story" and short["plan"]["character"] and any(sh["character"] for sh in short["shots"])
+    assert planner.chosen_format({"settings": {}}, "nonsense") == "explainer"                         # a format the model invented falls back to the one that invents no person
+
+
+def test_a_shot_gets_the_look_of_a_subject_it_names_even_when_the_model_forgot_to_list_it(gw):
+    from shorts import subjects
+    short = {"plan": {"subjects": JETS}}
+    shot = {"prompt": "An Indian Air Force Su-30MKI banks over green hills.", "still": "", "subjects": []}
+    assert "orange, white and green roundel" in subjects.block(short, shot) and "red and yellow" not in subjects.block(short, shot)
+    assert subjects.block({"plan": {}}, shot) == ""                                                   # an older short without a subject list is unchanged
+    assert [x["name"] for x in subjects.parse_lines("Tejas: a small delta-wing fighter\nno colon here")] == ["Tejas"]
+
+
+def test_make_clips_draws_a_missing_or_old_start_picture_first_instead_of_skipping_it(gw, monkeypatch):
+    short = planned()
+    asked = {}
+
+    async def fake_keys(short_id, shot_ids, only_missing, progress, s, key):
+        asked["ids"] = shot_ids
+        return {"made": len(shot_ids), "failed": []}
+    monkeypatch.setattr(clips, "make_keyframes", fake_keys)
+    note = run(clips.make_clips(short["id"], [short["shots"][0]["id"]], True, None, S, "k"))
+    assert asked["ids"] == [short["shots"][0]["id"]]                                                  # nothing was drawn yet, so the clip job drew it
+    assert note.startswith("1 start picture drawn first")

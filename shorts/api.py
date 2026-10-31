@@ -16,7 +16,7 @@ from story3 import store as media
 from story3.voice import MediaError
 
 from characters import store as cstore, studio_edit
-from . import auto, cast, checks, clips, frames, models, motion, pipelines as P, planner, remix, stitch, store, timeline, voice as svoice, wan
+from . import auto, cast, checks, clips, formats, frames, models, motion, pipelines as P, planner, remix, stitch, store, subjects as subj, timeline, voice as svoice, wan
 
 router = APIRouter(prefix="/api/shorts")
 MAX_UPLOAD = 12 * 1024 * 1024
@@ -185,6 +185,7 @@ class SettingsReq(BaseModel):
     seed: int | None = None
     voice: dict | None = None
     voice_mode: str | None = None
+    format: str | None = None            # auto | story | documentary | explainer | comparison (shorts/formats.py)
     captions: bool | None = None
     bed: bool | None = None
     review_keyframes: bool | None = None
@@ -221,6 +222,8 @@ async def patch_settings(short_id: str, body: SettingsReq):
         patch.pop("size")                                               # only the 5B pipeline has the sharper size
     if "steps" in patch and patch["steps"] is not None and not 1 <= patch["steps"] <= 100:
         raise HTTPException(400, "steps is between 1 and 100")
+    if "format" in patch and patch["format"] not in (formats.AUTO, *formats.FORMATS):
+        raise HTTPException(400, f"format is one of: {', '.join((formats.AUTO, *formats.FORMATS))}")
     if "voice_mode" in patch and patch["voice_mode"] not in ("narration", "none"):
         raise HTTPException(400, "voice_mode is one of: narration, none")
     if "voice" in patch:
@@ -240,6 +243,7 @@ class PlanPatch(BaseModel):
     character: str | None = None
     place: str | None = None
     look: str | None = None
+    subjects: str | None = None          # one per line: "Name: how it looks"
 
 
 @router.patch("/{short_id}/plan")
@@ -248,9 +252,29 @@ async def patch_plan(short_id: str, body: PlanPatch):
     p = body.model_dump(exclude_unset=True)
     if "title" in p:
         short["title"] = (p.pop("title") or short["title"]).strip()[:90]
+    if "subjects" in p:
+        short["plan"]["subjects"] = subj.parse_lines(p.pop("subjects") or "")
+    if "format" in p:
+        p.pop("format")
     short["plan"].update({k: (v or "").strip() for k, v in p.items()})
     store.save(short)
     return await state(short_id)
+
+
+@router.post("/{short_id}/subjects")
+async def find_subjects(short_id: str):
+    """Write the subject list (who and what the story is about, with their looks) for a short that was planned without one. The shots are not touched: write the shots of a beat again to use them."""
+    s, be = _backend()
+
+    async def work(progress):
+        progress(0, 1, "finding the subjects of the story")
+        short = _get(short_id)
+        found = await subj.extract(short, be, s)
+        short = store.get(short_id)
+        short["plan"]["subjects"] = found
+        store.save(short)
+        return f"{len(found)} subjects found: " + ", ".join(x["name"] for x in found)
+    return _start(short_id, "short_subjects", work)
 
 
 class BeatEdit(BaseModel):

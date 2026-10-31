@@ -234,6 +234,15 @@ async def make_clips(short_id: str, shot_ids: list[str] | None = None, only_miss
     todo = [sh for sh in short["shots"] if not shot_ids or sh["id"] in shot_ids]
     if only_missing:
         todo = [sh for sh in todo if not chosen_clip(short, sh)]
+    drawn = ""
+    if P.keyframes_on(short):                                                  # a shot whose start picture is missing or old (its prompt changed after it was drawn) gets one now,
+        need = [sh["id"] for sh in todo if not chosen_keyframe(short, sh)]    # instead of being skipped without a word; the pictures stay in the storyboard to look at or redo
+        if need:
+            kf = await make_keyframes(short_id, need, True, progress, s, key)
+            drawn = f"{kf['made']} start picture{'s' if kf['made'] != 1 else ''} drawn first ({', '.join(need)})"
+            if kf["failed"]:
+                drawn += f"; {len(kf['failed'])} could not be drawn: " + "; ".join(x["shot"] + ": " + x["error"][:60] for x in kf["failed"])
+            short = planner.sync_timing(short_id)
     made, failed, skipped = 0, [], []
     for i, sh in enumerate(todo):
         if progress:
@@ -258,7 +267,7 @@ async def make_clips(short_id: str, shot_ids: list[str] | None = None, only_miss
                 break
     if progress:
         progress(len(todo), len(todo), "done")
-    parts = [f"{made} clip{'s' if made != 1 else ''} made"]
+    parts = ([drawn] if drawn else []) + [f"{made} clip{'s' if made != 1 else ''} made"]
     if skipped:
         parts.append(f"{len(skipped)} skipped (start picture not ready yet — draw it in the storyboard first): {', '.join(x['shot'] for x in skipped)}")
     if failed:

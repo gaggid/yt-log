@@ -11,7 +11,7 @@ import json
 
 import config
 
-from . import models, store
+from . import models, store, subjects
 
 PIPELINES = {
     "quick": {"label": "Quick (Wan 5B)", "models": [models.TI2V],
@@ -67,6 +67,8 @@ def compose(short: dict, shot: dict, with_picture: bool = False) -> str:
     if shot.get("character") and plan.get("character") and not with_picture:
         parts.append(plan["character"].rstrip(". ") + ".")
     parts.append(shot["prompt"].strip())
+    if not with_picture and subjects.block(short, shot):
+        parts.append(subjects.block(short, shot))
     if not with_picture:
         setting = shot.get("setting") or plan.get("place")
         if setting:

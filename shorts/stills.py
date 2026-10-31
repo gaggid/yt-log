@@ -10,7 +10,7 @@ from story2 import providers
 from story3 import scenes
 from story3.voice import MediaError
 
-from . import cast, pipelines as P
+from . import cast, pipelines as P, subjects
 
 SIZE = "720x1280"                         # 9:16, multiples of 16, well inside the image model's pixel budget; cropped to the video size when it is animated
 DEFAULT_MODEL = providers.DEFAULT_MODEL
@@ -47,6 +47,8 @@ def prompt(short: dict, shot: dict) -> str:
     if shot.get("character") and plan.get("character"):
         parts.append(framed_character(plan["character"], shot).rstrip(". ") + ".")
     parts.append((shot.get("still") or shot["prompt"]).strip())
+    if subjects.block(short, shot):
+        parts.append(subjects.block(short, shot))
     setting = shot.get("setting") or plan.get("place")
     if setting:
         parts.append(f"Setting: {setting.rstrip('. ')}.")
@@ -95,6 +97,8 @@ def edit_prompt(short: dict, shot: dict, refs: dict) -> str:
     identity = "Every person keeps exactly the face, hair, skin tone, build and clothes of their own picture; if a place picture is given the scene happens there."
     plan = short["plan"]
     parts = [" ".join(names), "Create a new photograph:", (shot.get("still") or shot["prompt"]).strip()]
+    if subjects.block(short, shot):
+        parts.append(subjects.block(short, shot))
     if shot.get("setting"):
         parts.append(f"Setting: {shot['setting'].rstrip('. ')}.")
     elif not refs["place"] and plan.get("place"):

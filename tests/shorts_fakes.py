@@ -133,8 +133,8 @@ class VideoGateway:
 class FakeChat:
     """Answers [TASK:p4_plan] with five beats of Hinglish and [TASK:p4_shots] with exactly the number of shots asked for."""
 
-    def __init__(self, narration=None, extra_shots=0):
-        self.calls, self.narration, self.extra_shots = [], narration or HINDI, extra_shots
+    def __init__(self, narration=None, extra_shots=0, plan_extra=None, shot_extra=None):
+        self.calls, self.narration, self.extra_shots, self.plan_extra, self.shot_extra = [], narration or HINDI, extra_shots, plan_extra or {}, shot_extra or {}
 
     def count(self, task):
         return sum(1 for c in self.calls if c["task"] == task)
@@ -147,11 +147,11 @@ class FakeChat:
         if task == "p4_plan":
             beats = [{"name": f"Beat {i + 1}", "feeling": "tense", "tag": ["curious", "nervous", "surprised", "serious", "happy"][i], "narration": n} for i, n in enumerate(self.narration)]
             body = {"title": "The wallet", "logline": "A courier finds a wallet and makes a choice.", "character": "A 24 year old Indian man, lean, short black hair, yellow delivery jacket and blue jeans.",
-                    "place": "A rainy city street at night with orange streetlights.", "look": "cinematic, shallow depth of field, handheld", "beats": beats}
+                    "place": "A rainy city street at night with orange streetlights.", "look": "cinematic, shallow depth of field, handheld", "beats": beats, **self.plan_extra}
         elif task == "p4_shots":
             n = int(re.search(r"EXACTLY (\d+) shots", system).group(1)) + self.extra_shots
             body = {"shots": [{"prompt": f"The courier stops and looks down at a wallet on the wet road, shot {i + 1}.", "still": f"A courier stands over a dropped wallet on a wet road at night, orange light, frame {i + 1}.", "camera": ["slow push in", "static", "pan left", "close-up"][i % 4], "character": i % 2 == 0,
-                               "continues": i % 3 == 1, "setting": ""} for i in range(n)]}
+                               "continues": i % 3 == 1, "setting": "", **self.shot_extra} for i in range(n)]}
         else:
             raise AssertionError("unexpected task " + task)
         return LLMResult(json.dumps(body, ensure_ascii=False))
