@@ -258,7 +258,12 @@ async def make_clips(short_id: str, shot_ids: list[str] | None = None, only_miss
                 break
     if progress:
         progress(len(todo), len(todo), "done")
-    return {"made": made, "failed": failed, "skipped": skipped}
+    parts = [f"{made} clip{'s' if made != 1 else ''} made"]
+    if skipped:
+        parts.append(f"{len(skipped)} skipped (start picture not ready yet — draw it in the storyboard first): {', '.join(x['shot'] for x in skipped)}")
+    if failed:
+        parts.append(f"{len(failed)} failed: {'; '.join(x['shot'] + ': ' + x['error'][:60] for x in failed)}")
+    return "; ".join(parts)
 
 
 # ── what the screen shows ────────────────────────────────────────────────────
