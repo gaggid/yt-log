@@ -735,14 +735,18 @@ async def remix_upload(short_id: str, file: UploadFile = File(...)):
     except MediaError as e:
         path.unlink(missing_ok=True)
         raise HTTPException(400, str(e))
-    if dur < remix.WINDOW_S:
+    if dur < 3.0:
         path.unlink(missing_ok=True)
-        raise HTTPException(400, f"the video is {dur:.0f} seconds long; a short needs at least {remix.WINDOW_S:.0f}")
+        raise HTTPException(400, f"the video is {dur:.0f} seconds long; use one that is at least 3 seconds")
     cuts = await asyncio.to_thread(frames.scene_cuts, path, 0.3, remix.ANALYSE_S)
     r = remix.data(short)
-    r.update(url="", info={"title": file.filename or "uploaded video", "duration_s": dur, "id": ""}, source="remix/source.mp4", cuts=cuts, suggest=remix.suggest_windows(cuts, dur), start=0.0, driving=[])
+    short_video = dur < remix.WINDOW_S
+    length = dur if short_video else remix.WINDOW_S
+    r.update(url="", info={"title": file.filename or "uploaded video", "duration_s": dur, "id": ""}, source="remix/source.mp4", cuts=cuts, suggest=remix.suggest_windows(cuts, dur, length), start=0.0, driving=[], length=length)
     short["remix"] = r
     store.save(short)
+    if short_video:
+        await asyncio.to_thread(remix.prepare, short_id, 0.0)
     return await state(short_id)
 
 

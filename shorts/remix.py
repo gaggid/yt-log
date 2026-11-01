@@ -154,17 +154,18 @@ def prepare(short_id: str, start: float, fit: str = "crop", segments: int = 1) -
     if fit not in ("crop", "pad") or segments not in (1, 2):
         raise MediaError("fit is crop or pad; segments is 1 or 2")
     dur = float(r["info"]["duration_s"])
-    start = max(0.0, min(float(start), dur - WINDOW_S))
+    length = float(r.get("length") or WINDOW_S)
+    start = max(0.0, min(float(start), dur - length))
     src = store.media_dir(short_id) / r["source"]
     d = store.media_dir(short_id, "remix")
-    seg_len = WINDOW_S / segments
+    seg_len = length / segments
     paths = []
     for i in range(segments):
         out = d / f"driving{i + 1}.mp4"
         _encode(src, start + i * seg_len, seg_len, fit, out)
         paths.append(f"remix/{out.name}")
-    cuts = [round(c - start, 2) for c in r["cuts"] if start < c < start + WINDOW_S]
-    r.update(start=round(start, 2), fit=fit, segments=segments, driving=paths, window_cuts=cuts, slow=frames.long_stretches(cuts, WINDOW_S))
+    cuts = [round(c - start, 2) for c in r["cuts"] if start < c < start + length]
+    r.update(start=round(start, 2), fit=fit, segments=segments, driving=paths, window_cuts=cuts, slow=frames.long_stretches(cuts, length))
     short["remix"] = r
     return store.save(short)
 
@@ -242,7 +243,7 @@ def request(short: dict, n: int, attempt: int = 1) -> dict:
         raise MediaError("choose a character from the library, or upload the picture of your character first")
     if not drive:
         raise MediaError("choose the window of the video first")
-    seg_len = WINDOW_S / max(1, r["segments"])
+    seg_len = float(r.get("length") or WINDOW_S) / max(1, r["segments"])
     body = {"model": models.ANIMATE, "image": wan.data_url(frames.crop_916(image.read_bytes(), DRIVING_SIZE), "image/jpeg"), "driving_video": wan.data_url(drive.read_bytes(), "video/mp4"),
             "prompt": effective_prompt(short), "size": DRIVING_SIZE, "fps": DRIVING_FPS, "duration": seg_len, "steps": int(short["settings"].get("steps") or P.DEFAULT_STEPS[models.ANIMATE]),
             "pose_strength": float(r["pose_strength"]), "keep_audio": r["audio"] == "original", "seed": (int(short["settings"].get("seed", 7)) + 101 * (attempt - 1) + 17 * n) % (2 ** 32),
@@ -263,7 +264,8 @@ def input_hash(short: dict, n: int) -> str:
 
 def estimate_s(short: dict) -> int:
     r = data(short)
-    return int(P.request_seconds(models.ANIMATE, int(WINDOW_S * DRIVING_FPS)) + (OVERHEAD_EXTRA if r["segments"] == 2 else 0))
+    length = float(r.get("length") or WINDOW_S)
+    return int(P.request_seconds(models.ANIMATE, int(length * DRIVING_FPS)) + (OVERHEAD_EXTRA if r["segments"] == 2 else 0))
 
 
 OVERHEAD_EXTRA = 40
@@ -385,7 +387,8 @@ def build(short_id: str, progress=None) -> dict:
     work = store.media_dir(short_id, f"work/{it['id']}")
     t0 = time.time()
     try:
-        seg_len = WINDOW_S / len(parts)
+        length = float(r.get("length") or WINDOW_S)
+        seg_len = length / len(parts)
         segs = []
         for i, p in enumerate(parts):
             if progress:
@@ -395,7 +398,7 @@ def build(short_id: str, progress=None) -> dict:
             segs.append(seg)
         silent = work / "silent.mp4"
         stitch.join_segments(segs, silent, work)
-        t_s = float(short["settings"].get("target_s") or models.TARGET_S)
+        t_s = length
         voice_wav, bed_parts, ass = None, [{"duration_s": t_s}], None
         if voice_it:
             dur = float(voice_it["meta"]["duration_s"])
