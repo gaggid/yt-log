@@ -7,7 +7,7 @@ from story.schemas import Str
 from story2 import intake, leak, lexicon, maya, safety, svara, voices
 from story2.schemas import M
 
-from . import cast, formats, models, prompts as P, store, subjects as subj, timeline
+from . import cast, formats, looks, models, prompts as P, store, subjects as subj, timeline
 
 WORDS_LO, WORDS_HI = 52, 86              # spoken words in the whole short (the prompt asks for 62 to 74; this is what is accepted)
 REC_LO, REC_HI = 62, 74                  # what the prompt asks for at the full 30 seconds
@@ -247,6 +247,7 @@ async def make_plan(short_id: str, backend, s: dict | None = None, progress=None
     if cast.entries(short):                                                  # the library decides who and where, not the model
         plan["character"] = cast.block(short).replace("\n", " ") or plan["character"]
         plan["look"] = cast.look_text(short) or plan["look"]
+    plan["look"] = looks.of(short, plan["look"])
     if cast.place_text(short):
         plan["place"] = cast.place_text(short)
     beats = _beats_from(out, voices.current({"tts": short["settings"].get("voice")})["engine"])

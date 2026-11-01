@@ -16,7 +16,7 @@ from story3 import store as media
 from story3.voice import MediaError
 
 from characters import store as cstore, studio_edit
-from . import auto, cast, checks, clips, formats, frames, models, motion, pipelines as P, planner, remix, stitch, store, subjects as subj, timeline, voice as svoice, wan
+from . import auto, cast, checks, clips, formats, frames, looks, models, motion, pipelines as P, planner, remix, stitch, store, subjects as subj, timeline, voice as svoice, wan
 
 router = APIRouter(prefix="/api/shorts")
 MAX_UPLOAD = 12 * 1024 * 1024
@@ -49,6 +49,11 @@ def _start(short_id: str, kind: str, work):
         raise HTTPException(409, str(e))
 
 
+async def _message(work):
+    """A job step that answers with a plain-words summary: the screen shows it."""
+    return (await work)["message"]
+
+
 def _backend():
     s = settings_mod.get()
     return s, llm.ChatBackend(s, settings_mod.api_key())
@@ -67,7 +72,7 @@ async def options():
         have = [m in ids for m in p["models"]] if listed else []
         pipes[k] = {"label": p["label"], "about": p["about"], "models": p["models"], "available": (all(have) if listed else None),
                     "missing": [m for m, h in zip(p["models"], have) if not h] if listed else []}
-    return {"pipelines": pipes, "voices": voices.public(), "image_modes": IMAGE_MODES, "image_models": [{"id": k, "label": v["label"], "default": v["default"], "licence": v["licence"]["status"]} for k, v in providers.PROVIDERS.items()], "sizes": SIZES, "gateway_video_models": sorted(i for i in ids if i), "tags": list(maya.STYLE_TAGS),
+    return {"pipelines": pipes, "voices": voices.public(), "image_modes": IMAGE_MODES, "visual_styles": looks.public(), "image_models": [{"id": k, "label": v["label"], "default": v["default"], "licence": v["licence"]["status"]} for k, v in providers.PROVIDERS.items()], "sizes": SIZES, "gateway_video_models": sorted(i for i in ids if i), "tags": list(maya.STYLE_TAGS),
             "limits": {"target_s": models.TARGET_S, "max_shot_s": models.MAX_SHOT_S}}
 
 
@@ -177,11 +182,14 @@ async def state(short_id: str):
 class SettingsReq(BaseModel):
     image_mode: str | None = None
     image_model: str | None = None
+    visual_style: str | None = None
     cast: list[dict] | None = None
     place_id: str | None = None
     size: str | None = None
     steps: int | None = None
+    size_14b: str | None = None
     chain: bool | None = None
+    speed_lora: bool | None = None
     seed: int | None = None
     voice: dict | None = None
     voice_mode: str | None = None
@@ -201,6 +209,8 @@ async def patch_settings(short_id: str, body: SettingsReq):
         raise HTTPException(400, f"image_mode is one of: {', '.join(IMAGE_MODES)}")
     if "image_model" in patch and patch["image_model"] not in providers.PROVIDERS:
         raise HTTPException(400, f"image_model is one of: {', '.join(providers.PROVIDERS)}")
+    if "visual_style" in patch and patch["visual_style"] not in ("", *looks.presets()):
+        raise HTTPException(400, f"visual_style is one of: {', '.join(looks.presets())} (or empty)")
     if "cast" in patch:
         patch["cast"] = [{"character_id": str(e.get("character_id", "")), "look_id": str(e.get("look_id", ""))} for e in (patch["cast"] or []) if e.get("character_id")]
         if len(patch["cast"]) > cast.MAX_PEOPLE:
@@ -216,6 +226,8 @@ async def patch_settings(short_id: str, body: SettingsReq):
                 raise HTTPException(400, "that is not a place")
         except cstore.CharError as ex:
             raise HTTPException(400, str(ex))
+    if "size_14b" in patch and patch["size_14b"] not in (models.SIZE_PORTRAIT, models.SIZE_14B_HD):
+        raise HTTPException(400, f"size_14b is one of: {models.SIZE_PORTRAIT}, {models.SIZE_14B_HD}")
     if "size" in patch and patch["size"] not in SIZES:
         raise HTTPException(400, f"size is one of: {', '.join(SIZES)}")
     if "size" in patch and short["pipeline"] != "quick":
@@ -461,7 +473,7 @@ async def make_clips(short_id: str, body: ShotsReq | None = None):
     chk = checks.run(short)
     if not chk["ok"]:
         raise HTTPException(400, next(i["text"] for i in chk["issues"] if i["level"] == "block"))
-    return _start(short_id, "short_clips", lambda progress: clips.make_clips(short_id, body.shot_ids, body.only_missing, progress))
+    return _start(short_id, "short_clips", lambda progress: _message(clips.make_clips(short_id, body.shot_ids, body.only_missing, progress)))
 
 
 @router.post("/{short_id}/final")

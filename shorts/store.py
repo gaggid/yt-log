@@ -18,8 +18,11 @@ KEY, CLIP, VOICE, FINAL = "short_key", "short_clip", "short_voice", "short_final
 DEFAULT_SETTINGS = {
     "image_mode": "qwen",             # qwen (the image model draws every start picture) | anchor (the user's picture of the main character, the rest drawn) | per_shot (the user's picture for chosen shots, the rest drawn) | wan (no start pictures: Wan decides)
     "image_model": "qwen-image-2.1",  # the gateway's image model that draws the start pictures
-    "size": "480x832",
+    "visual_style": "",               # "" = the planner writes the look | realism | filmic | gta | noir | concept (shorts/looks.py)
+    "size": "704x1280",                # the sharper 5B size (less grain); 480x832 is the quick draft
     "steps": None,                    # None = the model's final-quality default (shorts/pipelines.py)
+    "size_14b": "480x832",            # keyframe pipeline picture size: 480x832 | 720x1280 (about 2.3x slower)
+    "speed_lora": False,              # keyframe pipeline: Wan 14B speed LoRA (4 steps, about 5x faster, less fine detail); off = full quality ("always final")
     "chain": True,                    # quick pipeline: a shot marked "continues" starts from the last frame of the one before
     "seed": 7,
     "voice": {"engine": "maya-tts", "voice": "Siddhant"},

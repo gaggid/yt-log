@@ -81,7 +81,7 @@ class VideoGateway:
             raw = req.content
             size = re.search(rb'name="size"\r\n\r\n([^\r]*)\r\n', raw).group(1).decode()
             prompt = re.search(rb'name="prompt"\r\n\r\n(.*?)\r\n--', raw, re.S).group(1).decode()
-            self.pic_edits.append({"prompt": prompt, "images": raw.count(b'name="image"'), "size": size})
+            self.pic_edits.append({"prompt": prompt, "images": raw.count(b'name="image'), "size": size})
             w, h = (int(v) for v in size.split("x"))
             return httpx.Response(200, json={"data": [{"b64_json": base64.b64encode(png_bytes(w // 8, h // 8)).decode()}]})
         if req.method == "POST" and path.endswith("/video/generations"):
@@ -146,7 +146,7 @@ class FakeChat:
         self.calls.append({"task": task, "user": messages[-1]["content"], "system": system})
         if task == "p4_plan":
             beats = [{"name": f"Beat {i + 1}", "feeling": "tense", "tag": ["curious", "nervous", "surprised", "serious", "happy"][i], "narration": n} for i, n in enumerate(self.narration)]
-            body = {"title": "The wallet", "logline": "A courier finds a wallet and makes a choice.", "character": "A 24 year old Indian man, lean, short black hair, yellow delivery jacket and blue jeans.",
+            body = {"format": "story", "title": "The wallet", "logline": "A courier finds a wallet and makes a choice.", "character": "A 24 year old Indian man, lean, short black hair, yellow delivery jacket and blue jeans.",
                     "place": "A rainy city street at night with orange streetlights.", "look": "cinematic, shallow depth of field, handheld", "beats": beats, **self.plan_extra}
         elif task == "p4_shots":
             n = int(re.search(r"EXACTLY (\d+) shots", system).group(1)) + self.extra_shots

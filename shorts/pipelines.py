@@ -11,7 +11,7 @@ import json
 
 import config
 
-from . import models, store, subjects
+from . import looks, models, store, subjects
 
 PIPELINES = {
     "quick": {"label": "Quick (Wan 5B)", "models": [models.TI2V],
@@ -21,7 +21,7 @@ PIPELINES = {
     "remix": {"label": "Remix a YouTube video (Wan Animate)", "models": [models.ANIMATE],
               "about": "Your character performs the motion of a video you link. The video's own background is not kept."},
 }
-NEGATIVE = "blurry, low quality, static, deformed, disfigured, extra fingers, poorly drawn hands, jpeg artifacts, text, watermark, logo, subtitles, signature"
+NEGATIVE = "grainy, noisy, film grain, noise, pixelated, blurry, low quality, static, deformed, disfigured, extra fingers, poorly drawn hands, jpeg artifacts, text, watermark, logo, subtitles, signature"
 KEYFRAME_FRAMES = 5
 DEFAULT_STEPS = {models.TI2V: 20, models.T2V: 20, models.I2V: 10, models.ANIMATE: 10, models.TALK: 6}
 # seconds of work per generated frame at 480x832, from the docs' timings (RTX 4060 Ti 16 GB); shorts/probe.py writes measured values over these
@@ -75,14 +75,20 @@ def compose(short: dict, shot: dict, with_picture: bool = False) -> str:
             parts.append(f"Setting: {setting.rstrip('. ')}.")
     if shot.get("camera"):
         parts.append(f"Camera: {shot['camera'].rstrip('. ')}.")
-    if plan.get("look"):
-        parts.append(plan["look"].rstrip(". ") + ".")
+    look = looks.of(short, plan.get("look", ""))
+    if look:
+        parts.append(look.rstrip(". ") + ".")
     return " ".join(parts)[:3900]
 
 
 def seed_for(short: dict, shot: dict, attempt: int) -> int:
     idx = next((i for i, s in enumerate(short["shots"]) if s["id"] == shot["id"]), 0)
     return (int(short["settings"].get("seed", 7)) + 17 * idx + 101 * (attempt - 1)) % (2 ** 32)
+
+
+def size_14b(short: dict) -> str:
+    s = short["settings"].get("size_14b")
+    return s if s in (models.SIZE_PORTRAIT, models.SIZE_14B_HD) else models.SIZE_PORTRAIT
 
 
 def steps_of(short: dict, model: str) -> int:
@@ -108,10 +114,15 @@ def keyframe_request(short: dict, shot: dict, attempt: int) -> dict:
 
 
 def animate_request(short: dict, shot: dict, attempt: int, image: str) -> dict:
-    """Picture to video at full quality (speed LoRA off). The prompt describes the motion; the picture already shows the subject."""
-    return {"model": models.I2V, "prompt": compose(short, shot, True), "negative_prompt": NEGATIVE, "image": image, "size": models.SIZE_PORTRAIT,
-            "num_frames": models.gen_frames(shot["seconds"], models.I2V), "fps": models.MODELS[models.I2V]["fps"], "speed_lora": False, "steps": steps_of(short, models.I2V),
+    """Picture to video at full quality (speed LoRA off), or a fast draft when the person turned `speed_lora` on (the gateway then uses its own 4 steps and guidance 1, so no
+    steps are sent unless the person set them). The prompt describes the motion; the picture already shows the subject."""
+    fast = bool(short["settings"].get("speed_lora"))
+    body = {"model": models.I2V, "prompt": compose(short, shot, True), "negative_prompt": NEGATIVE, "image": image, "size": size_14b(short),
+            "num_frames": models.gen_frames(shot["seconds"], models.I2V), "fps": models.MODELS[models.I2V]["fps"], "speed_lora": fast, "steps": steps_of(short, models.I2V),
             "seed": seed_for(short, shot, attempt), "response_format": "mp4"}
+    if fast and not short["settings"].get("steps"):
+        body.pop("steps")
+    return body
 
 
 def avatar_request(short: dict, shot: dict, attempt: int, image: str, audio: str) -> dict:
@@ -144,6 +155,8 @@ def request_seconds(model: str, frames: int, short: dict | None = None) -> float
     spf = float(_measured().get(model, {}).get("s_per_frame") or SEC_PER_FRAME[model])
     if short is not None:
         spf *= steps_of(short, model) / DEFAULT_STEPS[model] if model in (models.TI2V, models.I2V) else 1
+        if model == models.I2V and size_14b(short) == models.SIZE_14B_HD:
+            spf *= 2.3                                         # 1280x720 is about 2.3x the pixels of 832x480
         if model == models.TI2V and (short["settings"].get("size") == models.SIZE_SHARP):
             spf *= 2.9                                         # 1280x704 took about 10 minutes against 3.5 for 832x480
     return OVERHEAD_S + frames * spf

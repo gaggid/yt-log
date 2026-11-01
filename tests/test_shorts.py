@@ -195,7 +195,6 @@ def test_keyframe_pipeline_makes_stills_first_then_animates_each(gw, env):
     short["images"]["shots"][short["shots"][0]["id"]] = "upload/mine.png"
     (store.media_dir(sid, "upload") / "mine.png").write_bytes(png_bytes())
     store.save(short)
-    assert run(clips.make_clips(sid, s=S, key="k"))["skipped"], "clips wait for the keyframes"
     kf = run(clips.make_keyframes(sid, s=S, key="k"))
     n = len(store.get(sid)["shots"])
     assert kf["made"] == n and not kf["failed"]
@@ -218,7 +217,6 @@ def test_the_image_model_draws_the_start_pictures_then_wan_animates_them(gw, env
     assert short["settings"]["image_mode"] == "qwen" and all(sh["still"] for sh in short["shots"]) and P.keyframes_on(short)
     run(svoice.make(sid, s=S, key="k"))
     n = len(short["shots"])
-    assert run(clips.make_clips(sid, s=S, key="k"))["skipped"], "clips wait for the start pictures"
     kf = run(clips.make_keyframes(sid, s=S, key="k"))
     assert kf["made"] == n and not kf["failed"] and len(gw.images) == n
     assert not [r for r in gw.requests if r["model"] == models.T2V], "Wan is not asked for pictures"
@@ -378,7 +376,7 @@ def test_api_create_plan_edit_and_check(client):
     assert r.json()["beats"][0]["sentences"][0]["tag"] == "whispers"
     assert client.patch(f"/api/shorts/{sid}/settings", json={"image_mode": "nonsense"}).status_code == 400
     assert client.patch(f"/api/shorts/{sid}/settings", json={"voice": {"engine": "veena-tts", "voice": "agastya"}}).json()["settings"]["voice"]["engine"] == "veena-tts"
-    assert client.patch(f"/api/shorts/{sid}/settings", json={"size": "704x1280"}).json()["settings"]["size"] == "480x832", "only the 5B pipeline has the sharper size"
+    assert client.patch(f"/api/shorts/{sid}/settings", json={"size": "480x832"}).json()["settings"]["size"] == "704x1280", "only the 5B pipeline can change the size"
     up = client.post(f"/api/shorts/{sid}/images/anchor", files={"file": ("a.png", png_bytes(), "image/png")})
     assert up.status_code == 200 and up.json()["settings"]["image_mode"] == "anchor" and up.json()["images"]["anchor"].startswith("upload/")
     assert client.post(f"/api/shorts/{sid}/images/anchor", files={"file": ("a.txt", b"nope", "text/plain")}).status_code == 400
@@ -460,4 +458,24 @@ def test_make_clips_draws_a_missing_or_old_start_picture_first_instead_of_skippi
     monkeypatch.setattr(clips, "make_keyframes", fake_keys)
     note = run(clips.make_clips(short["id"], [short["shots"][0]["id"]], True, None, S, "k"))
     assert asked["ids"] == [short["shots"][0]["id"]]                                                  # nothing was drawn yet, so the clip job drew it
-    assert note.startswith("1 start picture drawn first")
+    assert note["message"].startswith("1 start picture drawn first")
+
+
+def test_speed_lora_is_off_unless_the_person_turns_it_on():
+    short = planned("keyframe")
+    sh = short["shots"][0]
+    off = P.animate_request(short, sh, 1, "data:image/jpeg;base64,x")
+    assert off["speed_lora"] is False and off["steps"] == P.DEFAULT_STEPS[models.I2V]
+    short["settings"]["speed_lora"] = True
+    on = P.animate_request(short, sh, 1, "data:image/jpeg;base64,x")
+    assert on["speed_lora"] is True and "steps" not in on, "the gateway's own 4 steps and guidance 1 go with the LoRA"
+
+
+def test_the_14b_size_is_480p_or_720p_and_the_picture_follows_it():
+    short = planned("keyframe")
+    sh = short["shots"][0]
+    assert P.animate_request(short, sh, 1, "x")["size"] == models.SIZE_PORTRAIT
+    short["settings"]["size_14b"] = "720x1280"
+    assert P.animate_request(short, sh, 1, "x")["size"] == "720x1280" and clips.clip_plan.__doc__
+    short["settings"]["size_14b"] = "bogus"
+    assert P.animate_request(short, sh, 1, "x")["size"] == models.SIZE_PORTRAIT

@@ -14,7 +14,7 @@ from . import clips, frames, models, planner, store, timeline, voice as svoice
 CAPTION_SIZE = 72
 CAPTION_MARGIN_V = 340                # captions sit in the lower third, above where the apps put their own buttons
 CAPTION_WORDS = (2, 4)                # fast pace: two to four words at a time
-VERSION = "s1"                        # part of the final video's cache key: bump when the way it is put together changes
+VERSION = "s2"                        # part of the final video's cache key: bump when the way it is put together changes
 
 
 def _ffmpeg(args: list[str], cwd: Path | None = None) -> None:
@@ -24,7 +24,7 @@ def _ffmpeg(args: list[str], cwd: Path | None = None) -> None:
 def encode_segment(src: Path, out: Path, n_frames: int) -> None:
     """One shot: the clip at 30 fps, scaled to cover 1080x1920 and cropped, cut to `n_frames`. A clip shorter than needed holds its last frame."""
     w, h = models.OUT_SIZE
-    vf = (f"fps={models.OUT_FPS},tpad=stop_mode=clone:stop_duration=3,scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos,crop={w}:{h},setsar=1,format=yuv420p")
+    vf = (f"hqdn3d=2:1.5:3:3,fps={models.OUT_FPS},tpad=stop_mode=clone:stop_duration=3,scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos,crop={w}:{h},setsar=1,format=yuv420p")
     _ffmpeg(["-i", str(src), "-vf", vf, "-frames:v", str(n_frames), "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-r", str(models.OUT_FPS), str(out)])
 
 

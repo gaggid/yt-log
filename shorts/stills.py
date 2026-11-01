@@ -10,11 +10,16 @@ from story2 import providers
 from story3 import scenes
 from story3.voice import MediaError
 
-from . import cast, pipelines as P, subjects
+from . import cast, looks, pipelines as P, subjects
 
 SIZE = "720x1280"                         # 9:16, multiples of 16, well inside the image model's pixel budget; cropped to the video size when it is animated
 DEFAULT_MODEL = providers.DEFAULT_MODEL
 KEEP_OUT = "A single still photograph in a vertical 9:16 frame. No text, no letters, no numbers, no logo, no watermark, no subtitles, no collage, no split screen."
+
+
+def keep_out(short: dict) -> str:
+    """KEEP_OUT, saying 'still image' instead of 'photograph' when the chosen style is a drawing."""
+    return KEEP_OUT.replace("still photograph", "still illustration") if looks.painted(short) else KEEP_OUT
 
 
 def model_of(short: dict) -> str:
@@ -54,11 +59,11 @@ def prompt(short: dict, shot: dict) -> str:
         parts.append(f"Setting: {setting.rstrip('. ')}.")
     if shot.get("camera"):
         parts.append(f"Camera: {shot['camera'].rstrip('. ')}.")
-    if plan.get("look"):
-        parts.append(plan["look"].rstrip(". ") + ".")
+    if looks.of(short, plan.get("look", "")):
+        parts.append(looks.of(short, plan.get("look", "")).rstrip(". ") + ".")
     if shot.get("avatar"):
         parts.append(AVATAR_FRAMING)
-    parts.append(KEEP_OUT)
+    parts.append(keep_out(short))
     return " ".join(parts)[:3900]
 
 
@@ -105,7 +110,7 @@ def edit_prompt(short: dict, shot: dict, refs: dict) -> str:
         parts.append(f"Setting: {plan['place'].rstrip('. ')}.")
     if shot.get("camera"):
         parts.append(f"Camera: {shot['camera'].rstrip('. ')}.")
-    look = cast.look_text(short) or plan.get("look")
+    look = looks.of(short, cast.look_text(short) or plan.get("look"))
     if look:
         parts.append(look.rstrip(". ") + ".")
     parts.append(identity)
@@ -113,7 +118,7 @@ def edit_prompt(short: dict, shot: dict, refs: dict) -> str:
         parts.append("Ignore any clothing, colour or outfit words in the photograph description above — the person's exact appearance comes from their picture only.")
     if shot.get("avatar"):
         parts.append(AVATAR_FRAMING)
-    parts.append(KEEP_OUT)
+    parts.append(keep_out(short))
     return " ".join(parts)[:3900]
 
 

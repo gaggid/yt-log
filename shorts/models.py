@@ -11,6 +11,7 @@ HOOK_MAX_S = 2.0                      # the first shot is shorter still
 MIN_SHOT_S = 2.0
 SIZE_PORTRAIT = "480x832"             # every pipeline asks for 9:16; the 5B can also do the sharper size below
 SIZE_SHARP = "704x1280"
+SIZE_14B_HD = "720x1280"             # the 14B image-to-video model at 720p (a multiple of 16); the docs call it untested on the server GPU
 
 T2V, I2V, TI2V, ANIMATE, TALK = "wan-2.2-t2v-a14b", "wan-2.2-i2v-a14b", "wan-2.2-ti2v-5b", "wan-2.2-animate-2", "infinitetalk-14b"      # TALK: InfiniteTalk, a picture speaks the voice (owner decision 2026-10-30: not Wan S2V, too slow)
 

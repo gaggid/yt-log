@@ -53,21 +53,23 @@ async function newShort() {
   const [opts, stories] = await Promise.all([call('/options'), call('/stories').catch(() => [])]);
   const pipes = Object.entries(opts.pipelines);
   const html = `<div class="wide-dlg"></div>
-    <h4 style="margin-top:0">Which model</h4>${pipes.map(([k, p], i) => `<label class="sh-pipe ${p.available === false ? 'off' : ''}"><input type="radio" name="pipe" value="${k}" ${i === 0 ? 'checked' : ''}> <b>${esc(p.label)}</b>
+    <h4 style="margin-top:0">Which model</h4>${pipes.map(([k, p], i) => `<label class="sh-pipe ${p.available === false ? 'off' : ''}"><input type="radio" name="pipe" value="${k}" ${k === 'keyframe' ? 'checked' : ''}> <b>${esc(p.label)}</b>
       <div class="mute small">${esc(p.about)}</div>${p.available === false ? `<div class="err small">The gateway does not list: ${esc(p.missing.join(', '))}</div>` : ''}</label>`).join('')}
     <div id="sh-src"><h4>What is it about</h4>
       <label class="f">Where the idea comes from<select id="sh-kind"><option value="idea">Write an idea</option><option value="story" ${stories.length ? '' : 'disabled'}>An approved story${stories.length ? '' : ' (none yet)'}</option></select></label>
       <label class="f mt-s" id="sh-idea-l">The idea, in a sentence or two<textarea id="sh-idea" placeholder="A delivery rider finds a wallet with a lakh rupees in it. What does he do?"></textarea></label>
       <label class="f mt-s" id="sh-story-l" hidden>The story<select id="sh-story">${stories.map(s => `<option value="${esc(s.id)}">${esc(s.title)} (${esc(s.project)})</option>`).join('')}</select></label></div>
+    <div id="sh-fast-l" class="mt-s"><label class="f">Video size<select id="sh-size14"><option value="480x832">480p (480x832, about 12 min for a 5 s shot)</option><option value="720x1280">720p (720x1280, sharper, about 2.3x slower)</option></select></label>
+      <label class="row mt-s"><input type="checkbox" id="sh-fast"> Fast draft: Wan speed LoRA (about 3x quicker, slightly softer and less motion; leave off for the final)</label></div>
     <h4>Length</h4>
     <label class="f">Video duration (seconds)<input type="number" id="sh-dur" value="30" min="10" max="30" step="1" style="width:80px">
       <span class="small mute">10–30 seconds. The voice, shot count and timeline all adjust automatically.</span></label>`;
   const dlg = dialog({title: 'New short', html, buttons: [{label: 'Cancel', value: null}, {label: 'Create', primary: true,
-    collect: l => { const dur = Math.max(10, Math.min(30, parseInt(l.querySelector('#sh-dur').value) || 30)); return {pipeline: l.querySelector('input[name=pipe]:checked').value, kind: l.querySelector('#sh-kind').value, text: l.querySelector('#sh-idea').value, candidate_id: l.querySelector('#sh-story').value, settings: {target_s: dur}}; },
+    collect: l => { const dur = Math.max(10, Math.min(30, parseInt(l.querySelector('#sh-dur').value) || 30)); return {pipeline: l.querySelector('input[name=pipe]:checked').value, kind: l.querySelector('#sh-kind').value, text: l.querySelector('#sh-idea').value, candidate_id: l.querySelector('#sh-story').value, settings: {target_s: dur, speed_lora: l.querySelector('input[name=pipe]:checked').value === 'keyframe' && l.querySelector('#sh-fast').checked, size_14b: l.querySelector('#sh-size14').value}}; },
     validate: v => v.pipeline !== 'remix' && v.kind === 'idea' && v.text.trim().length < 10 ? 'Write the idea in a sentence or two.' : ''}]});
   setTimeout(() => {
     const k = document.querySelector('#sh-kind'), p = () => document.querySelectorAll('input[name=pipe]');
-    const sync = () => { const remix = document.querySelector('input[name=pipe]:checked')?.value === 'remix'; $('#sh-src').hidden = remix; const st = k.value === 'story'; $('#sh-idea-l').hidden = st; $('#sh-story-l').hidden = !st; };
+    const sync = () => { const remix = document.querySelector('input[name=pipe]:checked')?.value === 'remix'; $('#sh-src').hidden = remix; $('#sh-fast-l').hidden = document.querySelector('input[name=pipe]:checked')?.value !== 'keyframe'; const st = k.value === 'story'; $('#sh-idea-l').hidden = st; $('#sh-story-l').hidden = !st; };
     if (k) { k.onchange = sync; p().forEach(r => r.onchange = sync); sync(); }
   }, 30);
   const v = await dlg;
@@ -149,6 +151,8 @@ function sideView() {
     ${remix ? '' : `<label class="f">Start pictures<select id="st-mode">${[['qwen', 'The image model draws a picture for every shot'], ['anchor', 'My picture of the main character, the rest drawn'], ['per_shot', 'My pictures for chosen shots, the rest drawn'], ['wan', 'No pictures: Wan decides (fast, rougher)']].map(([k, t]) => `<option value="${k}" ${st.image_mode === k ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
     ${castBlock()}
     ${st.image_mode === 'wan' ? '' : `<label class="f mt-s">Image model<select id="st-imodel">${(v.image_models || [{id: st.image_model, label: st.image_model}]).map(m => `<option value="${esc(m.id)}" ${st.image_model === m.id ? 'selected' : ''}>${esc(m.label)}${m.licence === 'restricted' ? ' (licence restricted)' : ''}</option>`).join('')}</select></label>`}
+    <label class="f mt-s">Picture style<select id="st-style">${(v.visual_styles || [{id: '', label: 'Let the planner choose'}]).map(m => `<option value="${esc(m.id)}" title="${esc(m.description || '')}" ${(st.visual_style || '') === m.id ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}</select>
+      <span class="small mute">${esc(((v.visual_styles || []).find(m => m.id === (st.visual_style || '')) || {}).description || '')} Re-plan to apply to the story; pictures and clips redraw with it.</span></label>
     <div class="mt-s small">${s.images.anchor ? `<img src="/api/shorts/file/${s.id}/${esc(s.images.anchor)}" style="width:70px;border-radius:6px;vertical-align:middle"> <button class="small" id="st-anchor">Change</button> <button class="small bad" id="st-anchor-x">Remove</button>` : `<button class="small" id="st-anchor">Upload the main character's picture</button>`}</div>
     <label class="f mt-s">Describe that character in a line (used in the shots that show them)<textarea id="st-char" style="min-height:48px">${esc(st.character_text || '')}</textarea></label>
     <label class="f mt-s">Format<select id="st-format">${[['auto', 'Detect from the story (recommended)'], ['story', 'Story: dramatised, follows a person'], ['documentary', 'Documentary: real subjects, narrator'], ['explainer', 'Explainer: facts and numbers'], ['comparison', 'Comparison: sides against each other']].map(([k, t]) => `<option value="${k}" ${(st.format || 'auto') === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
@@ -158,6 +162,8 @@ function sideView() {
     ${(st.voice_mode || 'narration') !== 'none' ? `<label class="f mt-s">Voice<select id="st-voice">${voiceOptions(st.voice)}</select></label>` : ''}
     ${s.pipeline === 'quick' ? `<label class="f mt-s">Picture size<select id="st-size"><option value="480x832" ${st.size === '480x832' ? 'selected' : ''}>480x832 (about 20 min)</option><option value="704x1280" ${st.size === '704x1280' ? 'selected' : ''}>704x1280 sharper (about an hour)</option></select></label>
       <label class="row mt-s"><input type="checkbox" id="st-chain" ${st.chain ? 'checked' : ''}> A shot marked "continues" starts from the last frame of the one before</label>` : ''}
+    ${s.pipeline === 'keyframe' ? `<label class="f mt-s">Video size<select id="st-size14"><option value="480x832" ${st.size_14b !== '720x1280' ? 'selected' : ''}>480p (480x832, about 12 min for 5 s)</option><option value="720x1280" ${st.size_14b === '720x1280' ? 'selected' : ''}>720p (720x1280, sharper, about 2.3x slower)</option></select></label>
+      <label class="row mt-s"><input type="checkbox" id="st-fast" ${st.speed_lora ? 'checked' : ''}> Fast draft: Wan speed LoRA (about 5x quicker, softer detail; leave off for the final)</label>` : ''}
     ${s.keyframes_on ? `<label class="row mt-s"><input type="checkbox" id="st-review" ${st.review_keyframes ? 'checked' : ''}> Stop to look at the start pictures before animating</label>` : ''}
     <label class="row mt-s"><input type="checkbox" id="st-cap" ${st.captions ? 'checked' : ''}> Burn captions into the video</label>
     <label class="row mt-s"><input type="checkbox" id="st-bed" ${st.bed ? 'checked' : ''}> Quiet sound bed under the voice</label>
@@ -416,7 +422,7 @@ function wire() {
   const q = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)];
   const on = (sel, fn) => { const e = q(sel); if (e) e.onclick = () => fn(e); };
   const st = (id, key, conv = v => v) => { const e = q(id); if (e) e.onchange = () => patch('/settings', {[key]: conv(e.type === 'checkbox' ? e.checked : e.value)}); };
-  st('#st-mode', 'image_mode'); st('#st-imodel', 'image_model'); st('#st-char', 'character_text'); st('#st-tone', 'tone'); st('#st-format', 'format'); st('#st-size', 'size'); st('#st-chain', 'chain'); st('#st-review', 'review_keyframes');
+  st('#st-mode', 'image_mode'); st('#st-imodel', 'image_model'); st('#st-style', 'visual_style'); st('#st-char', 'character_text'); st('#st-tone', 'tone'); st('#st-format', 'format'); st('#st-size', 'size'); st('#st-chain', 'chain'); st('#st-fast', 'speed_lora'); st('#st-size14', 'size_14b'); st('#st-review', 'review_keyframes');
   st('#st-cap', 'captions'); st('#st-bed', 'bed'); st('#st-steps', 'steps', v => v === '' ? null : +v); st('#st-seed', 'seed', v => +v || 0);
   const vm = q('#st-vmode'); if (vm) vm.onchange = () => patch('/settings', {voice_mode: vm.value});
   const vs = q('#st-voice'); if (vs) vs.onchange = () => { const [engine, voice] = vs.value.split('|'); patch('/settings', {voice: {engine, voice}}); };

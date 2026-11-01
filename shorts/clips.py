@@ -64,7 +64,7 @@ def clip_plan(short: dict, shot: dict) -> dict | None:
         token = f"key:{kf['id']}"
         make = P.animate_request if short["pipeline"] == "keyframe" else P.quick_request
         build = lambda attempt, image: make(short, shot, attempt, image)                         # noqa: E731
-        load = lambda: _jpeg_url(media.path_of(kf).read_bytes(), size if short["pipeline"] == "quick" else models.SIZE_PORTRAIT)   # noqa: E731
+        load = lambda: _jpeg_url(media.path_of(kf).read_bytes(), size if short["pipeline"] == "quick" else P.size_14b(short))   # noqa: E731
         return {"token": token, "hash": P.req_hash(P.animate_request(short, shot, 1, token)), "build": build, "load": load, "source": "keyframe"}
     src = P.start_source(short, shot)
     if src in ("upload", "anchor"):
@@ -272,7 +272,7 @@ async def make_clips(short_id: str, shot_ids: list[str] | None = None, only_miss
         parts.append(f"{len(skipped)} skipped (start picture not ready yet — draw it in the storyboard first): {', '.join(x['shot'] for x in skipped)}")
     if failed:
         parts.append(f"{len(failed)} failed: {'; '.join(x['shot'] + ': ' + x['error'][:60] for x in failed)}")
-    return "; ".join(parts)
+    return {"made": made, "failed": failed, "skipped": skipped, "message": "; ".join(parts)}
 
 
 # ── what the screen shows ────────────────────────────────────────────────────
