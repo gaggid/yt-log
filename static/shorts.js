@@ -63,7 +63,7 @@ async function newShort() {
       <label class="row mt-s"><input type="checkbox" id="sh-fast"> Fast draft: Wan speed LoRA (about 3x quicker, slightly softer and less motion; leave off for the final)</label></div>
     <div id="sh-look-l"><h4>Look and voice</h4>
       <label class="f">Picture style<select id="sh-style">${(opts.visual_styles || []).map(m => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}</select></label>
-      <label class="f mt-s">Narration voice<select id="sh-voice">${(() => { window._shVoices = opts.voices; return voiceOptions(null); })()}</select></label>
+      <label class="f mt-s">Narration voice<select id="sh-voice">${(() => { window._shVoices = opts.voices; return voiceOptions({engine: 'maya-tts', voice: 'Siddhant'}); })()}</select></label>
 <label class="f mt-s">Narration tone or persona<select id="sh-tone">${toneOptions(opts.tones, '')}</select></label>
       <label class="f mt-s">Language edge (only when the script calls for it)<select id="sh-edge">${edgeOptions(opts.tones, 'clean')}</select></label>
       <label class="f mt-s">Narration speed<select id="sh-vspeed">${[[0.85, 'Slower (0.85x)'], [0.92, 'A little slower (0.92x)'], [1, 'Normal (1x)'], [1.08, 'A little faster (1.08x)'], [1.15, 'Faster (1.15x)']].map(([k, t]) => `<option value="${k}" ${Math.abs((1 || 1) - k) < 0.01 ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
@@ -73,7 +73,7 @@ async function newShort() {
       <span class="small mute">10–30 seconds. The voice, shot count and timeline all adjust automatically.</span></label>`;
   const dlg = dialog({title: 'New short', html, buttons: [{label: 'Cancel', value: null}, {label: 'Create', primary: true,
     collect: l => { const dur = Math.max(10, Math.min(30, parseInt(l.querySelector('#sh-dur').value) || 30)); return {pipeline: l.querySelector('input[name=pipe]:checked').value, kind: l.querySelector('#sh-kind').value, text: l.querySelector('#sh-idea').value, candidate_id: l.querySelector('#sh-story').value, settings: {target_s: dur, visual_style: l.querySelector('#sh-style').value, language: l.querySelector('#sh-lang').value, tone_id: l.querySelector('#sh-tone').value, edge: l.querySelector('#sh-edge').value, voice_speed: +l.querySelector('#sh-vspeed').value, voice: (() => { const [engine, voice] = l.querySelector('#sh-voice').value.split('|'); return {engine, voice}; })(), speed_lora: l.querySelector('input[name=pipe]:checked').value === 'keyframe' && l.querySelector('#sh-fast').checked, size_14b: l.querySelector('#sh-size14').value}}; },
-    validate: v => v.pipeline !== 'remix' && v.kind === 'idea' && v.text.trim().length < 10 ? 'Write the idea in a sentence or two.' : ''}]});
+    validate: v => v.pipeline !== 'remix' && v.kind === 'idea' && v.text.trim().length < 10 ? 'Write the idea in a sentence or two.' : (v.pipeline !== 'remix' && v.settings.language !== 'hinglish' && v.settings.voice.engine !== 'maya-tts' ? 'A narration language other than Hinglish needs a Maya voice. Pick a Maya voice or Hinglish.' : '')}]});
   setTimeout(() => {
     const k = document.querySelector('#sh-kind'), p = () => document.querySelectorAll('input[name=pipe]');
     const sync = () => { const remix = document.querySelector('input[name=pipe]:checked')?.value === 'remix'; $('#sh-src').hidden = remix; $('#sh-fast-l').hidden = document.querySelector('input[name=pipe]:checked')?.value !== 'keyframe'; $('#sh-look-l').hidden = remix; const st = k.value === 'story'; $('#sh-idea-l').hidden = st; $('#sh-story-l').hidden = !st; };
@@ -169,7 +169,7 @@ function sideView() {
     <label class="f mt-s">Tone (optional)<input id="st-tone" value="${esc(st.tone || '')}" placeholder="funny, tense, warm..."></label>`}
     <label class="f mt-s">Audio<select id="st-vmode"><option value="narration" ${(st.voice_mode || 'narration') === 'narration' ? 'selected' : ''}>Narration voice (generated)</option><option value="none" ${st.voice_mode === 'none' ? 'selected' : ''}>No voice — video only (silent or background music)</option></select></label>
     ${(st.voice_mode || 'narration') !== 'none' ? `<label class="f mt-s">Voice<select id="st-voice">${voiceOptions(st.voice)}</select></label>
-<label class="f mt-s">Narration tone or persona<select id="st-tone">${toneOptions(v.tones, st.tone_id)}</select>
+<label class="f mt-s">Narration tone or persona<select id="st-toneid">${toneOptions(v.tones, st.tone_id)}</select>
         <span class="small mute">Only the next plan writes in it. Change the speed below to match if you want.</span></label>
       <label class="f mt-s">Language edge<select id="st-edge">${edgeOptions(v.tones, st.edge)}</select></label>
       <label class="f mt-s">Narration speed<select id="st-vspeed">${[[0.85, 'Slower (0.85x)'], [0.92, 'A little slower (0.92x)'], [1, 'Normal (1x)'], [1.08, 'A little faster (1.08x)'], [1.15, 'Faster (1.15x)']].map(([k, t]) => `<option value="${k}" ${Math.abs((st.voice_speed || 1) - k) < 0.01 ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
@@ -455,7 +455,7 @@ function wire() {
   const q = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)];
   const on = (sel, fn) => { const e = q(sel); if (e) e.onclick = () => fn(e); };
   const st = (id, key, conv = v => v) => { const e = q(id); if (e) e.onchange = () => patch('/settings', {[key]: conv(e.type === 'checkbox' ? e.checked : e.value)}); };
-  st('#st-mode', 'image_mode'); st('#st-imodel', 'image_model'); st('#st-style', 'visual_style'); st('#st-char', 'character_text'); st('#st-tone', 'tone'); st('#st-format', 'format'); st('#st-size', 'size'); st('#st-chain', 'chain'); st('#st-fast', 'speed_lora'); st('#st-lang', 'language'); st('#st-tone', 'tone_id'); st('#st-edge', 'edge'); st('#st-vspeed', 'voice_speed', v => +v); st('#st-size14', 'size_14b'); st('#st-review', 'review_keyframes');
+  st('#st-mode', 'image_mode'); st('#st-imodel', 'image_model'); st('#st-style', 'visual_style'); st('#st-char', 'character_text'); st('#st-tone', 'tone'); st('#st-format', 'format'); st('#st-size', 'size'); st('#st-chain', 'chain'); st('#st-fast', 'speed_lora'); st('#st-lang', 'language'); st('#st-toneid', 'tone_id'); st('#st-edge', 'edge'); st('#st-vspeed', 'voice_speed', v => +v); st('#st-size14', 'size_14b'); st('#st-review', 'review_keyframes');
   st('#st-cap', 'captions'); st('#st-bed', 'bed'); st('#st-steps', 'steps', v => v === '' ? null : +v); st('#st-seed', 'seed', v => +v || 0);
   const vm = q('#st-vmode'); if (vm) vm.onchange = () => patch('/settings', {voice_mode: vm.value});
   const vs = q('#st-voice'); if (vs) vs.onchange = () => { const [engine, voice] = vs.value.split('|'); patch('/settings', {voice: {engine, voice}}); };

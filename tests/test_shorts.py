@@ -563,3 +563,38 @@ def test_a_beat_of_voice_starts_and_ends_at_silence_so_the_join_does_not_click(e
     with wave.open(str(out)) as w:
         x = array.array("h"); x.frombytes(w.readframes(w.getnframes()))
     assert abs(x[0]) < 600 and abs(x[-1]) < 600 and max(abs(v) for v in x[5000:6000]) > 15000, "silent at both ends, untouched in the middle"
+
+
+@needs_ffmpeg
+def test_every_choice_made_when_creating_a_short_reaches_the_prompts_and_the_requests(client, gw, monkeypatch):
+    from shorts import languages, looks, stills, tones
+    chat = FakeChat()
+    body = {"pipeline": "keyframe", "kind": "idea", "text": "A courier finds a wallet with a lakh rupees in it.",
+            "settings": {"visual_style": "noir", "language": "ta", "voice": {"engine": "maya-tts", "voice": "Kayal"}, "voice_speed": 1.15, "tone_id": "osint", "edge": "spicy",
+                         "size_14b": "720x1280", "speed_lora": True}}
+    sid = client.post("/api/shorts", json=body).json()["id"]
+    short = run(planner.make_plan(sid, chat, S))
+    plan_prompt = next(c for c in chat.calls if c["task"] == "p4_plan")
+    system, user = plan_prompt["system"], plan_prompt["user"]
+    assert "Tamil" in system, "language"                                            # the language rule is in the system text
+    assert "Narration tone: Open-source intelligence analyst" in user and "mild everyday swear words" in user, "tone and edge"
+    assert short["plan"]["look"] == looks.of(short), "style replaces the model's look"
+    assert all(b["tag"] == "neutral" for b in short["beats"]), "voice tags start neutral"
+    prompt = stills.prompt(short, short["shots"][0])
+    assert "graphic-novel" in prompt and "illustration" in prompt, "picture style and the keep-out sentence follow it"
+    assert "graphic-novel" in P.compose(short, short["shots"][0], True), "the Wan prompt follows the style"
+    req = P.animate_request(short, short["shots"][0], 1, "data:image/jpeg;base64,x")
+    assert req["size"] == "720x1280" and req["speed_lora"] is True and "steps" not in req
+    sent = []
+
+    async def spy(client, base, key, bodies):
+        sent.extend(bodies)
+        return await fake_speak_all(client, base, key, bodies)
+    monkeypatch.setattr(voice3, "_speak_all", spy)
+    run(svoice.make(sid, s=S, key="k"))
+    assert sent and all(b["language"] == "ta" and b["speed"] == 1.15 and b["voice"] == "Kayal" and b["model"] == "maya-tts" for b in sent), sent[:1]
+    assert svoice.speed(store.get(sid)) == 1.15 and languages.code(short["settings"]) == "ta"
+    state = client.get(f"/api/shorts/{sid}").json()
+    assert state["voice_gate"] == "" and state["settings"]["tone_id"] == "osint"
+    opts = client.get("/api/shorts/options").json()
+    assert opts["tones"]["default"] == tones.DEFAULT and len(opts["languages"]) == 13 and any(v["id"] == "realism" for v in opts["visual_styles"])
