@@ -133,9 +133,17 @@ class VideoGateway:
 class FakeChat:
     """Answers [TASK:p4_plan] with five beats of Hinglish and [TASK:p4_shots] with exactly the number of shots asked for."""
 
-    def __init__(self, narration=None, extra_shots=0, plan_extra=None, shot_extra=None, no_director=False):
+    def __init__(self, narration=None, extra_shots=0, plan_extra=None, shot_extra=None, no_director=False, room=False, scores=(9,), punch_words=None, long=0, stills=False, still_text=None, moves=False, move_text=None):
         self.calls, self.narration, self.extra_shots, self.plan_extra, self.shot_extra = [], narration or HINDI, extra_shots, plan_extra or {}, shot_extra or {}
         self.no_director = no_director
+        self.moves, self.move_text = moves, move_text                                       # moves: answers the motion writer (otherwise it fails and the shots keep the planner's prompt)
+        self.stills, self.still_text = stills, still_text                                    # stills: answers the picture writer (otherwise it fails and the shots keep the planner's stills)
+        self.room, self.scores, self.punch_words = room, list(scores), punch_words          # room: answers the writers' room tasks; otherwise they fail and the planner uses the one-call plan
+        self.script: dict[str, list[dict]] = {}
+        self.k = 0
+        self.long = long                                                                    # a number of beats: the room then writes filler words to the asked budget (for long shorts)
+        if long:
+            self.narration = [[] for _ in range(long)]
 
     def count(self, task):
         return sum(1 for c in self.calls if c["task"] == task)
@@ -144,15 +152,33 @@ class FakeChat:
         from story.llm import LLMResult
         system = messages[0]["content"]
         task = re.match(r"\[TASK:(\w+)\]", system).group(1)
+        if task == "p4_move" and not self.moves:
+            from story.llm import LLMError
+            raise LLMError("the motion writer is off in this test")
+        if task == "p4_still" and not self.stills:
+            from story.llm import LLMError
+            raise LLMError("the picture writer is off in this test")
+        if task in ("p4_bible", "p4_map", "p4_draft", "p4_punch") and not self.room:
+            from story.llm import LLMError
+            self.room_refused = getattr(self, "room_refused", 0) + 1
+            raise LLMError("the writers' room is off in this test")
         self.calls.append({"task": task, "user": messages[-1]["content"], "system": system})
+        if task in ("p4_bible", "p4_map", "p4_draft", "p4_punch"):
+            return LLMResult(json.dumps(self._room(task, system, messages[1]["content"]), ensure_ascii=False))
         if task == "p4_plan":
-            beats = [{"name": f"Beat {i + 1}", "feeling": "tense", "tag": ["curious", "nervous", "surprised", "serious", "happy"][i], "narration": n} for i, n in enumerate(self.narration)]
+            beats = [{"name": f"Beat {i + 1}", "feeling": "tense", "tag": ["curious", "nervous", "surprised", "serious", "happy"][i % 5], "narration": n} for i, n in enumerate(self.narration)]
             body = {"format": "story", "title": "The wallet", "logline": "A courier finds a wallet and makes a choice.", "character": "A 24 year old Indian man, lean, short black hair, yellow delivery jacket and blue jeans.",
                     "place": "A rainy city street at night with orange streetlights.", "look": "cinematic, shallow depth of field, handheld", "beats": beats, **self.plan_extra}
         elif task == "p4_shots":
             n = int(re.search(r"EXACTLY (\d+) shots", system).group(1)) + self.extra_shots
             body = {"shots": [{"prompt": f"The courier stops and looks down at a wallet on the wet road, shot {i + 1}.", "still": f"A courier stands over a dropped wallet on a wet road at night, orange light, frame {i + 1}.", "camera": ["slow push in", "static", "pan left", "close-up"][i % 4], "character": i % 2 == 0,
                                "continues": i % 3 == 1, "setting": "", **self.shot_extra} for i in range(n)]}
+        elif task == "p4_move":
+            ids = re.search(r"Write the motion of: ([^.]+)\.", messages[1]["content"]).group(1).split(", ")
+            body = {"shots": [{"id": i, "move": self.move_text or f"The courier slowly lifts the wallet toward his chest while the camera slowly pushes in, rain falling steadily behind him, shot {i}."} for i in ids]}
+        elif task == "p4_still":
+            ids = re.search(r"Write the pictures of: ([^.]+)\.", messages[1]["content"]).group(1).split(", ")
+            body = {"shots": [{"id": i, "still": self.still_text or f"Close-up of one courier holding one wallet beside a rusty bus stop, picture {i}, a single streetlight behind him.", "must_show": ["exactly 1 courier", "wallet in his hand"]} for i in ids]}
         elif task == "p4_shotlist":
             if getattr(self, "no_director", False):
                 raise RuntimeError("director is down")
@@ -162,6 +188,62 @@ class FakeChat:
         else:
             raise AssertionError("unexpected task " + task)
         return LLMResult(json.dumps(body, ensure_ascii=False))
+
+
+def _room_method(self, task, system, user):
+    n = len(self.narration)
+    if task == "p4_bible":
+        return {"premise": "A courier finds a wallet and must choose.", "promise": "dread", "hero": "Rahul wants rent money, fears the debt.", "secret": "The wallet belongs to his landlord.", "world": ["It rains all night."],
+                "wow": ["The photo is of him."], "question": "Would you keep it?", "voice": "Rahul, first person, dry.", "motifs": ["rain"], "avoid": ["lottery"]}
+    if task == "p4_map":
+        t = float(re.search(r"for ([\d.]+) seconds", system).group(1))
+        jobs = ["hook"] + ["escalate", "reveal", "rehook", "twist", "breather", "escalate", "reveal"] * 3
+        return {"beats": [{"name": f"Beat {i + 1}", "job": jobs[i] if i < n - 1 else "sting", "feeling": "tense", "seconds": t / n, "carries": f"thing {i + 1}", "cliff": "" if i == n - 1 else "what next?"} for i in range(n)]}
+    if task == "p4_draft":
+        i = int(re.search(r"NOW WRITE BEAT (\d+)", user).group(1)) - 1
+        lo, hi = (int(x) for x in re.search(r"between (\d+) and (\d+) words", system).groups())
+        if "THE PRODUCER'S INSTRUCTION" in user:                                           # a rewrite: new words inside the asked budget, never the old text
+            n, out, k = (lo + hi) // 2, [], 0
+            while n > 0:
+                w = min(n, 5 + 3 * (k % 2))
+                out.append({"text": " ".join(["अंधेरा", "दरवाज़ा", "आवाज़", "ठंडी", "रात", "साँस", "क़दम", "खामोशी"][(j + k + i) % 8] for j in range(w)) + "।", "tag": "whispers"})
+                n -= w
+                k += 1
+            self.script[f"b{i + 1}"] = out
+            return {"sentences": out}
+        return {"sentences": self._lines(i, lo, hi)}
+    texts = re.findall(r"^(b\d+) \(", user, re.M)
+    score = self.scores.pop(0) if len(self.scores) > 1 else self.scores[0]
+    lo, hi = (int(x) for x in re.search(r"between (\d+) and (\d+) words", system).groups())
+    beats = []
+    for bid in texts:
+        base = self.script.get(bid, [])
+        if self.punch_words is not None:
+            sents = [{"text": " ".join(["sharper"] * self.punch_words), "tag": "whispers"}]
+        else:
+            sents = [{**s, "text": s["text"]} for s in base]
+        beats.append({"id": bid, "sentences": sents})
+    return {"score": score, "problems": ["beat b2 is flat"], "beats": beats}
+
+
+def _room_lines(self, i, lo, hi):
+    """Beat i of the narration when it is given, else filler words (letters only) for a budget of lo..hi words, in lines of five to nine words."""
+    if self.long:
+        words, out, k = (lo + hi) // 2, [], self.k
+        while words > 0:
+            w = min(words, 5 + k % 5)
+            out.append({"text": " ".join(["door", "rain", "phone", "cold", "step", "light", "hand", "night", "voice"][(k + j) % 9] for j in range(w)) + ".", "tag": ["whispers", "scared", "neutral", "loudly"][k % 4]})
+            words -= w
+            k += 1
+        self.script[f"b{i + 1}"] = out
+        self.k = k
+        return out
+    out = [{"text": t, "tag": ["whispers", "nervous"][j % 2]} for j, t in enumerate(self.narration[i])]
+    self.script[f"b{i + 1}"] = out
+    return out
+
+
+FakeChat._room, FakeChat._lines = _room_method, _room_lines
 
 
 async def fake_speak_all(client, base, key, bodies):

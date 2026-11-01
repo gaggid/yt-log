@@ -24,7 +24,7 @@ THE SUBJECTS (what the facts are about, so the pictures show the right things)
 
 THE NARRATION
 - {beats} beats; the whole narration is between {lo} and {hi} words, so it takes about {seconds} seconds when spoken. Count the words.
-- Use 8 to 10 sentences in all, so each beat has two or three: one fact or one step of the argument per sentence, and every key fact of the brief is told, including its central question and any history it mentions. Short sentences, not fewer facts.
+- Use 10 to 13 sentences in all, so each beat has two or three: one fact or one step of the argument per sentence, and every key fact of the brief is told, including its central question and any history it mentions. Short sentences, not fewer facts.
 - The first sentence is the hook: at most 7 words, a question or a startling fact, no greeting, no "aaj hum".
 - Every sentence is at most 12 words and carries one idea. A real question where the viewer would ask it. A short blunt sentence after a longer one. End on a payoff or a sting, not a summary.
 - The narrator speaks in the first person where it fits. {language_rule}
@@ -65,8 +65,17 @@ A SHOT PROMPT is English, 35 to 70 words, present tense, in this order: the subj
 """
 
 
-def plan_system(engine: str, target_s: float = 30.0, beats: str = "4 to 6", lo: int = 62, hi: int = 74, format_choice: str = "auto", language_rule: str = "") -> str:      # replace, not format: the JSON example has braces
-    return (PLAN.replace("{format_section}", formats.plan_section(format_choice)).replace("{voice_rules}", voices.narration_rules(engine) or "Write for the ear.").replace("{tags}", ", ".join(maya.STYLE_TAGS)).replace("{language_rule}", language_rule or languages.HINGLISH_RULE)
+WRITTEN = """THE NARRATION
+- The narration is ALREADY WRITTEN (given below as THE SCRIPT). Do not write it and do not change it: return "beats": [] in the JSON.
+- Use the script to decide the subjects, the look, the main character and the place: the people, objects and places the script speaks of must be in "subjects", described concretely."""
+
+
+def plan_system(engine: str, target_s: float = 30.0, beats: str = "4 to 6", lo: int = 80, hi: int = 90, format_choice: str = "auto", language_rule: str = "", written: bool = False) -> str:      # replace, not format: the JSON example has braces
+    text = PLAN
+    if written:
+        a, b = text.index("THE NARRATION\n"), text.index("THE LOOK (")
+        text = text[:a] + WRITTEN + "\n\n" + text[b:]
+    return (text.replace("{format_section}", formats.plan_section(format_choice)).replace("{voice_rules}", voices.narration_rules(engine) or "Write for the ear.").replace("{tags}", ", ".join(maya.STYLE_TAGS)).replace("{language_rule}", language_rule or languages.HINGLISH_RULE)
             .replace("{seconds}", f"{target_s:g}").replace("{beats}", beats).replace("{lo}", str(lo)).replace("{hi}", str(hi)))
 
 

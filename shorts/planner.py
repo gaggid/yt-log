@@ -8,10 +8,10 @@ from story2 import intake, leak, lexicon, maya, safety, svara, voices
 from story2.schemas import M
 
 from . import voice as svoice
-from . import cast, formats, languages, looks, models, shotlist, tones, prompts as P, store, subjects as subj, timeline
+from . import cast, formats, languages, looks, models, motionwriter, script as scriptmod, shotlist, stillwriter, tones, prompts as P, store, subjects as subj, timeline
 
-WORDS_LO, WORDS_HI = 52, 86              # spoken words in the whole short (the prompt asks for 62 to 74; this is what is accepted)
-REC_LO, REC_HI = 62, 74                  # what the prompt asks for at the full 30 seconds
+WORDS_LO, WORDS_HI = 64, 96              # spoken words in the whole short (the prompt asks for 80 to 90; this is what is accepted). The voice speeds up to x1.35 to land on 30 s
+REC_LO, REC_HI = 80, 90                  # what the prompt asks for at the full 30 seconds
 MAX_SENTENCE_WORDS = 16
 MAX_HOOK_WORDS = 9
 MAX_CHARACTER_SHOTS = 4
@@ -32,7 +32,7 @@ class PlanOut(M):
     character: Str = ""
     place: Str = ""
     look: Str = ""
-    beats: list[SBeat]
+    beats: list[SBeat] = []                          # empty when the script engine wrote the narration (shorts/script.py)
 
 
 class ShotOut(M):
@@ -54,7 +54,7 @@ def source_text(short: dict) -> str:
     src = short["source"]
     if src.get("kind") == "story":
         return "FACTS (tell only these; do not invent any):\n" + src.get("facts", "")
-    return "THE IDEA (the brief for the short):\n" + src.get("text", "")
+    return "THE IDEA (the brief for the short):\n" + src.get("text", "").replace("�", '"')           # a pasted brief can arrive with its curly quotes broken
 
 
 def _profile(short: dict):
@@ -91,8 +91,12 @@ def word_limits(t_s: float, speed: float = 1.0) -> tuple[int, int, int, int]:
 def _word_limits(t_s: float) -> tuple[int, int, int, int]:
     """(accepted low, accepted high, asked low, asked high) spoken words for a short of `t_s` seconds. Scaled from the 30-second figures; a shorter short is also capped by what the voice can say
     (the fastest the timeline lets it speak), so words that pass here can fit."""
-    if t_s >= models.TARGET_S:
+    if t_s == models.TARGET_S:
         return WORDS_LO, WORDS_HI, REC_LO, REC_HI
+    if t_s > models.TARGET_S:                                        # longer: scaled, and capped by what the voice can say with the gaps between beats
+        k = t_s / models.TARGET_S
+        hi = min(round(WORDS_HI * k), int((t_s * 0.97 - 0.9) * timeline.TEMPO_MAX * timeline.PACE_WPS))
+        return round(WORDS_LO * k), hi, round(REC_LO * k), min(round(REC_HI * k), hi - 1)
     hi = min(round(WORDS_HI * t_s / models.TARGET_S), int((t_s - 0.9) * timeline.TEMPO_MAX * timeline.PACE_WPS))
     lo = max(6, round(WORDS_LO * t_s / models.TARGET_S))
     return lo, hi, max(lo, round(REC_LO * t_s / models.TARGET_S)), max(lo, min(round(REC_HI * t_s / models.TARGET_S), hi - 1))
@@ -104,7 +108,9 @@ def min_sentences(t_s: float) -> int:
 
 
 def beat_range(t_s: float) -> tuple[int, int]:
-    """How many beats a short of `t_s` seconds has: 4 to 6 at 30 seconds, fewer when shorter."""
+    """How many beats a short of `t_s` seconds has: 4 to 6 at 30 seconds, fewer when shorter, one per 7 to 10 seconds in a long one."""
+    if t_s > 45:
+        return max(4, round(t_s / 10)), max(6, round(t_s / 7))
     lo = max(2, round(t_s / 7.5))
     return lo, max(lo + 1, round(t_s / 5))
 
@@ -148,8 +154,9 @@ def _beats_from(out: PlanOut, engine: str) -> list[dict]:
     for i, b in enumerate(out.beats, 1):
         tag = maya.NEUTRAL if engine == "maya-tts" else ""                 # neutral for every beat: the person changes a tag on the screen when a beat needs one
         sents = [{"text": re.sub(r"\s+", " ", t).strip(), "tag": ""} for t in b.narration if t.strip()]
-        if sents and tag:
-            sents[0]["tag"] = tag
+        if tag:
+            for x in sents:
+                x["tag"] = tag
         beats.append({"id": f"b{i}", "name": b.name or f"Beat {i}", "feeling": b.feeling, "tag": tag, "sentences": sents, "shot_ids": []})
     beats = [b for b in beats if b["sentences"]]
     for b in beats:
@@ -157,7 +164,7 @@ def _beats_from(out: PlanOut, engine: str) -> list[dict]:
     return beats
 
 
-async def _plan_call(short: dict, backend, s: dict, note: str = "") -> PlanOut:
+async def _plan_call(short: dict, backend, s: dict, note: str = "", written: list[dict] | None = None) -> PlanOut:
     cur = voices.current({"tts": short["settings"].get("voice")})
     caller = llm.JsonCaller(backend, s)
     prof = _profile(short)
@@ -178,6 +185,8 @@ async def _plan_call(short: dict, backend, s: dict, note: str = "") -> PlanOut:
     _, _, ask_lo, ask_hi = word_limits(t_s, svoice.speed(short))
 
     def check(out: PlanOut) -> None:
+        if written is not None:
+            return
         if len(out.beats) < min(3, b_lo):
             raise ValueError(f"write at least {min(3, b_lo)} beats")
         if len(out.beats) > b_hi and not caller.last_attempt:
@@ -191,7 +200,9 @@ async def _plan_call(short: dict, backend, s: dict, note: str = "") -> PlanOut:
         if probs:
             raise ValueError("; ".join(probs[:4]))
 
-    res = await caller.call(P.plan_system(cur["engine"], t_s, f"{b_lo} to {b_hi}", ask_lo, ask_hi, short["settings"].get("format") or formats.AUTO, languages.rule(short["settings"])), f"{source_text(short)}{extra}\n{note}\nWrite the short now.", PlanOut, validate=check)
+    if written is not None:
+        extra += "\nTHE SCRIPT (already written, spoken by the narrator):\n" + scriptmod._script_text(written)
+    res = await caller.call(P.plan_system(cur["engine"], t_s, f"{b_lo} to {b_hi}", ask_lo, ask_hi, short["settings"].get("format") or formats.AUTO, languages.rule(short["settings"]), written is not None),f"{source_text(short)}{extra}\n{note}\nWrite the short now.", PlanOut, validate=check)
     return res.value
 
 
@@ -271,7 +282,13 @@ async def make_plan(short_id: str, backend, s: dict | None = None, progress=None
     short = store.get(short_id)
     if progress:
         progress(0, 1, "writing the story and the narration")
-    out = await _plan_call(short, backend, s)
+    written = None
+    if short["settings"].get("script_engine", "room") == "room":
+        try:
+            written = await scriptmod.write(short, backend, s, progress)
+        except llm.LLMError:
+            written = None                                                       # the old one-call plan is the fallback; a failed room never stops a short
+    out = await _plan_call(short, backend, s, written=written["beats"] if written else None)
     fmt = chosen_format(short, out.format)
     fixed = bool(short["settings"].get("character_text") or cast.entries(short))          # a person the producer fixed is kept in any format
     plan = {"title": out.title.strip()[:90], "logline": out.logline.strip(), "format": fmt, "subjects": subj.clean([x.model_dump() for x in out.subjects]),
@@ -283,7 +300,11 @@ async def make_plan(short_id: str, backend, s: dict | None = None, progress=None
     plan["look"] = looks.of(short, plan["look"])
     if cast.place_text(short):
         plan["place"] = cast.place_text(short)
-    beats = _beats_from(out, voices.current({"tts": short["settings"].get("voice")})["engine"])
+    beats = written["beats"] if written else _beats_from(out, voices.current({"tts": short["settings"].get("voice")})["engine"])
+    for b in beats:
+        safety.guard_tags(b["sentences"])
+    if written:
+        short["script"] = {"bible": written["bible"], "map": written["map"], "report": written["report"]}
     short.update(plan=plan, beats=beats, shots=[], title=plan["title"] or short["title"])
     counts = timeline.plan_counts(beats, target_s(short), timeline.silent(short))
     all_shots: list[dict] = []
@@ -300,6 +321,7 @@ async def make_plan(short_id: str, backend, s: dict | None = None, progress=None
             sh["beat"] = b["id"]
             all_shots.append(sh)
         b["shot_ids"] = [sh["id"] for sh in shots]
+        await stillwriter.write_beat(short, b, shots, backend, s)                  # the picture prompts are written by their own call (shorts/stillwriter.py)
     if not formats.allows_character(fmt) and not fixed:                      # no invented main person in a documentary, an explainer or a comparison
         for sh in all_shots:
             sh["character"], sh["cast"] = False, []
@@ -311,6 +333,9 @@ async def make_plan(short_id: str, backend, s: dict | None = None, progress=None
     short["status"] = "planned"
     short["keyframes_confirmed"] = False
     refit(short)
+    if progress:
+        progress(len(beats) + 1, len(beats) + 2, "writing the motion of every shot")
+    await motionwriter.write_all(short, backend, s)                          # needs the seconds of each shot, so it comes after the timeline
     return store.save(short)
 
 
@@ -333,10 +358,83 @@ async def reshoot_beat(short_id: str, beat_id: str, count: int, backend, s: dict
         sh["id"] = f"s{top + k}"                                       # new ids: clips made for the old shots are not mistaken for these
         sh["beat"] = beat_id
     beat["shot_ids"] = [sh["id"] for sh in shots]
+    await stillwriter.write_beat(short, beat, shots, backend, s)
     order = {sid: n for n, sid in enumerate(sid for b in short["beats"] for sid in b["shot_ids"])}
     short["shots"] = sorted(keep + shots, key=lambda sh: order[sh["id"]])
     refit(short)
+    await motionwriter.write_beat(short, beat, shots, backend, s)
     return store.save(short)
+
+
+def _check_narration(short: dict) -> None:
+    if timeline.silent(short) or not any(b["sentences"] for b in short["beats"]):
+        raise store.ShortError("this short has no narration to rewrite")
+
+
+async def rewrite_beat(short_id: str, beat_id: str, instruction: str, backend, s: dict | None = None) -> dict:
+    """Write the words of one beat again, following the producer's instruction. The beat keeps its shots; its voice take becomes old (hash) and the timeline is fitted again."""
+    short = store.get(short_id)
+    _check_narration(short)
+    sents = await scriptmod.rewrite_beat(short, beat_id, instruction, backend, s)
+    short = store.get(short_id)
+    beat = next(b for b in short["beats"] if b["id"] == beat_id)
+    beat["sentences"] = sents
+    safety.guard_tags(beat["sentences"])
+    store.save(short)
+    return sync_timing(short_id)
+
+
+async def rewrite_script(short_id: str, instruction: str, backend, s: dict | None = None, progress=None) -> dict:
+    """Write every beat again (same beats, same shots) and punch the script up."""
+    short = store.get(short_id)
+    _check_narration(short)
+    out = await scriptmod.rewrite_all(short, instruction, backend, s, progress)
+    short = store.get(short_id)
+    for b in short["beats"]:
+        if b["id"] in out["beats"]:
+            b["sentences"] = out["beats"][b["id"]]
+            safety.guard_tags(b["sentences"])
+    short["script"] = {**(short.get("script") or {}), "bible": scriptmod.stored_bible(short).model_dump(), "report": out["report"]}
+    store.save(short)
+    return sync_timing(short_id)
+
+
+async def rewrite_pictures(short_id: str, backend, s: dict | None = None, progress=None, shot_id: str = "", note: str = "") -> str:
+    """Write the picture prompts again: of one shot (with the producer's instruction) or of every shot. The shots, the narration and the timing are not touched; a changed prompt makes its start picture old."""
+    s = s or settings_mod.get()
+    short = store.get(short_id)
+    if shot_id:
+        sh = store.shot_by_id(short, shot_id)
+        beat = next(b for b in short["beats"] if b["id"] == sh["beat"])
+        shots = [x for sid in beat["shot_ids"] for x in short["shots"] if x["id"] == sid]
+        n = await stillwriter.write_beat(short, beat, shots, backend, s, only={shot_id}, note=note)
+        if n:
+            await motionwriter.write_beat(short, beat, shots, backend, s, only={shot_id})        # the motion is written for the picture, so it follows it
+    else:
+        n = await stillwriter.write_all(short, backend, s, progress, note)
+        if n:
+            await motionwriter.write_all(short, backend, s)
+    if not n:
+        raise store.ShortError("the model did not write a picture prompt; the old ones are kept")
+    store.save(short)
+    return f"{n} picture prompt(s) written"
+
+
+async def rewrite_motion(short_id: str, backend, s: dict | None = None, progress=None, shot_id: str = "", note: str = "") -> str:
+    """Write what moves in a shot (with the producer's instruction) or in every shot again. A changed motion makes that shot's clip old."""
+    s = s or settings_mod.get()
+    short = store.get(short_id)
+    if shot_id:
+        sh = store.shot_by_id(short, shot_id)
+        beat = next(b for b in short["beats"] if b["id"] == sh["beat"])
+        shots = [x for sid in beat["shot_ids"] for x in short["shots"] if x["id"] == sid]
+        n = await motionwriter.write_beat(short, beat, shots, backend, s, only={shot_id}, note=note)
+    else:
+        n = await motionwriter.write_all(short, backend, s, progress, note)
+    if not n:
+        raise store.ShortError("the model did not write a motion prompt (or these shots are moved by an avatar or a reference video); the old ones are kept")
+    store.save(short)
+    return f"{n} motion prompt(s) written"
 
 
 async def reshoot_all(short_id: str, backend, s: dict | None = None, progress=None) -> str:

@@ -147,3 +147,83 @@ def test_a_close_up_leaves_out_the_shoes_and_trousers_of_the_character_but_a_wid
     assert "trousers" not in close and "flats" not in close and "tunic" in close and "earrings" in close
     assert stills.framed_character(text, {"camera": "wide shot, full body", "still": "She walks."}) == text
     assert stills.framed_character(text, {"camera": "", "still": ""}) == text, "no framing named: nothing is left out"
+
+
+def test_the_edit_prompt_never_describes_a_cast_member_again_and_says_the_rest_once(gw):
+    a, b, plat = make_char("Raju"), make_char("Meera", slots={**SLOTS, "gender": "woman", "hair": "long black plait"}), make_char("Platform", "place")
+    short = with_cast(a, b, place=plat)
+    short["plan"]["subjects"] = [{"name": "Raju", "kind": "person", "visual": "An Indian man in a mustard yellow jacket and short black hair."},
+                                 {"name": "Stranger", "kind": "person", "visual": "An old man in a brown shawl with a white beard."},
+                                 {"name": "Parcel", "kind": "object", "visual": "A brown cardboard parcel tied with red string."},
+                                 {"name": "Waiting Hall", "kind": "place", "visual": "A stone waiting hall with wooden benches."}]
+    sh = dict(short["shots"][0], cast=[a["id"], b["id"]], character=True, camera="slow push in", setting="", subjects=["Raju", "Stranger", "Parcel", "Waiting Hall"],
+              still="Medium shot of Raju on the left and Meera on the right, both facing the Stranger, one parcel on the bench between them.")
+    refs = cast.refs_for(short, sh)
+    out = stills.edit_prompt(short, sh, refs)
+    assert out.startswith("Picture 1 shows Raju") and "Picture 3 shows the place." in out
+    assert "mustard yellow" not in out, "a cast member is not described again: the picture gives the look"
+    assert "Stranger: An old man in a brown shawl" in out and "Parcel: A brown cardboard parcel" in out
+    assert "Setting:" not in out and "Waiting Hall" not in out, "the place picture is given, so no place words"
+    assert "Camera:" not in out and out.count("keeps exactly") == 1 and "wording about their looks or clothes" in out and "The scene happens in the place of the place picture." in out
+    no_pic = dict(sh, setting="")
+    refs2 = dict(refs, place=False)
+    out2 = stills.edit_prompt(short, no_pic, refs2)
+    assert out2.count("Setting:") == 1 and "stone waiting hall" in out2 and "Waiting Hall:" not in out2, "a place subject becomes the setting, once"
+
+
+def test_the_picture_writer_is_told_who_the_cast_is_and_never_to_describe_them(gw):
+    raju = make_char()
+    chat = FakeChat(stills=True)
+    short = run(planner.make_plan(new_short("keyframe", cast=[{"character_id": raju["id"], "look_id": ""}])["id"], chat, S))
+    call = next(c for c in chat.calls if c["task"] == "p4_still")
+    assert "CAST (drawn from library pictures" in call["user"] and "Raju" in call["user"] and "cast in the shot: Raju" in call["user"]
+    assert "never describe their face, hair, skin or clothes" in call["system"]
+    assert any(sh["cast"] for sh in short["shots"])
+
+
+def test_a_remix_with_a_library_character_writes_its_own_animate_prompt_and_takes_a_place_as_the_background(gw, env):
+    from shorts import remix
+    raju, plat = make_char(), make_char("Platform", "place")
+    short = store.create("Remix", "remix", {"kind": "idea", "text": "", "candidate_id": "", "facts": ""}, {}, {"remix": dict(remix.DEFAULT)})
+    sid = short["id"]
+    short = store.get(sid)
+    short["remix"].update(character_id=raju["id"], source="remix/source.mp4", driving=["remix/driving1.mp4"], rights_video=True)
+    store.save(short)
+    short = store.get(sid)
+    auto = remix.auto_prompt(short)
+    assert "mustard yellow" in auto and "Background:" not in auto
+    assert "no_prompt" not in {i["code"] for i in remix.check(short)["issues"]}, "a library character is described for you"
+    h1 = remix.input_hash(short, 0)
+    short["remix"]["place_id"] = plat["id"]
+    store.save(short)
+    short = store.get(sid)
+    with_place = remix.auto_prompt(short)
+    assert with_place.startswith(auto.rstrip()[:40]) and "Background:" in with_place and "railway platform" in with_place.lower()
+    assert remix.input_hash(short, 0) != h1, "a new background makes the clip old"
+    (store.media_dir(sid, "remix") / "driving1.mp4").write_bytes(b"x" * 100)
+    assert remix.request(short, 0)["prompt"] == with_place, "Animate is sent the library description"
+    short["remix"]["prompt"] = "My own words about a blue kurta."
+    store.save(short)
+    assert remix.request(store.get(sid), 0)["prompt"] == "My own words about a blue kurta.", "the person's own text wins"
+    short = store.get(sid)
+    short["remix"].update(prompt="", look_id="lk-1")
+    c = cstore.get(raju["id"])
+    c["looks"] = [{"id": "lk-1", "name": "Office", "item": "", "recipe": {"value": "a navy blazer over a white shirt"}}]
+    cstore.save(c)
+    lk = remix.auto_prompt(short)
+    assert "Wearing a navy blazer over a white shirt" in lk and "mustard yellow" not in lk, "a look's outfit replaces the character's own outfit words"
+
+
+def test_the_remix_background_must_be_a_place(gw, env):
+    from fastapi.testclient import TestClient
+    import main
+    import config
+    from shorts import remix
+    with TestClient(main.app) as c:
+        c.post("/login", data={"username": config.APP_USER, "password": config.APP_PASSWORD})
+        raju, plat = make_char(), make_char("Platform", "place")
+        sid = c.post("/api/shorts", json={"pipeline": "remix", "kind": "idea", "text": ""}).json()["id"]
+        assert c.patch(f"/api/shorts/{sid}/remix", json={"place_id": raju["id"]}).status_code == 400
+        assert c.patch(f"/api/shorts/{sid}/remix", json={"place_id": "ch-nope"}).status_code == 404
+        st = c.patch(f"/api/shorts/{sid}/remix", json={"character_id": raju["id"], "place_id": plat["id"]}).json()
+        assert st["remix"]["place_id"] == plat["id"] and "Background:" in st["remix"]["auto_prompt"]

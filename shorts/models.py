@@ -4,6 +4,7 @@ import math
 
 TARGET_S = 30.0                       # the contract: a short is this long
 TOLERANCE_S = 0.5
+MIN_TARGET_S, MAX_TARGET_S = 5.0, 180.0   # the length a person may ask for: 5 seconds to 3 minutes (the default stays TARGET_S)
 OUT_FPS = 30
 OUT_SIZE = (1080, 1920)
 MAX_SHOT_S = 3.0                      # owner rule: no shot is on screen longer than this

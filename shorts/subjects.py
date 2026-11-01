@@ -32,6 +32,7 @@ Return ONLY a JSON object: {"subjects": [{"name": "...", "kind": "person | group
   Never write the subject's name inside the visual as text to be printed; describe how it looks.
 - Real machines and people are drawn as they really look: if you know the real appearance, describe it (for example a twin-engine stealth fighter with canards and a dark grey finish with a red and yellow star roundel); if you do not know it, say what the facts say and stay plain.
 - When the facts name only a class (for example "Chinese stealth fighters" or "Indian fighters"), name the best-known real example in the subject for the picture, such as "Chinese stealth fighter (J-20)" or "Indian Su-30MKI fighter", and describe that real machine. This is for the pictures only; the narration says only what the facts say.
+- Describe what makes it RECOGNISABLE and where its parts are (for example: twin tail fins, a long nose, wing pylons beneath the wings, the exhaust pipe at the rear), never filler like "grey metal", "sleek", "powerful" or "beautiful".
 - Prefer what can be SEEN: a force or an organisation is shown by its machines, people or uniforms, so list those instead of the bare organisation. Do not list the same thing twice.
 - Nothing graphic: no gore, no weapons aimed at anyone. No text, numbers or logos to be read in the picture.
 """

@@ -72,10 +72,11 @@ async function newShort() {
       <label class="f mt-s">Narration speed<select id="sh-vspeed">${[[0.85, 'Slower (0.85x)'], [0.92, 'A little slower (0.92x)'], [1, 'Normal (1x)'], [1.08, 'A little faster (1.08x)'], [1.15, 'Faster (1.15x)']].map(([k, t]) => `<option value="${k}" ${Math.abs((1 || 1) - k) < 0.01 ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
       <label class="f mt-s">Narration language<select id="sh-lang">${(opts.languages || []).map(m => `<option value="${esc(m.id)}">${esc(m.label)}${m.maya_only ? ' (Maya voice only)' : ''}</option>`).join('')}</select></label></div>
     <h4>Length</h4>
-    <label class="f">Video duration (seconds)<input type="number" id="sh-dur" value="30" min="10" max="30" step="1" style="width:80px">
-      <span class="small mute">10–30 seconds. The voice, shot count and timeline all adjust automatically.</span></label>`;
+    <div class="f">Video length
+      <span><input type="number" id="sh-dur-m" value="0" min="0" max="3" step="1" style="width:60px"> min <input type="number" id="sh-dur-s" value="30" min="0" max="59" step="1" style="width:60px"> sec</span>
+      <span class="small mute">From 5 seconds to 3 minutes (30 seconds if you leave it). The story is written to fit: a short one gets a hook and a blow, a long one gets a re-hook every 20 seconds or so. The voice, shot count and timeline adjust automatically.</span></div>`;
   const dlg = dialog({title: 'New short', html, buttons: [{label: 'Cancel', value: null}, {label: 'Create', primary: true,
-    collect: l => { const dur = Math.max(10, Math.min(30, parseInt(l.querySelector('#sh-dur').value) || 30)); return {pipeline: l.querySelector('input[name=pipe]:checked').value, kind: l.querySelector('#sh-kind').value, text: l.querySelector('#sh-idea').value, candidate_id: l.querySelector('#sh-story').value, settings: {target_s: dur, visual_style: l.querySelector('#sh-style').value, language: l.querySelector('#sh-lang').value, tone_id: l.querySelector('#sh-tone').value, edge: l.querySelector('#sh-edge').value, voice_speed: +l.querySelector('#sh-vspeed').value, voice: (() => { const [engine, voice] = l.querySelector('#sh-voice').value.split('|'); return {engine, voice}; })(), speed_lora: l.querySelector('input[name=pipe]:checked').value === 'keyframe' && l.querySelector('#sh-fast').checked, size_14b: l.querySelector('#sh-size14').value}}; },
+    collect: l => { const dur = Math.max(5, Math.min(180, (parseInt(l.querySelector('#sh-dur-m').value) || 0) * 60 + (parseInt(l.querySelector('#sh-dur-s').value) || 0))) || 30; return {pipeline: l.querySelector('input[name=pipe]:checked').value, kind: l.querySelector('#sh-kind').value, text: l.querySelector('#sh-idea').value, candidate_id: l.querySelector('#sh-story').value, settings: {target_s: dur, visual_style: l.querySelector('#sh-style').value, language: l.querySelector('#sh-lang').value, tone_id: l.querySelector('#sh-tone').value, edge: l.querySelector('#sh-edge').value, voice_speed: +l.querySelector('#sh-vspeed').value, voice: (() => { const [engine, voice] = l.querySelector('#sh-voice').value.split('|'); return {engine, voice}; })(), speed_lora: l.querySelector('input[name=pipe]:checked').value === 'keyframe' && l.querySelector('#sh-fast').checked, size_14b: l.querySelector('#sh-size14').value}}; },
     validate: v => v.pipeline !== 'remix' && v.kind === 'idea' && v.text.trim().length < 10 ? 'Write the idea in a sentence or two.' : (v.pipeline !== 'remix' && v.settings.language !== 'hinglish' && v.settings.voice.engine !== 'maya-tts' ? 'A narration language other than Hinglish needs a Maya voice. Pick a Maya voice or Hinglish.' : '')}]});
   setTimeout(() => {
     const k = document.querySelector('#sh-kind'), p = () => document.querySelectorAll('input[name=pipe]');
@@ -174,6 +175,9 @@ function sideView() {
     <label class="f mt-s">Format<select id="st-format">${[['auto', 'Detect from the story (recommended)'], ['story', 'Story: dramatised, follows a person'], ['documentary', 'Documentary: real subjects, narrator'], ['explainer', 'Explainer: facts and numbers'], ['comparison', 'Comparison: sides against each other']].map(([k, t]) => `<option value="${k}" ${(st.format || 'auto') === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
       <span class="small mute">Only the next plan uses it.${(s.plan || {}).format ? ` This plan is a <b>${esc(s.plan.format)}</b>.` : ''}</span></label>
     <label class="f mt-s">Tone (optional)<input id="st-tone" value="${esc(st.tone || '')}" placeholder="funny, tense, warm..."></label>`}
+    <label class="f mt-s">Length (seconds, 5 to 180)<input type="number" id="st-target" value="${st.target_s || 30}" min="5" max="180" step="1" style="width:80px">
+      <span class="small mute">Only the next plan is written to this length.</span></label>
+    <label class="f mt-s">Script writer<select id="st-script"><option value="room" ${(st.script_engine || 'room') === 'room' ? 'selected' : ''}>Writers' room (story bible, retention map, beat drafts, punch-up)</option><option value="single" ${st.script_engine === 'single' ? 'selected' : ''}>One call (old, fast)</option></select></label>
     <label class="f mt-s">Audio<select id="st-vmode"><option value="narration" ${(st.voice_mode || 'narration') === 'narration' ? 'selected' : ''}>Narration voice (generated)</option><option value="none" ${st.voice_mode === 'none' ? 'selected' : ''}>No voice — video only (silent or background music)</option></select></label>
     ${(st.voice_mode || 'narration') !== 'none' ? `<label class="f mt-s">Voice<select id="st-voice">${voiceOptions(st.voice)}</select></label>
 <label class="f mt-s">Narration tone or persona<select id="st-toneid">${toneOptions(v.tones, st.tone_id)}</select>
@@ -353,6 +357,8 @@ function keyframesView() {
       const kb = making(x.keyframes);
       return `<div class="sh-key"><div class="mute row">${esc(x.id)} · ${x.seconds}s · ${esc(x.begins)}<span class="sp"></span>${busyTxt(kb, 'drawing')}</div><div class="sh-wrap">${busyDot(kb, 'This picture')}${k && k.url ? `<img src="${esc(k.url)}" loading="lazy" ${x.keyframe ? '' : 'style="opacity:.55"'}>${x.keyframe ? '' : '<div class="warn small">old picture: the prompt changed after it was drawn. Press Again, or Make clips will draw it first.</div>'}` : `<div class="sh-thumb" style="width:100%">${x.keyframes.some(y => y.status === 'failed') ? 'failed' : 'not made'}</div>`}</div>
         <textarea data-still="${x.id}" style="min-height:70px;font-size:12px;width:100%" ${x.begins === 'upload' || x.begins === 'anchor' ? 'disabled title="This shot uses your own picture"' : ''}>${esc(x.still || x.prompt)}</textarea>
+        ${(x.must_show || []).length ? `<div class="mute small" style="margin-top:3px" title="What the picture has to show. Check these when you look at it.">✔ ${esc(x.must_show.join(' · '))}</div>` : ''}
+        <div class="row" style="margin-top:4px"><button class="small" data-rewrite-pic="${x.id}" title="The model writes this picture prompt again; you say what should change">Rewrite prompt…</button></div>
         ${k && k.url ? `<div class="row" style="margin-top:4px"><input data-fix="${x.id}" placeholder="Change one thing…" style="flex:1;font-size:12px"><button class="small" data-fixgo="${x.id}">Fix</button></div>` : ''}
         <label class="row small" style="margin-top:4px;gap:5px"><input type="checkbox" data-neg-on="${x.id}" ${x.avoid ? 'checked' : ''}> negative prompt</label>
         <input data-neg="${x.id}" value="${esc(x.avoid || '')}" placeholder="Keep out: e.g. text, extra jets, people" style="width:100%;font-size:12px" ${x.avoid ? '' : 'disabled'}>
@@ -363,15 +369,19 @@ function beatsView() {
   const s = S, tl = s.timeline;
   const busy = s.job.state === 'running';
   const clipsHeader = `<div class="card pad mt"><div class="row"><h2 style="margin:0">Shots &amp; clips</h2><span class="sp"></span>
+    <button class="small" id="b-move-all" ${busy ? 'disabled' : ''} title="The model writes what moves in every shot (what Wan is asked to do with each picture)">Write motion again…</button>
+    <button class="small" id="b-pics-all" ${busy ? 'disabled' : ''} title="The model writes what the image model is asked to draw, for every shot">Write picture prompts again…</button>
     <button class="small" id="b-clips-missing" ${busy || s.voice_gate ? 'disabled' : ''} ${s.voice_gate ? `title="${esc(s.voice_gate)}"` : ''}>Make missing clips</button>
     <button class="primary" id="b-clips-all" ${busy || s.voice_gate ? 'disabled' : ''}>Make all clips</button></div></div>`;
-  return clipsHeader + s.beats.map((b, bi) => {
+  const sr = (s.script || {}).report;
+  const scriptNote = `<div class="row small mt-s"><button class="small" id="b-rewrite-all" ${busy ? 'disabled' : ''} title="Write every scene's words again (same scenes, same pictures), then punch the script up">Rewrite the whole script…</button>${sr ? `<span class="mute">Script: critic score ${esc(sr.score)}/10 after ${esc(sr.rounds)} punch-up round(s)${(sr.problems || []).length ? '. Left to fix: ' + esc(sr.problems.join(' / ')) : ''}.</span>` : ''}</div>`;
+  return clipsHeader + scriptNote + s.beats.map((b, bi) => {
     const v = s.voice.beats.find(x => x.beat === b.id) || {};
     const take = (v.attempts || []).filter(a => a.status === 'done' && a.current).pop();
     const shots = s.shots.filter(x => x.beat === b.id);
-    return `<div class="sh-beat"><div class="row"><b>${bi + 1}. ${esc(b.name)}</b><span class="mute small">${esc(b.feeling || '')}</span><span class="sp"></span>
+    return `<div class="sh-beat"><div class="row"><b>${bi + 1}. ${esc(b.name)}</b><span class="mute small">${esc([b.job, b.feeling].filter(Boolean).join(' · '))}</span><span class="sp"></span>
         <select data-tag="${b.id}" class="small" style="width:auto">${['', 'neutral', ...(window._shTags || [])].map(t => `<option value="${t}" ${t === (b.tag || '') ? 'selected' : ''}>${t || 'voice: none'}</option>`).join('')}</select>
-        ${busyTxt(making(v.attempts), 'making the voice')}<button class="small" data-voice="${b.id}">${take ? 'Voice again' : 'Make the voice'}</button></div>
+        ${busyTxt(making(v.attempts), 'making the voice')}<button class="small" data-rewrite="${b.id}" ${busy ? 'disabled' : ''} title="Write this scene again; you say what should change">Rewrite…</button><button class="small" data-voice="${b.id}">${take ? 'Voice again' : 'Make the voice'}</button></div>
       <textarea data-beat="${b.id}">${esc(b.sentences.map(x => x.text).join('\n'))}</textarea>
       <div class="row small mt-s">${take ? `<audio controls src="${esc(take.url)}" style="height:30px"></audio><span class="mute">${take.seconds}s spoken</span>` : '<span class="mute">no voice yet</span>'}</div>
       ${shots.map(x => shotView(x)).join('')}</div>`;
@@ -391,6 +401,10 @@ function shotView(x) {
       <label><input type="checkbox" data-shot-flag="continues" data-id="${x.id}" ${x.continues ? 'checked' : ''}> continues</label>
       <label title="The person in this shot's picture speaks the voice with lip sync (InfiniteTalk). Needs a library character in the shot and the beat's voice."><input type="checkbox" data-shot-flag="avatar" data-id="${x.id}" ${x.avatar ? 'checked' : ''}> talking avatar</label>
       ${x.motion && x.motion.file ? `<span class="small">${badge('good', 'moves like: ' + esc(x.motion.title || 'a video'))} <a href="#" data-motion-clear="${x.id}">remove</a></span>` : `<button class="small" data-motion="${x.id}" title="A video (file, YouTube or Instagram link) drives how the person in this shot moves (Wan Animate). 2 to 3 seconds of it are used.">movement from a video…</button>`}</div>
+    ${x.avatar || (x.motion && x.motion.file) ? '' : `<div class="mute small">What moves (sent to Wan with the start picture; name the things that move, do not describe the picture)</div>
+    <textarea data-move="${x.id}" style="min-height:64px;font-size:13px" placeholder="Not written yet: press Rewrite motion…">${esc(x.move || '')}</textarea>
+    <div class="row small"><button class="small" data-rewrite-move="${x.id}" ${S.job.state === 'running' ? 'disabled' : ''} title="The model writes what moves in this shot; you say what should change">Rewrite motion…</button></div>`}
+    <div class="mute small">${S.keyframes_on ? 'The scene as planned (used only to plan the picture and when Wan draws the picture itself)' : 'The scene as planned'}</div>
     <textarea data-shot="${x.id}" style="min-height:64px;font-size:13px">${esc(x.prompt)}</textarea>
     <div class="row small mt-s"><label class="row">Camera <input data-shot-cam="${x.id}" value="${esc(x.camera)}" style="width:150px"></label>
       <button class="small" data-clip="${x.id}" ${S.voice_gate ? `disabled title="${esc(S.voice_gate)}"` : needsKey ? 'disabled title="Draw the start picture first (Again button above)"' : ''}>${clip ? 'Make again' : 'Make this clip'}</button><button class="small" data-up="${x.id}">My picture</button>
@@ -425,7 +439,9 @@ function remixView() {
     <p class="mute small">The character in your picture performs the motion of this video. The video's own background is not kept: the background comes from your picture and the description below.</p></div>
     <div class="card pad mt"><h2>2. The character</h2>
       ${rxCharacter(r)}<div class="row mt-s">${!r.character_id && s.images.anchor ? `<img src="/api/shorts/file/${s.id}/${esc(s.images.anchor)}" style="width:90px;border-radius:8px">` : ''}${r.character_id ? '' : `<button id="st-anchor2">${s.images.anchor ? 'Change the picture' : 'or upload a picture of your own'}</button>`}</div>
-      <label class="f mt-s">Describe the character and the background (what they wear, where they are)<textarea id="rx-prompt">${esc(r.prompt)}</textarea></label>
+      ${r.character_id ? `<label class="f mt-s">Background place from the library (optional)<select id="rx-place"><option value="">none: describe it below</option>${(window._shChars || []).filter(c => c.kind === 'place' && c.status === 'ready').map(c => `<option value="${esc(c.id)}" ${c.id === r.place_id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>` : ''}
+      <label class="f mt-s">Describe the character and the background (what they wear, where they are)${r.auto_prompt ? ' - leave empty to use the description written from the library' : ''}<textarea id="rx-prompt" placeholder="${esc(r.auto_prompt || '')}">${esc(r.prompt)}</textarea></label>
+      ${r.auto_prompt ? `<div class="row small mt-s"><button class="small" id="rx-auto" title="Copy the description written from the library into the box so you can change it">Edit the library description</button><span class="mute">${r.prompt.trim() ? 'Your own text is sent.' : 'The library description is sent: ' + esc(r.auto_prompt.slice(0, 160)) + (r.auto_prompt.length > 160 ? '…' : '')}</span></div>` : ''}
       <div class="row mt-s"><label class="f" style="flex:1">What the motion looks like (optional)<input id="rx-motion" value="${esc(r.motion_prompt)}"></label><label class="f">Pose strength (0 to 10)<input type="number" id="rx-pose" value="${r.pose_strength}" min="0" max="10" step="0.5"></label></div></div>
     <div class="card pad mt"><h2>3. Sound</h2>
       <label class="f">Sound<select id="rx-audio"><option value="none" ${r.audio === 'none' ? 'selected' : ''}>The quiet sound bed only</option><option value="voiceover" ${r.audio === 'voiceover' ? 'selected' : ''}>A voice-over I write (Hinglish, under 80 words)</option><option value="original" ${r.audio === 'original' ? 'selected' : ''}>The video's own sound</option></select></label>
@@ -468,7 +484,7 @@ function wire() {
   const q = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)];
   const on = (sel, fn) => { const e = q(sel); if (e) e.onclick = () => fn(e); };
   const st = (id, key, conv = v => v) => { const e = q(id); if (e) e.onchange = () => patch('/settings', {[key]: conv(e.type === 'checkbox' ? e.checked : e.value)}); };
-  st('#st-mode', 'image_mode'); st('#st-imodel', 'image_model'); st('#st-style', 'visual_style'); st('#st-char', 'character_text'); st('#st-tone', 'tone'); st('#st-format', 'format'); st('#st-size', 'size'); st('#st-chain', 'chain'); st('#st-fast', 'speed_lora'); st('#st-lang', 'language'); st('#st-toneid', 'tone_id'); st('#st-edge', 'edge'); st('#st-vspeed', 'voice_speed', v => +v); st('#st-size14', 'size_14b'); st('#st-review', 'review_keyframes');
+  st('#st-target', 'target_s', v => +v); st('#st-script', 'script_engine'); st('#st-mode', 'image_mode'); st('#st-imodel', 'image_model'); st('#st-style', 'visual_style'); st('#st-char', 'character_text'); st('#st-tone', 'tone'); st('#st-format', 'format'); st('#st-size', 'size'); st('#st-chain', 'chain'); st('#st-fast', 'speed_lora'); st('#st-lang', 'language'); st('#st-toneid', 'tone_id'); st('#st-edge', 'edge'); st('#st-vspeed', 'voice_speed', v => +v); st('#st-size14', 'size_14b'); st('#st-review', 'review_keyframes');
   st('#st-cap', 'captions'); st('#st-bed', 'bed'); st('#st-steps', 'steps', v => v === '' ? null : +v); st('#st-seed', 'seed', v => +v || 0);
   const vm = q('#st-vmode'); if (vm) vm.onchange = () => patch('/settings', {voice_mode: vm.value});
   const vs = q('#st-voice'); if (vs) vs.onchange = () => { const [engine, voice] = vs.value.split('|'); patch('/settings', {voice: {engine, voice}}); };
@@ -487,6 +503,38 @@ function wire() {
   all('[data-plan]').forEach(e => e.onchange = () => patch('/plan', {[e.dataset.plan]: e.value}));
   all('[data-beat]').forEach(e => e.onchange = () => patch('/narration', {beats: [{id: e.dataset.beat, sentences: e.value.split('\n')}]}));
   all('[data-tag]').forEach(e => e.onchange = () => { const ta = q(`[data-beat="${e.dataset.tag}"]`); patch('/narration', {beats: [{id: e.dataset.tag, sentences: ta.value.split('\n'), tag: e.value}]}); });
+  all('[data-move]').forEach(e => e.onchange = () => patch('/shots/' + e.dataset.move, {move: e.value}));
+  all('[data-rewrite-move]').forEach(e => e.onclick = async () => {
+    const t = await textDlg(`Rewrite the motion of ${e.dataset.rewriteMove}`, 'What should move, and how? (for example: he turns his head fast, the camera pans left)', '', true);
+    if (t === null || t.trim().length < 3) return;
+    post(e, '/motion/write', {shot_id: e.dataset.rewriteMove, instruction: t.trim()}, 'Writing the motion');
+  });
+  on('#b-move-all', async b => {
+    const t = await textDlg('Write the motion of every shot again', 'Anything to change in all of them? (optional)', '', true);
+    if (t === null) return;
+    post(b, '/motion/write', {instruction: t.trim()}, 'Writing the motion');
+  });
+  all('[data-rewrite-pic]').forEach(e => e.onclick = async () => {
+    const t = await textDlg(`Rewrite the picture prompt of ${e.dataset.rewritePic}`, 'What should the picture show or fix? (for example: exactly three jets, missiles under the wings)', '', true);
+    if (t === null || t.trim().length < 3) return;
+    post(e, '/pictures/write', {shot_id: e.dataset.rewritePic, instruction: t.trim()}, 'Writing the picture prompt');
+  });
+  on('#b-pics-all', async b => {
+    const t = await textDlg('Write all picture prompts again', 'Anything to change in every picture? (optional)', '', true);
+    if (t === null) return;
+    post(b, '/pictures/write', {instruction: t.trim()}, 'Writing the picture prompts');
+  });
+  all('[data-rewrite]').forEach(e => e.onclick = async () => {
+    const i = S.beats.findIndex(b => b.id === e.dataset.rewrite);
+    const t = await textDlg(`Rewrite scene ${i + 1}: ${S.beats[i].name}`, 'What should change? (for example: make it scarier, let her say his name, shorter and colder)', '', true);
+    if (t === null || t.trim().length < 3) return;
+    post(e, '/rewrite', {beat_id: e.dataset.rewrite, instruction: t.trim()}, 'Rewriting the scene');
+  });
+  on('#b-rewrite-all', async b => {
+    const t = await textDlg('Rewrite the whole script', 'What should change? (optional; leave blank for a sharper, more concrete version)', '', true);
+    if (t === null) return;
+    post(b, '/rewrite', {instruction: t.trim()}, 'Rewriting the script');
+  });
   all('[data-voice]').forEach(e => e.onclick = () => post(e, '/voice', {beat_ids: [e.dataset.voice], only_missing: false}, 'Making the voice'));
   all('[data-shot]').forEach(e => e.onchange = () => patch('/shots/' + e.dataset.shot, {prompt: e.value}));
   all('[data-castpick]').forEach(b => b.onclick = async () => {
@@ -532,7 +580,7 @@ function wire() {
   all('[data-sugg]').forEach(e => e.onclick = () => win(+e.dataset.sugg));
   const rx = (id, key, conv = v => v) => { const e = q(id); if (e) e.onchange = () => patch('/remix', {[key]: conv(e.type === 'checkbox' ? e.checked : e.value)}); };
   rx('#rx-char', 'character_id'); rx('#rx-look', 'look_id');
-  rx('#rx-prompt', 'prompt'); rx('#rx-motion', 'motion_prompt'); rx('#rx-pose', 'pose_strength', v => +v); rx('#rx-audio', 'audio'); rx('#rx-script', 'script'); rx('#rx-r1', 'rights_video'); rx('#rx-r2', 'rights_character');
+  rx('#rx-prompt', 'prompt'); rx('#rx-place', 'place_id'); on('#rx-auto', () => patch('/remix', {prompt: S.remix.auto_prompt})); rx('#rx-motion', 'motion_prompt'); rx('#rx-pose', 'pose_strength', v => +v); rx('#rx-audio', 'audio'); rx('#rx-script', 'script'); rx('#rx-r1', 'rights_video'); rx('#rx-r2', 'rights_character');
   on('#rx-make', b => post(b, '/remix/make', {}, 'Animating'));
 }
 

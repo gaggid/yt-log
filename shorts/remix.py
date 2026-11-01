@@ -16,7 +16,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import config
-from characters import store as cstore, studio_edit
+from characters import requests as CR, store as cstore, studio_edit
 from story import settings as settings_mod
 from story3 import store as media, video
 from story3.voice import MediaError
@@ -33,7 +33,7 @@ MAX_SOURCE_S = 3 * 3600
 ANALYSE_S = 900                                    # the cut map and the window suggestions read at most this much of the video
 KEEP_AUDIO = ("none", "original", "voiceover")
 DEFAULT = {"url": "", "info": {}, "source": "", "start": 0.0, "fit": "crop", "cuts": [], "suggest": [], "driving": [], "segments": 1, "audio": "none", "script": "", "prompt": "",
-           "motion_prompt": "", "pose_strength": 1.0, "rights_video": False, "rights_character": False, "length": WINDOW_S, "character_id": "", "look_id": ""}
+           "motion_prompt": "", "pose_strength": 1.0, "rights_video": False, "rights_character": False, "length": WINDOW_S, "character_id": "", "look_id": "", "place_id": ""}
 
 
 def data(short: dict) -> dict:
@@ -186,6 +186,45 @@ def character(short: dict) -> dict | None:
     return {"char": c, "path": media.path_of(it) if it else None, "label": c["name"] + (f" ({look})" if look else ""), "version": c["version"]}
 
 
+OUTFIT_SLOTS = ("top", "bottom", "footwear", "accessories", "outerwear")
+
+
+def place_char(short: dict) -> dict | None:
+    """The library place chosen as the background, or None."""
+    pid = data(short).get("place_id")
+    if not pid:
+        return None
+    try:
+        c = cstore.get(pid)
+    except cstore.CharError:
+        return None
+    return c if c["kind"] == "place" else None
+
+
+def auto_prompt(short: dict) -> str:
+    """The description Animate reads, written from the library: the character (its declared and written details; when a look is chosen the look's outfit replaces the outfit slots, so the words
+    never fight the picture), and the chosen place as the background. Animate keeps the character of the picture and takes the background from the picture and these words, not from the video."""
+    ch = character(short)
+    if not ch or not ch["char"]:
+        return ""
+    c = ch["char"]
+    look = next((x for x in c["looks"] if x["id"] == data(short).get("look_id")), None)
+    if look:
+        wear = ((look.get("recipe") or {}).get("value") or "").strip()
+        text = CR.identity_text({**c, "slots": {k: v for k, v in c["slots"].items() if k not in OUTFIT_SLOTS}}).rstrip(". ") + "." + (f" Wearing {wear.rstrip('. ')}." if wear else " Wearing the outfit shown in the picture.")
+    else:
+        text = CR.identity_text(c).rstrip(". ") + "."
+    pl = place_char(short)
+    if pl:
+        text += f" Background: {CR.identity_text(pl).rstrip('. ')}."
+    return text[:1200]
+
+
+def effective_prompt(short: dict) -> str:
+    """What Animate is sent: the person's own description when there is one, else the one written from the chosen character and place."""
+    return data(short)["prompt"].strip() or auto_prompt(short)
+
+
 def picture(short: dict) -> Path | None:
     ch = character(short)
     if ch is not None:
@@ -205,7 +244,7 @@ def request(short: dict, n: int, attempt: int = 1) -> dict:
         raise MediaError("choose the window of the video first")
     seg_len = WINDOW_S / max(1, r["segments"])
     body = {"model": models.ANIMATE, "image": wan.data_url(frames.crop_916(image.read_bytes(), DRIVING_SIZE), "image/jpeg"), "driving_video": wan.data_url(drive.read_bytes(), "video/mp4"),
-            "prompt": r["prompt"].strip(), "size": DRIVING_SIZE, "fps": DRIVING_FPS, "duration": seg_len, "steps": int(short["settings"].get("steps") or P.DEFAULT_STEPS[models.ANIMATE]),
+            "prompt": effective_prompt(short), "size": DRIVING_SIZE, "fps": DRIVING_FPS, "duration": seg_len, "steps": int(short["settings"].get("steps") or P.DEFAULT_STEPS[models.ANIMATE]),
             "pose_strength": float(r["pose_strength"]), "keep_audio": r["audio"] == "original", "seed": (int(short["settings"].get("seed", 7)) + 101 * (attempt - 1) + 17 * n) % (2 ** 32),
             "response_format": "mp4"}
     if r.get("motion_prompt"):
@@ -218,7 +257,7 @@ def input_hash(short: dict, n: int) -> str:
     image = picture(short)
     drive = store.image_path(short, r["driving"][n]) if n < len(r["driving"]) else None
     ch = character(short)
-    return store.input_hash("remix", r["prompt"], r["motion_prompt"], r["pose_strength"], r["audio"] == "original", clips._fingerprint(image) if image else "", clips._fingerprint(drive) if drive else "",
+    return store.input_hash("remix", effective_prompt(short), r["motion_prompt"], r["pose_strength"], r["audio"] == "original", clips._fingerprint(image) if image else "", clips._fingerprint(drive) if drive else "",
                             [r["character_id"], r["look_id"], ch["version"]] if ch else "")
 
 
@@ -252,8 +291,8 @@ def check(short: dict) -> dict:
         add("block", "no_video", "Paste the YouTube or Instagram link and fetch the video, or upload a video file.")
     elif not r["driving"]:
         add("block", "no_window", "Choose the 30-second window of the video.")
-    if not r["prompt"].strip():
-        add("block", "no_prompt", "Describe the character and the background in a sentence or two (what they wear, where they are). The model reads this, not the video's scene.")
+    if not effective_prompt(short):
+        add("block", "no_prompt", "Describe the character and the background in a sentence or two (what they wear, where they are). The model reads this, not the video's scene. (A character from the library is described for you.)")
     if r["audio"] == "voiceover" and not r["script"].strip():
         add("block", "no_script", "Write the voice-over, or choose another sound option.")
     if r["audio"] == "voiceover" and len(r["script"].split()) > 80:

@@ -35,7 +35,8 @@ DEFAULT_SETTINGS = {
     "language": "hinglish",           # narration language (shorts/languages.py): hinglish | en | hi | bn | ta | te | mr | gu | kn | ml | pa | or | as; all but hinglish need the Maya voice
     "cast": [],                       # characters from the Character Studio library: [{"character_id", "look_id"}], at most two people (shorts/cast.py)
     "place_id": "",                   # a place from the library
-    "target_s": 30,                   # desired video length in seconds (default 30; shorter values are supported)
+    "target_s": 30,                   # desired video length in seconds: 5 to 180, default 30 (models.MIN_TARGET_S, MAX_TARGET_S)
+    "script_engine": "room",          # room = the writers' room (shorts/script.py: bible, retention map, beat drafts, punch-up) | single = the old one-call plan
 }
 
 

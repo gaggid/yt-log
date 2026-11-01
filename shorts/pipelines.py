@@ -18,10 +18,12 @@ PIPELINES = {
               "about": "One model for text or pictures. The fastest way to see the idea (about 20 minutes)."},
     "keyframe": {"label": "Keyframes, then animate (Wan 14B)", "models": [models.T2V, models.I2V],
                  "about": "A picture for every shot first, which you check, then each is animated at full quality. The best look (about an hour)."},
-    "remix": {"label": "Remix a YouTube video (Wan Animate)", "models": [models.ANIMATE],
-              "about": "Your character performs the motion of a video you link. The video's own background is not kept."},
+    "remix": {"label": "Remix a video: YouTube, Instagram or your own file (Wan Animate)", "models": [models.ANIMATE],
+              "about": "Your character performs the motion of a video you link (YouTube or Instagram) or upload. The video's own background is not kept."},
 }
 NEGATIVE = "grainy, noisy, film grain, noise, pixelated, blurry, low quality, static, deformed, disfigured, extra fingers, poorly drawn hands, jpeg artifacts, text, watermark, logo, subtitles, signature"
+NEGATIVE_MOVE = NEGATIVE + ", morphing face, changing face, face distortion, warping, flicker, sudden lighting change, scene cut, jump cut, duplicate people, extra limbs, new objects appearing"   # picture-to-video: keep the picture as it is
+HOLD = "Same people, place, style and light as the first frame throughout; one continuous shot, no cut."
 KEYFRAME_FRAMES = 5
 DEFAULT_STEPS = {models.TI2V: 20, models.T2V: 20, models.I2V: 10, models.ANIMATE: 10, models.TALK: 6}
 # seconds of work per generated frame at 480x832, from the docs' timings (RTX 4060 Ti 16 GB); shorts/probe.py writes measured values over these
@@ -60,9 +62,12 @@ def keyframes_on(short: dict) -> bool:
 
 
 def compose(short: dict, shot: dict, with_picture: bool = False) -> str:
-    """The Wan prompt: the shot, then the character and the place the plan fixed (words are not left to the model to repeat), the camera and the look. A shot that starts from a picture
-    does not describe what the picture already shows."""
+    """The Wan prompt. A shot that starts from a picture gets only what MOVES (shorts/motionwriter.py writes `move`: the subject's action, the camera, one motion of the surroundings) and a line that
+    holds the picture as it is; the picture already shows the subject, the place and the style, and words about them make Wan redraw it. Without a written `move` (an older short, a failed call) it is
+    the planner's prompt and camera. A shot Wan has to draw from text gets the character, the place and the look as well."""
     plan = short["plan"]
+    if with_picture and (shot.get("move") or "").strip():
+        return f"{shot['move'].strip()} {HOLD}"[:3900]
     parts = []
     if shot.get("character") and plan.get("character") and not with_picture:
         parts.append(plan["character"].rstrip(". ") + ".")
@@ -76,7 +81,7 @@ def compose(short: dict, shot: dict, with_picture: bool = False) -> str:
     if shot.get("camera"):
         parts.append(f"Camera: {shot['camera'].rstrip('. ')}.")
     look = looks.of(short, plan.get("look", ""))
-    if look:
+    if look and not with_picture:
         parts.append(look.rstrip(". ") + ".")
     return " ".join(parts)[:3900]
 
@@ -99,7 +104,7 @@ def steps_of(short: dict, model: str) -> int:
 
 def quick_request(short: dict, shot: dict, attempt: int, image: str | None = None) -> dict:
     """Wan 5B, text or picture. `image` is a data URL."""
-    body = {"model": models.TI2V, "prompt": compose(short, shot, bool(image)), "negative_prompt": NEGATIVE, "size": short["settings"].get("size") or models.SIZE_PORTRAIT,
+    body = {"model": models.TI2V, "prompt": compose(short, shot, bool(image)), "negative_prompt": NEGATIVE_MOVE if image else NEGATIVE, "size": short["settings"].get("size") or models.SIZE_PORTRAIT,
             "num_frames": models.gen_frames(shot["seconds"], models.TI2V), "fps": models.MODELS[models.TI2V]["fps"], "steps": steps_of(short, models.TI2V),
             "seed": seed_for(short, shot, attempt), "response_format": "mp4"}
     if image:
@@ -117,7 +122,7 @@ def animate_request(short: dict, shot: dict, attempt: int, image: str) -> dict:
     """Picture to video at full quality (speed LoRA off), or a fast draft when the person turned `speed_lora` on (the gateway then uses its own 4 steps and guidance 1, so no
     steps are sent unless the person set them). The prompt describes the motion; the picture already shows the subject."""
     fast = bool(short["settings"].get("speed_lora"))
-    body = {"model": models.I2V, "prompt": compose(short, shot, True), "negative_prompt": NEGATIVE, "image": image, "size": size_14b(short),
+    body = {"model": models.I2V, "prompt": compose(short, shot, True), "negative_prompt": NEGATIVE_MOVE, "image": image, "size": size_14b(short),
             "num_frames": models.gen_frames(shot["seconds"], models.I2V), "fps": models.MODELS[models.I2V]["fps"], "speed_lora": fast, "steps": steps_of(short, models.I2V),
             "seed": seed_for(short, shot, attempt), "response_format": "mp4"}
     if fast and not short["settings"].get("steps"):

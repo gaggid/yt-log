@@ -73,7 +73,7 @@ async def options():
         pipes[k] = {"label": p["label"], "about": p["about"], "models": p["models"], "available": (all(have) if listed else None),
                     "missing": [m for m, h in zip(p["models"], have) if not h] if listed else []}
     return {"pipelines": pipes, "voices": voices.public(), "image_modes": IMAGE_MODES, "visual_styles": looks.public(), "languages": languages.public(), "tones": tones.public(), "image_models": [{"id": k, "label": v["label"], "default": v["default"], "licence": v["licence"]["status"]} for k, v in providers.PROVIDERS.items()], "sizes": SIZES, "gateway_video_models": sorted(i for i in ids if i), "tags": list(maya.STYLE_TAGS),
-            "limits": {"target_s": models.TARGET_S, "max_shot_s": models.MAX_SHOT_S}}
+            "limits": {"target_s": models.TARGET_S, "min_target_s": models.MIN_TARGET_S, "max_target_s": models.MAX_TARGET_S, "max_shot_s": models.MAX_SHOT_S}}
 
 
 @router.get("/stories")
@@ -128,6 +128,8 @@ async def create(body: CreateReq):
         st["voice_speed"] = tones.speed_of(st)                      # a chosen tone brings its own speed; the person can still change it
     if "voice_speed" in st and not 0.8 <= float(st["voice_speed"] or 0) <= 1.3:
         raise HTTPException(400, "voice_speed is between 0.8 and 1.3")
+    if "target_s" in st and not models.MIN_TARGET_S <= float(st["target_s"] or 0) <= models.MAX_TARGET_S:
+        raise HTTPException(400, f"the length is between {models.MIN_TARGET_S:g} seconds and {models.MAX_TARGET_S:g} seconds")
     if st.get("size_14b") not in (None, models.SIZE_PORTRAIT, models.SIZE_14B_HD):
         raise HTTPException(400, "unknown video size")
     if "voice" in st:
@@ -178,13 +180,13 @@ async def state(short_id: str):
     real = svoice.real_seconds(short)
     tl = timeline.build(short, real) if short["shots"] else None
     out = {"id": short["id"], "title": short["title"], "pipeline": short["pipeline"], "pipeline_label": P.pipeline(short)["label"], "status": short["status"], "source": short["source"],
-           "settings": short["settings"], "plan": short["plan"], "beats": short["beats"], "images": short["images"], "keyframes_confirmed": short.get("keyframes_confirmed", False), "keyframes_on": P.keyframes_on(short),
+           "settings": short["settings"], "plan": short["plan"], "script": short.get("script"), "beats": short["beats"], "images": short["images"], "keyframes_confirmed": short.get("keyframes_confirmed", False), "keyframes_on": P.keyframes_on(short),
            "job": jobs.status(short_id), "estimate_s": P.estimate_s(short) if (short["shots"] or short["pipeline"] == "remix") else 0,
            "voice": svoice.state(short), "voice_gate": checks.voice_gate(short), "auto": auto.state(short), "final": stitch.final_state(short_id)}
     if short["pipeline"] == "remix":
         r = remix.data(short)
         ch = remix.character(short)
-        out.update(shots=[], remix={**r, "character_label": ch["label"] if ch else "", "character_ok": bool(ch and ch["path"]), "cuts": r["cuts"][:400], "check": remix.check(short), "parts": [p["id"] if p else None for p in remix.chosen_parts(short)],
+        out.update(shots=[], remix={**r, "auto_prompt": remix.auto_prompt(short), "character_label": ch["label"] if ch else "", "character_ok": bool(ch and ch["path"]), "cuts": r["cuts"][:400], "check": remix.check(short), "parts": [p["id"] if p else None for p in remix.chosen_parts(short)],
                                     "source_url": f"/api/shorts/file/{short_id}/{r['source']}" if r["source"] else "",
                                     "driving_urls": [f"/api/shorts/file/{short_id}/{d}" for d in r["driving"]],
                                     "part_clips": [[clips._view(short_id, i) for i in media.items(short_id, store.CLIP, f"remix-{n + 1}")] for n in range(r["segments"])]},
@@ -221,6 +223,8 @@ class SettingsReq(BaseModel):
     review_keyframes: bool | None = None
     character_text: str | None = None
     tone: str | None = None
+    target_s: float | None = None
+    script_engine: str | None = None
 
 
 @router.patch("/{short_id}/settings")
@@ -258,6 +262,10 @@ async def patch_settings(short_id: str, body: SettingsReq):
         raise HTTPException(400, "steps is between 1 and 100")
     if "format" in patch and patch["format"] not in (formats.AUTO, *formats.FORMATS):
         raise HTTPException(400, f"format is one of: {', '.join((formats.AUTO, *formats.FORMATS))}")
+    if "target_s" in patch and not models.MIN_TARGET_S <= (patch["target_s"] or 0) <= models.MAX_TARGET_S:
+        raise HTTPException(400, f"the length is between {models.MIN_TARGET_S:g} seconds and {models.MAX_TARGET_S:g} seconds")
+    if "script_engine" in patch and patch["script_engine"] not in ("room", "single"):
+        raise HTTPException(400, "script_engine is room or single")
     if "voice_mode" in patch and patch["voice_mode"] not in ("narration", "none"):
         raise HTTPException(400, "voice_mode is one of: narration, none")
     if "tone_id" in patch and patch["tone_id"] not in tones.TONES:
@@ -360,6 +368,7 @@ class ShotPatch(BaseModel):
     continues: bool | None = None
     setting: str | None = None
     avoid: str | None = None                       # the optional negative prompt of the start picture (shorts/stills.py)
+    move: str | None = None                        # what moves in the shot (shorts/motionwriter.py): the picture-to-video prompt
     avatar: bool | None = None                     # a talking avatar shot (InfiniteTalk): its picture speaks the voice
 
 
@@ -448,6 +457,56 @@ async def fit(short_id: str):
 async def rethink(short_id: str):
     s, be = _backend()
     return _start(short_id, "short_rethink", lambda progress: planner.reshoot_all(short_id, be, s, progress))
+
+
+class RewriteReq(BaseModel):
+    beat_id: str = ""                 # empty = the whole script
+    instruction: str = ""
+
+
+@router.post("/{short_id}/rewrite")
+async def rewrite(short_id: str, body: RewriteReq):
+    """Write the words of one beat (the producer's instruction is required) or of the whole script again. The shots stay; the voice of a changed beat is made again."""
+    short = _get(short_id)
+    if body.beat_id and not any(b["id"] == body.beat_id for b in short["beats"]):
+        raise HTTPException(400, f"no such beat: {body.beat_id}")
+    if body.beat_id and len(body.instruction.strip()) < 3:
+        raise HTTPException(400, "say what should change in this beat")
+    s, be = _backend()
+
+    async def work(progress):
+        if body.beat_id:
+            progress(0, 1, f"writing {body.beat_id} again")
+            await planner.rewrite_beat(short_id, body.beat_id, body.instruction, be, s)
+            return f"{body.beat_id} written again"
+        await planner.rewrite_script(short_id, body.instruction, be, s, progress)
+        return "the whole script was written again"
+    return _start(short_id, "short_rewrite", work)
+
+
+class PicturesReq(BaseModel):
+    shot_id: str = ""                 # empty = every shot
+    instruction: str = ""
+
+
+@router.post("/{short_id}/pictures/write")
+async def write_pictures(short_id: str, body: PicturesReq):
+    """Write the picture prompts (what the image model is asked to draw) again: one shot with the producer's instruction, or all of them."""
+    short = _get(short_id)
+    if body.shot_id and not any(x["id"] == body.shot_id for x in short["shots"]):
+        raise HTTPException(400, f"no such shot: {body.shot_id}")
+    s, be = _backend()
+    return _start(short_id, "short_pictures", lambda progress: planner.rewrite_pictures(short_id, be, s, progress, body.shot_id, body.instruction))
+
+
+@router.post("/{short_id}/motion/write")
+async def write_motion(short_id: str, body: PicturesReq):
+    """Write what moves in a shot (with the producer's instruction) or in every shot again."""
+    short = _get(short_id)
+    if body.shot_id and not any(x["id"] == body.shot_id for x in short["shots"]):
+        raise HTTPException(400, f"no such shot: {body.shot_id}")
+    s, be = _backend()
+    return _start(short_id, "short_motion", lambda progress: planner.rewrite_motion(short_id, be, s, progress, body.shot_id, body.instruction))
 
 
 class BeatReq(BaseModel):
@@ -561,6 +620,7 @@ class RemixPatch(BaseModel):
     rights_character: bool | None = None
     character_id: str | None = None                 # a library character ("" = use the uploaded picture)
     look_id: str | None = None
+    place_id: str | None = None                     # a library place, the background of the remix ("" = none)
 
 
 @router.patch("/{short_id}/remix")
@@ -582,6 +642,12 @@ async def patch_remix(short_id: str, body: RemixPatch):
             raise HTTPException(400, "a place cannot be animated; choose a person")
         if p.get("look_id") and not any(x["id"] == p["look_id"] for x in c["looks"]):
             raise HTTPException(400, "this character has no such look")
+    if p.get("place_id"):
+        try:
+            if cstore.get(p["place_id"])["kind"] != "place":
+                raise HTTPException(400, "that is not a place")
+        except cstore.CharError as e:
+            raise HTTPException(404, str(e))
     if "character_id" in p and not p["character_id"]:
         p["look_id"] = ""
     elif "character_id" in p and "look_id" not in p:

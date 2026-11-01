@@ -56,7 +56,7 @@ def test_timeline_is_exactly_900_frames_and_no_shot_over_three_seconds():
     assert sum(s["frames"] for s in tl["shots"]) == 900 and tl["total_s"] == pytest.approx(30.0)
     assert max(s["seconds"] for s in tl["shots"]) <= 3.0 and tl["shots"][0]["seconds"] <= 2.0
     assert not tl["problems"] and 11 <= len(tl["shots"]) <= 14
-    real = {b["id"]: 8.0 for b in short["beats"]}                                # five beats of eight seconds: too long to fit under 30 even at x1.12
+    real = {b["id"]: 9.0 for b in short["beats"]}                                # five beats of nine seconds: too long to fit under 30 even at x1.35
     assert any(p["code"] == "length" for p in timeline.build(short, real)["problems"])
     few = {b["id"]: 11.0 for b in short["beats"][:1]}                            # a long first beat gets shots over three seconds
     assert any(p["code"] == "shot_too_long" for p in timeline.build(short, few)["problems"])
@@ -134,11 +134,11 @@ def test_checks_warn_about_a_missing_anchor_and_text_in_pictures(gw):
 
 
 def test_a_shorter_short_asks_for_fewer_words_and_beats(gw):
-    assert planner.word_limits(30) == (52, 86, 62, 74) and planner.beat_range(30) == (4, 6)
+    assert planner.word_limits(30) == (64, 96, 80, 90) and planner.beat_range(30) == (4, 6)
     lo, hi, ask_lo, ask_hi = planner.word_limits(10)
-    assert (lo, hi) == (17, 25) and lo <= ask_lo <= ask_hi < hi and planner.beat_range(10) == (2, 3)
-    fat = [{"sentences": [{"text": " ".join(["shabd"] * 58)}]}]                       # a 30-second narration is far too long for 10 seconds
-    assert any("17 and 25" in p for p in planner.narration_problems(fat, None, 10))
+    assert (lo, hi) == (21, 30) and lo <= ask_lo <= ask_hi < hi and planner.beat_range(10) == (2, 3)
+    fat = [{"sentences": [{"text": " ".join(["shabd"] * 80)}]}]                       # a 30-second narration is far too long for 10 seconds
+    assert any("21 and 30" in p for p in planner.narration_problems(fat, None, 10))
     assert not any("words; it must be" in p for p in planner.narration_problems(fat, None, 30))
     from shorts import prompts
     p = prompts.plan_system("maya-tts", 10, "2 to 3", 21, 24)
@@ -582,7 +582,8 @@ def test_every_choice_made_when_creating_a_short_reaches_the_prompts_and_the_req
     assert all(b["tag"] == "neutral" for b in short["beats"]), "voice tags start neutral"
     prompt = stills.prompt(short, short["shots"][0])
     assert "graphic-novel" in prompt and "illustration" in prompt, "picture style and the keep-out sentence follow it"
-    assert "graphic-novel" in P.compose(short, short["shots"][0], True), "the Wan prompt follows the style"
+    assert "graphic-novel" in P.compose(short, short["shots"][0], False), "the text-to-video prompt follows the style"
+    assert "graphic-novel" not in P.compose(short, short["shots"][0], True), "a prompt for a picture does not repeat the style: the picture has it"
     req = P.animate_request(short, short["shots"][0], 1, "data:image/jpeg;base64,x")
     assert req["size"] == "720x1280" and req["speed_lora"] is True and "steps" not in req
     sent = []
@@ -684,3 +685,254 @@ def test_negative_prompt_is_in_the_request_the_image_gateway_receives(gw):
     assert kf["made"] == 2 and len(gw.images) == 2
     assert "No extra jets, no text on the wing." in gw.images[0]["prompt"] and "extra jets" not in gw.images[1]["prompt"], "only the shot that has a negative prompt gets it"
     assert short["shots"][0]["id"] and clips.chosen_keyframe(store.get(sid), store.get(sid)["shots"][0]), "the picture drawn with it counts as current"
+
+
+# ── the writers' room (shorts/script.py) ─────────────────────────────────────
+
+from shorts_fakes import HINDI
+
+SR = {**S, "retries": 0}                                                               # the fake lines are short next to the new word budget; one attempt per call keeps the call counts exact
+
+
+def test_the_writers_room_writes_the_narration_before_the_plan_and_keeps_its_tags(gw):
+    chat = FakeChat(room=True)
+    short = run(planner.make_plan(new_short()["id"], chat, SR))
+    tasks = [c["task"] for c in chat.calls]
+    assert tasks[:2] == ["p4_bible", "p4_map"] and tasks.count("p4_draft") == 5 and tasks.count("p4_punch") == 1
+    assert tasks.index("p4_plan") > tasks.index("p4_punch"), "the look is planned from a finished script"
+    plan_call = next(c for c in chat.calls if c["task"] == "p4_plan")
+    assert "ALREADY WRITTEN" in plan_call["system"] and "THE SCRIPT" in plan_call["user"] and "whispers" not in plan_call["user"]
+    assert [b["sentences"][0]["text"] for b in short["beats"]] == [n[0] for n in HINDI]
+    assert {x["tag"] for b in short["beats"] for x in b["sentences"]} == {"neutral"}, "the producer sets emotions later: every sentence starts neutral"
+    assert short["beats"][0]["job"] == "hook" and short["beats"][-1]["job"] == "sting"
+    assert short["script"]["bible"]["premise"] and short["script"]["report"]["score"] == 9 and short["script"]["report"]["rounds"] == 1
+    draft = next(c for c in chat.calls if c["task"] == "p4_draft")
+    assert "no content limits" in draft["system"] and "Show, do not report" in draft["system"] and '"tag"' not in draft["system"]
+    later = [c for c in chat.calls if c["task"] == "p4_draft"][2]
+    assert "WRITTEN SO FAR" in later["user"] and "NOW WRITE BEAT 3 of 5" in later["user"]
+
+
+def test_a_low_score_runs_the_punch_up_again_and_a_broken_rewrite_is_ignored(gw):
+    chat = FakeChat(room=True, scores=(5, 9))
+    short = run(planner.make_plan(new_short()["id"], chat, S))
+    assert chat.count("p4_punch") == 2 and short["script"]["report"]["rounds"] == 2
+    bad = FakeChat(room=True, scores=(5,), punch_words=2)                              # a rewrite far under the word budget
+    short = run(planner.make_plan(new_short()["id"], bad, {**S, "retries": 1}))
+    assert [b["sentences"][0]["text"] for b in short["beats"]] == [n[0] for n in HINDI], "the draft stays when the rewrite breaks the budget"
+
+
+def test_a_failing_room_falls_back_to_the_one_call_plan(gw):
+    chat = FakeChat()                                                                  # room tasks raise
+    short = run(planner.make_plan(new_short()["id"], chat, S))
+    assert chat.room_refused == 1 and chat.count("p4_plan") == 1 and "script" not in short and len(short["beats"]) == 5
+    single = FakeChat(room=True)
+    run(planner.make_plan(new_short(script_engine="single")["id"], single, S))
+    assert single.count("p4_bible") == 0
+
+
+def test_word_budget_and_beats_scale_from_five_seconds_to_three_minutes():
+    lo5, hi5 = planner.word_limits(5)[:2]
+    lo30, hi30 = planner.word_limits(30)[:2]
+    lo180, hi180, ask_lo, ask_hi = planner.word_limits(180)
+    assert (lo30, hi30) == (64, 96) and 6 <= lo5 < hi5 <= 14 and lo180 > 5 * lo30 and hi180 <= (180 * 0.97 - 0.9) * timeline.TEMPO_MAX * timeline.PACE_WPS and ask_lo < ask_hi < hi180
+    assert planner.beat_range(30) == (4, 6) and planner.beat_range(180) == (18, 26) and planner.beat_range(5)[0] == 2
+    assert planner.word_limits(60)[0] < planner.word_limits(90)[0] < planner.word_limits(120)[0]
+
+
+@pytest.mark.parametrize("seconds", [5, 12, 60, 120, 180])
+def test_a_short_of_any_length_gets_a_timeline_of_exactly_that_length(gw, seconds):
+    n = 2 if seconds < 10 else (4 if seconds <= 30 else (seconds // 9))
+    chat = FakeChat(room=True, long=n)
+    sid = new_short(language="en", target_s=seconds)["id"]
+    short = run(planner.make_plan(sid, chat, S))
+    tl = timeline.build(short, {})
+    assert tl["total_s"] == pytest.approx(seconds, abs=0.5) and not tl["problems"], tl["problems"]
+    assert max(s["seconds"] for s in tl["shots"]) <= 3.0 and sum(s["frames"] for s in tl["shots"]) == round(tl["total_s"] * 30)
+    words = sum(len(x["text"].split()) for b in short["beats"] for x in b["sentences"])
+    lo, hi = planner.word_limits(seconds)[:2]
+    assert lo <= words <= hi, (words, lo, hi)
+
+
+def test_the_api_takes_a_length_from_five_seconds_to_three_minutes(client):
+    for bad in (4, 181, 0):
+        assert client.post("/api/shorts", json={"pipeline": "quick", "kind": "idea", "text": "a courier finds a wallet", "settings": {"target_s": bad}}).status_code == 400
+    r = client.post("/api/shorts", json={"pipeline": "quick", "kind": "idea", "text": "a courier finds a wallet", "settings": {"target_s": 150}})
+    assert r.status_code == 200 and r.json()["settings"]["target_s"] == 150 and r.json()["settings"]["script_engine"] == "room"
+    sid = r.json()["id"]
+    assert client.patch(f"/api/shorts/{sid}/settings", json={"target_s": 200}).status_code == 400
+    assert client.patch(f"/api/shorts/{sid}/settings", json={"target_s": 5}).json()["settings"]["target_s"] == 5
+
+
+def _planned_room(chat=None):
+    chat = chat or FakeChat(room=True)
+    return run(planner.make_plan(new_short()["id"], chat, SR)), chat
+
+
+def test_a_scene_rewrite_follows_the_producers_words_and_keeps_the_rest(gw):
+    short, chat = _planned_room()
+    before = {b["id"]: [x["text"] for x in b["sentences"]] for b in short["beats"]}
+    shots = {b["id"]: list(b["shot_ids"]) for b in short["beats"]}
+    after = run(planner.rewrite_beat(short["id"], "b2", "make it colder and let her say his name", chat, SR))
+    again = store.get(short["id"])
+    new = {b["id"]: [x["text"] for x in b["sentences"]] for b in again["beats"]}
+    assert new["b2"] != before["b2"] and all(new[k] == before[k] for k in new if k != "b2")
+    assert {b["id"]: b["shot_ids"] for b in again["beats"]} == shots, "the pictures stay"
+    call = [c for c in chat.calls if c["task"] == "p4_draft"][-1]
+    assert "make it colder and let her say his name" in call["user"] and "THE CURRENT TEXT OF THIS BEAT" in call["user"] and "COMES AFTER" in call["user"] and "NOW WRITE BEAT 2 of 5" in call["user"]
+    assert {x["tag"] for x in again["beats"][1]["sentences"]} == {"neutral"} and after["shots"]
+
+
+def test_the_whole_script_can_be_written_again_with_the_same_beats_and_shots(gw):
+    short, chat = _planned_room()
+    old = [(b["id"], list(b["shot_ids"]), [x["text"] for x in b["sentences"]]) for b in short["beats"]]
+    run(planner.rewrite_script(short["id"], "colder, and end on the door", chat, SR))
+    again = store.get(short["id"])
+    assert [(b["id"], b["shot_ids"]) for b in again["beats"]] == [(i, s) for i, s, _ in old]
+    assert all([x["text"] for x in b["sentences"]] != t for b, (_, _, t) in zip(again["beats"], old))
+    drafts = [c for c in chat.calls if c["task"] == "p4_draft"][5:]
+    assert len(drafts) == 5 and all("colder, and end on the door" in c["user"] for c in drafts) and chat.count("p4_punch") == 2
+    assert again["script"]["report"]["score"] == 9 and again["script"]["bible"]["premise"]
+
+
+def test_a_short_from_the_one_call_plan_can_be_rewritten_too(gw):
+    chat = FakeChat()
+    short = run(planner.make_plan(new_short()["id"], chat, S))
+    assert "script" not in short
+    chat.room = True
+    run(planner.rewrite_beat(short["id"], "b1", "shorter and angrier", chat, S))
+    assert [x["text"] for x in store.get(short["id"])["beats"][0]["sentences"]] != [x["text"] for x in short["beats"][0]["sentences"]]
+
+
+def test_api_rewrite_asks_for_the_change_in_a_scene_and_runs_as_a_job(client):
+    client.chat.room = True
+    sid = client.post("/api/shorts", json={"pipeline": "keyframe", "kind": "idea", "text": "A courier finds a wallet with a lakh rupees."}).json()["id"]
+    assert client.post(f"/api/shorts/{sid}/plan").status_code == 200 and wait_job(client, sid)["state"] == "done"
+    assert client.post(f"/api/shorts/{sid}/rewrite", json={"beat_id": "b9", "instruction": "scarier"}).status_code == 400
+    assert client.post(f"/api/shorts/{sid}/rewrite", json={"beat_id": "b2", "instruction": " "}).status_code == 400
+    old = client.get(f"/api/shorts/{sid}").json()["beats"]
+    assert client.post(f"/api/shorts/{sid}/rewrite", json={"beat_id": "b2", "instruction": "scarier"}).status_code == 200
+    assert wait_job(client, sid)["state"] == "done"
+    new = client.get(f"/api/shorts/{sid}").json()["beats"]
+    assert new[1]["sentences"] != old[1]["sentences"] and new[0]["sentences"] == old[0]["sentences"]
+    assert client.post(f"/api/shorts/{sid}/rewrite", json={}).status_code == 200 and wait_job(client, sid)["state"] == "done"
+
+
+# ── the picture writer (shorts/stillwriter.py) ───────────────────────────────
+
+from shorts import stillwriter, stills
+
+
+def test_the_picture_writer_writes_each_start_picture_prompt_from_the_narration_and_the_shots(gw):
+    chat = FakeChat(stills=True)
+    short = run(planner.make_plan(new_short()["id"], chat, S))
+    assert chat.count("p4_still") == len(short["beats"]) and all(sh["still_by"] == "writer" and sh["must_show"] for sh in short["shots"])
+    assert all(sh["still"].startswith("Close-up of one courier") for sh in short["shots"])
+    first = next(c for c in chat.calls if c["task"] == "p4_still")
+    assert "THIS BEAT" in first["user"] and "THE SHOTS OF THIS BEAT" in first["user"] and "Write the pictures of: s1," in first["user"]
+    assert "exact number" in first["system"] and "beneath each wing" in first["system"] and "DO NOT REPEAT" in first["system"]
+
+
+def test_a_failing_picture_writer_keeps_the_planners_stills(gw):
+    chat = FakeChat()
+    short = run(planner.make_plan(new_short()["id"], chat, S))
+    assert chat.count("p4_still") == 0 and all("still_by" not in sh and sh["still"].startswith("A courier stands over") for sh in short["shots"])
+
+
+def test_the_picture_writer_sends_back_vague_counts_negatives_and_filler():
+    bad = stillwriter.StillOut(id="s1", still="Many sleek grey metal jets fly without missiles on top of the wings in a big crowd over the hills at sunset today")
+    msg = "; ".join(stillwriter.problems(bad))
+    assert "Many" in msg and "without" in msg and "sleek" in msg
+    good = stillwriter.StillOut(id="s1", still="Low-angle wide shot of three fighter jets flying left to right over a ridge, one missile on a pylon beneath each wing, the top of the wings bare")
+    assert stillwriter.problems(good) == []
+    chat = FakeChat(stills=True, still_text=bad.still)
+    run(planner.make_plan(new_short()["id"], chat, {**S, "retries": 1}))
+    assert chat.count("p4_still") == 2 * 5, "each beat is sent back once, then the last attempt is accepted"
+
+
+def test_the_start_picture_prompt_says_everything_once_and_starts_with_the_picture(gw):
+    short = planned()
+    short["plan"]["character"] = "A man in his late twenties, lean build, messy black hair, dark grey oversized hoodie."
+    short["plan"]["subjects"] = [{"name": "The Man", "kind": "person", "visual": "An Indian man in his late twenties, lean build, messy black hair, dark grey oversized hoodie."},
+                                 {"name": "Phone", "kind": "object", "visual": "A black smartphone with a glowing screen."},
+                                 {"name": "Dim Room", "kind": "place", "visual": "A small room with one lamp and a heavy wooden door."}]
+    sh = short["shots"][0]
+    sh.update(character=True, subjects=["The Man", "Phone", "Dim Room"], camera="slow push in", still="Medium shot of one man holding one phone at chest height, the screen facing him.", setting="")
+    out = stills.prompt(short, sh)
+    assert out.startswith("Medium shot of one man holding one phone")
+    assert out.count("dark grey oversized hoodie") == 1, "the main character is not repeated as a subject"
+    assert "Phone: A black smartphone" in out and out.count("Setting:") == 1 and "heavy wooden door" in out and "Camera:" not in out and "slow push" not in out
+    assert "Dim Room:" not in out, "a place subject becomes the setting, once"
+
+
+def test_the_api_rewrites_one_picture_prompt_with_the_producers_instruction(client):
+    client.chat.stills = True
+    sid = client.post("/api/shorts", json={"pipeline": "quick", "kind": "idea", "text": "A courier finds a wallet with a lakh rupees."}).json()["id"]
+    assert client.post(f"/api/shorts/{sid}/plan").status_code == 200 and wait_job(client, sid)["state"] == "done"
+    assert client.post(f"/api/shorts/{sid}/pictures/write", json={"shot_id": "s99"}).status_code == 400
+    client.chat.still_text = "Wide shot of exactly three couriers waiting at one bus stop, each holding one parcel in the right hand."
+    n = client.chat.count("p4_still")
+    assert client.post(f"/api/shorts/{sid}/pictures/write", json={"shot_id": "s2", "instruction": "three couriers, parcels in the right hand"}).status_code == 200
+    assert wait_job(client, sid)["state"] == "done"
+    shots = client.get(f"/api/shorts/{sid}").json()["shots"]
+    assert shots[1]["still"].startswith("Wide shot of exactly three couriers") and not shots[0]["still"].startswith("Wide shot of exactly three")
+    last = [c for c in client.chat.calls if c["task"] == "p4_still"][-1]
+    assert client.chat.count("p4_still") == n + 1 and "three couriers, parcels in the right hand" in last["user"] and "Write the pictures of: s2." in last["user"] and "(KEEP, already written" in last["user"]
+
+
+# ── the motion writer (shorts/motionwriter.py) ───────────────────────────────
+
+from shorts import motionwriter
+
+
+def test_the_motion_writer_writes_what_moves_for_every_shot_and_wan_gets_only_that(gw):
+    chat = FakeChat(moves=True)
+    short = run(planner.make_plan(new_short("keyframe")["id"], chat, S))
+    assert chat.count("p4_move") == len(short["beats"]) and all(sh["move_by"] == "writer" and "camera" in sh["move"] for sh in short["shots"])
+    first = next(c for c in chat.calls if c["task"] == "p4_move")
+    assert "THE LINE THE VIEWER HEARS" in first["user"] and "what the picture shows:" in first["user"] and "(2.0 s" in first["user"] or "s, planner's camera" in first["user"]
+    assert "ONLY WHAT MOVES" in first["system"] and "NEVER describe looks" in first["system"]
+    sh = short["shots"][1]
+    req = P.animate_request(short, sh, 1, "data:image/jpeg;base64,x")
+    assert req["prompt"] == f"{sh['move']} {P.HOLD}" and "Camera:" not in req["prompt"] and "graphic" not in req["prompt"]
+    assert "morphing face" in req["negative_prompt"] and "scene cut" in req["negative_prompt"]
+    assert "morphing face" not in P.quick_request(short, sh, 1)["negative_prompt"], "the text-to-video request keeps the plain negative prompt"
+    assert P.compose(short, sh, False).startswith("The courier stops"), "a shot Wan draws from text still uses the planner's prompt"
+
+
+def test_a_failing_motion_writer_keeps_the_planners_prompt_and_camera(gw):
+    short = run(planner.make_plan(new_short("keyframe")["id"], FakeChat(), S))
+    assert all("move" not in sh for sh in short["shots"])
+    sh = short["shots"][0]
+    out = P.compose(short, sh, True)
+    assert out.startswith(sh["prompt"]) and out.endswith(f"Camera: {sh['camera']}.") and "graphic" not in out
+
+
+def test_the_motion_writer_sends_back_looks_negatives_and_a_missing_camera():
+    bad = motionwriter.MoveOut(id="s1", move="The man wearing a dark hoodie does not move at all while his sharp cinematic face glows in a noir style room")
+    msg = "; ".join(motionwriter.problems(bad))
+    assert "wearing" in msg and "not" in msg and "camera" in msg
+    good = motionwriter.MoveOut(id="s1", move="The man slowly lifts the phone toward his face, his brow tightening. The camera slowly pushes in. The screen glow flickers brighter.")
+    assert motionwriter.problems(good) == []
+
+
+def test_avatar_and_reference_video_shots_are_left_to_their_own_models(gw):
+    short = run(planner.make_plan(new_short("keyframe")["id"], FakeChat(moves=True), S))
+    a, m = short["shots"][0], short["shots"][1]
+    a["avatar"], m["motion"] = True, {"file": "motion/x.mp4"}
+    assert not motionwriter.eligible(a) and not motionwriter.eligible(m) and motionwriter.eligible(short["shots"][2])
+
+
+def test_the_api_rewrites_the_motion_of_one_shot_with_the_producers_instruction(client):
+    client.chat.moves = True
+    sid = client.post("/api/shorts", json={"pipeline": "keyframe", "kind": "idea", "text": "A courier finds a wallet with a lakh rupees."}).json()["id"]
+    assert client.post(f"/api/shorts/{sid}/plan").status_code == 200 and wait_job(client, sid)["state"] == "done"
+    assert client.post(f"/api/shorts/{sid}/motion/write", json={"shot_id": "s99"}).status_code == 400
+    client.chat.move_text = "The courier turns his head quickly to the left, the camera pans left to follow him, a bus passes slowly behind."
+    n = client.chat.count("p4_move")
+    assert client.post(f"/api/shorts/{sid}/motion/write", json={"shot_id": "s3", "instruction": "he turns his head fast"}).status_code == 200
+    assert wait_job(client, sid)["state"] == "done"
+    shots = client.get(f"/api/shorts/{sid}").json()["shots"]
+    assert shots[2]["move"].startswith("The courier turns his head quickly") and not shots[0]["move"].startswith("The courier turns his head")
+    last = [c for c in client.chat.calls if c["task"] == "p4_move"][-1]
+    assert client.chat.count("p4_move") == n + 1 and "he turns his head fast" in last["user"] and "Write the motion of: s3." in last["user"] and "KEEP, already written" in last["user"]
+    assert client.patch(f"/api/shorts/{sid}/shots/s3", json={"move": "The courier raises one hand, the camera holds still."}).json()["shots"][2]["move"].startswith("The courier raises one hand")

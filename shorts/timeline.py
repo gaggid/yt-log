@@ -5,7 +5,7 @@ from . import models
 PACE_WPS = 148 / 60                    # spoken words per second of the voices (story2/voices.py pace_wpm)
 GAP_S = 0.12                           # silence between two beats
 END_HOLD_S = 0.3                       # the last picture stays a moment after the last word
-TEMPO_MIN, TEMPO_MAX = 0.9, 1.12       # how much the voice may be slowed or sped up to land on 30 s
+TEMPO_MIN, TEMPO_MAX = 0.9, 1.35       # how much the voice may be slowed or sped up to land on 30 s
 SAFE_SHOT_S = 2.5                      # the planner aims at this, so real voice that runs a little long still fits under the 3-second rule
 
 
@@ -29,7 +29,7 @@ def shots_to_fit(span_s: float, hook: bool = False) -> int:
     """The shot count that really clears the 3-second rule for a stretch of `span_s` seconds, split the way `build` splits it (a hook beat has a shorter first shot, so the rest are longer).
     `shots_needed` stays the planner's aim; it prefers shots of at least MIN_SHOT_S and so can ask for too few. Asking again for the same count never clears the problem; this one does."""
     n = shots_needed(span_s)
-    while n < 12:
+    while n < 60:
         first = min(models.HOOK_MAX_S, span_s / n) if (hook and n > 1) else span_s / n
         rest = (span_s - first) / (n - 1) if n > 1 else first
         if round(max(first, rest) * models.OUT_FPS) / models.OUT_FPS <= models.MAX_SHOT_S - 0.02:

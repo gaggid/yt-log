@@ -56,22 +56,40 @@ AVATAR_FRAMING = ("The person faces the camera straight on, waist-up, looking in
                   "of the body, a steady uncluttered background.")
 
 
+def _tokens(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z]+", text.lower()) if len(w) > 3 and w not in {"with", "wearing", "that", "from", "over", "this", "their", "have"}}
+
+
+def _same(a: str, b: str) -> bool:
+    """Whether two descriptions say mostly the same words (the main character is also listed as a subject)."""
+    ta, tb = _tokens(a), _tokens(b)
+    return len(ta & tb) >= 5 and len(ta & tb) / min(len(ta), len(tb)) >= 0.6              # a few shared words (brown, white, beard) are not the same person
+
+
+def looks_line(short: dict, shot: dict, character: str) -> tuple[str, str]:
+    """(who and what looks like, the place) for a shot, each said once. The main character is not repeated as a subject, and the place is the shot's own place, else a place subject it shows,
+    else the plan's main place."""
+    subs = subjects.in_shot(short, shot)
+    shown = [f"{s['name']}: {s['visual'].rstrip('. ')}." for s in subs if s.get("kind") != "place" and not (character and _same(character, s["visual"]))]
+    places = [s for s in subs if s.get("kind") == "place"]
+    setting = (shot.get("setting") or "").strip() or (places[0]["visual"].strip() if places else "") or (short["plan"].get("place") or "").strip()
+    return " ".join(([character.rstrip(". ") + "."] if character else []) + shown), setting
+
+
 def prompt(short: dict, shot: dict) -> str:
-    """The picture prompt: the person (when the shot shows them), the still, the place, the camera and the look, then what to keep out (this model has no negative prompt)."""
+    """The picture prompt: the still first (the image model weighs the first words most), then how the people and things in it look, the place once, the style and what to keep out. The camera
+    move is not said (it means nothing for a still picture), and nothing is said twice (this model has no negative prompt and draws every word)."""
     plan = short["plan"]
-    parts = []
-    if shot.get("character") and plan.get("character"):
-        parts.append(framed_character(plan["character"], shot).rstrip(". ") + ".")
-    parts.append((shot.get("still") or shot["prompt"]).strip())
-    if subjects.block(short, shot):
-        parts.append(subjects.block(short, shot))
-    setting = shot.get("setting") or plan.get("place")
+    character = framed_character(plan["character"], shot) if shot.get("character") and plan.get("character") else ""
+    who, setting = looks_line(short, shot, character)
+    parts = [(shot.get("still") or shot["prompt"]).strip()]
+    if who:
+        parts.append("How they look: " + who)
     if setting:
         parts.append(f"Setting: {setting.rstrip('. ')}.")
-    if shot.get("camera"):
-        parts.append(f"Camera: {shot['camera'].rstrip('. ')}.")
-    if looks.of(short, plan.get("look", "")):
-        parts.append(looks.of(short, plan.get("look", "")).rstrip(". ") + ".")
+    look = looks.of(short, plan.get("look", ""))
+    if look:
+        parts.append(look.rstrip(". ") + ".")
     if shot.get("avatar"):
         parts.append(AVATAR_FRAMING)
     if avoid_line(shot):
@@ -101,34 +119,46 @@ async def draw(body: dict, base: str, key: str) -> bytes:
     return base64.b64decode(img["b64_json"])
 
 
+_MAIN = {"the man", "the woman", "man", "woman", "protagonist", "hero", "heroine", "main character", "the protagonist", "narrator"}
+
+
+def _is_cast(sub: dict, cast_names: set[str], character: str, shot: dict) -> bool:
+    """Whether a person subject is one of the people drawn from the reference pictures (they must not be described again: the words would fight the pictures): named like a cast member,
+    described like the main character, or called "the man" in a shot that shows the main character."""
+    if sub.get("kind") != "person":
+        return False
+    name = subjects._norm(sub["name"])
+    return name in cast_names or bool(character and _same(character, sub["visual"])) or bool(shot.get("character") and name in _MAIN)
+
+
 def edit_prompt(short: dict, shot: dict, refs: dict) -> str:
-    """The start picture of a shot with a cast: the pictures are named by position, the still describes the new frame, and the people keep their own faces, hair and clothes."""
+    """The start picture of a shot with a cast: the pictures are named by position, the still says what happens and where they stand, and the pictures alone give the people their faces, hair and
+    clothes. So the prompt never describes a cast member again, adds the look of anything else once, and names the place only when no place picture is given."""
     who = refs["who"]
-    chars = refs.get("chars") or []
-    # Build per-picture labels and explicit face/clothes instructions for the single-person case,
-    # where Picture 1 is the face portrait and Picture 2 is the full-body look with the chosen outfit.
-    # Without explicit attribution, the model defaults to the portrait's visible neckline/collar for
-    # the outfit instead of the full-body look picture.
+    plan = short["plan"]
+    noun = "illustration" if looks.painted(short) else "photograph"
     names = [f"Picture {i} shows {w[0]} ({w[1]})." for i, w in enumerate(who, 1)]
     if refs["place"]:
         names.append(f"Picture {len(who) + 1} shows the place.")
-    identity = "Every person keeps exactly the face, hair, skin tone, build and clothes of their own picture; if a place picture is given the scene happens there."
-    plan = short["plan"]
-    parts = [" ".join(names), "Create a new photograph:", (shot.get("still") or shot["prompt"]).strip()]
-    if subjects.block(short, shot):
-        parts.append(subjects.block(short, shot))
-    if shot.get("setting"):
-        parts.append(f"Setting: {shot['setting'].rstrip('. ')}.")
-    elif not refs["place"] and plan.get("place"):
-        parts.append(f"Setting: {plan['place'].rstrip('. ')}.")
-    if shot.get("camera"):
-        parts.append(f"Camera: {shot['camera'].rstrip('. ')}.")
+    cast_names = {subjects._norm(w[0]) for w in who}
+    subs = subjects.in_shot(short, shot)
+    others = [s for s in subs if s.get("kind") != "place" and not _is_cast(s, cast_names, plan.get("character", ""), shot)]
+    parts = [" ".join(names), f"Create a new {noun}:", (shot.get("still") or shot["prompt"]).strip()]
+    if others:
+        parts.append("How they look: " + " ".join(f"{s['name']}: {s['visual'].rstrip('. ')}." for s in others))
+    if not refs["place"]:
+        places = [s for s in subs if s.get("kind") == "place"]
+        setting = (shot.get("setting") or "").strip() or (places[0]["visual"].strip() if places else "") or (plan.get("place") or "").strip()
+        if setting:
+            parts.append(f"Setting: {setting.rstrip('. ')}.")
     look = looks.of(short, cast.look_text(short) or plan.get("look"))
     if look:
         parts.append(look.rstrip(". ") + ".")
-    parts.append(identity)
-    if refs["who"]:
-        parts.append("Ignore any clothing, colour or outfit words in the photograph description above — the person's exact appearance comes from their picture only.")
+    if who:
+        parts.append("Each person keeps exactly the face, hair, skin tone, build and clothes of their own picture; any wording about their looks or clothes above is ignored."
+                     + (" The scene happens in the place of the place picture." if refs["place"] else ""))
+    elif refs["place"]:
+        parts.append("The scene happens in the place of the place picture.")
     if shot.get("avatar"):
         parts.append(AVATAR_FRAMING)
     if avoid_line(shot):
