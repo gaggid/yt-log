@@ -61,15 +61,20 @@ async function newShort() {
       <label class="f mt-s" id="sh-story-l" hidden>The story<select id="sh-story">${stories.map(s => `<option value="${esc(s.id)}">${esc(s.title)} (${esc(s.project)})</option>`).join('')}</select></label></div>
     <div id="sh-fast-l" class="mt-s"><label class="f">Video size<select id="sh-size14"><option value="480x832">480p (480x832, about 12 min for a 5 s shot)</option><option value="720x1280">720p (720x1280, sharper, about 2.3x slower)</option></select></label>
       <label class="row mt-s"><input type="checkbox" id="sh-fast"> Fast draft: Wan speed LoRA (about 3x quicker, slightly softer and less motion; leave off for the final)</label></div>
+    <div id="sh-look-l"><h4>Look and voice</h4>
+      <label class="f">Picture style<select id="sh-style">${(opts.visual_styles || []).map(m => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}</select></label>
+      <label class="f mt-s">Narration voice<select id="sh-voice">${(() => { window._shVoices = opts.voices; return voiceOptions(null); })()}</select></label>
+<label class="f mt-s">Narration speed<select id="sh-vspeed">${[[0.85, 'Slower (0.85x)'], [0.92, 'A little slower (0.92x)'], [1, 'Normal (1x)'], [1.08, 'A little faster (1.08x)'], [1.15, 'Faster (1.15x)']].map(([k, t]) => `<option value="${k}" ${Math.abs((1 || 1) - k) < 0.01 ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+      <label class="f mt-s">Narration language<select id="sh-lang">${(opts.languages || []).map(m => `<option value="${esc(m.id)}">${esc(m.label)}${m.maya_only ? ' (Maya voice only)' : ''}</option>`).join('')}</select></label></div>
     <h4>Length</h4>
     <label class="f">Video duration (seconds)<input type="number" id="sh-dur" value="30" min="10" max="30" step="1" style="width:80px">
       <span class="small mute">10–30 seconds. The voice, shot count and timeline all adjust automatically.</span></label>`;
   const dlg = dialog({title: 'New short', html, buttons: [{label: 'Cancel', value: null}, {label: 'Create', primary: true,
-    collect: l => { const dur = Math.max(10, Math.min(30, parseInt(l.querySelector('#sh-dur').value) || 30)); return {pipeline: l.querySelector('input[name=pipe]:checked').value, kind: l.querySelector('#sh-kind').value, text: l.querySelector('#sh-idea').value, candidate_id: l.querySelector('#sh-story').value, settings: {target_s: dur, speed_lora: l.querySelector('input[name=pipe]:checked').value === 'keyframe' && l.querySelector('#sh-fast').checked, size_14b: l.querySelector('#sh-size14').value}}; },
+    collect: l => { const dur = Math.max(10, Math.min(30, parseInt(l.querySelector('#sh-dur').value) || 30)); return {pipeline: l.querySelector('input[name=pipe]:checked').value, kind: l.querySelector('#sh-kind').value, text: l.querySelector('#sh-idea').value, candidate_id: l.querySelector('#sh-story').value, settings: {target_s: dur, visual_style: l.querySelector('#sh-style').value, language: l.querySelector('#sh-lang').value, voice_speed: +l.querySelector('#sh-vspeed').value, voice: (() => { const [engine, voice] = l.querySelector('#sh-voice').value.split('|'); return {engine, voice}; })(), speed_lora: l.querySelector('input[name=pipe]:checked').value === 'keyframe' && l.querySelector('#sh-fast').checked, size_14b: l.querySelector('#sh-size14').value}}; },
     validate: v => v.pipeline !== 'remix' && v.kind === 'idea' && v.text.trim().length < 10 ? 'Write the idea in a sentence or two.' : ''}]});
   setTimeout(() => {
     const k = document.querySelector('#sh-kind'), p = () => document.querySelectorAll('input[name=pipe]');
-    const sync = () => { const remix = document.querySelector('input[name=pipe]:checked')?.value === 'remix'; $('#sh-src').hidden = remix; $('#sh-fast-l').hidden = document.querySelector('input[name=pipe]:checked')?.value !== 'keyframe'; const st = k.value === 'story'; $('#sh-idea-l').hidden = st; $('#sh-story-l').hidden = !st; };
+    const sync = () => { const remix = document.querySelector('input[name=pipe]:checked')?.value === 'remix'; $('#sh-src').hidden = remix; $('#sh-fast-l').hidden = document.querySelector('input[name=pipe]:checked')?.value !== 'keyframe'; $('#sh-look-l').hidden = remix; const st = k.value === 'story'; $('#sh-idea-l').hidden = st; $('#sh-story-l').hidden = !st; };
     if (k) { k.onchange = sync; p().forEach(r => r.onchange = sync); sync(); }
   }, 30);
   const v = await dlg;
@@ -159,7 +164,10 @@ function sideView() {
       <span class="small mute">Only the next plan uses it.${(s.plan || {}).format ? ` This plan is a <b>${esc(s.plan.format)}</b>.` : ''}</span></label>
     <label class="f mt-s">Tone (optional)<input id="st-tone" value="${esc(st.tone || '')}" placeholder="funny, tense, warm..."></label>`}
     <label class="f mt-s">Audio<select id="st-vmode"><option value="narration" ${(st.voice_mode || 'narration') === 'narration' ? 'selected' : ''}>Narration voice (generated)</option><option value="none" ${st.voice_mode === 'none' ? 'selected' : ''}>No voice — video only (silent or background music)</option></select></label>
-    ${(st.voice_mode || 'narration') !== 'none' ? `<label class="f mt-s">Voice<select id="st-voice">${voiceOptions(st.voice)}</select></label>` : ''}
+    ${(st.voice_mode || 'narration') !== 'none' ? `<label class="f mt-s">Voice<select id="st-voice">${voiceOptions(st.voice)}</select></label>
+<label class="f mt-s">Narration speed<select id="st-vspeed">${[[0.85, 'Slower (0.85x)'], [0.92, 'A little slower (0.92x)'], [1, 'Normal (1x)'], [1.08, 'A little faster (1.08x)'], [1.15, 'Faster (1.15x)']].map(([k, t]) => `<option value="${k}" ${Math.abs((st.voice_speed || 1) - k) < 0.01 ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+      <label class="f mt-s">Narration language<select id="st-lang">${(v.languages || []).map(m => `<option value="${esc(m.id)}" ${(st.language || 'hinglish') === m.id ? 'selected' : ''}>${esc(m.label)}${m.maya_only ? ' (Maya voice only)' : ''}</option>`).join('')}</select>
+        <span class="small mute">Only the next plan writes in it. Voices made in another language are made again.</span></label>` : ''}
     ${s.pipeline === 'quick' ? `<label class="f mt-s">Picture size<select id="st-size"><option value="480x832" ${st.size === '480x832' ? 'selected' : ''}>480x832 (about 20 min)</option><option value="704x1280" ${st.size === '704x1280' ? 'selected' : ''}>704x1280 sharper (about an hour)</option></select></label>
       <label class="row mt-s"><input type="checkbox" id="st-chain" ${st.chain ? 'checked' : ''}> A shot marked "continues" starts from the last frame of the one before</label>` : ''}
     ${s.pipeline === 'keyframe' ? `<label class="f mt-s">Video size<select id="st-size14"><option value="480x832" ${st.size_14b !== '720x1280' ? 'selected' : ''}>480p (480x832, about 12 min for 5 s)</option><option value="720x1280" ${st.size_14b === '720x1280' ? 'selected' : ''}>720p (720x1280, sharper, about 2.3x slower)</option></select></label>
@@ -190,7 +198,17 @@ function planView() {
       <label class="f mt-s">The look (added to every shot)<input data-plan="look" value="${esc(p.look || '')}"></label>
       <label class="f mt-s">The subjects${p.format ? ` (${esc(p.format)})` : ''}: who and what the story is about, one per line as Name: how it looks<textarea data-plan="subjects" style="min-height:90px" placeholder="Chinese J-20 stealth fighter: twin-engine, dark grey, canards, red and yellow star roundel">${esc((p.subjects || []).map(x => x.name + ': ' + x.visual).join('\n'))}</textarea></label>
       <div class="row mt-s"><button class="small" id="b-subjects" title="Read the story again and write the subject list. The shots stay as they are; write the shots of a beat again to use it.">Find the subjects</button><span class="mute small">Every shot that shows one gets its look added to the picture prompt.</span></div>` : `<p class="mute">The model writes a hook, four to six beats of Hinglish narration and the shots. It takes a minute or two.</p>`}</div>
-    ${has ? checksView() + (s.keyframes_on ? keyframesView() : '') + beatsView() : ''}`;
+    ${has ? checksView() + voiceView() + (s.keyframes_on ? keyframesView() : '') + beatsView() : ''}`;
+}
+
+/* step 1 after the plan: the voice. Start pictures, clips and the final video wait for it, because the shot lengths follow the real voice */
+function voiceView() {
+  const s = S, v = s.voice || {}, off = (s.settings.voice_mode || 'narration') === 'none', busy = s.job.state === 'running';
+  if (off) return `<div class="card pad mt"><div class="row"><h2 style="margin:0">Voice</h2>${badge('info', 'no narration')}</div><div class="mute small mt-s">Video only: no voice is made, so nothing waits for it.</div></div>`;
+  const ok = !s.voice_gate;
+  return `<div class="card pad mt"><div class="row"><h2 style="margin:0">Voice</h2>${ok ? badge('good', 'ready') : badge('problem', 'step to do first')}<span class="mute small">${v.have || 0} of ${v.total || 0} beats</span><span class="sp"></span>
+    <button class="${ok ? 'small' : 'primary'}" id="b-voice-plan" ${busy ? 'disabled' : ''}>${ok ? 'Make all the voices again' : 'Make the voice for every beat'}</button></div>
+    <div class="mute small mt-s">${ok ? 'Every beat has its voice. The shots now follow the real length of the voice.' : esc(s.voice_gate) + ' The start pictures, the clips and the final video unlock when this is done. Listen to each beat below and change its words or its feeling if needed.'}</div></div>`;
 }
 
 function checksView() {
@@ -198,7 +216,7 @@ function checksView() {
   if (!c) return '';
   const fix = c.issues.find(i => i.fix === 'fit_shots');
   return `<div class="card pad mt"><div class="row"><h2 style="margin:0">Checks</h2>${c.ok ? badge('good', 'ready to make') : badge('problem', c.blockers + ' to fix')}<span class="sp"></span>
-    ${fix ? `<button id="b-fit" class="small">Write the shots again to fit</button>` : ''}</div>
+    ${fix ? `<button id="b-fit" class="small">Write the shots again to fit</button>` : ''}${c.issues.some(i => i.fix === 'make_voice') ? `<button id="b-voice-chk" class="small primary" ${S.job.state === 'running' ? 'disabled' : ''}>Make the voice</button>` : ''}</div>
     ${c.issues.length ? c.issues.map(i => `<div class="${i.level === 'block' ? 'errbox' : 'warnbox'}">${esc(i.text)}</div>`).join('') : '<div class="mute small mt-s">Every shot is under three seconds, the short is ${S.settings.target_s || 30} seconds, and the words pass.</div>'}
     ${S.timeline ? `<div class="mute small mt-s">${S.timeline.estimated ? 'Timing is an estimate until the voice is made.' : 'Timing follows the real voice.'} ${S.timeline.shots.length} shots, ${S.timeline.total_s}s, voice speed x${S.timeline.tempo}.</div>` : ''}</div>`;
 }
@@ -305,7 +323,7 @@ function keyframesView() {
   const s = S;
   const done = s.shots.filter(x => x.keyframe).length;
   return `<div class="card pad mt"><div class="row"><h2 style="margin:0">Start pictures (storyboard)</h2><span class="mute small">${done} of ${s.shots.length}</span><span class="sp"></span>
-    <button class="small" id="b-keys">${done ? 'Make the missing ones' : 'Draw the start pictures'}</button>
+    <button class="small" id="b-keys" ${S.voice_gate || S.job.state === 'running' ? `disabled title="${esc(S.voice_gate || '')}"` : ''}>${done ? 'Make the missing ones' : 'Draw the start pictures'}</button>
     <button class="small ${s.keyframes_confirmed ? '' : 'primary'}" id="b-keys-ok">${s.keyframes_confirmed ? 'Confirmed ✓ (undo)' : 'Pictures are good'}</button></div>
     <p class="mute small">One picture per shot, drawn from the picture prompt under it (edit the prompt, then press Again). Your own pictures are used as they are. Look at them now: animating is the long wait.</p>
     <div class="sh-keys">${s.shots.map(x => { const k = x.keyframes.find(y => y.id === x.keyframe) || x.keyframes.filter(y => y.status === 'done').pop();
@@ -319,8 +337,8 @@ function beatsView() {
   const s = S, tl = s.timeline;
   const busy = s.job.state === 'running';
   const clipsHeader = `<div class="card pad mt"><div class="row"><h2 style="margin:0">Shots &amp; clips</h2><span class="sp"></span>
-    <button class="small" id="b-clips-missing" ${busy ? 'disabled' : ''}>Make missing clips</button>
-    <button class="primary" id="b-clips-all" ${busy ? 'disabled' : ''}>Make all clips</button></div></div>`;
+    <button class="small" id="b-clips-missing" ${busy || s.voice_gate ? 'disabled' : ''} ${s.voice_gate ? `title="${esc(s.voice_gate)}"` : ''}>Make missing clips</button>
+    <button class="primary" id="b-clips-all" ${busy || s.voice_gate ? 'disabled' : ''}>Make all clips</button></div></div>`;
   return clipsHeader + s.beats.map((b, bi) => {
     const v = s.voice.beats.find(x => x.beat === b.id) || {};
     const take = (v.attempts || []).filter(a => a.status === 'done' && a.current).pop();
@@ -348,7 +366,7 @@ function shotView(x) {
       ${x.motion && x.motion.file ? `<span class="small">${badge('good', 'moves like: ' + esc(x.motion.title || 'a video'))} <a href="#" data-motion-clear="${x.id}">remove</a></span>` : `<button class="small" data-motion="${x.id}" title="A video (file, YouTube or Instagram link) drives how the person in this shot moves (Wan Animate). 2 to 3 seconds of it are used.">movement from a video…</button>`}</div>
     <textarea data-shot="${x.id}" style="min-height:64px;font-size:13px">${esc(x.prompt)}</textarea>
     <div class="row small mt-s"><label class="row">Camera <input data-shot-cam="${x.id}" value="${esc(x.camera)}" style="width:150px"></label>
-      <button class="small" data-clip="${x.id}" ${needsKey ? 'disabled title="Draw the start picture first (Again button above)"' : ''}>${clip ? 'Make again' : 'Make this clip'}</button><button class="small" data-up="${x.id}">My picture</button>
+      <button class="small" data-clip="${x.id}" ${S.voice_gate ? `disabled title="${esc(S.voice_gate)}"` : needsKey ? 'disabled title="Draw the start picture first (Again button above)"' : ''}>${clip ? 'Make again' : 'Make this clip'}</button><button class="small" data-up="${x.id}">My picture</button>
       ${needsKey ? `<span class="mute">↑ draw start picture first</span>` : ''}
       ${clip ? `<label><input type="checkbox" data-approve="${clip.id}" ${clip.approved ? 'checked' : ''}> keep this one</label>` : ''}
       ${failed && !clip ? `<span class="err">${esc(failed.error)}</span>` : ''}</div></div></div>`;
@@ -397,7 +415,7 @@ function remixView() {
 function finalView() {
   const f = S.final, last = f.attempts.filter(a => a.status === 'done').pop();
   const miss = f.checklist && !f.checklist.ready ? f.checklist.missing : [];
-  return `<div class="card pad mt sh-final"><div class="row"><h2 style="margin:0">The short</h2><span class="sp"></span><button class="primary" id="b-final" ${miss.length || (S.job.state === 'running') ? 'disabled' : ''}>${last ? 'Put together again' : 'Put the short together'}</button></div>
+  return `<div class="card pad mt sh-final"><div class="row"><h2 style="margin:0">The short</h2><span class="sp"></span><button class="primary" id="b-final" ${miss.length || S.voice_gate || (S.job.state === 'running') ? 'disabled' : ''}>${last ? 'Put together again' : 'Put the short together'}</button></div>
     ${miss.length ? `<div class="mute small mt-s">Still missing: ${esc(miss.slice(0, 6).join(', '))}${miss.length > 6 ? ' and ' + (miss.length - 6) + ' more' : ''}</div>` : ''}
     ${last ? `<div class="mt-s">${vid(last.url)}</div><div class="row mt-s small"><a href="${esc(last.url)}" download>Download the MP4</a><span class="mute">${last.duration_s}s · 1080x1920${last.bed ? ' · with sound bed' : ''}</span></div>` : '<p class="mute small">The 30-second 9:16 video appears here.</p>'}
     ${f.attempts.filter(a => a.status === 'failed').slice(-1).map(a => `<div class="errbox">${esc(a.error)}</div>`).join('')}</div>`;
@@ -422,7 +440,7 @@ function wire() {
   const q = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)];
   const on = (sel, fn) => { const e = q(sel); if (e) e.onclick = () => fn(e); };
   const st = (id, key, conv = v => v) => { const e = q(id); if (e) e.onchange = () => patch('/settings', {[key]: conv(e.type === 'checkbox' ? e.checked : e.value)}); };
-  st('#st-mode', 'image_mode'); st('#st-imodel', 'image_model'); st('#st-style', 'visual_style'); st('#st-char', 'character_text'); st('#st-tone', 'tone'); st('#st-format', 'format'); st('#st-size', 'size'); st('#st-chain', 'chain'); st('#st-fast', 'speed_lora'); st('#st-size14', 'size_14b'); st('#st-review', 'review_keyframes');
+  st('#st-mode', 'image_mode'); st('#st-imodel', 'image_model'); st('#st-style', 'visual_style'); st('#st-char', 'character_text'); st('#st-tone', 'tone'); st('#st-format', 'format'); st('#st-size', 'size'); st('#st-chain', 'chain'); st('#st-fast', 'speed_lora'); st('#st-lang', 'language'); st('#st-vspeed', 'voice_speed', v => +v); st('#st-size14', 'size_14b'); st('#st-review', 'review_keyframes');
   st('#st-cap', 'captions'); st('#st-bed', 'bed'); st('#st-steps', 'steps', v => v === '' ? null : +v); st('#st-seed', 'seed', v => +v || 0);
   const vm = q('#st-vmode'); if (vm) vm.onchange = () => patch('/settings', {voice_mode: vm.value});
   const vs = q('#st-voice'); if (vs) vs.onchange = () => { const [engine, voice] = vs.value.split('|'); patch('/settings', {voice: {engine, voice}}); };
@@ -430,6 +448,8 @@ function wire() {
   on('#st-anchor-x', async () => { S = await call('/' + SID + '/images/anchor', {method: 'DELETE'}); render(); });
   on('#b-plan', b => post(b, '/plan', {}, 'Planning started'));
   on('#b-fit', b => post(b, '/fit', {}, 'Writing the shots again'));
+  on('#b-voice-chk', b => post(b, '/voice', {only_missing: true}, 'Making the voice'));
+  on('#b-voice-plan', b => post(b, '/voice', {only_missing: !!S.voice_gate}, 'Making the voice'));
   on('#b-keys', b => post(b, '/keyframes', {}, 'Keyframes started'));
   on('#b-keys-ok', b => post(b, '/keyframes/confirm', {confirmed: !S.keyframes_confirmed}));
   on('#b-final', b => post(b, '/final', {}, 'Putting the short together'));

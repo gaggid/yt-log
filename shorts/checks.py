@@ -2,13 +2,21 @@
 app can mend it, which fix applies."""
 import re
 
-from . import avatar, cast, models, motion, pipelines as P, planner, store, timeline, voice as svoice
+from . import avatar, cast, languages, models, motion, pipelines as P, planner, store, timeline, voice as svoice
 
 TEXT_WORDS = re.compile(r"\b(?:text|writing|written|words?|letters?|caption|subtitles?|sign (?:saying|reading)|reads|newspaper|headline|logo|poster|banner|screen showing)\b", re.I)
 
 
 def _issue(level: str, code: str, text: str, **extra) -> dict:
     return {"level": level, "code": code, "text": text, **extra}
+
+
+def voice_gate(short: dict) -> str:
+    """Why the next steps (start pictures, clips, the final video) must wait: the narration is on, so every beat needs its voice first (the shot lengths come from the real voice). '' when clear."""
+    if short["pipeline"] == "remix" or short.get("settings", {}).get("voice_mode") == "none" or not short.get("beats"):
+        return ""
+    gone = svoice.missing(short)
+    return f"Make the voice first: {len(gone)} of {len(short['beats'])} beats have no voice yet. The shot lengths follow the real voice." if gone else ""
 
 
 def run(short: dict) -> dict:
@@ -18,9 +26,12 @@ def run(short: dict) -> dict:
     no_voice = short.get("settings", {}).get("voice_mode") == "none"
     real = {} if no_voice else svoice.real_seconds(short)
     tl = timeline.build(short, real)
+    gone = voice_gate(short)
+    if gone:
+        issues.append(_issue("block", "no_voice", gone, fix="make_voice"))
     prof = planner._profile(short)
     if not no_voice:
-        for p in planner.narration_problems(short["beats"], prof, planner.target_s(short)):
+        for p in planner.narration_problems(short["beats"], prof, planner.target_s(short), languages.of(short["settings"]), svoice.speed(short)):
             soft = p.startswith(("stock phrases", "a sentence is", "the first sentence"))
             issues.append(_issue("warn" if soft else "block", "narration", p))
     for p in tl["problems"]:

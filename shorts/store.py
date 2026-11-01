@@ -22,6 +22,7 @@ DEFAULT_SETTINGS = {
     "size": "704x1280",                # the sharper 5B size (less grain); 480x832 is the quick draft
     "steps": None,                    # None = the model's final-quality default (shorts/pipelines.py)
     "size_14b": "480x832",            # keyframe pipeline picture size: 480x832 | 720x1280 (about 2.3x slower)
+    "voice_speed": 1.0,               # narration speed sent to the voice (0.8 - 1.3); the words asked for scale with it
     "speed_lora": False,              # keyframe pipeline: Wan 14B speed LoRA (4 steps, about 5x faster, less fine detail); off = full quality ("always final")
     "chain": True,                    # quick pipeline: a shot marked "continues" starts from the last frame of the one before
     "seed": 7,
@@ -29,7 +30,7 @@ DEFAULT_SETTINGS = {
     "captions": True,
     "bed": True,                      # the quiet sound bed under the voice
     "review_keyframes": True,         # keyframe pipeline: auto-run stops once for the contact sheet
-    "language": "hinglish",
+    "language": "hinglish",           # narration language (shorts/languages.py): hinglish | en | hi | bn | ta | te | mr | gu | kn | ml | pa | or | as; all but hinglish need the Maya voice
     "cast": [],                       # characters from the Character Studio library: [{"character_id", "look_id"}], at most two people (shorts/cast.py)
     "place_id": "",                   # a place from the library
     "target_s": 30,                   # desired video length in seconds (default 30; shorter values are supported)

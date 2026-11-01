@@ -16,7 +16,7 @@ from story3 import store as media
 from story3.voice import MediaError
 
 from characters import store as cstore, studio_edit
-from . import auto, cast, checks, clips, formats, frames, looks, models, motion, pipelines as P, planner, remix, stitch, store, subjects as subj, timeline, voice as svoice, wan
+from . import auto, cast, checks, clips, formats, frames, languages, looks, models, motion, pipelines as P, planner, remix, stitch, store, subjects as subj, timeline, voice as svoice, wan
 
 router = APIRouter(prefix="/api/shorts")
 MAX_UPLOAD = 12 * 1024 * 1024
@@ -72,7 +72,7 @@ async def options():
         have = [m in ids for m in p["models"]] if listed else []
         pipes[k] = {"label": p["label"], "about": p["about"], "models": p["models"], "available": (all(have) if listed else None),
                     "missing": [m for m, h in zip(p["models"], have) if not h] if listed else []}
-    return {"pipelines": pipes, "voices": voices.public(), "image_modes": IMAGE_MODES, "visual_styles": looks.public(), "image_models": [{"id": k, "label": v["label"], "default": v["default"], "licence": v["licence"]["status"]} for k, v in providers.PROVIDERS.items()], "sizes": SIZES, "gateway_video_models": sorted(i for i in ids if i), "tags": list(maya.STYLE_TAGS),
+    return {"pipelines": pipes, "voices": voices.public(), "image_modes": IMAGE_MODES, "visual_styles": looks.public(), "languages": languages.public(), "image_models": [{"id": k, "label": v["label"], "default": v["default"], "licence": v["licence"]["status"]} for k, v in providers.PROVIDERS.items()], "sizes": SIZES, "gateway_video_models": sorted(i for i in ids if i), "tags": list(maya.STYLE_TAGS),
             "limits": {"target_s": models.TARGET_S, "max_shot_s": models.MAX_SHOT_S}}
 
 
@@ -120,6 +120,20 @@ async def create(body: CreateReq):
     else:
         raise HTTPException(400, "kind is idea or story")
     st = {k: v for k, v in (body.settings or {}).items() if k in store.DEFAULT_SETTINGS or k in ("character_text", "tone")}
+    if st.get("visual_style") not in (None, "", *looks.presets()):
+        raise HTTPException(400, "unknown picture style")
+    if "voice_speed" in st and not 0.8 <= float(st["voice_speed"] or 0) <= 1.3:
+        raise HTTPException(400, "voice_speed is between 0.8 and 1.3")
+    if st.get("size_14b") not in (None, models.SIZE_PORTRAIT, models.SIZE_14B_HD):
+        raise HTTPException(400, "unknown video size")
+    if "voice" in st:
+        try:
+            st["voice"] = voices.choose({}, (st["voice"] or {}).get("engine", ""), (st["voice"] or {}).get("voice"))["tts"]
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+    why = languages.problem(st.get("language", languages.DEFAULT), (st.get("voice") or store.DEFAULT_SETTINGS["voice"])["engine"])
+    if why:
+        raise HTTPException(400, why)
     short = store.create(title, body.pipeline, src, st, {"remix": dict(remix.DEFAULT)} if body.pipeline == "remix" else None)
     return await state(short["id"])
 
@@ -162,7 +176,7 @@ async def state(short_id: str):
     out = {"id": short["id"], "title": short["title"], "pipeline": short["pipeline"], "pipeline_label": P.pipeline(short)["label"], "status": short["status"], "source": short["source"],
            "settings": short["settings"], "plan": short["plan"], "beats": short["beats"], "images": short["images"], "keyframes_confirmed": short.get("keyframes_confirmed", False), "keyframes_on": P.keyframes_on(short),
            "job": jobs.status(short_id), "estimate_s": P.estimate_s(short) if (short["shots"] or short["pipeline"] == "remix") else 0,
-           "voice": svoice.state(short), "auto": auto.state(short), "final": stitch.final_state(short_id)}
+           "voice": svoice.state(short), "voice_gate": checks.voice_gate(short), "auto": auto.state(short), "final": stitch.final_state(short_id)}
     if short["pipeline"] == "remix":
         r = remix.data(short)
         ch = remix.character(short)
@@ -193,6 +207,8 @@ class SettingsReq(BaseModel):
     seed: int | None = None
     voice: dict | None = None
     voice_mode: str | None = None
+    language: str | None = None
+    voice_speed: float | None = None
     format: str | None = None            # auto | story | documentary | explainer | comparison (shorts/formats.py)
     captions: bool | None = None
     bed: bool | None = None
@@ -238,6 +254,13 @@ async def patch_settings(short_id: str, body: SettingsReq):
         raise HTTPException(400, f"format is one of: {', '.join((formats.AUTO, *formats.FORMATS))}")
     if "voice_mode" in patch and patch["voice_mode"] not in ("narration", "none"):
         raise HTTPException(400, "voice_mode is one of: narration, none")
+    if "voice_speed" in patch and not 0.8 <= (patch["voice_speed"] or 0) <= 1.3:
+        raise HTTPException(400, "voice_speed is between 0.8 and 1.3")
+    if "language" in patch or "voice" in patch:
+        engine = (patch.get("voice") or short["settings"].get("voice") or {}).get("engine", "")
+        why = languages.problem(patch.get("language", languages.of(short["settings"])), engine)
+        if why:
+            raise HTTPException(400, why)
     if "voice" in patch:
         try:
             patch["voice"] = voices.choose({}, patch["voice"].get("engine", ""), patch["voice"].get("voice"))["tts"]
@@ -447,8 +470,11 @@ class ShotsReq(BaseModel):
 @router.post("/{short_id}/keyframes")
 async def make_keyframes(short_id: str, body: ShotsReq | None = None):
     body = body or ShotsReq()
-    if not P.keyframes_on(_get(short_id)):
+    short = _get(short_id)
+    if not P.keyframes_on(short):
         raise HTTPException(400, "this short has no start pictures (Wan decides every picture)")
+    if checks.voice_gate(short):
+        raise HTTPException(400, checks.voice_gate(short))
     return _start(short_id, "short_keyframes", lambda progress: clips.make_keyframes(short_id, body.shot_ids, body.only_missing, progress))
 
 
@@ -479,6 +505,8 @@ async def make_clips(short_id: str, body: ShotsReq | None = None):
 @router.post("/{short_id}/final")
 async def make_final(short_id: str):
     short = _get(short_id)
+    if checks.voice_gate(short):
+        raise HTTPException(400, checks.voice_gate(short))
 
     async def work(progress):
         fn = remix.build if short["pipeline"] == "remix" else stitch.build

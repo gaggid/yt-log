@@ -110,7 +110,7 @@ def test_plan_writes_beats_shots_and_a_ready_timeline(gw):
     assert short["beats"][0]["sentences"][0]["tag"] == "curious"                  # the beat's voice feeling is on its first sentence
     assert planner.narration_problems(short["beats"]) == []
     chk = checks.run(short)
-    assert chk["ok"], chk["issues"]
+    assert [i["code"] for i in chk["issues"] if i["level"] == "block"] == ["no_voice"], chk["issues"]      # the voice is the first gate: nothing else is wrong
 
 
 def test_the_plan_is_sent_back_when_the_words_break_the_rules(gw):
@@ -367,7 +367,7 @@ def test_api_create_plan_edit_and_check(client):
     assert client.post(f"/api/shorts/{sid}/plan").status_code == 200
     assert wait_job(client, sid)["state"] == "done"
     st = client.get(f"/api/shorts/{sid}").json()
-    assert len(st["beats"]) == 5 and st["checks"]["ok"] and st["auto"]["next"] == "voice"
+    assert len(st["beats"]) == 5 and [i["code"] for i in st["checks"]["issues"] if i["level"] == "block"] == ["no_voice"] and st["auto"]["next"] == "voice"
     assert st["estimate_s"] > 0 and st["timeline"]["total_s"] == pytest.approx(30.0)
     shot = st["shots"][0]["id"]
     r = client.patch(f"/api/shorts/{sid}/shots/{shot}", json={"prompt": "A new prompt about a wallet.", "character": True})
@@ -479,3 +479,47 @@ def test_the_14b_size_is_480p_or_720p_and_the_picture_follows_it():
     assert P.animate_request(short, sh, 1, "x")["size"] == "720x1280" and clips.clip_plan.__doc__
     short["settings"]["size_14b"] = "bogus"
     assert P.animate_request(short, sh, 1, "x")["size"] == models.SIZE_PORTRAIT
+
+
+@needs_ffmpeg
+def test_nothing_after_the_voice_starts_until_every_beat_has_one(gw, env):
+    short = planned("keyframe")
+    sid = short["id"]
+    assert checks.voice_gate(short) and "5 of 5" in checks.voice_gate(short)
+    run(svoice.make(sid, s=S, key="k"))
+    assert not checks.voice_gate(store.get(sid))
+    short = store.get(sid)
+    short["settings"]["voice_mode"] = "none"
+    assert not checks.voice_gate(short), "no narration, no voice gate"
+
+
+def test_language_needs_the_maya_voice_and_reaches_the_prompt_and_the_voice_request():
+    from shorts import languages
+    assert languages.problem("hinglish", "veena-tts") == "" and languages.problem("ta", "maya-tts") == ""
+    assert "needs the Maya voice" in languages.problem("ta", "veena-tts") and languages.problem("xx", "maya-tts")
+    assert "Tamil" in languages.rule({"language": "ta"}) and "Devanagari" in languages.rule({})
+    short = planned("keyframe")
+    h_hi = svoice.beat_hash(short, short["beats"][0])
+    short["settings"]["language"] = "ta"
+    assert svoice.beat_hash(short, short["beats"][0]) != h_hi, "another language makes the old take old"
+
+
+def test_create_takes_style_language_voice_and_sizes_and_refuses_a_voice_that_cannot_speak_the_language(client):
+    base = {"pipeline": "keyframe", "kind": "idea", "text": "A courier finds a wallet with a lakh rupees in it."}
+    ok = client.post("/api/shorts", json={**base, "settings": {"visual_style": "realism", "language": "ta", "voice": {"engine": "maya-tts", "voice": "Kayal"}, "size_14b": "720x1280", "speed_lora": True}})
+    st = ok.json()["settings"]
+    assert ok.status_code == 200 and st["visual_style"] == "realism" and st["language"] == "ta" and st["voice"]["voice"] == "Kayal" and st["size_14b"] == "720x1280" and st["speed_lora"] is True
+    bad = client.post("/api/shorts", json={**base, "settings": {"language": "ta", "voice": {"engine": "veena-tts", "voice": "agastya"}}})
+    assert bad.status_code == 400 and "Maya" in bad.json()["detail"]
+    assert client.post("/api/shorts", json={**base, "settings": {"visual_style": "nope"}}).status_code == 400
+
+
+def test_narration_speed_scales_the_words_asked_for_and_marks_old_voice_old(client):
+    short = planned("keyframe")
+    h1 = svoice.beat_hash(short, short["beats"][0])
+    short["settings"]["voice_speed"] = 0.85
+    assert svoice.beat_hash(short, short["beats"][0]) != h1 and svoice.speed(short) == 0.85
+    assert planner.word_limits(30, 0.85)[1] < planner.word_limits(30, 1.0)[1] < planner.word_limits(30, 1.15)[1]
+    sid = short["id"]
+    assert client.patch(f"/api/shorts/{sid}/settings", json={"voice_speed": 3}).status_code == 400
+    assert client.patch(f"/api/shorts/{sid}/settings", json={"voice_speed": 1.08}).json()["settings"]["voice_speed"] == 1.08

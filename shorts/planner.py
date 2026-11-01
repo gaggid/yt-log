@@ -7,7 +7,8 @@ from story.schemas import Str
 from story2 import intake, leak, lexicon, maya, safety, svara, voices
 from story2.schemas import M
 
-from . import cast, formats, looks, models, prompts as P, store, subjects as subj, timeline
+from . import voice as svoice
+from . import cast, formats, languages, looks, models, prompts as P, store, subjects as subj, timeline
 
 WORDS_LO, WORDS_HI = 52, 86              # spoken words in the whole short (the prompt asks for 62 to 74; this is what is accepted)
 REC_LO, REC_HI = 62, 74                  # what the prompt asks for at the full 30 seconds
@@ -81,7 +82,13 @@ def target_s(short: dict) -> float:
     return float(short.get("settings", {}).get("target_s") or models.TARGET_S)
 
 
-def word_limits(t_s: float) -> tuple[int, int, int, int]:
+def word_limits(t_s: float, speed: float = 1.0) -> tuple[int, int, int, int]:
+    """Scaled by the narration speed: a slower voice says fewer words in the same seconds."""
+    lo, hi, a, b = _word_limits(t_s)
+    return round(lo * speed), round(hi * speed), round(a * speed), round(b * speed)
+
+
+def _word_limits(t_s: float) -> tuple[int, int, int, int]:
     """(accepted low, accepted high, asked low, asked high) spoken words for a short of `t_s` seconds. Scaled from the 30-second figures; a shorter short is also capped by what the voice can say
     (the fastest the timeline lets it speak), so words that pass here can fit."""
     if t_s >= models.TARGET_S:
@@ -97,14 +104,14 @@ def beat_range(t_s: float) -> tuple[int, int]:
     return lo, max(lo + 1, round(t_s / 5))
 
 
-def narration_problems(beats: list[dict], profile=None, t_s: float = models.TARGET_S) -> list[str]:
+def narration_problems(beats: list[dict], profile=None, t_s: float = models.TARGET_S, language: str = languages.DEFAULT, speed: float = 1.0) -> list[str]:
     """What is wrong with the words, in plain terms. Used while the model writes (it is sent back) and by the checks."""
     out: list[str] = []
     sentences = [s["text"] for b in beats for s in b["sentences"]]
     n = sum(len(t.split()) for t in sentences)
     if not sentences:
         return ["there is no narration"]
-    lo, hi = word_limits(t_s)[:2]
+    lo, hi = word_limits(t_s, speed)[:2]
     if n < lo or n > hi:
         out.append(f"the narration is {n} words; it must be between {lo} and {hi} so that it fills about {t_s:g} seconds")
     if len(sentences[0].split()) > MAX_HOOK_WORDS:
@@ -117,7 +124,7 @@ def narration_problems(beats: list[dict], profile=None, t_s: float = models.TARG
         if re.search(r"\d", t):
             out.append(f"digits in \"{t[:50]}\": write numbers as words")
             break
-    for t in sentences:
+    for t in sentences if language in ("hinglish", "hi") else []:
         if svara.romanised_hindi(t):
             out.append(f"Hindi written in Latin letters: \"{t[:50]}\". Hindi words must be in Devanagari; only English words use Latin letters")
             break
@@ -162,7 +169,7 @@ async def _plan_call(short: dict, backend, s: dict, note: str = "") -> PlanOut:
 
     t_s = target_s(short)
     b_lo, b_hi = beat_range(t_s)
-    _, _, ask_lo, ask_hi = word_limits(t_s)
+    _, _, ask_lo, ask_hi = word_limits(t_s, svoice.speed(short))
 
     def check(out: PlanOut) -> None:
         if len(out.beats) < min(3, b_lo):
@@ -171,11 +178,11 @@ async def _plan_call(short: dict, backend, s: dict, note: str = "") -> PlanOut:
             raise ValueError(f"write at most {b_hi} beats for a {t_s:g}-second short; you wrote {len(out.beats)}")
         if caller.last_attempt:
             return                                                    # style rules never stop a run; the checks screen lists what is left
-        probs = narration_problems(_beats_from(out, cur["engine"]), prof, t_s)
+        probs = narration_problems(_beats_from(out, cur["engine"]), prof, t_s, languages.of(short["settings"]), svoice.speed(short))
         if probs:
             raise ValueError("; ".join(probs[:4]))
 
-    res = await caller.call(P.plan_system(cur["engine"], t_s, f"{b_lo} to {b_hi}", ask_lo, ask_hi, short["settings"].get("format") or formats.AUTO), f"{source_text(short)}{extra}\n{note}\nWrite the short now.", PlanOut, validate=check)
+    res = await caller.call(P.plan_system(cur["engine"], t_s, f"{b_lo} to {b_hi}", ask_lo, ask_hi, short["settings"].get("format") or formats.AUTO, languages.rule(short["settings"])), f"{source_text(short)}{extra}\n{note}\nWrite the short now.", PlanOut, validate=check)
     return res.value
 
 

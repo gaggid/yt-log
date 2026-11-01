@@ -2,7 +2,7 @@
 for its sampling (story/settings.py SAMPLING)."""
 from story2 import maya, voices
 
-from . import formats
+from . import formats, languages
 
 PLAN = """[TASK:p4_plan]
 You write {seconds}-second vertical video shorts for Indian viewers. The video is made by an AI video model from your shot prompts and spoken by a narrator; everything is decided by you.
@@ -26,7 +26,7 @@ THE NARRATION
 - {beats} beats; the whole narration is between {lo} and {hi} words, so it takes about {seconds} seconds when spoken. Count the words.
 - The first sentence is the hook: at most 7 words, a question or a startling fact, no greeting, no "aaj hum".
 - Every sentence is at most 12 words and carries one idea. A real question where the viewer would ask it. A short blunt sentence after a longer one. End on a payoff or a sting, not a summary.
-- The narrator speaks in the first person where it fits. Plain, spoken Hinglish in mixed script: Hindi words in Devanagari, English words in Latin letters, numbers written as words (never digits), no other script.
+- The narrator speaks in the first person where it fits. {language_rule}
 - {voice_rules}
 - Never mention a book, an author, an article, a chapter or "the source". Never invent a fact that the facts below do not give.
 - "tag" is the beat's voice feeling, one of: {tags}, or "neutral". Pick the one the beat needs; a whole short is not one mood.
@@ -62,8 +62,8 @@ A SHOT PROMPT is English, 35 to 70 words, present tense, in this order: the subj
 """
 
 
-def plan_system(engine: str, target_s: float = 30.0, beats: str = "4 to 6", lo: int = 62, hi: int = 74, format_choice: str = "auto") -> str:      # replace, not format: the JSON example has braces
-    return (PLAN.replace("{format_section}", formats.plan_section(format_choice)).replace("{voice_rules}", voices.narration_rules(engine) or "Write for the ear.").replace("{tags}", ", ".join(maya.STYLE_TAGS))
+def plan_system(engine: str, target_s: float = 30.0, beats: str = "4 to 6", lo: int = 62, hi: int = 74, format_choice: str = "auto", language_rule: str = "") -> str:      # replace, not format: the JSON example has braces
+    return (PLAN.replace("{format_section}", formats.plan_section(format_choice)).replace("{voice_rules}", voices.narration_rules(engine) or "Write for the ear.").replace("{tags}", ", ".join(maya.STYLE_TAGS)).replace("{language_rule}", language_rule or languages.HINGLISH_RULE)
             .replace("{seconds}", f"{target_s:g}").replace("{beats}", beats).replace("{lo}", str(lo)).replace("{hi}", str(hi)))
 
 

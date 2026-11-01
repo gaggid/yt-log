@@ -9,13 +9,20 @@ from story2 import maya, safety, voices
 from story3 import audiofix, store as media, voice as voice3
 from story3.voice import MediaError
 
-from . import store
+from . import languages, store
 
 RETAKES = 1
 
 
 def current(short: dict) -> dict:
     return voices.current({"tts": short["settings"].get("voice")})
+
+
+def speed(short: dict) -> float:
+    try:
+        return min(1.3, max(0.8, float(short["settings"].get("voice_speed") or 1.0)))
+    except (TypeError, ValueError):
+        return 1.0
 
 
 def segment(beat: dict) -> dict:
@@ -25,7 +32,7 @@ def segment(beat: dict) -> dict:
 
 def beat_hash(short: dict, beat: dict) -> str:
     k = voices.key(current(short))
-    return store.input_hash(k, voices.text_for(k, segment(beat)))
+    return store.input_hash(k, voices.text_for(k, segment(beat)), languages.code(short["settings"]) if voices.engine_of_key(k) == "maya-tts" else "", speed(short))
 
 
 def chosen(short: dict, beat: dict) -> dict | None:
@@ -59,6 +66,7 @@ async def make(short_id: str, beat_ids: list[str] | None = None, only_missing: b
         for i, beat in enumerate(todo):
             if progress:
                 progress(i, len(todo), f"voice {i + 1} of {len(todo)}")
+            lang_rec = {"speed": speed(short), **({"language": languages.code(short["settings"])} if cur["engine"] == "maya-tts" else {})}
             safety.guard_tags(beat["sentences"])
             h = beat_hash(short, beat)
             it = media.add(short_id, store.VOICE, beat["id"], 0, "running", {"input_hash": h})
@@ -66,7 +74,7 @@ async def make(short_id: str, beat_ids: list[str] | None = None, only_missing: b
             try:
                 best = None
                 for extra in range(RETAKES + 1):                           # a take with long dead air is made once more with another seed
-                    bodies = [voices.request_body(cur, t, it["attempt"] + 1000 * extra) for t in voices.texts_for(voices.key(cur), segment(beat))]
+                    bodies = [voices.request_body(cur, t, it["attempt"] + 1000 * extra, lang_rec) for t in voices.texts_for(voices.key(cur), segment(beat))]
                     raw = await voice3._speak_all(client, s["base_url"], key, bodies)
                     got, rep = audiofix.trim(raw, [], audiofix.DEFAULT_MAX_GAP_S)
                     if best is None or rep["longest_removed_s"] < best[1]["longest_removed_s"]:
