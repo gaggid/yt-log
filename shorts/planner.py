@@ -8,7 +8,7 @@ from story2 import intake, leak, lexicon, maya, safety, svara, voices
 from story2.schemas import M
 
 from . import voice as svoice
-from . import cast, formats, languages, looks, models, tones, prompts as P, store, subjects as subj, timeline
+from . import cast, formats, languages, looks, models, shotlist, tones, prompts as P, store, subjects as subj, timeline
 
 WORDS_LO, WORDS_HI = 52, 86              # spoken words in the whole short (the prompt asks for 62 to 74; this is what is accepted)
 REC_LO, REC_HI = 62, 74                  # what the prompt asks for at the full 30 seconds
@@ -98,6 +98,11 @@ def _word_limits(t_s: float) -> tuple[int, int, int, int]:
     return lo, hi, max(lo, round(REC_LO * t_s / models.TARGET_S)), max(lo, min(round(REC_HI * t_s / models.TARGET_S), hi - 1))
 
 
+def min_sentences(t_s: float) -> int:
+    """Fewest sentences the plan prompt accepts: about one per four seconds."""
+    return max(3, round(t_s / 4.3))
+
+
 def beat_range(t_s: float) -> tuple[int, int]:
     """How many beats a short of `t_s` seconds has: 4 to 6 at 30 seconds, fewer when shorter."""
     lo = max(2, round(t_s / 7.5))
@@ -179,6 +184,9 @@ async def _plan_call(short: dict, backend, s: dict, note: str = "") -> PlanOut:
             raise ValueError(f"write at most {b_hi} beats for a {t_s:g}-second short; you wrote {len(out.beats)}")
         if caller.last_attempt:
             return                                                    # style rules never stop a run; the checks screen lists what is left
+        n_sent = sum(len([t for t in b.narration if t.strip()]) for b in out.beats)
+        if n_sent < min_sentences(t_s):
+            raise ValueError(f"write at least {min_sentences(t_s)} sentences in all (one fact per sentence); you wrote {n_sent}")
         probs = narration_problems(_beats_from(out, cur["engine"]), prof, t_s, languages.of(short["settings"]), svoice.speed(short))
         if probs:
             raise ValueError("; ".join(probs[:4]))
@@ -203,6 +211,12 @@ async def _shots_call(short: dict, beat: dict, count: int, backend, s: dict, bef
         ctx.append("THE SUBJECTS (name them exactly in the shots they appear in):\n" + "\n".join(f"- {x['name']} ({x['kind'] or 'subject'}): {x['visual']}" for x in subj.of(short)))
     if before:
         ctx.append(f"THE SHOT BEFORE THIS BEAT: {before['prompt']} (camera: {before['camera']})")
+    ideas = beat.get("ideas") or []
+    if len(ideas) == count:
+        ctx.append("SHOT IDEAS for this beat (the director's pictures, one per shot, in order):\n" + "\n".join(f"{i}. {x['idea']}" + (f" [subjects: {', '.join(x['subjects'])}]" if x["subjects"] else "") for i, x in enumerate(ideas, 1)))
+    seen = shotlist.drawn(short, beat["id"])
+    if seen:
+        ctx.append("ALREADY DRAWN in other beats (do not repeat these pictures):\n" + "\n".join(seen))
 
     def check(out: ShotsOut) -> None:
         if len(out.shots) != count and not caller.last_attempt:
@@ -240,6 +254,17 @@ def _limit_character_shots(shots: list[dict]) -> None:
                 sh["cast"] = []
 
 
+async def direct(short: dict, counts: list[int], backend, s: dict, progress=None) -> None:
+    """The director's pass: plan every picture of the short before any shot is written (shorts/shotlist.py). A failure here never stops the plan; the beats then get their shots without a list."""
+    if progress:
+        progress(1, len(short["beats"]) + 2, "planning the pictures of the whole short")
+    try:
+        shotlist.apply(short, await shotlist.make(short, counts, backend, s, target_s(short)))
+    except Exception:
+        for b in short["beats"]:
+            b.pop("ideas", None)
+
+
 async def make_plan(short_id: str, backend, s: dict | None = None, progress=None) -> dict:
     """Plan the whole short: narration and look first, then the shots of each beat. Replaces an earlier plan (voice and clips made from it stop counting by their hashes)."""
     s = s or settings_mod.get()
@@ -262,10 +287,12 @@ async def make_plan(short_id: str, backend, s: dict | None = None, progress=None
     short.update(plan=plan, beats=beats, shots=[], title=plan["title"] or short["title"])
     counts = timeline.plan_counts(beats, target_s(short), timeline.silent(short))
     all_shots: list[dict] = []
+    short["shots"] = all_shots                                               # the shots written so far, so a beat sees what the earlier beats drew
     before = None
+    await direct(short, counts, backend, s, progress)
     for i, (b, n) in enumerate(zip(beats, counts)):
         if progress:
-            progress(i + 1, len(beats) + 1, f"planning the shots of beat {i + 1} of {len(beats)}")
+            progress(i + 2, len(beats) + 2, f"planning the shots of beat {i + 1} of {len(beats)}")
         shots = await _shots_call(short, b, n, backend, s, before)
         before = shots[-1]
         for sh in shots:
@@ -310,6 +337,20 @@ async def reshoot_beat(short_id: str, beat_id: str, count: int, backend, s: dict
     short["shots"] = sorted(keep + shots, key=lambda sh: order[sh["id"]])
     refit(short)
     return store.save(short)
+
+
+async def reshoot_all(short_id: str, backend, s: dict | None = None, progress=None) -> str:
+    """Think the pictures of the whole short again (director's list, then the shots of every beat) without touching the narration, the voice or the timing. New shot ids make older pictures and clips old."""
+    s = s or settings_mod.get()
+    short = store.get(short_id)
+    counts = [max(1, len(b["shot_ids"])) for b in short["beats"]]
+    await direct(short, counts, backend, s, progress)
+    store.save(short)
+    for i, (b, n) in enumerate(zip(short["beats"], counts)):
+        if progress:
+            progress(i + 2, len(short["beats"]) + 2, f"writing the shots of beat {i + 1} of {len(short['beats'])}")
+        await reshoot_beat(short_id, b["id"], n, backend, s)
+    return "the pictures of every beat were planned again"
 
 
 def refit(short: dict, voice: dict[str, float] | None = None) -> dict:

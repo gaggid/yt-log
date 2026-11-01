@@ -443,6 +443,12 @@ async def fit(short_id: str):
     return _start(short_id, "short_fit", lambda progress: planner.fit_shots(short_id, be, s, progress))
 
 
+@router.post("/{short_id}/rethink")
+async def rethink(short_id: str):
+    s, be = _backend()
+    return _start(short_id, "short_rethink", lambda progress: planner.reshoot_all(short_id, be, s, progress))
+
+
 class BeatReq(BaseModel):
     count: int = 3
 

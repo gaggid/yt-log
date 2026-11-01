@@ -14,7 +14,7 @@ THE FORMAT
 {format_section}
 
 THE SUBJECTS (what the facts are about, so the pictures show the right things)
-- "subjects": at most 6, the most important first: every named or distinct person, group or force, machine or vehicle, organisation, place, product or program the facts are about, from every side of the story.
+- "subjects": at most 10, the most important first. Machines alone make a dull short: when the facts allow, include at least three different kinds (machine, person or group, place, a period of history, an object that proves a point): every named or distinct person, group or force, machine or vehicle, organisation, place, product or program the facts are about, from every side of the story.
   "name" is the exact name the facts use, with its common short form (for example "Chinese J-20 stealth fighter"). "kind" is person, group, machine, organisation, place, product, software or other.
 - "visual" is English, 20 to 45 words: one concrete description an image model can draw without knowing the story: shape, size, colours, markings, insignia, clothing, materials, where it is usually seen.
   Make each side look like itself, and EVERY machine or person must say whose it is by what can be seen: national roundels and flag colours on aircraft and vehicles, uniforms, a software window by its layout and theme. Real machines and people are drawn as they really look. No readable text in it.
@@ -24,6 +24,7 @@ THE SUBJECTS (what the facts are about, so the pictures show the right things)
 
 THE NARRATION
 - {beats} beats; the whole narration is between {lo} and {hi} words, so it takes about {seconds} seconds when spoken. Count the words.
+- Use 8 to 10 sentences in all, so each beat has two or three: one fact or one step of the argument per sentence, and every key fact of the brief is told, including its central question and any history it mentions. Short sentences, not fewer facts.
 - The first sentence is the hook: at most 7 words, a question or a startling fact, no greeting, no "aaj hum".
 - Every sentence is at most 12 words and carries one idea. A real question where the viewer would ask it. A short blunt sentence after a longer one. End on a payoff or a sting, not a summary.
 - The narrator speaks in the first person where it fits. {language_rule}
@@ -58,7 +59,9 @@ A SHOT PROMPT is English, 35 to 70 words, present tense, in this order: the subj
 - {subject_rule}
 - "continues": true only when the shot is the same moment and place as the shot before it, seen closer or from another angle. Otherwise false: a new place, time or subject.
 - "setting": leave empty to use the main place; write a short place description only when this shot is somewhere else.
-- Show the narration with pictures that fit it; do not repeat the words. Never show a source, a book or an author.
+- Show the CLAIM of the narration, not only its topic: when the words say thin air cuts the load, the picture shows the proof (a jet on a high dusty runway with one missile under its wing), not just a jet. Do not repeat the words. Never show a source, a book or an author.
+- Give the framing once in "still" (one of close-up, medium, wide); never two framings in one prompt. No filler words like "single one".
+- If SHOT IDEAS are given, write one shot for each, in order, drawing exactly the picture of its idea (you may improve the wording). If ALREADY DRAWN shots are given, do not make a picture that looks like any of them.
 """
 
 

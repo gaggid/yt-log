@@ -2,7 +2,7 @@
 app can mend it, which fix applies."""
 import re
 
-from . import avatar, cast, languages, models, motion, pipelines as P, planner, store, timeline, voice as svoice
+from . import avatar, cast, languages, models, motion, pipelines as P, planner, shotlist, store, timeline, voice as svoice
 
 TEXT_WORDS = re.compile(r"\b(?:text|writing|written|words?|letters?|caption|subtitles?|sign (?:saying|reading)|reads|newspaper|headline|logo|poster|banner|screen showing)\b", re.I)
 
@@ -63,6 +63,8 @@ def run(short: dict) -> dict:
             from story2 import leak
             for f in leak.check(sh["prompt"], prof, scene=True):
                 issues.append(_issue("block", "leak", f"shot {sh['id']} points back to the source: {f.text}"))
+    for p in shotlist.problems(short):
+        issues.append(_issue("warn", p["code"], p["text"], fix="reshoot_all", shots=p["shots"]))
     chars = sum(1 for sh in short["shots"] if sh.get("character"))
     if chars > planner.MAX_CHARACTER_SHOTS:
         issues.append(_issue("warn", "many_character_shots", f"{chars} shots show the main character; the same face over many shots drifts. Four or fewer holds up best"))

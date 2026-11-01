@@ -424,7 +424,7 @@ def test_a_facts_article_is_a_documentary_with_its_subjects_and_no_invented_pers
     chat = FakeChat(plan_extra={"format": "comparison", "subjects": JETS}, shot_extra={"subjects": ["Chinese J-20 stealth fighter"]})
     short = new_short()
     short = run(planner.make_plan(short["id"], chat, S))
-    assert short["plan"]["format"] == "comparison" and [x["name"] for x in short["plan"]["subjects"]] == [j["name"] for j in JETS]
+    assert short["plan"]["format"] == "comparison" and [x["name"] for x in short["plan"]["subjects"]] == [j["name"] for j in JETS] + ["Pilot"]
     assert short["plan"]["character"] == "" and not any(sh["character"] for sh in short["shots"])      # the fake model still asked for a character in half the shots
     shots_system = next(c for c in chat.calls if c["task"] == "p4_shots")
     assert "Format comparison" in shots_system["system"] and "THE SUBJECTS" in shots_system["user"] and "Chinese J-20 stealth fighter" in shots_system["user"]
@@ -598,3 +598,62 @@ def test_every_choice_made_when_creating_a_short_reaches_the_prompts_and_the_req
     assert state["voice_gate"] == "" and state["settings"]["tone_id"] == "osint"
     opts = client.get("/api/shorts/options").json()
     assert opts["tones"]["default"] == tones.DEFAULT and len(opts["languages"]) == 13 and any(v["id"] == "realism" for v in opts["visual_styles"])
+
+
+# ── the director's shot list and the variety check ───────────────────────────
+
+def test_the_director_plans_the_pictures_before_the_shots_and_later_beats_see_earlier_ones(gw):
+    chat = FakeChat()
+    s = new_short("quick")
+    short = run(planner.make_plan(s["id"], chat, S))
+    assert chat.count("p4_shotlist") == 1 and chat.calls[1]["task"] == "p4_shotlist"
+    assert all(len(b["ideas"]) == len(b["shot_ids"]) for b in short["beats"])
+    shot_calls = [c for c in chat.calls if c["task"] == "p4_shots"]
+    assert "SHOT IDEAS" in shot_calls[0]["user"] and "Idea 1.1" in shot_calls[0]["user"] and "ALREADY DRAWN" not in shot_calls[0]["user"]
+    assert "ALREADY DRAWN" in shot_calls[1]["user"]
+    assert any(x["name"] == "Pilot" for x in short["plan"]["subjects"]), "the director's new subjects are kept"
+
+
+def test_a_failing_director_never_stops_the_plan(gw):
+    chat = FakeChat(no_director=True)
+    short = run(planner.make_plan(new_short("quick")["id"], chat, S))
+    assert short["status"] == "planned" and all("ideas" not in b for b in short["beats"])
+    assert "SHOT IDEAS" not in [c for c in chat.calls if c["task"] == "p4_shots"][0]["user"]
+
+
+def test_rethinking_the_pictures_keeps_the_words_and_makes_new_shots(gw):
+    short = planned()
+    words = [b["sentences"] for b in short["beats"]]
+    old = [s["id"] for s in short["shots"]]
+    chat = FakeChat()
+    msg = run(planner.reshoot_all(short["id"], chat, S))
+    after = store.get(short["id"])
+    assert [b["sentences"] for b in after["beats"]] == words and not set(old) & {s["id"] for s in after["shots"]}
+    assert chat.count("p4_shotlist") == 1 and chat.count("p4_shots") == len(after["beats"]) and "planned again" in msg
+    assert any(x["name"] == "Pilot" for x in after["plan"]["subjects"]), "the director's new subjects are saved by a rethink"
+
+
+def test_variety_check_flags_one_subject_everywhere_and_the_same_picture_twice(gw):
+    from shorts import shotlist
+    short = planned()
+    short["plan"]["subjects"] = [{"name": "Jet", "kind": "machine", "visual": "A grey jet."}, {"name": "Valley", "kind": "place", "visual": "A snowy valley."}]
+    for i, sh in enumerate(short["shots"]):
+        sh["subjects"], sh["setting"] = (["Jet"], "") if i < 6 else (["Valley"], "")
+        sh["still"] = f"A grey jet flies over a valley {['north', 'east', 'west', 'south', 'sunrise', 'dusk'][i % 6]} wide" if i < 6 else f"Snowy valley view number {i} with {['river', 'tent', 'goat', 'pine', 'hut', 'road'][i % 6]}"
+    codes = {p["code"] for p in shotlist.problems(short)}
+    assert "one_subject" in codes or len(short["shots"]) < 4
+    a, b = short["shots"][0], short["shots"][1]
+    a["still"] = b["still"] = "A grey jet on a dusty runway between towering peaks at noon"
+    a["subjects"] = b["subjects"] = ["Jet"]
+    probs = shotlist.problems(short)
+    assert any(p["code"] == "similar_shots" and {a["id"], b["id"]} <= set(p["shots"]) for p in probs)
+    warn = [i for i in checks.run(short)["issues"] if i["code"] in ("one_subject", "similar_shots")]
+    assert warn and all(i["level"] == "warn" and i["fix"] == "reshoot_all" for i in warn)
+
+
+def test_api_rethink_endpoint_runs_the_job(client):
+    sid = client.post("/api/shorts", json={"pipeline": "keyframe", "kind": "idea", "text": "A courier finds a wallet with a lakh rupees."}).json()["id"]
+    client.post(f"/api/shorts/{sid}/plan")
+    assert wait_job(client, sid)["state"] == "done"
+    assert client.post(f"/api/shorts/{sid}/rethink").status_code == 200
+    assert wait_job(client, sid)["state"] == "done"

@@ -133,8 +133,9 @@ class VideoGateway:
 class FakeChat:
     """Answers [TASK:p4_plan] with five beats of Hinglish and [TASK:p4_shots] with exactly the number of shots asked for."""
 
-    def __init__(self, narration=None, extra_shots=0, plan_extra=None, shot_extra=None):
+    def __init__(self, narration=None, extra_shots=0, plan_extra=None, shot_extra=None, no_director=False):
         self.calls, self.narration, self.extra_shots, self.plan_extra, self.shot_extra = [], narration or HINDI, extra_shots, plan_extra or {}, shot_extra or {}
+        self.no_director = no_director
 
     def count(self, task):
         return sum(1 for c in self.calls if c["task"] == task)
@@ -152,6 +153,12 @@ class FakeChat:
             n = int(re.search(r"EXACTLY (\d+) shots", system).group(1)) + self.extra_shots
             body = {"shots": [{"prompt": f"The courier stops and looks down at a wallet on the wet road, shot {i + 1}.", "still": f"A courier stands over a dropped wallet on a wet road at night, orange light, frame {i + 1}.", "camera": ["slow push in", "static", "pan left", "close-up"][i % 4], "character": i % 2 == 0,
                                "continues": i % 3 == 1, "setting": "", **self.shot_extra} for i in range(n)]}
+        elif task == "p4_shotlist":
+            if getattr(self, "no_director", False):
+                raise RuntimeError("director is down")
+            counts = [int(n) for n in re.findall(r"\[(\d+) shots\]", messages[-1]["content"])]
+            body = {"subjects": [{"name": "Pilot", "kind": "person", "visual": "An Indian air force pilot in a green flight suit and white helmet, seen from the side in a cockpit."}],
+                    "beats": [{"ideas": [{"idea": f"Idea {b + 1}.{i + 1}: a different picture", "subjects": ["Pilot"] if i == 0 else []} for i in range(n)]} for b, n in enumerate(counts)]}
         else:
             raise AssertionError("unexpected task " + task)
         return LLMResult(json.dumps(body, ensure_ascii=False))

@@ -7,7 +7,7 @@ from story import llm, settings as settings_mod
 from story.schemas import Str
 from story2.schemas import M
 
-MAX_SUBJECTS = 6
+MAX_SUBJECTS = 10
 
 
 class SubjectOut(M):
@@ -26,7 +26,7 @@ organisation, place, product, animal or software. Keep every side of a story: a 
 
 Return ONLY a JSON object: {"subjects": [{"name": "...", "kind": "person | group | machine | organisation | place | product | software | other", "visual": "..."}]}
 
-- At most 6, the most important first. Use the exact names the facts use (and the common short form, for example "Chinese J-20 stealth fighter").
+- At most 10, the most important first. Do not stop at machines: when the facts allow, also list the people who use them (pilots, crew, soldiers, engineers, leaders), the places, a period of history, and an object that proves a point. Use the exact names the facts use (and the common short form, for example "Chinese J-20 stealth fighter").
 - "visual" is English, 20 to 45 words, one concrete description an image model can draw WITHOUT knowing the story: shape, size, colours, markings, insignia, clothing, materials, the setting it is usually seen in.
   EVERY machine, vehicle, person or group MUST say whose it is by what can be seen: the national roundel or flag colours on aircraft and vehicles (for example a red and yellow star on Chinese aircraft, an orange, white and green roundel on Indian aircraft), the uniform, the logo shown only as a shape (no readable text), a software window by its layout and theme.
   Never write the subject's name inside the visual as text to be printed; describe how it looks.
