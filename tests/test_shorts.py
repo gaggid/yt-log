@@ -107,7 +107,7 @@ def test_plan_writes_beats_shots_and_a_ready_timeline(gw):
     assert [s["id"] for s in short["shots"]] == [f"s{i}" for i in range(1, len(short["shots"]) + 1)]
     assert all(s["beat"] in {b["id"] for b in short["beats"]} for s in short["shots"])
     assert sum(len(b["shot_ids"]) for b in short["beats"]) == len(short["shots"])
-    assert short["beats"][0]["sentences"][0]["tag"] == "curious"                  # the beat's voice feeling is on its first sentence
+    assert short["beats"][0]["sentences"][0]["tag"] == "neutral"                  # every beat starts neutral; the person changes a tag by hand
     assert planner.narration_problems(short["beats"]) == []
     chk = checks.run(short)
     assert [i["code"] for i in chk["issues"] if i["level"] == "block"] == ["no_voice"], chk["issues"]      # the voice is the first gate: nothing else is wrong
@@ -533,3 +533,33 @@ def test_the_shot_count_asked_for_always_clears_the_three_second_rule():
             first = min(models.HOOK_MAX_S, span / n) if (hook and n > 1) else span / n
             rest = (span - first) / (n - 1) if n > 1 else first
             assert round(max(first, rest) * 30) / 30 <= models.MAX_SHOT_S, (span, hook, n)
+
+
+def test_tones_are_valid_and_reach_the_plan_prompt_and_create_takes_them(client):
+    from shorts import tones
+    from story2 import maya
+    assert tones.DEFAULT in tones.TONES and len(tones.TONES) >= 19
+    for k, t in tones.TONES.items():
+        assert set(t["tags"]) <= set(maya.STYLE_TAGS) and t["speed"] in (0.85, 0.92, 1.0, 1.08, 1.15) and 1 <= t["energy"] <= 5, k
+    text = tones.prompt_text({"tone_id": "osint", "edge": "savage"})
+    assert "verified" in text and "Never use slurs" in text
+    assert tones.prompt_text({}).count("Friendly big brother") == 1 and "No swearing" in tones.prompt_text({})
+    base = {"pipeline": "keyframe", "kind": "idea", "text": "A courier finds a wallet with a lakh rupees in it."}
+    st = client.post("/api/shorts", json={**base, "settings": {"tone_id": "motivator", "edge": "spicy"}}).json()["settings"]
+    assert st["tone_id"] == "motivator" and st["edge"] == "spicy" and st["voice_speed"] == 1.15, "a tone brings its speed"
+    assert client.post("/api/shorts", json={**base, "settings": {"tone_id": "nope"}}).status_code == 400
+
+
+@needs_ffmpeg
+def test_a_beat_of_voice_starts_and_ends_at_silence_so_the_join_does_not_click(env):
+    import array, wave
+    from shorts import stitch
+    src = env / "take.wav"
+    with wave.open(str(src), "wb") as w:                                   # a tone that starts at full level, like a take trimmed right at the word
+        w.setnchannels(1), w.setsampwidth(2), w.setframerate(24000)
+        w.writeframes(array.array("h", [int(20000 * (1 if (i // 20) % 2 else -1)) for i in range(24000)]).tobytes())
+    out = env / "beat.wav"
+    stitch.beat_audio(src, 1.0, 1.5, out)
+    with wave.open(str(out)) as w:
+        x = array.array("h"); x.frombytes(w.readframes(w.getnframes()))
+    assert abs(x[0]) < 600 and abs(x[-1]) < 600 and max(abs(v) for v in x[5000:6000]) > 15000, "silent at both ends, untouched in the middle"

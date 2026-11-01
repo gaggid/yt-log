@@ -22,6 +22,8 @@ DEFAULT_SETTINGS = {
     "size": "704x1280",                # the sharper 5B size (less grain); 480x832 is the quick draft
     "steps": None,                    # None = the model's final-quality default (shorts/pipelines.py)
     "size_14b": "480x832",            # keyframe pipeline picture size: 480x832 | 720x1280 (about 2.3x slower)
+    "tone_id": "bigbro",              # narration tone or persona (shorts/tones.py)
+    "edge": "clean",                  # clean | spicy | savage: how rough the language may get when the script calls for it
     "voice_speed": 1.0,               # narration speed sent to the voice (0.8 - 1.3); the words asked for scale with it
     "speed_lora": False,              # keyframe pipeline: Wan 14B speed LoRA (4 steps, about 5x faster, less fine detail); off = full quality ("always final")
     "chain": True,                    # quick pipeline: a shot marked "continues" starts from the last frame of the one before

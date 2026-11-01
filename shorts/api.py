@@ -16,7 +16,7 @@ from story3 import store as media
 from story3.voice import MediaError
 
 from characters import store as cstore, studio_edit
-from . import auto, cast, checks, clips, formats, frames, languages, looks, models, motion, pipelines as P, planner, remix, stitch, store, subjects as subj, timeline, voice as svoice, wan
+from . import auto, cast, checks, clips, formats, frames, languages, looks, tones, models, motion, pipelines as P, planner, remix, stitch, store, subjects as subj, timeline, voice as svoice, wan
 
 router = APIRouter(prefix="/api/shorts")
 MAX_UPLOAD = 12 * 1024 * 1024
@@ -72,7 +72,7 @@ async def options():
         have = [m in ids for m in p["models"]] if listed else []
         pipes[k] = {"label": p["label"], "about": p["about"], "models": p["models"], "available": (all(have) if listed else None),
                     "missing": [m for m, h in zip(p["models"], have) if not h] if listed else []}
-    return {"pipelines": pipes, "voices": voices.public(), "image_modes": IMAGE_MODES, "visual_styles": looks.public(), "languages": languages.public(), "image_models": [{"id": k, "label": v["label"], "default": v["default"], "licence": v["licence"]["status"]} for k, v in providers.PROVIDERS.items()], "sizes": SIZES, "gateway_video_models": sorted(i for i in ids if i), "tags": list(maya.STYLE_TAGS),
+    return {"pipelines": pipes, "voices": voices.public(), "image_modes": IMAGE_MODES, "visual_styles": looks.public(), "languages": languages.public(), "tones": tones.public(), "image_models": [{"id": k, "label": v["label"], "default": v["default"], "licence": v["licence"]["status"]} for k, v in providers.PROVIDERS.items()], "sizes": SIZES, "gateway_video_models": sorted(i for i in ids if i), "tags": list(maya.STYLE_TAGS),
             "limits": {"target_s": models.TARGET_S, "max_shot_s": models.MAX_SHOT_S}}
 
 
@@ -122,6 +122,10 @@ async def create(body: CreateReq):
     st = {k: v for k, v in (body.settings or {}).items() if k in store.DEFAULT_SETTINGS or k in ("character_text", "tone")}
     if st.get("visual_style") not in (None, "", *looks.presets()):
         raise HTTPException(400, "unknown picture style")
+    if st.get("tone_id", tones.DEFAULT) not in tones.TONES or st.get("edge", tones.DEFAULT_EDGE) not in tones.EDGES:
+        raise HTTPException(400, "unknown narration tone or edge")
+    if "voice_speed" not in st and "tone_id" in st:
+        st["voice_speed"] = tones.speed_of(st)                      # a chosen tone brings its own speed; the person can still change it
     if "voice_speed" in st and not 0.8 <= float(st["voice_speed"] or 0) <= 1.3:
         raise HTTPException(400, "voice_speed is between 0.8 and 1.3")
     if st.get("size_14b") not in (None, models.SIZE_PORTRAIT, models.SIZE_14B_HD):
@@ -209,6 +213,8 @@ class SettingsReq(BaseModel):
     voice_mode: str | None = None
     language: str | None = None
     voice_speed: float | None = None
+    tone_id: str | None = None
+    edge: str | None = None
     format: str | None = None            # auto | story | documentary | explainer | comparison (shorts/formats.py)
     captions: bool | None = None
     bed: bool | None = None
@@ -254,6 +260,10 @@ async def patch_settings(short_id: str, body: SettingsReq):
         raise HTTPException(400, f"format is one of: {', '.join((formats.AUTO, *formats.FORMATS))}")
     if "voice_mode" in patch and patch["voice_mode"] not in ("narration", "none"):
         raise HTTPException(400, "voice_mode is one of: narration, none")
+    if "tone_id" in patch and patch["tone_id"] not in tones.TONES:
+        raise HTTPException(400, "unknown narration tone")
+    if "edge" in patch and patch["edge"] not in tones.EDGES:
+        raise HTTPException(400, "edge is one of: " + ", ".join(tones.EDGES))
     if "voice_speed" in patch and not 0.8 <= (patch["voice_speed"] or 0) <= 1.3:
         raise HTTPException(400, "voice_speed is between 0.8 and 1.3")
     if "language" in patch or "voice" in patch:

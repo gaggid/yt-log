@@ -29,7 +29,7 @@ THE NARRATION
 - The narrator speaks in the first person where it fits. {language_rule}
 - {voice_rules}
 - Never mention a book, an author, an article, a chapter or "the source". Never invent a fact that the facts below do not give.
-- "tag" is the beat's voice feeling, one of: {tags}, or "neutral". Pick the one the beat needs; a whole short is not one mood.
+- "tag": always "neutral". The producer sets voice emotion by hand later.
 
 THE LOOK (used to write every shot, so make it concrete)
 - "character": the one main person, described slot by slot with concrete values: age, build, face and hair, clothes with colours. Empty string if no person is needed, and ALWAYS empty unless the format is "story": do not invent a person for a documentary, an explainer or a comparison.

@@ -11,10 +11,12 @@ from story3.voice import MediaError
 
 from . import clips, frames, models, planner, store, timeline, voice as svoice
 
+BEAT_FADE_IN_S = 0.012              # fades on each beat of voice, so two beats join without a click
+BEAT_FADE_OUT_S = 0.02
 CAPTION_SIZE = 72
 CAPTION_MARGIN_V = 340                # captions sit in the lower third, above where the apps put their own buttons
 CAPTION_WORDS = (2, 4)                # fast pace: two to four words at a time
-VERSION = "s2"                        # part of the final video's cache key: bump when the way it is put together changes
+VERSION = "s3"                        # part of the final video's cache key: bump when the way it is put together changes
 
 
 def _ffmpeg(args: list[str], cwd: Path | None = None) -> None:
@@ -35,8 +37,10 @@ def join_segments(segs: list[Path], out: Path, work: Path) -> None:
 
 
 def beat_audio(src: Path, tempo: float, span: float, out: Path) -> None:
-    """A beat's voice at `tempo` (pitch kept), padded with silence or cut to exactly `span` seconds, 24 kHz mono."""
-    _ffmpeg(["-i", str(src), "-af", f"atempo={tempo:.4f},apad=whole_dur={span:.3f}", "-t", f"{span:.3f}", "-ar", "24000", "-ac", "1", "-c:a", "pcm_s16le", str(out)])
+    """A beat's voice at `tempo` (pitch kept), padded with silence or cut to exactly `span` seconds, 24 kHz mono. The ends are faded for a few milliseconds: a take starts on a non-zero
+    sample (and can be cut mid-wave), and the loudness step at the end lifts that step into an audible click where two beats join."""
+    fade = f"afade=t=in:st=0:d={BEAT_FADE_IN_S},afade=t=out:st={max(0.0, span - BEAT_FADE_OUT_S):.3f}:d={BEAT_FADE_OUT_S}"
+    _ffmpeg(["-i", str(src), "-af", f"atempo={tempo:.4f},apad=whole_dur={span:.3f},{fade}", "-t", f"{span:.3f}", "-ar", "24000", "-ac", "1", "-c:a", "pcm_s16le", str(out)])
 
 
 def silence(work: Path, seconds: float) -> Path:

@@ -8,7 +8,7 @@ from story2 import intake, leak, lexicon, maya, safety, svara, voices
 from story2.schemas import M
 
 from . import voice as svoice
-from . import cast, formats, languages, looks, models, prompts as P, store, subjects as subj, timeline
+from . import cast, formats, languages, looks, models, tones, prompts as P, store, subjects as subj, timeline
 
 WORDS_LO, WORDS_HI = 52, 86              # spoken words in the whole short (the prompt asks for 62 to 74; this is what is accepted)
 REC_LO, REC_HI = 62, 74                  # what the prompt asks for at the full 30 seconds
@@ -141,7 +141,7 @@ def narration_problems(beats: list[dict], profile=None, t_s: float = models.TARG
 def _beats_from(out: PlanOut, engine: str) -> list[dict]:
     beats = []
     for i, b in enumerate(out.beats, 1):
-        tag = maya.norm_tag(b.tag) if engine == "maya-tts" else ""
+        tag = maya.NEUTRAL if engine == "maya-tts" else ""                 # neutral for every beat: the person changes a tag on the screen when a beat needs one
         sents = [{"text": re.sub(r"\s+", " ", t).strip(), "tag": ""} for t in b.narration if t.strip()]
         if sents and tag:
             sents[0]["tag"] = tag
@@ -164,6 +164,7 @@ async def _plan_call(short: dict, backend, s: dict, note: str = "") -> PlanOut:
                   + cast.block(short))
     if cast.place_text(short):
         extra += f"\nThe main place is fixed by the producer: {cast.place_text(short)}"
+    extra += tones.prompt_text(short["settings"])
     if short["settings"].get("tone"):
         extra += f"\nTone: {short['settings']['tone']}"
 
