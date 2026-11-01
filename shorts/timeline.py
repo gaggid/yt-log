@@ -6,7 +6,7 @@ PACE_WPS = 148 / 60                    # spoken words per second of the voices (
 GAP_S = 0.12                           # silence between two beats
 END_HOLD_S = 0.3                       # the last picture stays a moment after the last word
 TEMPO_MIN, TEMPO_MAX = 0.9, 1.12       # how much the voice may be slowed or sped up to land on 30 s
-SAFE_SHOT_S = 2.75                     # the planner aims at this, so real voice that runs a little long still fits under the 3-second rule
+SAFE_SHOT_S = 2.5                      # the planner aims at this, so real voice that runs a little long still fits under the 3-second rule
 
 
 def words(beat: dict) -> int:
@@ -23,6 +23,19 @@ def shots_needed(span_s: float) -> int:
     by_max = max(1, -(-int(span_s * 100 + 0.5) // int(SAFE_SHOT_S * 100)))
     by_min = max(1, int(span_s / models.MIN_SHOT_S))
     return min(by_max, by_min)
+
+
+def shots_to_fit(span_s: float, hook: bool = False) -> int:
+    """The shot count that really clears the 3-second rule for a stretch of `span_s` seconds, split the way `build` splits it (a hook beat has a shorter first shot, so the rest are longer).
+    `shots_needed` stays the planner's aim; it prefers shots of at least MIN_SHOT_S and so can ask for too few. Asking again for the same count never clears the problem; this one does."""
+    n = shots_needed(span_s)
+    while n < 12:
+        first = min(models.HOOK_MAX_S, span_s / n) if (hook and n > 1) else span_s / n
+        rest = (span_s - first) / (n - 1) if n > 1 else first
+        if round(max(first, rest) * models.OUT_FPS) / models.OUT_FPS <= models.MAX_SHOT_S - 0.02:
+            break
+        n += 1
+    return n
 
 
 def silent(short: dict) -> bool:
@@ -87,7 +100,7 @@ def build(short: dict, voice: dict[str, float] | None = None) -> dict:
     for s in out_shots:
         if s["seconds"] > models.MAX_SHOT_S + 1e-6:
             bi = next(i for i, b in enumerate(beats) if b["id"] == s["beat"])
-            need[s["beat"]] = shots_needed(sp["spans"][bi])
+            need[s["beat"]] = shots_to_fit(sp["spans"][bi], hook=(bi == 0))
     if need:
         problems.append({"code": "shot_too_long", "text": "some shots would be on screen longer than " + f"{models.MAX_SHOT_S:g} seconds", "beats": need})
     if abs(total - target_s) > models.TOLERANCE_S:

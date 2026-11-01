@@ -44,6 +44,10 @@ def run(short: dict) -> dict:
             issues.append(_issue("block", p["code"], p["text"]))
     if tl["shots"] and tl["shots"][0]["seconds"] > models.HOOK_MAX_S + 1e-6:
         issues.append(_issue("warn", "hook", f"the first shot is {tl['shots'][0]['seconds']:.1f} seconds; the hook should be {models.HOOK_MAX_S:g} or less", fix="fit_shots", beats={short["beats"][0]["id"]: len(short["beats"][0]["shot_ids"]) + 1}))
+    for s in tl["shots"][1:]:
+        if s["seconds"] < models.MIN_SHOT_S - 0.05:
+            issues.append(_issue("warn", "shot_too_short", f"shot {s['id']} is only {s['seconds']:.1f} seconds; a shot should be at least {models.MIN_SHOT_S:g} (fewer, longer shots read better)"))
+            break
     cfg_model = models.TI2V if short["pipeline"] == "quick" else models.I2V
     for sh in short["shots"]:
         try:

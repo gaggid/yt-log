@@ -523,3 +523,13 @@ def test_narration_speed_scales_the_words_asked_for_and_marks_old_voice_old(clie
     sid = short["id"]
     assert client.patch(f"/api/shorts/{sid}/settings", json={"voice_speed": 3}).status_code == 400
     assert client.patch(f"/api/shorts/{sid}/settings", json={"voice_speed": 1.08}).json()["settings"]["voice_speed"] == 1.08
+
+
+def test_the_shot_count_asked_for_always_clears_the_three_second_rule():
+    from shorts import timeline
+    for hook in (False, True):
+        for span in [x / 10 for x in range(30, 160)]:
+            n = timeline.shots_to_fit(span, hook)
+            first = min(models.HOOK_MAX_S, span / n) if (hook and n > 1) else span / n
+            rest = (span - first) / (n - 1) if n > 1 else first
+            assert round(max(first, rest) * 30) / 30 <= models.MAX_SHOT_S, (span, hook, n)
