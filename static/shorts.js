@@ -9,6 +9,9 @@ css.textContent = `
 .sh-shot{display:grid;grid-template-columns:104px 1fr;gap:12px;padding:10px 0;border-top:1px solid var(--line)}
 .sh-thumb{width:104px;aspect-ratio:9/16;background:var(--bg);border:1px solid var(--line);border-radius:8px;overflow:hidden;display:grid;place-items:center;color:var(--mute);font-size:11px;text-align:center}
 .sh-thumb video,.sh-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.sh-wrap{position:relative}
+.sh-busy{position:absolute;top:5px;right:5px;width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.92);display:grid;place-items:center;box-shadow:0 1px 4px rgba(0,0,0,.3);color:var(--accent,#4f46e5);z-index:2}
+.sh-busy .spin{width:13px;height:13px}
 .sh-keys{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}
 .sh-key{border:1px solid var(--line);border-radius:10px;padding:6px;background:var(--panel);font-size:12px}
 .sh-key img{width:100%;aspect-ratio:9/16;object-fit:cover;border-radius:6px;display:block;background:var(--bg)}
@@ -120,6 +123,10 @@ async function upload(path, file, btn) {
   await refresh(true);
 }
 const pick = (accept, cb) => { const i = document.createElement('input'); i.type = 'file'; i.accept = accept; i.onchange = () => i.files[0] && cb(i.files[0]); i.click(); };
+
+const making = list => (list || []).some(a => a.status === 'running' || a.status === 'queued');
+const busyDot = (on, what) => on ? `<span class="sh-busy" title="${esc(what)} is being made in the background"><span class="spin"></span></span>` : '';
+const busyTxt = (on, what) => on ? `<span class="mute small"><span class="spin"></span> ${esc(what)}…</span>` : '';
 
 function jobBox() {
   const j = S.job || {};
@@ -343,9 +350,12 @@ function keyframesView() {
     <button class="small ${s.keyframes_confirmed ? '' : 'primary'}" id="b-keys-ok">${s.keyframes_confirmed ? 'Confirmed ✓ (undo)' : 'Pictures are good'}</button></div>
     <p class="mute small">One picture per shot, drawn from the picture prompt under it (edit the prompt, then press Again). Your own pictures are used as they are. Look at them now: animating is the long wait.</p>
     <div class="sh-keys">${s.shots.map(x => { const k = x.keyframes.find(y => y.id === x.keyframe) || x.keyframes.filter(y => y.status === 'done').pop();
-      return `<div class="sh-key"><div class="mute">${esc(x.id)} · ${x.seconds}s · ${esc(x.begins)}</div>${k && k.url ? `<img src="${esc(k.url)}" loading="lazy" ${x.keyframe ? '' : 'style="opacity:.55"'}>${x.keyframe ? '' : '<div class="warn small">old picture: the prompt changed after it was drawn. Press Again, or Make clips will draw it first.</div>'}` : `<div class="sh-thumb" style="width:100%">${x.keyframes.some(y => y.status === 'failed') ? 'failed' : 'not made'}</div>`}
+      const kb = making(x.keyframes);
+      return `<div class="sh-key"><div class="mute row">${esc(x.id)} · ${x.seconds}s · ${esc(x.begins)}<span class="sp"></span>${busyTxt(kb, 'drawing')}</div><div class="sh-wrap">${busyDot(kb, 'This picture')}${k && k.url ? `<img src="${esc(k.url)}" loading="lazy" ${x.keyframe ? '' : 'style="opacity:.55"'}>${x.keyframe ? '' : '<div class="warn small">old picture: the prompt changed after it was drawn. Press Again, or Make clips will draw it first.</div>'}` : `<div class="sh-thumb" style="width:100%">${x.keyframes.some(y => y.status === 'failed') ? 'failed' : 'not made'}</div>`}</div>
         <textarea data-still="${x.id}" style="min-height:70px;font-size:12px;width:100%" ${x.begins === 'upload' || x.begins === 'anchor' ? 'disabled title="This shot uses your own picture"' : ''}>${esc(x.still || x.prompt)}</textarea>
         ${k && k.url ? `<div class="row" style="margin-top:4px"><input data-fix="${x.id}" placeholder="Change one thing…" style="flex:1;font-size:12px"><button class="small" data-fixgo="${x.id}">Fix</button></div>` : ''}
+        <label class="row small" style="margin-top:4px;gap:5px"><input type="checkbox" data-neg-on="${x.id}" ${x.avoid ? 'checked' : ''}> negative prompt</label>
+        <input data-neg="${x.id}" value="${esc(x.avoid || '')}" placeholder="Keep out: e.g. text, extra jets, people" style="width:100%;font-size:12px" ${x.avoid ? '' : 'disabled'}>
         <div class="row" style="margin-top:4px"><button class="small" data-key="${x.id}">Again</button><button class="small" data-up="${x.id}">My picture</button></div></div>`; }).join('')}</div></div>`;
 }
 
@@ -361,7 +371,7 @@ function beatsView() {
     const shots = s.shots.filter(x => x.beat === b.id);
     return `<div class="sh-beat"><div class="row"><b>${bi + 1}. ${esc(b.name)}</b><span class="mute small">${esc(b.feeling || '')}</span><span class="sp"></span>
         <select data-tag="${b.id}" class="small" style="width:auto">${['', 'neutral', ...(window._shTags || [])].map(t => `<option value="${t}" ${t === (b.tag || '') ? 'selected' : ''}>${t || 'voice: none'}</option>`).join('')}</select>
-        <button class="small" data-voice="${b.id}">${take ? 'Voice again' : 'Make the voice'}</button></div>
+        ${busyTxt(making(v.attempts), 'making the voice')}<button class="small" data-voice="${b.id}">${take ? 'Voice again' : 'Make the voice'}</button></div>
       <textarea data-beat="${b.id}">${esc(b.sentences.map(x => x.text).join('\n'))}</textarea>
       <div class="row small mt-s">${take ? `<audio controls src="${esc(take.url)}" style="height:30px"></audio><span class="mute">${take.seconds}s spoken</span>` : '<span class="mute">no voice yet</span>'}</div>
       ${shots.map(x => shotView(x)).join('')}</div>`;
@@ -374,7 +384,8 @@ function shotView(x) {
   const needsKey = S.keyframes_on && !key;
   const media = clip && clip.url ? vid(clip.url, 'muted loop') : key && key.url ? `<img src="${esc(key.url)}">` : (x.clips.some(c => c.status === 'failed') ? 'failed' : 'no clip yet');
   const failed = x.clips.filter(c => c.status === 'failed').pop();
-  return `<div class="sh-shot"><div class="sh-thumb">${media}</div><div>
+  const cb = making(x.clips), kb = making(x.keyframes);
+  return `<div class="sh-shot"><div class="sh-wrap"><div class="sh-thumb">${media}</div>${busyDot(cb || kb, cb ? 'This clip' : 'The start picture')}</div><div>
     <div class="row small"><b>${esc(x.id)}</b><span class="mute">${x.seconds}s · starts: ${esc(x.begins)}</span>${x.old_clip ? badge('warn', 'clip is old') : ''}<span class="sp"></span>
       <label><input type="checkbox" data-shot-flag="character" data-id="${x.id}" ${x.character ? 'checked' : ''}> shows the main character</label>
       <label><input type="checkbox" data-shot-flag="continues" data-id="${x.id}" ${x.continues ? 'checked' : ''}> continues</label>
@@ -383,7 +394,8 @@ function shotView(x) {
     <textarea data-shot="${x.id}" style="min-height:64px;font-size:13px">${esc(x.prompt)}</textarea>
     <div class="row small mt-s"><label class="row">Camera <input data-shot-cam="${x.id}" value="${esc(x.camera)}" style="width:150px"></label>
       <button class="small" data-clip="${x.id}" ${S.voice_gate ? `disabled title="${esc(S.voice_gate)}"` : needsKey ? 'disabled title="Draw the start picture first (Again button above)"' : ''}>${clip ? 'Make again' : 'Make this clip'}</button><button class="small" data-up="${x.id}">My picture</button>
-      ${needsKey ? `<span class="mute">↑ draw start picture first</span>` : ''}
+      ${busyTxt(cb, 'making the clip')}${busyTxt(kb && !cb, 'drawing the start picture')}
+      ${needsKey && !kb ? `<span class="mute">↑ draw start picture first</span>` : ''}
       ${clip ? `<label><input type="checkbox" data-approve="${clip.id}" ${clip.approved ? 'checked' : ''}> keep this one</label>` : ''}
       ${failed && !clip ? `<span class="err">${esc(failed.error)}</span>` : ''}</div></div></div>`;
 }
@@ -502,7 +514,14 @@ function wire() {
   all('[data-clip]').forEach(e => e.onclick = () => post(e, '/clips', {shot_ids: [e.dataset.clip], only_missing: false}, 'Making the clip'));
   on('#b-clips-all', b => post(b, '/clips', {only_missing: false}, 'Making all clips'));
   on('#b-clips-missing', b => post(b, '/clips', {only_missing: true}, 'Making missing clips'));
-  all('[data-key]').forEach(e => e.onclick = () => post(e, '/keyframes', {shot_ids: [e.dataset.key], only_missing: false}, 'Making the keyframe'));
+  all('[data-neg-on]').forEach(e => e.onchange = () => { const t = document.querySelector(`[data-neg="${e.dataset.negOn}"]`); t.disabled = !e.checked; if (e.checked) t.focus(); });
+  all('[data-key]').forEach(e => e.onclick = async () => {
+    const id = e.dataset.key, on = document.querySelector(`[data-neg-on="${id}"]`), t = document.querySelector(`[data-neg="${id}"]`);
+    const want = on && on.checked && t ? t.value.trim() : '';
+    const sh = S.shots.find(x => x.id === id);
+    if (sh && (sh.avoid || '') !== want) { try { await call('/' + SID + '/shots/' + id, {method: 'PATCH', json: {avoid: want}}); } catch (err) { toast(err.message, {bad: true}); return; } }
+    post(e, '/keyframes', {shot_ids: [id], only_missing: false}, 'Making the keyframe');
+  });
   all('[data-up]').forEach(e => e.onclick = () => pick('image/*', f => upload('/images/shot/' + e.dataset.up, f, e)));
   all('[data-approve]').forEach(e => e.onchange = async () => { await call('/item/' + e.dataset.approve + '/approve', {method: 'POST', json: {confirmed: e.checked}}); refresh(true); });
   // remix

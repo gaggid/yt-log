@@ -22,6 +22,17 @@ def keep_out(short: dict) -> str:
     return KEEP_OUT.replace("still photograph", "still illustration") if looks.painted(short) else KEEP_OUT
 
 
+def avoid_items(shot: dict) -> list[str]:
+    """What the person wants kept out of this shot's start picture (the optional negative prompt box), as short items."""
+    return [x.strip(" .") for x in re.split(r"[,;\n]+", str(shot.get("avoid") or "")) if x.strip(" .")][:12]
+
+
+def avoid_line(shot: dict) -> str:
+    """The negative prompt as the image model reads it: Qwen ignores a negative field, so it is said in the prompt in the same "No x, no y." form as KEEP_OUT."""
+    items = avoid_items(shot)
+    return ("No " + ", no ".join(items) + ".") if items else ""
+
+
 def model_of(short: dict) -> str:
     return short["settings"].get("image_model") or DEFAULT_MODEL
 
@@ -63,6 +74,8 @@ def prompt(short: dict, shot: dict) -> str:
         parts.append(looks.of(short, plan.get("look", "")).rstrip(". ") + ".")
     if shot.get("avatar"):
         parts.append(AVATAR_FRAMING)
+    if avoid_line(shot):
+        parts.append(avoid_line(shot))
     parts.append(keep_out(short))
     return " ".join(parts)[:3900]
 
@@ -71,7 +84,7 @@ def request(short: dict, shot: dict, attempt: int) -> dict:
     model = model_of(short)
     body = {"model": model, "prompt": prompt(short, shot), "size": SIZE, "n": 1, "seed": P.seed_for(short, shot, attempt), "response_format": "b64_json"}
     if providers.PROVIDERS.get(model, {}).get("negative_prompt"):          # FLUX runs with guidance and honours one; Qwen (cfg 1) ignores it, so only the sentence in the prompt counts
-        body["negative_prompt"] = P.NEGATIVE
+        body["negative_prompt"] = ", ".join([P.NEGATIVE, *avoid_items(shot)])
     return body
 
 
@@ -118,6 +131,8 @@ def edit_prompt(short: dict, shot: dict, refs: dict) -> str:
         parts.append("Ignore any clothing, colour or outfit words in the photograph description above — the person's exact appearance comes from their picture only.")
     if shot.get("avatar"):
         parts.append(AVATAR_FRAMING)
+    if avoid_line(shot):
+        parts.append(avoid_line(shot))
     parts.append(keep_out(short))
     return " ".join(parts)[:3900]
 

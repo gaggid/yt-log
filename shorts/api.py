@@ -359,6 +359,7 @@ class ShotPatch(BaseModel):
     character: bool | None = None
     continues: bool | None = None
     setting: str | None = None
+    avoid: str | None = None                       # the optional negative prompt of the start picture (shorts/stills.py)
     avatar: bool | None = None                     # a talking avatar shot (InfiniteTalk): its picture speaks the voice
 
 

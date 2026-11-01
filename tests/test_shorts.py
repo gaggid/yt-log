@@ -657,3 +657,30 @@ def test_api_rethink_endpoint_runs_the_job(client):
     assert wait_job(client, sid)["state"] == "done"
     assert client.post(f"/api/shorts/{sid}/rethink").status_code == 200
     assert wait_job(client, sid)["state"] == "done"
+
+
+def test_negative_prompt_of_a_start_picture_reaches_the_prompt_and_makes_the_old_picture_old(gw):
+    from shorts import clips as sclips, stills
+    short = planned("keyframe")
+    sh = short["shots"][0]
+    before = sclips.keyframe_plan(short, sh)["hash"]
+    plain = stills.prompt(short, sh)
+    assert "No extra jets" not in plain
+    sh["avoid"] = "extra jets, text on the wing;\nclouds"
+    out = stills.prompt(short, sh)
+    assert "No extra jets, no text on the wing, no clouds." in out and out.rstrip().endswith(stills.keep_out(short))
+    assert sclips.keyframe_plan(short, sh)["hash"] != before, "a new negative prompt makes the drawn picture old, so Again draws it"
+    sh["avoid"] = ""
+    assert stills.prompt(short, sh) == plain
+
+
+def test_negative_prompt_is_in_the_request_the_image_gateway_receives(gw):
+    short = planned("keyframe")
+    sid = short["id"]
+    short["shots"][0]["avoid"] = "extra jets, text on the wing"
+    store.save(short)
+    run(svoice.make(sid, s=S, key="k"))
+    kf = run(clips.make_keyframes(sid, [short["shots"][0]["id"], short["shots"][1]["id"]], s=S, key="k"))
+    assert kf["made"] == 2 and len(gw.images) == 2
+    assert "No extra jets, no text on the wing." in gw.images[0]["prompt"] and "extra jets" not in gw.images[1]["prompt"], "only the shot that has a negative prompt gets it"
+    assert short["shots"][0]["id"] and clips.chosen_keyframe(store.get(sid), store.get(sid)["shots"][0]), "the picture drawn with it counts as current"
