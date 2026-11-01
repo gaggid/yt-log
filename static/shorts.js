@@ -430,12 +430,13 @@ function remixView() {
     <div class="row"><input id="rx-url" placeholder="YouTube or Instagram link, https://..." value="${esc(r.url || '')}" style="flex:1;min-width:240px"><button class="primary" id="rx-fetch">Fetch the video</button><button id="rx-upload" class="small">or upload a file</button></div>
     ${r.source ? `<div class="mt-s small">${esc((r.info || {}).title || '')} · ${mm((r.info || {}).duration_s || 0)} long · ${(r.cuts || []).length} cuts found</div>
       <div class="mt-s">${vid(r.source_url, 'style="max-height:260px"')}</div>
-      <h4>Pick the 30 seconds</h4><div class="sh-sugg small">Suggested (the fastest-cut stretches): ${sugg || '<span class="mute">none found</span>'}</div>
+      ${(r.info && r.info.duration_s < 30) ? `<div class="row mt-s"><label class="f">Fit to 9:16<select id="rx-fit"><option value="crop" ${r.fit === 'crop' ? 'selected' : ''}>Crop the sides</option><option value="pad" ${r.fit === 'pad' ? 'selected' : ''}>Keep it all, black bars</option></select></label></div>
+      ${r.driving.length ? '<div class="mt-s small ok">Whole video ready as the motion guide.</div>' : ''}` : `<h4>Pick the 30 seconds</h4><div class="sh-sugg small">Suggested (the fastest-cut stretches): ${sugg || '<span class="mute">none found</span>'}</div>
       <div class="row mt-s"><label class="f">Start (seconds)<input type="number" id="rx-start" value="${r.start}" min="0" step="1"></label>
         <label class="f">Fit to 9:16<select id="rx-fit"><option value="crop" ${r.fit === 'crop' ? 'selected' : ''}>Crop the sides</option><option value="pad" ${r.fit === 'pad' ? 'selected' : ''}>Keep it all, black bars</option></select></label>
         <label class="f">Requests<select id="rx-seg"><option value="1" ${r.segments === 1 ? 'selected' : ''}>One (30 s)</option><option value="2" ${r.segments === 2 ? 'selected' : ''}>Two (15 s each)</option></select></label>
         <button id="rx-window" class="primary">Cut this window</button></div>
-      ${r.driving.length ? `<div class="mt-s small ok">Window ready: from ${mm(r.start)}, ${r.window_cuts ? r.window_cuts.length : 0} cuts. ${(r.slow || []).length ? `<span class="warn">${r.slow.length} stretch(es) over three seconds without a cut.</span>` : 'Fast-cut all the way.'}</div>` : ''}` : ''}
+      ${r.driving.length ? `<div class="mt-s small ok">Window ready: from ${mm(r.start)}, ${r.window_cuts ? r.window_cuts.length : 0} cuts. ${(r.slow || []).length ? '<span class="warn">' + r.slow.length + ' stretch(es) over three seconds without a cut.</span>' : 'Fast-cut all the way.'}</div>` : ''}`}` : ''}
     <p class="mute small">The character in your picture performs the motion of this video. The video's own background is not kept: the background comes from your picture and the description below.</p></div>
     <div class="card pad mt"><h2>2. The character</h2>
       ${rxCharacter(r)}<div class="row mt-s">${!r.character_id && s.images.anchor ? `<img src="/api/shorts/file/${s.id}/${esc(s.images.anchor)}" style="width:90px;border-radius:8px">` : ''}${r.character_id ? '' : `<button id="st-anchor2">${s.images.anchor ? 'Change the picture' : 'or upload a picture of your own'}</button>`}</div>
@@ -578,6 +579,7 @@ function wire() {
   const win = start => act(null, async () => { S = await call('/' + SID + '/remix/window', {method: 'POST', json: {start, fit: q('#rx-fit').value, segments: +q('#rx-seg').value}}); render(); return true; }, 'Window ready');
   on('#rx-window', () => win(+q('#rx-start').value || 0));
   all('[data-sugg]').forEach(e => e.onclick = () => win(+e.dataset.sugg));
+  { const fitEl = q('#rx-fit'); if (fitEl && S.remix && S.remix.info && S.remix.info.duration_s < 30) fitEl.onchange = () => win(0); }
   const rx = (id, key, conv = v => v) => { const e = q(id); if (e) e.onchange = () => patch('/remix', {[key]: conv(e.type === 'checkbox' ? e.checked : e.value)}); };
   rx('#rx-char', 'character_id'); rx('#rx-look', 'look_id');
   rx('#rx-prompt', 'prompt'); rx('#rx-place', 'place_id'); on('#rx-auto', () => patch('/remix', {prompt: S.remix.auto_prompt})); rx('#rx-motion', 'motion_prompt'); rx('#rx-pose', 'pose_strength', v => +v); rx('#rx-audio', 'audio'); rx('#rx-script', 'script'); rx('#rx-r1', 'rights_video'); rx('#rx-r2', 'rights_character');
