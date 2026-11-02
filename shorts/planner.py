@@ -399,6 +399,100 @@ async def rewrite_script(short_id: str, instruction: str, backend, s: dict | Non
     return sync_timing(short_id)
 
 
+async def insert_beat(short_id: str, after_beat_id: str, topic: str, backend, s: dict | None = None) -> dict:
+    """Insert a brand-new beat after `after_beat_id` without touching any existing beats.
+
+    Existing voice takes and clips stay valid (their hashes are unchanged).
+    The new beat gets its own shots, still prompts and motion — it will need voice separately.
+    Returns the updated short (sync_timing result)."""
+    import hashlib, time as _time
+    s = s or settings_mod.get()
+    short = store.get(short_id)
+    _check_narration(short)
+
+    # Write the sentences for the new beat
+    sentences = await scriptmod.write_beat_for_gap(short, after_beat_id, topic, backend, s)
+    if not sentences:
+        raise store.ShortError("the model could not write the new beat — try again")
+
+    # Build the new beat
+    new_id = "b" + hashlib.sha1(f"{short_id}{after_beat_id}{topic}{_time.time()}".encode()).hexdigest()[:6]
+    new_beat: dict = {
+        "id": new_id,
+        "name": topic[:50],
+        "job": "escalate",
+        "feeling": "curious",
+        "sentences": sentences,
+        "shot_ids": [],
+        "ideas": [],
+    }
+    safety.guard_tags(new_beat["sentences"])
+
+    # Insert after the named beat
+    beats = short["beats"]
+    pos = next((i for i, b in enumerate(beats) if b["id"] == after_beat_id), len(beats) - 1)
+    beats.insert(pos + 1, new_beat)
+
+    # Plan shots for the new beat (1–2 shots, same pattern as make_plan)
+    t_s = target_s(short)
+    n_shots = timeline.shots_needed(t_s / max(1, len(beats)))
+    before_shot = short["shots"][-1] if short["shots"] else None
+    shots = await _shots_call(short, new_beat, max(1, min(n_shots, 2)), backend, s, before_shot)
+    next_id = len(short["shots"]) + 1
+    for sh in shots:
+        sh["id"] = f"s{next_id}"
+        sh["beat"] = new_beat["id"]
+        short["shots"].append(sh)
+        next_id += 1
+    new_beat["shot_ids"] = [sh["id"] for sh in shots]
+
+    # Write still prompts for the new shots
+    await stillwriter.write_beat(short, new_beat, shots, backend, s)
+    await motionwriter.write_beat(short, new_beat, shots, backend, s)
+
+    store.save(short)
+    return sync_timing(short_id)
+
+
+async def trim_narration(short_id: str, backend, s: dict | None = None) -> str:
+    """Shorten the narration to fit the word budget by rewriting the longest beat(s).
+
+    Called when the checks show "the narration is N words; it must be between lo and hi".
+    Only the over-budget beats are rewritten; all other beats and their voice/clips stay valid."""
+    s = s or settings_mod.get()
+    short = store.get(short_id)
+    _check_narration(short)
+    t_s = target_s(short)
+    from story2 import voices as v2
+    speed = v2.current({"tts": short.get("settings", {}).get("voice", {})}).get("speed", 1.0)
+    _, hi, _, _ = word_limits(t_s, speed)
+    total = sum(len(s_["text"].split()) for b in short["beats"] for s_ in b["sentences"])
+    if total <= hi:
+        return "narration is already within the word budget"
+    over = total - hi
+    # Trim the longest beats first
+    by_len = sorted(short["beats"], key=lambda b: sum(len(s_["text"].split()) for s_ in b["sentences"]), reverse=True)
+    trimmed = 0
+    for beat in by_len:
+        if trimmed >= over:
+            break
+        beat_words = sum(len(s_["text"].split()) for s_ in beat["sentences"])
+        target = max(3, beat_words - (over - trimmed) - 1)
+        note = f"Shorten this beat from {beat_words} words to {target} words. Keep the key claim. Cut filler, not substance."
+        sents = await scriptmod.rewrite_beat(short, beat["id"], note, backend, s)
+        short = store.get(short_id)
+        b = next(b for b in short["beats"] if b["id"] == beat["id"])
+        new_words = sum(len(s_["text"].split()) for s_ in sents)
+        trimmed += beat_words - new_words
+        b["sentences"] = sents
+        safety.guard_tags(b["sentences"])
+        store.save(short)
+        short = store.get(short_id)
+    sync_timing(short_id)
+    new_total = sum(len(s_["text"].split()) for b in short["beats"] for s_ in b["sentences"])
+    return f"trimmed from {total} to {new_total} words"
+
+
 async def rewrite_pictures(short_id: str, backend, s: dict | None = None, progress=None, shot_id: str = "", note: str = "") -> str:
     """Write the picture prompts again: of one shot (with the producer's instruction) or of every shot. The shots, the narration and the timing are not touched; a changed prompt makes its start picture old."""
     s = s or settings_mod.get()

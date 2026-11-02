@@ -8,7 +8,7 @@ import re
 
 from story import llm, settings as settings_mod
 from story.schemas import Str, StrList
-from story2 import lexicon, maya, svara
+from story2 import lexicon, maya, svara, voices
 from story2.schemas import M
 
 from . import languages, timeline, tones
@@ -406,6 +406,63 @@ async def punch_up(short: dict, bible: BibleOut, beats: list[dict], t_s: float, 
         if out.score >= PASS_SCORE:
             break
     return beats, report
+
+
+async def write_beat_for_gap(short: dict, after_beat_id: str, topic: str, backend, s: dict) -> list[dict]:
+    """Write sentences for a brand-new beat to insert after `after_beat_id`.
+
+    The model sees the beat before, the beat after, and the full brief so the new beat
+    flows naturally between its neighbours. Returns a list of sentence dicts ready to
+    drop into short["beats"]. Returns [] on any failure so the caller can decide."""
+    beats = short["beats"]
+    pos = next((i for i, b in enumerate(beats) if b["id"] == after_beat_id), len(beats) - 1)
+    before_beat = beats[pos]
+    after_beat_obj = beats[pos + 1] if pos + 1 < len(beats) else None
+
+    t_s = float(short.get("settings", {}).get("target_s") or 30)
+    # New beat gets a proportional share — roughly one beat's worth of seconds
+    avg_s = t_s / max(1, len(beats) + 1)
+    lo = max(3, round(seconds_to_words(avg_s, t_s) * 0.75))
+    hi = max(lo + 2, round(seconds_to_words(avg_s, t_s) * 1.25))
+
+    engine = voices.current({"tts": short.get("settings", {}).get("voice", {})}).get("engine", "maya-tts")
+    bible = stored_bible(short)
+    language = languages.of(short.get("settings", {}))
+    prev_last = before_beat["sentences"][-1]["text"] if before_beat.get("sentences") else ""
+
+    caller = llm.JsonCaller(backend, s)
+
+    def check(out: DraftOut) -> None:
+        if caller.last_attempt:
+            return
+        sents = clean_sentences(out.sentences, engine)
+        probs = draft_problems(sents, lo, hi, language, prev_last)
+        if probs:
+            raise ValueError("; ".join(probs[:3]))
+
+    before_text = " ".join(s["text"] for s in before_beat.get("sentences", []))
+    after_text = (" ".join(s["text"] for s in after_beat_obj.get("sentences", [])) if after_beat_obj else "")
+
+    system = (DRAFT
+              .replace("{base}", _base(short, t_s))
+              .replace("{tags}", TAGS)
+              .replace("{words}", f"This beat is about {avg_s:.1f} seconds of speech: between {lo} and {hi} words."))
+
+    lines = [
+        f"THE STORY BIBLE:\n{_bible_text(bible)}",
+        f"THE BEAT BEFORE THIS NEW BEAT:\n{before_text}",
+        f"THE NEW BEAT TO WRITE:\nJob: escalate — makes it stranger or more concrete than the beat before\nFeeling: curious\nIt must carry: {topic}",
+    ]
+    if after_text:
+        lines.append(f"THE BEAT AFTER THIS NEW BEAT (do not spoil or repeat it):\n{after_text}")
+    lines.append(f"THE PRODUCER'S INSTRUCTION: {topic.strip()}")
+    lines.append(f"Write exactly one beat ({lo} to {hi} words). Return ONLY the JSON object.")
+
+    try:
+        res = await caller.call(system, "\n\n".join(lines), DraftOut, validate=check)
+        return clean_sentences(res.value.sentences, engine)
+    except llm.LLMError:
+        return []
 
 
 async def write(short: dict, backend, s: dict | None = None, progress=None) -> dict:

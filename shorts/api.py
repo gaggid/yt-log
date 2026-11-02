@@ -464,6 +464,14 @@ async def rethink(short_id: str):
     return _start(short_id, "short_rethink", lambda progress: planner.reshoot_all(short_id, be, s, progress))
 
 
+@router.post("/{short_id}/trim_narration")
+async def trim_narration(short_id: str):
+    """Shorten the narration to fit the word budget by rewriting the longest beat(s). Does not touch voice or clips."""
+    _get(short_id)
+    s, be = _backend()
+    return _start(short_id, "short_trim", lambda progress: planner.trim_narration(short_id, be, s))
+
+
 @router.post("/{short_id}/fix_similar")
 async def fix_similar(short_id: str):
     """Rewrite the picture prompt of the second shot in each near-duplicate pair so the pictures differ."""

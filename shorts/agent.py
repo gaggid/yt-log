@@ -75,6 +75,44 @@ def _record(decisions: list[dict], run_id: str, plan_id: str, story_type: str, c
     )
 
 
+def _actions_summary(actions: list) -> str:
+    """One-line summary of structured actions for the decisions timeline."""
+    if not actions:
+        return "No specific actions."
+    parts = []
+    for a in actions:
+        if a.type == "insert_beat":
+            parts.append(f"Insert beat after {a.after_beat}: \"{a.topic[:60]}\"")
+        elif a.type == "rewrite_beat":
+            parts.append(f"Rewrite {a.beat_id}: {a.instruction[:60]}")
+        elif a.type == "trim_beat":
+            parts.append(f"Trim {a.beat_id} to {a.target_words} words")
+        elif a.type == "rewrite_script":
+            parts.append(f"Rewrite script: {a.instruction[:60]}")
+    return "; ".join(parts)
+
+
+async def _dispatch_narration_actions(short_id: str, actions: list, backend, s: dict, progress) -> None:
+    """Execute each structured action in order. Each is surgical — existing beats/voice/clips untouched."""
+    if not actions:
+        return
+    for action in actions:
+        if action.type == "insert_beat" and action.after_beat and action.topic:
+            progress(None, None, f"inserting beat after {action.after_beat}")
+            await planner.insert_beat(short_id, action.after_beat, action.topic, backend, s)
+        elif action.type == "rewrite_beat" and action.beat_id and action.instruction:
+            progress(None, None, f"rewriting beat {action.beat_id}")
+            await planner.rewrite_beat(short_id, action.beat_id, action.instruction, backend, s)
+        elif action.type == "trim_beat" and action.beat_id:
+            progress(None, None, f"trimming beat {action.beat_id}")
+            note = f"Shorten to {action.target_words} words, keep the core message." if action.target_words else "Shorten this beat."
+            await planner.rewrite_beat(short_id, action.beat_id, note, backend, s)
+        elif action.type == "rewrite_script" and action.instruction:
+            progress(None, None, "rewriting full script")
+            await planner.rewrite_script(short_id, action.instruction, backend, s, _sub(progress, "rewrite script"))
+        # unknown types are silently skipped
+
+
 async def run(short_id: str, backend, s: dict, progress, key: str = "") -> dict:
     """Run the full shorts pipeline with agentic checkpoints.
     Returns {"decisions": [...], "notes": [...], "stopped": str | None}."""
@@ -113,12 +151,12 @@ async def run(short_id: str, backend, s: dict, progress, key: str = "") -> dict:
                     "Stopped — score did not improve between retries.")
             notes.append("Narration: score did not improve after rewrite; review the brief and edit manually.")
             break
-        # Rewrite with instruction
+        # Dispatch structured actions
+        action_summary = _actions_summary(result.actions)
         _record(decisions, run_id, plan_id, story_type, "narration",
-                attempt, result, score_now, None, False,
-                f"Rewriting script: {result.instruction[:120]}")
+                attempt, result, score_now, None, False, action_summary)
         score_prev = score_now
-        await planner.rewrite_script(short_id, result.instruction, backend, s, _sub(progress, "rewrite narration"))
+        await _dispatch_narration_actions(short_id, result.actions, backend, s, progress)
         short = store.get(short_id)
         total_retries += 1
 

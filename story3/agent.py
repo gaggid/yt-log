@@ -117,7 +117,7 @@ async def run(plan_id: str, progress, s: dict | None = None, api_key: str = "") 
             break
         _record(decisions, run_id, plan_id, story_type, "narration",
                 attempt, result, score_now, None, False,
-                f"Rewriting narration: {result.instruction[:120]}")
+                f"Rewriting narration: {result.instruction}")
         score_prev = score_now
         # Rewrite all narration beats with the instruction
         await planner.make_narration(plan_id, be, s, None, _sub(progress, "rewriting narration"),

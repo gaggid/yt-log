@@ -253,8 +253,10 @@ function checksView() {
   const fix = c.issues.find(i => i.fix === 'fit_shots');
   const rethink = c.issues.some(i => i.fix === 'reshoot_all');
   const fixSimilar = c.issues.some(i => i.fix === 'fix_similar');
+  const wordBlock = c.issues.some(i => i.code === 'narration' && i.level === 'block' && i.text && i.text.includes('words'));
+  const busy = S.job.state === 'running';
   return `<div class="card pad mt"><div class="row"><h2 style="margin:0">Checks</h2>${c.ok ? badge('good', 'ready to make') : badge('problem', c.blockers + ' to fix')}<span class="sp"></span>
-    ${fix ? `<button id="b-fit" class="small">Write the shots again to fit</button>` : ''}${rethink ? `<button id="b-rethink" class="small">Plan all the pictures again</button>` : ''}${fixSimilar ? `<button id="b-fix-similar" class="small" ${S.job.state === 'running' ? 'disabled' : ''}>Fix similar pictures</button>` : ''}${c.issues.some(i => i.fix === 'make_voice') ? `<button id="b-voice-chk" class="small primary" ${S.job.state === 'running' ? 'disabled' : ''}>Make the voice</button>` : ''}</div>
+    ${fix ? `<button id="b-fit" class="small">Write the shots again to fit</button>` : ''}${rethink ? `<button id="b-rethink" class="small">Plan all the pictures again</button>` : ''}${fixSimilar ? `<button id="b-fix-similar" class="small" ${busy ? 'disabled' : ''}>Fix similar pictures</button>` : ''}${wordBlock ? `<button id="b-trim" class="small" ${busy ? 'disabled' : ''} title="Rewrites the longest beat(s) to bring the word count within budget — no full replan needed">Trim narration</button>` : ''}${c.issues.some(i => i.fix === 'make_voice') ? `<button id="b-voice-chk" class="small primary" ${busy ? 'disabled' : ''}>Make the voice</button>` : ''}</div>
     ${c.issues.length ? c.issues.map(i => `<div class="${i.level === 'block' ? 'errbox' : 'warnbox'}">${esc(i.text)}</div>`).join('') : '<div class="mute small mt-s">Every shot is under three seconds, the short is ${S.settings.target_s || 30} seconds, and the words pass.</div>'}
     ${S.timeline ? `<div class="mute small mt-s">${S.timeline.estimated ? 'Timing is an estimate until the voice is made.' : 'Timing follows the real voice.'} ${S.timeline.shots.length} shots, ${S.timeline.total_s}s, voice speed x${S.timeline.tempo}.</div>` : ''}</div>`;
 }
@@ -525,6 +527,7 @@ function wire() {
   on('#b-fit', b => post(b, '/fit', {}, 'Writing the shots again'));
   on('#b-rethink', b => post(b, '/rethink', {}, 'Planning all the pictures again'));
   on('#b-fix-similar', b => post(b, '/fix_similar', {}, 'Rewriting similar picture prompts'));
+  on('#b-trim', b => post(b, '/trim_narration', {}, 'Trimming narration'));
   on('#b-voice-chk', b => post(b, '/voice', {only_missing: true}, 'Making the voice'));
   on('#b-voice-plan', b => post(b, '/voice', {only_missing: !!S.voice_gate}, 'Making the voice'));
   on('#b-keys', b => post(b, '/keyframes', {}, 'Keyframes started'));
