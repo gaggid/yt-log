@@ -15,6 +15,7 @@ Timeline decisions (stored in story.agent_store):
 import asyncio
 import hashlib
 import time
+import types
 
 from story import settings as settings_mod
 from story.agent_store import PASS_SCORE, for_plan, recent_examples, save_decision
@@ -173,6 +174,39 @@ async def run(short_id: str, backend, s: dict, progress, key: str = "") -> dict:
     short = planner.sync_timing(short_id)
 
     chk = checks.run(short)
+    # Auto-fix word-count or timing blocks before giving up
+    for _fix_try in range(2):
+        if chk["ok"]:
+            break
+        blocks = [i for i in chk["issues"] if i["level"] == "block"]
+        word_block = next((b for b in blocks if b["code"] in ("narration", "length")), None)
+        shot_block = next((b for b in blocks if b["code"] == "shot_too_long"), None)
+        if word_block and total_retries < MAX_TOTAL_RETRIES:
+            progress(None, None, "narration too long — trimming to fit target")
+            _fix_r = types.SimpleNamespace(ok=False, problem=word_block["text"],
+                                           solution_desc="", actions=[], score=0, instruction="")
+            _record(decisions, run_id, plan_id, story_type, "checks_trim",
+                    _fix_try + 1, _fix_r, 0, None, False, "Trimmed narration to fit word budget")
+            await planner.trim_narration(short_id, backend, s)
+            short = store.get(short_id)
+            if short.get("settings", {}).get("voice_mode") != "none" and svoice.missing(short):
+                res = await svoice.make(short_id, progress=_sub(progress, "re-voice after trim"), s=s, key=key)
+                if res["failed"]:
+                    return {"decisions": decisions, "notes": notes,
+                            "stopped": f"Voice failed after trim: {res['failed'][0]['error']}"}
+                short = store.get(short_id)
+            await planner.fit_shots(short_id, backend, s, _sub(progress, "fit shots"))
+            short = planner.sync_timing(short_id)
+            total_retries += 1
+            chk = checks.run(short)
+        elif shot_block and total_retries < MAX_TOTAL_RETRIES:
+            progress(None, None, "re-fitting shots for timing")
+            await planner.fit_shots(short_id, backend, s, _sub(progress, "fit shots"))
+            short = planner.sync_timing(short_id)
+            total_retries += 1
+            chk = checks.run(short)
+        else:
+            break
     if not chk["ok"]:
         first = next(i for i in chk["issues"] if i["level"] == "block")
         return {"decisions": decisions, "notes": notes, "stopped": first["text"]}

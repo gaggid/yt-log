@@ -16,7 +16,7 @@ from story import llm as llm_mod
 from story2.schemas import M
 from story.schemas import Str, StrList
 
-from . import languages, tones
+from . import languages, planner as _planner, tones
 
 PASS_SCORE = 7
 
@@ -109,6 +109,7 @@ Check:
 3. Entity names: for documentary or comparison formats, use exact names from the brief — no aliases.
 4. Flow: does each beat transition naturally? Flag jarring jumps.
 5. Language: Hinglish mixed script, sentences end with ।, no digits.
+6. Word count: if the current total is outside the word budget, emit trim_beat actions for the longest beats until projected total is within budget. Do NOT use rewrite_script just for word count — trim the longest beats first.
 
 Return ONLY a JSON object with this exact structure:
 {
@@ -140,6 +141,7 @@ _NARRATION_USER = """THE BRIEF:
 FORMAT: {format}
 TONE: {tone}
 TARGET LENGTH: {target_s}s
+WORD BUDGET: {word_lo}–{word_hi} words total. CURRENT: {total_words} words.
 
 THE NARRATION (beat id · job · word count · text):
 {script}
@@ -153,11 +155,17 @@ async def narration(short: dict, backend, s: dict, examples: list[dict]) -> Narr
     caller = llm_mod.JsonCaller(backend, s)
     caller.last_attempt = True
     tone_label = tones.TONES.get(tones.of(short.get("settings")), {}).get("label", "")
+    target_s = float(short.get("settings", {}).get("target_s") or 30)
+    total_words = sum(len(s.get("text", "").split()) for b in short.get("beats", []) for s in b.get("sentences", []))
+    word_lo, word_hi = _planner.word_limits(target_s)[:2]
     user = _NARRATION_USER.format(
         brief=_brief(short),
         format=_format_label(short),
         tone=tone_label,
-        target_s=short.get("settings", {}).get("target_s", 30),
+        target_s=target_s,
+        word_lo=word_lo,
+        word_hi=word_hi,
+        total_words=total_words,
         script=_script_text(short),
         examples=_examples_block(examples),
     )
