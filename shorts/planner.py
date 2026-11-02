@@ -420,6 +420,46 @@ async def rewrite_pictures(short_id: str, backend, s: dict | None = None, progre
     return f"{n} picture prompt(s) written"
 
 
+async def fix_similar_shots(short_id: str, backend, s: dict | None = None, progress=None) -> str:
+    """Rewrite the picture prompt of the second shot in each near-duplicate pair, with an instruction to make it visually different."""
+    s = s or settings_mod.get()
+    short = store.get(short_id)
+    pairs = [p for p in shotlist.problems(short) if p["code"] == "similar_shots"]
+    if not pairs:
+        return "no similar pairs found"
+    # Build set of shot ids to rewrite (second of each pair) from the pair text
+    to_fix: list[tuple[str, str]] = []
+    for p in pairs:
+        shots_in_prob = p.get("shots", [])
+        # shotlist.problems stores all ids; re-derive pairs by comparing them
+        all_shots = {sh["id"]: sh for sh in short["shots"]}
+        ids = [sid for sid in shots_in_prob if sid in all_shots]
+        for i in range(len(ids)):
+            for j in range(i + 1, len(ids)):
+                a, b = ids[i], ids[j]
+                if shotlist._same(all_shots[a], all_shots[b]) >= shotlist.SIMILAR:
+                    to_fix.append((a, b))
+    seen: set[str] = set()
+    n = 0
+    for a_id, b_id in to_fix:
+        # rewrite the second shot; skip if already rewritten this run
+        if b_id in seen:
+            continue
+        seen.add(b_id)
+        a_sh = next(sh for sh in short["shots"] if sh["id"] == a_id)
+        note = f"This picture is nearly the same as {a_id} ('{(a_sh.get('still') or a_sh.get('prompt') or '')[:120]}'). Make it clearly different: show a different subject, angle, setting or scale."
+        beat = next(b for b in short["beats"] if b["id"] == next(sh["beat"] for sh in short["shots"] if sh["id"] == b_id))
+        beat_shots = [x for sid in beat["shot_ids"] for x in short["shots"] if x["id"] == sid]
+        written = await stillwriter.write_beat(short, beat, beat_shots, backend, s, only={b_id}, note=note)
+        if written:
+            await motionwriter.write_beat(short, beat, beat_shots, backend, s, only={b_id})
+            n += written
+    if not n:
+        raise store.ShortError("the model did not rewrite any picture prompt")
+    store.save(short)
+    return f"{n} picture prompt(s) rewritten to fix similar pairs"
+
+
 async def rewrite_motion(short_id: str, backend, s: dict | None = None, progress=None, shot_id: str = "", note: str = "") -> str:
     """Write what moves in a shot (with the producer's instruction) or in every shot again. A changed motion makes that shot's clip old."""
     s = s or settings_mod.get()

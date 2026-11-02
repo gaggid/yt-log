@@ -64,7 +64,8 @@ def run(short: dict) -> dict:
             for f in leak.check(sh["prompt"], prof, scene=True):
                 issues.append(_issue("block", "leak", f"shot {sh['id']} points back to the source: {f.text}"))
     for p in shotlist.problems(short):
-        issues.append(_issue("warn", p["code"], p["text"], fix="reshoot_all", shots=p["shots"]))
+        fix = "fix_similar" if p["code"] == "similar_shots" else "reshoot_all"
+        issues.append(_issue("warn", p["code"], p["text"], fix=fix, shots=p["shots"]))
     chars = sum(1 for sh in short["shots"] if sh.get("character"))
     if chars > planner.MAX_CHARACTER_SHOTS:
         issues.append(_issue("warn", "many_character_shots", f"{chars} shots show the main character; the same face over many shots drifts. Four or fewer holds up best"))

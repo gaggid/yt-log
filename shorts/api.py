@@ -462,6 +462,14 @@ async def rethink(short_id: str):
     return _start(short_id, "short_rethink", lambda progress: planner.reshoot_all(short_id, be, s, progress))
 
 
+@router.post("/{short_id}/fix_similar")
+async def fix_similar(short_id: str):
+    """Rewrite the picture prompt of the second shot in each near-duplicate pair so the pictures differ."""
+    _get(short_id)
+    s, be = _backend()
+    return _start(short_id, "short_pictures", lambda progress: planner.fix_similar_shots(short_id, be, s, progress))
+
+
 class RewriteReq(BaseModel):
     beat_id: str = ""                 # empty = the whole script
     instruction: str = ""
