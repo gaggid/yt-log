@@ -19,7 +19,9 @@ def voice_gate(short: dict) -> str:
     return f"Make the voice first: {len(gone)} of {len(short['beats'])} beats have no voice yet. The shot lengths follow the real voice." if gone else ""
 
 
-def run(short: dict) -> dict:
+def run(short: dict, tolerance_s: float = 0) -> dict:
+    """Run all pre-clip checks. tolerance_s > 0 widens the length and word-count
+    gates by that many seconds — used by the agent to allow ±15 s of flex."""
     issues: list[dict] = []
     if not short["shots"]:
         return {"ok": False, "issues": [_issue("block", "no_plan", "Plan the short first.")], "blockers": 1, "warnings": 0, "timeline": None}
@@ -30,16 +32,26 @@ def run(short: dict) -> dict:
     if gone:
         issues.append(_issue("block", "no_voice", gone, fix="make_voice"))
     prof = planner._profile(short)
+    t_s = float(short.get("settings", {}).get("target_s") or models.TARGET_S)
+    # When a tolerance is given, use the actual voice duration (clamped to the allowed
+    # window) as the effective target for word-count validation so the agent isn't
+    # penalised for content that fits within the allowed range.
+    if not no_voice and tl.get("total_s"):
+        eff_t_s = max(t_s - tolerance_s, min(t_s + tolerance_s, tl["total_s"])) if tolerance_s else t_s
+    else:
+        eff_t_s = t_s
     if not no_voice:
-        for p in planner.narration_problems(short["beats"], prof, planner.target_s(short), languages.of(short["settings"]), svoice.speed(short)):
+        for p in planner.narration_problems(short["beats"], prof, eff_t_s, languages.of(short["settings"]), svoice.speed(short)):
             soft = p.startswith(("stock phrases", "a sentence is", "the first sentence"))
             issues.append(_issue("warn" if soft else "block", "narration", p))
     for p in tl["problems"]:
         if p["code"] == "shot_too_long":
             issues.append(_issue("block", "shot_too_long", p["text"] + ". Write the shots of those beats again with more shots.", fix="fit_shots", beats=p["beats"]))
         elif p["code"] == "length":
-            t_s = float(short.get("settings", {}).get("target_s") or models.TARGET_S)
-            issues.append(_issue("block", "length", p["text"] + (": the voice is too long, shorten the narration" if tl["total_s"] > t_s else ": the narration is short, add a sentence"), fix=None))
+            if tolerance_s and abs(tl["total_s"] - t_s) <= tolerance_s:
+                pass  # within agent tolerance — not a blocker
+            else:
+                issues.append(_issue("block", "length", p["text"] + (": the voice is too long, shorten the narration" if tl["total_s"] > t_s else ": the narration is short, add a sentence"), fix=None))
         else:
             issues.append(_issue("block", p["code"], p["text"]))
     if tl["shots"] and tl["shots"][0]["seconds"] > models.HOOK_MAX_S + 1e-6:

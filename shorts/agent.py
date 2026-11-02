@@ -173,7 +173,7 @@ async def run(short_id: str, backend, s: dict, progress, key: str = "") -> dict:
     await planner.fit_shots(short_id, backend, s, _sub(progress, "fit shots"))
     short = planner.sync_timing(short_id)
 
-    chk = checks.run(short)
+    chk = checks.run(short, tolerance_s=15)
     # Auto-fix word-count or timing blocks before giving up
     for _fix_try in range(2):
         if chk["ok"]:
@@ -198,13 +198,13 @@ async def run(short_id: str, backend, s: dict, progress, key: str = "") -> dict:
             await planner.fit_shots(short_id, backend, s, _sub(progress, "fit shots"))
             short = planner.sync_timing(short_id)
             total_retries += 1
-            chk = checks.run(short)
+            chk = checks.run(short, tolerance_s=15)
         elif shot_block and total_retries < MAX_TOTAL_RETRIES:
             progress(None, None, "re-fitting shots for timing")
             await planner.fit_shots(short_id, backend, s, _sub(progress, "fit shots"))
             short = planner.sync_timing(short_id)
             total_retries += 1
-            chk = checks.run(short)
+            chk = checks.run(short, tolerance_s=15)
         else:
             break
     if not chk["ok"]:

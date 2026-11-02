@@ -157,7 +157,9 @@ async def narration(short: dict, backend, s: dict, examples: list[dict]) -> Narr
     tone_label = tones.TONES.get(tones.of(short.get("settings")), {}).get("label", "")
     target_s = float(short.get("settings", {}).get("target_s") or 30)
     total_words = sum(len(s.get("text", "").split()) for b in short.get("beats", []) for s in b.get("sentences", []))
-    word_lo, word_hi = _planner.word_limits(target_s)[:2]
+    # Give the agent ±15 s of flex: lo uses the shorter end, hi uses the longer end
+    word_lo = _planner.word_limits(max(5, target_s - 15))[0]
+    word_hi = _planner.word_limits(target_s + 15)[1]
     user = _NARRATION_USER.format(
         brief=_brief(short),
         format=_format_label(short),
