@@ -53,6 +53,15 @@ CREATE TABLE IF NOT EXISTS candidate_refs(
   candidate_id TEXT, para_idx INTEGER, PRIMARY KEY(candidate_id, para_idx)
 );
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS agent_decisions(
+  id TEXT PRIMARY KEY, plan_id TEXT NOT NULL, run_id TEXT NOT NULL,
+  story_type TEXT DEFAULT '', checkpoint TEXT NOT NULL, attempt INTEGER DEFAULT 1,
+  score_before INTEGER, score_after INTEGER, resolved INTEGER DEFAULT 0,
+  problem TEXT DEFAULT '', solution TEXT DEFAULT '', outcome TEXT DEFAULT '',
+  instruction_used TEXT DEFAULT '', created_at REAL
+);
+CREATE INDEX IF NOT EXISTS ad_plan ON agent_decisions(plan_id);
+CREATE INDEX IF NOT EXISTS ad_lookup ON agent_decisions(story_type, checkpoint, resolved);
 CREATE TABLE IF NOT EXISTS runs(
   id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT, started_at REAL, ended_at REAL,
   status TEXT, settings TEXT, note TEXT DEFAULT ''

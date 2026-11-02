@@ -117,11 +117,25 @@ def drawn(short: dict, skip_beat: str = "") -> list[str]:
     return out
 
 
+_SIZE_RE = re.compile(r"\b(extreme[\s-]close[\s-]?up|close[\s-]?up|medium|wide|establishing|overhead|bird[\s-]?s[\s-]?eye|low[\s-]?angle|high[\s-]?angle)\b", re.I)
+
+
+def _shot_size(text: str) -> str:
+    """The first shot-size keyword in the first 60 characters of a still prompt, normalised."""
+    m = _SIZE_RE.search((text or "")[:60])
+    return re.sub(r"[\s-]+", " ", m.group(1).lower()) if m else ""
+
+
 def _words(text: str) -> set[str]:
     return {w for w in re.findall(r"[a-z0-9]+", (text or "").lower()) if w not in STOP and len(w) > 2}
 
 
 def _same(a: dict, b: dict) -> float:
+    # Different shot sizes = visually distinct regardless of shared subject words
+    sa = _shot_size(a.get("still") or a.get("prompt", ""))
+    sb = _shot_size(b.get("still") or b.get("prompt", ""))
+    if sa and sb and sa != sb:
+        return 0.0
     wa, wb = _words(a.get("still") or a.get("prompt")), _words(b.get("still") or b.get("prompt"))
     return len(wa & wb) / max(1, min(len(wa), len(wb)))
 

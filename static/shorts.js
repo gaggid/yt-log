@@ -23,6 +23,9 @@ css.textContent = `
 .sh-pipe:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
 .sh-pipe.off{opacity:.55}
 .sh-sugg button{margin:2px 4px 2px 0}
+.agent-timeline{margin-top:10px}.agent-entry{display:grid;grid-template-columns:18px 1fr;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}.agent-entry:last-child{border-bottom:none}
+.agent-dot{width:12px;height:12px;border-radius:50%;margin-top:3px;flex:none;background:var(--mute)}.agent-dot.good{background:var(--ok)}.agent-dot.warn{background:var(--warn)}.agent-dot.info{background:var(--accent)}
+.agent-checkpoint{font-size:11px;color:var(--mute);text-transform:uppercase;margin-bottom:4px}.agent-row{font-size:13px;margin:2px 0}.agent-row b{display:inline-block;min-width:62px;color:var(--mute)}
 @media (max-width:980px){.sh-grid{grid-template-columns:1fr}.sh-side{position:static;max-height:none;order:-1}}
 `;
 document.head.append(css);
@@ -30,7 +33,7 @@ document.head.append(css);
 const call = (path, opts = {}) => api('/shorts' + path, opts);
 const mm = s => { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
 const vid = (url, extra = '') => url ? `<video src="${esc(url)}" controls preload="metadata" playsinline ${extra}></video>` : '';
-let S = null, SID = null, pollT = null, myRoute = 0;
+let S = null, SID = null, ADEC = null, pollT = null, myRoute = 0;
 
 /* ───────── list ───────── */
 window.viewShorts = async function () {
@@ -103,7 +106,12 @@ window.viewShort = async function (id) {
 async function refresh(force) {
   clearTimeout(pollT);
   const my = myRoute;
-  try { S = await call('/' + SID); } catch (e) { if (my === myRoute) toast(e.message, {bad: true}); return; }
+  try {
+    [S, ADEC] = await Promise.all([
+      call('/' + SID),
+      call('/' + SID + '/agent_decisions').catch(() => ({decisions: []})),
+    ]);
+  } catch (e) { if (my === myRoute) toast(e.message, {bad: true}); return; }
   if (my !== myRoute) return;
   const a = document.activeElement;
   if (force || !(a && a.closest && a.closest('#app') && /^(TEXTAREA|INPUT|SELECT)$/.test(a.tagName))) render();
@@ -151,14 +159,15 @@ function render() {
       <button class="small" onclick="shRename()">Rename</button><button class="small bad" onclick="shDelete()">Delete</button></div>
     ${jobBox()}
     <div class="nextbar"><div><b>${s.auto.done ? 'Everything is made.' : 'Next: ' + esc(next.label)}</b> <span class="mute small">${s.auto.steps.map(x => (x.done ? '✓ ' : '· ') + esc(x.label)).join('  ')}</span></div>
-      <button class="primary" ${busy ? 'disabled' : ''} onclick="shAuto(this)">${s.auto.done ? 'Run again' : 'Auto-run'}</button></div>
-    <div class="sh-grid"><div>${remix ? remixView() : planView()}${finalView()}</div><div class="sh-side">${sideView()}</div></div>`;
+      <div class="row" style="gap:8px"><button class="small" ${busy ? 'disabled' : ''} onclick="shAgent(this)" title="Runs the pipeline with an AI editorial director that scores each step and rewrites weak narration or pictures before continuing">Agent Run</button><button class="primary" ${busy ? 'disabled' : ''} onclick="shAuto(this)">${s.auto.done ? 'Run again' : 'Auto-run'}</button></div></div>
+    <div class="sh-grid"><div>${remix ? remixView() : planView()}${finalView()}${agentDecisionsView()}</div><div class="sh-side">${sideView()}</div></div>`;
   wire();
 }
 
 window.shRename = async () => { const t = await textDlg('Rename', 'Title', S.title); if (t) await patch('/plan', {title: t}); };
 window.shDelete = async () => { if (await confirmDlg('Delete this short', 'All its pictures, clips and voice are deleted too.', 'Delete', true)) { await act(null, () => call('/' + SID, {method: 'DELETE'}), 'Deleted'); location.hash = '#/shorts'; } };
 window.shAuto = btn => post(btn, '/auto', {}, 'Auto-run started');
+window.shAgent = btn => post(btn, '/agent_run', {}, 'Agent run started');
 
 /* side panel: settings */
 function sideView() {
@@ -457,6 +466,25 @@ function remixView() {
       ${ck.issues.map(i => `<div class="${i.level === 'block' ? 'errbox' : 'warnbox'}">${esc(i.text)}</div>`).join('')}
       <div class="mt-s mute small">One request cannot be stopped half-way without losing it.</div>
       ${(r.part_clips || []).map((cl, n) => cl.filter(c => c.url).slice(-1).map(c => `<div class="mt-s small">Part ${n + 1}: ${vid(c.url, 'style="max-height:260px"')}</div>`).join('')).join('')}</div>`;
+}
+
+function agentDecisionsView() {
+  const list = (ADEC && ADEC.decisions) ? ADEC.decisions : [];
+  if (!list.length) return '';
+  const dotClass = d => d.checkpoint === 'final' ? 'info' : (d.resolved ? 'good' : 'warn');
+  const cpLabel = d => {const labels = {narration:'Narration', stills:'Start pictures', final:'Final quality'}; return (labels[d.checkpoint] || d.checkpoint) + (d.attempt > 1 ? ` · attempt ${d.attempt}` : '');};
+  return `<div class="card pad mt"><div class="row"><h2 style="margin:0">Agent decisions</h2><span class="mute small sp">${list.length} checkpoint${list.length === 1 ? '' : 's'}</span></div>
+  <div class="agent-timeline">${list.map(d => `
+    <div class="agent-entry">
+      <div class="agent-dot ${dotClass(d)}"></div>
+      <div>
+        <div class="agent-checkpoint">${esc(cpLabel(d))}</div>
+        <div class="agent-row"><b>Problem</b>${esc(d.problem || '—')}</div>
+        <div class="agent-row"><b>Solution</b>${esc(d.solution || '—')}</div>
+        <div class="agent-row"><b>Outcome</b>${esc(d.outcome || '—')}</div>
+      </div>
+    </div>`).join('')}
+  </div></div>`;
 }
 
 function finalView() {

@@ -441,14 +441,23 @@ async def fix_similar_shots(short_id: str, backend, s: dict | None = None, progr
                     to_fix.append((a, b))
     seen: set[str] = set()
     n = 0
+    all_shots = {sh["id"]: sh for sh in short["shots"]}
     for a_id, b_id in to_fix:
-        # rewrite the second shot; skip if already rewritten this run
         if b_id in seen:
             continue
         seen.add(b_id)
-        a_sh = next(sh for sh in short["shots"] if sh["id"] == a_id)
-        note = f"This picture is nearly the same as {a_id} ('{(a_sh.get('still') or a_sh.get('prompt') or '')[:120]}'). Make it clearly different: show a different subject, angle, setting or scale."
-        beat = next(b for b in short["beats"] if b["id"] == next(sh["beat"] for sh in short["shots"] if sh["id"] == b_id))
+        a_sh = all_shots[a_id]
+        b_sh = all_shots[b_id]
+        a_still = (a_sh.get("still") or a_sh.get("prompt") or "")
+        # Change the shot SIZE and ANGLE — same subject is fine, but the framing must differ
+        note = (
+            f"Shot {b_id} looks nearly the same as {a_id} ('{a_still[:100]}'). "
+            f"Keep the same story subject but use a completely different shot size and angle: "
+            f"if the similar shot is wide, write a close-up or extreme close-up of one specific detail; "
+            f"if it is a close-up, pull back to a wide establishing view. "
+            f"Different framing of the same place is enough — the words just need to look distinct."
+        )
+        beat = next(b for b in short["beats"] if b["id"] == b_sh["beat"])
         beat_shots = [x for sid in beat["shot_ids"] for x in short["shots"] if x["id"] == sid]
         written = await stillwriter.write_beat(short, beat, beat_shots, backend, s, only={b_id}, note=note)
         if written:

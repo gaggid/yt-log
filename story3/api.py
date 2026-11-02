@@ -7,10 +7,11 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from story import llm, settings as settings_mod
+from story.agent_store import for_plan as agent_decisions_for_plan
 from story.pipeline import manager
 from story2 import jobs, planner, providers
 
-from . import auto, cards, clips, graphics, publish, likeness, refs, scenes, store, thumbnail, video, voice
+from . import agent, auto, cards, clips, graphics, publish, likeness, refs, scenes, store, thumbnail, video, voice
 
 router = APIRouter(prefix="/api/media")
 
@@ -317,6 +318,23 @@ async def auto_run(plan_id: str, body: AutoReq | None = None):
     async def work(progress):
         await auto.run(plan_id, progress, settings_mod.get(), settings_mod.api_key(), only)
     return _start(plan_id, "auto-run", work)
+
+
+@router.post("/{plan_id}/agent_run")
+async def agent_run(plan_id: str):
+    """Agentic auto-run: runs the pipeline with LLM evaluation checkpoints after narration, storyboard and the final video."""
+    _guard(planner.get_plan, plan_id)
+
+    async def work(progress):
+        await agent.run(plan_id, progress, settings_mod.get(), settings_mod.api_key())
+    return _start(plan_id, "agent-run", work)
+
+
+@router.get("/{plan_id}/agent_decisions")
+async def get_agent_decisions(plan_id: str):
+    """The timeline of editorial decisions made by the agent for this plan."""
+    _guard(planner.get_plan, plan_id)
+    return {"decisions": agent_decisions_for_plan(plan_id)}
 
 
 class VideoReq(BaseModel):

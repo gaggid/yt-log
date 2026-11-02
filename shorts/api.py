@@ -16,7 +16,9 @@ from story3 import store as media
 from story3.voice import MediaError
 
 from characters import store as cstore, studio_edit
-from . import auto, cast, checks, clips, formats, frames, languages, looks, tones, models, motion, pipelines as P, planner, remix, stitch, store, subjects as subj, timeline, upscale, voice as svoice, wan
+from story.agent_store import for_plan as agent_decisions_for_plan
+
+from . import agent, auto, cast, checks, clips, formats, frames, languages, looks, tones, models, motion, pipelines as P, planner, remix, stitch, store, subjects as subj, timeline, upscale, voice as svoice, wan
 
 router = APIRouter(prefix="/api/shorts")
 MAX_UPLOAD = 12 * 1024 * 1024
@@ -468,6 +470,21 @@ async def fix_similar(short_id: str):
     _get(short_id)
     s, be = _backend()
     return _start(short_id, "short_pictures", lambda progress: planner.fix_similar_shots(short_id, be, s, progress))
+
+
+@router.post("/{short_id}/agent_run")
+async def agent_run(short_id: str):
+    """Agentic auto-run: runs the pipeline with LLM evaluation checkpoints after narration, start pictures and the final video."""
+    _get(short_id)
+    s, be = _backend()
+    return _start(short_id, "short_agent", lambda progress: agent.run(short_id, be, s, progress, settings_mod.api_key()))
+
+
+@router.get("/{short_id}/agent_decisions")
+async def get_agent_decisions(short_id: str):
+    """The timeline of editorial decisions made by the agent for this short."""
+    _get(short_id)
+    return {"decisions": agent_decisions_for_plan(short_id)}
 
 
 class RewriteReq(BaseModel):
