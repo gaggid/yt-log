@@ -5,7 +5,7 @@ from . import models
 PACE_WPS = 148 / 60                    # spoken words per second of the voices (story2/voices.py pace_wpm)
 GAP_S = 0.12                           # silence between two beats
 END_HOLD_S = 0.3                       # the last picture stays a moment after the last word
-TEMPO_MIN, TEMPO_MAX = 0.9, 1.35       # how much the voice may be slowed or sped up to land on 30 s
+TEMPO_MIN, TEMPO_MAX = 0.9, 1.45       # how much the voice may be slowed or sped up to land on 30 s
 SAFE_SHOT_S = 2.5                      # the planner aims at this, so real voice that runs a little long still fits under the 3-second rule
 
 

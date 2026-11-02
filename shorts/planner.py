@@ -10,8 +10,8 @@ from story2.schemas import M
 from . import voice as svoice
 from . import cast, formats, languages, looks, models, motionwriter, script as scriptmod, shotlist, stillwriter, tones, prompts as P, store, subjects as subj, timeline
 
-WORDS_LO, WORDS_HI = 64, 96              # spoken words in the whole short (the prompt asks for 80 to 90; this is what is accepted). The voice speeds up to x1.35 to land on 30 s
-REC_LO, REC_HI = 80, 90                  # what the prompt asks for at the full 30 seconds
+WORDS_LO, WORDS_HI = 64, 104             # spoken words in the whole short (the prompt asks for 85 to 100; this is what is accepted). The voice speeds up to x1.45 to land on 30 s
+REC_LO, REC_HI = 85, 100                 # what the prompt asks for at the full 30 seconds
 MAX_SENTENCE_WORDS = 20
 MAX_HOOK_WORDS = 12
 MAX_CHARACTER_SHOTS = 4
