@@ -41,9 +41,10 @@ BIBLE = """[TASK:p4_bible]
 Step 1 of 4: the story bible. Decide what the story IS before any line is written. Return ONLY a JSON object:
 {"premise": "one sentence: who, what happens, why it matters", "promise": "what feeling the viewer is promised (dread, wonder, rage, laughter...)", "hero": "who the story follows: what they want, what they fear, one telling habit",
  "secret": "the thing the viewer must not know until late (a twist, a cause, a cost); empty if the story has none", "world": ["fixed facts and rules of this story, 3 to 6"], "wow": ["the 3 to 5 moments people will repeat to a friend, strongest last"],
- "question": "the question the viewer leaves with", "voice": "who the narrator is and how they speak (first person or not, their attitude, one verbal habit)", "motifs": ["1 to 3 images or phrases that return, so the end rhymes with the start"],
+ "question": "the question the viewer leaves with", "voice": "who the narrator is and how they speak (their attitude, one verbal habit)", "pov": "first | third | you: who tells it (see the rules)",
+ "cast": [{"name": "the name the narration will use", "role": "who they are to the story, 4 to 8 words", "habit": "one way they speak or act that is theirs alone"}], "motifs": ["1 to 3 images or phrases that return, so the end rhymes with the start"],
  "avoid": ["the 3 clichés this story would fall into, and so must not"]}
-Rules: keep every plot point of the brief; if the brief ends on a question, keep that question. Invent concrete detail the brief leaves out (names, objects, times, places, sounds) and keep it consistent. Never describe pictures. Do not solve a mystery the brief leaves open and do not add a new theory that explains it: add atmosphere, objects, names and habits, not lore."""
+Rules: {people} Point of view ("pov"): "first" = the narrator is a person in the story and says "I" (they are in the cast, with a name); "third" = the narrator watches named people; "you" = the narrator talks to the viewer as the one it happens to (only when the producer's tone asks for it or the brief is a direct address). {pov_rule} The hero is always in the cast. Keep every plot point of the brief; if the brief ends on a question, keep that question. Invent concrete detail the brief leaves out (objects, times, places, sounds) and keep it consistent. Never describe pictures. Do not solve a mystery the brief leaves open and do not add a new theory that explains it: add atmosphere, objects, names and habits, not lore."""
 
 MAP = """[TASK:p4_map]
 {base}
@@ -64,6 +65,7 @@ DRAFT = """[TASK:p4_draft]
 
 Step 3 of 4: write the narration of ONE beat. Return ONLY a JSON object: {"sentences": [{"text": "..."}]}
 Craft:
+- People: follow the bible's point of view and cast. Say a person's name the first time they appear and keep calling them by it; never "a man", "a woman", "someone" for a cast member. Every quoted line says who speaks it (a name, "I", or a clear "she said"). Whose phone, whose room, whose body: name the owner once. The narration never switches point of view. Show a cast member's habit as an action in a scene, once at most; never copy the cast notes into a line.
 - Show, do not report. Never write "he discovers", "she reveals", "a voice warns me". Write the discovery: the object, the sound, the exact words said, in the line itself. Put people's words in direct speech.
 - The viewer lives it: sensory detail (one sound, one smell, one texture), the narrator's body and thoughts, a number or a name instead of "a lot" or "someone".
 - Rhythm: vary the length. A long line that rolls, then a blunt short one. A fragment is fine. A line of two words can be a whole beat. Never three sentences of the same length in a row.
@@ -77,11 +79,17 @@ PUNCH = """[TASK:p4_punch]
 {base}
 
 Step 4 of 4: the punch-up. You get the whole script, beat by beat. Judge it as a skeptical viewer who scrolls at the first dull line, then rewrite what is weak.
-Score the INPUT script from 1 to 10 against: (1) the first line stops the scroll in two seconds, (2) a new hook or open loop at least every ten seconds, (3) no line that only reports what the pictures will show, (4) real lines of dialogue or concrete detail, not summary verbs, (5) the twist is set up before it fires, (6) varied rhythm with blunt lines, (7) the last line lands and the bible's question stays open.
+Score the INPUT script from 1 to 10 against: (1) the first line stops the scroll in two seconds, (2) a new hook or open loop at least every ten seconds, (3) no line that only reports what the pictures will show, (4) real lines of dialogue or concrete detail, not summary verbs, (5) the twist is set up before it fires, (6) varied rhythm with blunt lines, (7) the last line lands and the bible's question stays open, (8) the people are named and distinct, the point of view never switches, and it is always clear who speaks and whose things they are.
 Return ONLY a JSON object: {"score": 6, "problems": ["the 3 worst problems, each naming the beat"], "beats": [{"id": "b1", "sentences": [{"text": "..."}]}]}
 Rules for "beats": return EVERY beat with its id, in order. Rewrite the weak lines, keep the strong ones word for word. Keep each beat's job, order of events and facts. Keep the whole script between {lo} and {hi} words, and each beat within 20% of its words now. {tags}"""
 
 TAGS = "Write no tags, brackets or stage directions: the voice is neutral and the producer directs its emotion later. The words, the rhythm and the punctuation ('...' before a reveal, a comma for a breath, '?' for a real question) carry the feeling."
+
+
+class CastOut(M):
+    name: Str
+    role: Str = ""
+    habit: Str = ""
 
 
 class BibleOut(M):
@@ -93,6 +101,8 @@ class BibleOut(M):
     wow: StrList = []
     question: Str = ""
     voice: Str = ""
+    pov: Str = ""
+    cast: list[CastOut] = []
     motifs: StrList = []
     avoid: StrList = []
 
@@ -134,8 +144,19 @@ def _base(short: dict, t_s: float) -> str:
     settings = short["settings"]
     tone = tones.TONES[tones.of(settings)]
     tone_text = f"{tone['label'].split(' (')[0]} (energy {tone['energy']} of 5; sounds {tone['sound'].lower()}). Writing rules: {tone['writing']}"
+    if tone.get("pov"):
+        tone_text += f" Point of view: {tone['pov']}."
     return (BASE.replace("{seconds}", f"{t_s:g}").replace("{language_rule}", languages.rule(settings)).replace("{tone}", tone_text)
             .replace("{edge}", "Language edge: " + tones.EDGES[tones.edge_of(settings)]["rule"]))
+
+
+def _people_rules(short: dict) -> tuple[str, str]:
+    """(who may be named, point-of-view rule). A story made from facts has real people: their names are used exactly as given and none is invented. A brief is free to name its unnamed people."""
+    if short["source"].get("kind") == "story":
+        return ("The facts are real: put every person the facts name in the cast with exactly that name and role, and never invent a person, a name or a nickname.",
+                "Default to third. A real person is never made to say words the facts do not give; quote only what the facts quote.")
+    return ("Give every person the story needs a name that fits the place and time; if the brief already names someone, or the brief is about real, known people, use exactly those names and invent nobody real.",
+            "Default to third or first, whichever the brief reads best in; use you only when asked.")
 
 
 def _source(short: dict) -> str:
@@ -172,7 +193,7 @@ def _pace_rule(t_s: float) -> str:
 
 def _bible_text(b: BibleOut) -> str:
     lines = [f"PREMISE: {b.premise}", f"PROMISE: {b.promise}", f"HERO: {b.hero}", f"SECRET (hold it back): {b.secret}" if b.secret else "", "WORLD: " + "; ".join(b.world),
-             "WOW MOMENTS: " + "; ".join(b.wow), f"CLOSING QUESTION: {b.question}", f"NARRATOR: {b.voice}", "MOTIFS: " + "; ".join(b.motifs), "AVOID: " + "; ".join(b.avoid)]
+             "WOW MOMENTS: " + "; ".join(b.wow), f"CLOSING QUESTION: {b.question}", f"NARRATOR: {b.voice}", f"POINT OF VIEW: {b.pov}" if b.pov else "", "CAST (use exactly these names): " + "; ".join(f"{c.name} ({c.role}; {c.habit})" if c.habit else f"{c.name} ({c.role})" for c in b.cast) if b.cast else "", "MOTIFS: " + "; ".join(b.motifs), "AVOID: " + "; ".join(b.avoid)]
     return "\n".join(x for x in lines if x.strip() and not x.endswith(": "))
 
 
@@ -231,9 +252,19 @@ def draft_problems(sents: list[dict], lo: int, hi: int, language: str, prev_last
     return out
 
 
+def cast_problems(bible: BibleOut, sents: list[dict]) -> list[str]:
+    """By the end of the second beat the narration has said a cast member's name (a first-person narrator may be the only one, and says theirs once)."""
+    names = [c.name.strip() for c in bible.cast if c.name.strip()]
+    text = " ".join(s["text"] for s in sents).lower()
+    if names and not any(n.lower() in text or n.lower().split()[0] in text for n in names):
+        return ["no cast member is named yet: say the name of " + " or ".join(names[:3]) + " in this beat"]
+    return []
+
+
 async def write_bible(short: dict, t_s: float, backend, s: dict) -> BibleOut:
     caller = llm.JsonCaller(backend, s)
-    res = await caller.call(BIBLE.replace("{base}", _base(short, t_s)), _source(short) + "\n\nWrite the story bible now.", BibleOut)
+    people, pov = _people_rules(short)
+    res = await caller.call(BIBLE.replace("{base}", _base(short, t_s)).replace("{people}", people).replace("{pov_rule}", pov), _source(short) + "\n\nWrite the story bible now.", BibleOut)
     return res.value
 
 
@@ -270,7 +301,10 @@ async def draft_beat(short: dict, bible: BibleOut, plan: list[dict], done: list[
     def check(out: DraftOut) -> None:
         if caller.last_attempt:
             return
-        probs = draft_problems(clean_sentences(out.sentences, engine), lo, hi, language, prev_last)
+        sents = clean_sentences(out.sentences, engine)
+        probs = draft_problems(sents, lo, hi, language, prev_last)
+        if i == 1:
+            probs += cast_problems(bible, [x for b in done for x in b["sentences"]] + sents)
         if probs:
             raise ValueError("; ".join(probs[:3]))
 

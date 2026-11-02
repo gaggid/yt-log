@@ -936,3 +936,14 @@ def test_the_api_rewrites_the_motion_of_one_shot_with_the_producers_instruction(
     last = [c for c in client.chat.calls if c["task"] == "p4_move"][-1]
     assert client.chat.count("p4_move") == n + 1 and "he turns his head fast" in last["user"] and "Write the motion of: s3." in last["user"] and "KEEP, already written" in last["user"]
     assert client.patch(f"/api/shorts/{sid}/shots/s3", json={"move": "The courier raises one hand, the camera holds still."}).json()["shots"][2]["move"].startswith("The courier raises one hand")
+
+
+def test_cast_must_be_named_by_the_second_beat_and_story_personas_exist():
+    from shorts import script, tones
+    bible = script.BibleOut(premise="p", cast=[script.CastOut(name="Elias Roy", role="the man")])
+    assert script.cast_problems(bible, [{"text": "A man hears a ping."}])
+    assert not script.cast_problems(bible, [{"text": "Elias hears a ping."}])
+    assert not script.cast_problems(script.BibleOut(premise="p"), [{"text": "A man hears a ping."}]), "no cast, no check"
+    assert {t["id"] for t in tones.public()["tones"] if t["group"] == "Story personas"} == {"survivor", "campfire", "investigator", "memoir"}
+    real = {"source": {"kind": "story"}}
+    assert "never invent a person" in script._people_rules(real)[0] and "name that fits" in script._people_rules({"source": {"kind": "idea"}})[0]

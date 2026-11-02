@@ -200,7 +200,7 @@ function sideView() {
 }
 function toneOptions(tones, cur) {
   const T = (tones || {}).tones || [];
-  return ['Tones', 'Personas'].map(g => `<optgroup label="${g}">${T.filter(t => t.group === g).map(t => `<option value="${esc(t.id)}" title="${esc(t.sound + ' - best for: ' + t.best)}" ${(cur || tones.default) === t.id ? 'selected' : ''}>${esc(t.label)} - energy ${t.energy}/5</option>`).join('')}</optgroup>`).join('');
+  return ['Tones', 'Story personas', 'Personas'].map(g => `<optgroup label="${g}">${T.filter(t => t.group === g).map(t => `<option value="${esc(t.id)}" title="${esc(t.sound + ' - best for: ' + t.best)}" ${(cur || tones.default) === t.id ? 'selected' : ''}>${esc(t.label)} - energy ${t.energy}/5</option>`).join('')}</optgroup>`).join('');
 }
 function edgeOptions(tones, cur) {
   return ((tones || {}).edges || []).map(e => `<option value="${esc(e.id)}" ${(cur || 'clean') === e.id ? 'selected' : ''}>${esc(e.label)}</option>`).join('');
