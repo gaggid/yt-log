@@ -63,7 +63,8 @@ Rules:
 DRAFT = """[TASK:p4_draft]
 {base}
 
-Step 3 of 4: write the narration of ONE beat. Return ONLY a JSON object: {"sentences": [{"text": "..."}]}
+Step 3 of 4: write the narration of ONE beat. Return ONLY a JSON object: {"sentences": [{"text": "..."}, {"text": "..."}]}
+Each {"text": "..."} object holds exactly one spoken sentence ending in । or ? or !. Never put two sentences inside one "text" value.
 Craft:
 - People: follow the bible's point of view and cast. Say a person's name the first time they appear and keep calling them by it; never "a man", "a woman", "someone" for a cast member. Every quoted line says who speaks it (a name, "I", or a clear "she said"). Whose phone, whose room, whose body: name the owner once. The narration never switches point of view. Show a cast member's habit as an action in a scene, once at most; never copy the cast notes into a line.
 - Show, do not report. Never write "he discovers", "she reveals", "a voice warns me". Write the discovery: the object, the sound, the exact words said, in the line itself. Put people's words in direct speech.
@@ -80,7 +81,8 @@ PUNCH = """[TASK:p4_punch]
 
 Step 4 of 4: the punch-up. You get the whole script, beat by beat. Judge it as a skeptical viewer who scrolls at the first dull line, then rewrite what is weak.
 Score the INPUT script from 1 to 10 against: (1) the first line stops the scroll in two seconds, (2) a new hook or open loop at least every ten seconds, (3) no line that only reports what the pictures will show, (4) real lines of dialogue or concrete detail, not summary verbs, (5) the twist is set up before it fires, (6) varied rhythm with blunt lines, (7) the last line lands and the bible's question stays open, (8) the people are named and distinct, the point of view never switches, and it is always clear who speaks and whose things they are.
-Return ONLY a JSON object: {"score": 6, "problems": ["the 3 worst problems, each naming the beat"], "beats": [{"id": "b1", "sentences": [{"text": "..."}]}]}
+Return ONLY a JSON object: {"score": 6, "problems": ["the 3 worst problems, each naming the beat"], "beats": [{"id": "b1", "sentences": [{"text": "..."}, {"text": "..."}]}]}
+Each {"text": "..."} object holds exactly one spoken sentence ending in । or ? or !. Never put two sentences inside one "text" value.
 Rules for "beats": return EVERY beat with its id, in order. Rewrite the weak lines, keep the strong ones word for word. Keep each beat's job, order of events and facts. Keep the whole script between {lo} and {hi} words, and each beat within 20% of its words now. {tags}"""
 
 TAGS = "Write no tags, brackets or stage directions: the voice is neutral and the producer directs its emotion later. The words, the rhythm and the punctuation ('...' before a reveal, a comma for a breath, '?' for a real question) carry the feeling."
@@ -219,11 +221,15 @@ def fit_map(beats: list[MapBeat], t_s: float) -> list[dict]:
 
 def clean_sentences(sents: list[SentOut], engine: str) -> list[dict]:
     out = []
+    tag = maya.NEUTRAL if engine == "maya-tts" else ""
     for s in sents:
         text = re.sub(r"\[[a-z ]+\]", "", re.sub(r"\s+", " ", s.text)).strip()
         if not text:
             continue
-        out.append({"text": text, "tag": maya.NEUTRAL if engine == "maya-tts" else ""})          # every sentence starts neutral; the producer (or the voice-direction step) changes it
+        # Split packed sentences the model put in one text field (e.g. "A। B। C?")
+        parts = [p.strip() for p in re.split(r"(?<=[।?!])\s+", text) if p.strip()]
+        for p in parts:
+            out.append({"text": p, "tag": tag})      # every sentence starts neutral; the producer (or the voice-direction step) changes it
     return out
 
 
