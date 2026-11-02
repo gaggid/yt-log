@@ -492,9 +492,11 @@ function agentDecisionsView() {
 function finalView() {
   const f = S.final, last = f.attempts.filter(a => a.status === 'done').pop();
   const miss = f.checklist && !f.checklist.ready ? f.checklist.missing : [];
-  return `<div class="card pad mt sh-final"><div class="row"><h2 style="margin:0">The short</h2><span class="sp"></span><button class="primary" id="b-final" ${miss.length || S.voice_gate || (S.job.state === 'running') ? 'disabled' : ''}>${last ? 'Put together again' : 'Put the short together'}</button></div>
+  const want2k = S.settings.upscale === '2k' && S.pipeline !== 'remix';
+  const upBtn = want2k ? `<button id="b-upscale" ${S.voice_gate || S.job.state === 'running' ? 'disabled' : ''}>Upscale to 2K</button>` : '';
+  return `<div class="card pad mt sh-final"><div class="row"><h2 style="margin:0">The short</h2><span class="sp"></span>${upBtn}<button class="primary" id="b-final" ${miss.length || S.voice_gate || (S.job.state === 'running') ? 'disabled' : ''}>${last ? 'Put together again' : 'Put the short together'}</button></div>
     ${miss.length ? `<div class="mute small mt-s">Still missing: ${esc(miss.slice(0, 6).join(', '))}${miss.length > 6 ? ' and ' + (miss.length - 6) + ' more' : ''}</div>` : ''}
-    ${last ? `<div class="mt-s">${vid(last.url)}</div><div class="row mt-s small"><a href="${esc(last.url)}" download>Download the MP4</a><span class="mute">${last.duration_s}s · 1080x1920${last.bed ? ' · with sound bed' : ''}</span></div>` : '<p class="mute small">The 30-second 9:16 video appears here.</p>'}
+    ${last ? `<div class="mt-s">${vid(last.url)}</div><div class="row mt-s small"><a href="${esc(last.url)}" download>Download the MP4</a><span class="mute">${last.duration_s}s · ${want2k ? '1440x2560' : '1080x1920'}${last.bed ? ' · with sound bed' : ''}</span></div>` : '<p class="mute small">The 30-second 9:16 video appears here.</p>'}
     ${f.attempts.filter(a => a.status === 'failed').slice(-1).map(a => `<div class="errbox">${esc(a.error)}</div>`).join('')}</div>`;
 }
 
@@ -532,6 +534,7 @@ function wire() {
   on('#b-voice-plan', b => post(b, '/voice', {only_missing: !!S.voice_gate}, 'Making the voice'));
   on('#b-keys', b => post(b, '/keyframes', {}, 'Keyframes started'));
   on('#b-keys-ok', b => post(b, '/keyframes/confirm', {confirmed: !S.keyframes_confirmed}));
+  on('#b-upscale', b => post(b, '/upscale', {}, 'Upscaling clips to 2K'));
   on('#b-final', b => post(b, '/final', {}, 'Putting the short together'));
   on('#b-voice-all', b => post(b, '/voice', {only_missing: false}, 'Making the voice'));
   on('#b-subjects', b => post(b, '/subjects', {}, 'Finding the subjects'));

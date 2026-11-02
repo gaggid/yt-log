@@ -614,6 +614,21 @@ async def make_clips(short_id: str, body: ShotsReq | None = None):
     return _start(short_id, "short_clips", lambda progress: _message(clips.make_clips(short_id, body.shot_ids, body.only_missing, progress)))
 
 
+@router.post("/{short_id}/upscale")
+async def make_upscale(short_id: str):
+    short = _get(short_id)
+    if not upscale.wanted(short):
+        raise HTTPException(400, "Set 'Final video size' to 2K in Settings first")
+    if not upscale.missing(short):
+        raise HTTPException(400, "All clips are already upscaled")
+    async def work(progress):
+        res = await upscale.make(short_id, progress=lambda d, t, l="": progress(d, t, l), s=settings_mod.get(), key=settings_mod.api_key())
+        if res["failed"]:
+            raise RuntimeError(f"2K upscale, shot {res['failed'][0]['shot']}: {res['failed'][0]['error']}")
+        return f"Upscaled {res['made']} clip(s) to 2K"
+    return _start(short_id, "short_upscale", work)
+
+
 @router.post("/{short_id}/final")
 async def make_final(short_id: str):
     short = _get(short_id)
