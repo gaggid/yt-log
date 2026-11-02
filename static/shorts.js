@@ -191,6 +191,7 @@ function sideView() {
     ${s.pipeline === 'keyframe' ? `<label class="f mt-s">Video size<select id="st-size14"><option value="480x832" ${st.size_14b !== '720x1280' ? 'selected' : ''}>480p (480x832, about 12 min for 5 s)</option><option value="720x1280" ${st.size_14b === '720x1280' ? 'selected' : ''}>720p (720x1280, sharper, about 2.3x slower)</option></select></label>
       <label class="row mt-s"><input type="checkbox" id="st-fast" ${st.speed_lora ? 'checked' : ''}> Fast draft: Wan speed LoRA (about 5x quicker, softer detail; leave off for the final)</label>` : ''}
     ${s.keyframes_on ? `<label class="row mt-s"><input type="checkbox" id="st-review" ${st.review_keyframes ? 'checked' : ''}> Stop to look at the start pictures before animating</label>` : ''}
+    ${s.pipeline !== 'remix' ? `<label class="f mt-s">Final video size<select id="st-up"><option value="" ${!st.upscale ? 'selected' : ''}>1080x1920 (as made)</option><option value="2k" ${st.upscale === '2k' ? 'selected' : ''}>2K, 1440x2560 (every clip upscaled by the model server, minutes per clip)</option></select></label>` : ''}
     <label class="row mt-s"><input type="checkbox" id="st-cap" ${st.captions ? 'checked' : ''}> Burn captions into the video</label>
     <label class="row mt-s"><input type="checkbox" id="st-bed" ${st.bed ? 'checked' : ''}> Quiet sound bed under the voice</label>
     <div class="row mt-s"><label class="f">Steps (empty = full quality)<input type="number" id="st-steps" value="${st.steps || ''}" min="1" max="100"></label><label class="f">Seed<input type="number" id="st-seed" value="${st.seed}"></label></div>
@@ -486,7 +487,7 @@ function wire() {
   const on = (sel, fn) => { const e = q(sel); if (e) e.onclick = () => fn(e); };
   const st = (id, key, conv = v => v) => { const e = q(id); if (e) e.onchange = () => patch('/settings', {[key]: conv(e.type === 'checkbox' ? e.checked : e.value)}); };
   st('#st-target', 'target_s', v => +v); st('#st-script', 'script_engine'); st('#st-mode', 'image_mode'); st('#st-imodel', 'image_model'); st('#st-style', 'visual_style'); st('#st-char', 'character_text'); st('#st-tone', 'tone'); st('#st-format', 'format'); st('#st-size', 'size'); st('#st-chain', 'chain'); st('#st-fast', 'speed_lora'); st('#st-lang', 'language'); st('#st-toneid', 'tone_id'); st('#st-edge', 'edge'); st('#st-vspeed', 'voice_speed', v => +v); st('#st-size14', 'size_14b'); st('#st-review', 'review_keyframes');
-  st('#st-cap', 'captions'); st('#st-bed', 'bed'); st('#st-steps', 'steps', v => v === '' ? null : +v); st('#st-seed', 'seed', v => +v || 0);
+  st('#st-up', 'upscale'); st('#st-cap', 'captions'); st('#st-bed', 'bed'); st('#st-steps', 'steps', v => v === '' ? null : +v); st('#st-seed', 'seed', v => +v || 0);
   const vm = q('#st-vmode'); if (vm) vm.onchange = () => patch('/settings', {voice_mode: vm.value});
   const vs = q('#st-voice'); if (vs) vs.onchange = () => { const [engine, voice] = vs.value.split('|'); patch('/settings', {voice: {engine, voice}}); };
   on('#st-anchor', () => pick('image/*', f => upload('/images/anchor', f))); on('#st-anchor2', () => pick('image/*', f => upload('/images/anchor', f)));

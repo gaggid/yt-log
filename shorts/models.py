@@ -7,6 +7,11 @@ TOLERANCE_S = 0.5
 MIN_TARGET_S, MAX_TARGET_S = 5.0, 180.0   # the length a person may ask for: 5 seconds to 3 minutes (the default stays TARGET_S)
 OUT_FPS = 30
 OUT_SIZE = (1080, 1920)
+UPSCALE_SIZES = {"": OUT_SIZE, "2k": (1440, 2560)}       # setting `upscale`: "" = the 1080p short as made; "2k" = every clip goes through the gateway's upscaler (POST /v1/video/upscale) and the short is 1440x2560
+
+
+def out_size(settings: dict | None) -> tuple[int, int]:
+    return UPSCALE_SIZES.get((settings or {}).get("upscale") or "", OUT_SIZE)
 MAX_SHOT_S = 3.0                      # owner rule: no shot is on screen longer than this
 HOOK_MAX_S = 2.0                      # the first shot is shorter still
 MIN_SHOT_S = 1.5                      # owner rule: a shot is on screen between 1.5 and 3.0 seconds

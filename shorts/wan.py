@@ -60,12 +60,12 @@ def body_size(body: dict) -> int:
     return len(json.dumps(body))
 
 
-async def submit(body: dict, base: str, key: str, background: bool = False) -> dict:
+async def submit(body: dict, base: str, key: str, background: bool = False, path: str = "/video/generations") -> dict:
     """Send the request. Returns the gateway's answer: {"id": ...} for a queued job, or a finished result when the gateway answered at once."""
     if body_size(body) > BODY_LIMIT:
         raise WanError(f"the request is {body_size(body) // 1048576} MB; the gateway takes at most 25 MB (use smaller pictures or a shorter, smaller driving video)")
     last = ""
-    url = base.rstrip("/") + "/video/generations"
+    url = base.rstrip("/") + path
     for n in range(RETRIES + 1):
         try:
             async with _client(SUBMIT_TIMEOUT_S) as c:
@@ -147,11 +147,11 @@ async def fetch(result: dict, base: str, key: str) -> bytes:
     raise WanError(f"the finished clip could not be downloaded ({last})", lost=True)
 
 
-async def run(body: dict, base: str, key: str, on_job=None, limit_s: float = JOB_LIMIT_S, background: bool = False) -> tuple[bytes, dict]:
+async def run(body: dict, base: str, key: str, on_job=None, limit_s: float = JOB_LIMIT_S, background: bool = False, path: str = "/video/generations") -> tuple[bytes, dict]:
     """Submit, wait, download. A job that fails on the gateway's side is submitted again (up to RETRIES times). Returns (mp4 bytes, result dict)."""
     last: WanError | None = None
     for _ in range(RETRIES + 1):
-        ans = await submit(body, base, key, background)
+        ans = await submit(body, base, key, background, path)
         if ans.get("id") and ans.get("status") != "succeeded":
             if on_job:
                 on_job(ans["id"])

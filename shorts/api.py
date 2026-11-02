@@ -16,7 +16,7 @@ from story3 import store as media
 from story3.voice import MediaError
 
 from characters import store as cstore, studio_edit
-from . import auto, cast, checks, clips, formats, frames, languages, looks, tones, models, motion, pipelines as P, planner, remix, stitch, store, subjects as subj, timeline, voice as svoice, wan
+from . import auto, cast, checks, clips, formats, frames, languages, looks, tones, models, motion, pipelines as P, planner, remix, stitch, store, subjects as subj, timeline, upscale, voice as svoice, wan
 
 router = APIRouter(prefix="/api/shorts")
 MAX_UPLOAD = 12 * 1024 * 1024
@@ -225,6 +225,7 @@ class SettingsReq(BaseModel):
     tone: str | None = None
     target_s: float | None = None
     script_engine: str | None = None
+    upscale: str | None = None           # '' (1080x1920) | 2k (1440x2560, shorts/upscale.py)
 
 
 @router.patch("/{short_id}/settings")
@@ -266,6 +267,8 @@ async def patch_settings(short_id: str, body: SettingsReq):
         raise HTTPException(400, f"the length is between {models.MIN_TARGET_S:g} seconds and {models.MAX_TARGET_S:g} seconds")
     if "script_engine" in patch and patch["script_engine"] not in ("room", "single"):
         raise HTTPException(400, "script_engine is room or single")
+    if "upscale" in patch and patch["upscale"] not in models.UPSCALE_SIZES:
+        raise HTTPException(400, "upscale is empty (1080x1920) or 2k")
     if "voice_mode" in patch and patch["voice_mode"] not in ("narration", "none"):
         raise HTTPException(400, "voice_mode is one of: narration, none")
     if "tone_id" in patch and patch["tone_id"] not in tones.TONES:
@@ -586,6 +589,10 @@ async def make_final(short_id: str):
 
     async def work(progress):
         fn = remix.build if short["pipeline"] == "remix" else stitch.build
+        if upscale.wanted(short) and upscale.missing(short):
+            res = await upscale.make(short_id, progress=lambda d, t, l="": progress(d, t, l), s=settings_mod.get(), key=settings_mod.api_key())
+            if res["failed"]:
+                raise RuntimeError(f"2K step, shot {res['failed'][0]['shot']}: {res['failed'][0]['error']}")
         await asyncio.to_thread(fn, short_id, lambda d, t, l="": progress(d, t, l))
         return "the short is put together"
     return _start(short_id, "short_final", work)

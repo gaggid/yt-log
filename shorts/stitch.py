@@ -9,7 +9,7 @@ from pathlib import Path
 from story3 import audio as audio_mod, store as media, video
 from story3.voice import MediaError
 
-from . import clips, frames, models, planner, store, timeline, voice as svoice
+from . import clips, frames, models, planner, store, timeline, upscale, voice as svoice
 
 BEAT_FADE_IN_S = 0.012              # fades on each beat of voice, so two beats join without a click
 BEAT_FADE_OUT_S = 0.02
@@ -23,9 +23,9 @@ def _ffmpeg(args: list[str], cwd: Path | None = None) -> None:
     frames.run(args, cwd=cwd)
 
 
-def encode_segment(src: Path, out: Path, n_frames: int) -> None:
-    """One shot: the clip at 30 fps, scaled to cover 1080x1920 and cropped, cut to `n_frames`. A clip shorter than needed holds its last frame."""
-    w, h = models.OUT_SIZE
+def encode_segment(src: Path, out: Path, n_frames: int, size: tuple[int, int] | None = None) -> None:
+    """One shot: the clip at 30 fps, scaled to cover 1080x1920 (1440x2560 for a 2K short) and cropped, cut to `n_frames`. A clip shorter than needed holds its last frame."""
+    w, h = size or models.OUT_SIZE
     vf = (f"hqdn3d=2:1.5:3:3,fps={models.OUT_FPS},tpad=stop_mode=clone:stop_duration=3,scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos,crop={w}:{h},setsar=1,format=yuv420p")
     _ffmpeg(["-i", str(src), "-vf", vf, "-frames:v", str(n_frames), "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-r", str(models.OUT_FPS), str(out)])
 
@@ -105,7 +105,7 @@ def mix_and_mux(silent: Path, voice_wav: Path | None, bed_parts: list[dict], cap
 
 
 def final_hash(short: dict, tl: dict, used: dict) -> str:
-    return store.input_hash(VERSION, json.dumps([tl["tempo"], [(s["id"], s["frames"]) for s in tl["shots"]], used, short["settings"].get("captions"), short["settings"].get("bed")], sort_keys=True))
+    return store.input_hash(VERSION, json.dumps([short["settings"].get("upscale") or "", tl["tempo"], [(s["id"], s["frames"]) for s in tl["shots"]], used, short["settings"].get("captions"), short["settings"].get("bed")], sort_keys=True))
 
 
 def checklist(short: dict) -> dict:
@@ -120,6 +120,7 @@ def checklist(short: dict) -> dict:
     for sh in short["shots"]:
         if not clips.chosen_clip(short, sh):
             missing.append(f"clip for shot {sh['id']}")
+    missing += [f"2K version of the clip for shot {sh['id']}" for sh in upscale.missing(short)]
     return {"ready": not missing, "missing": missing}
 
 
@@ -139,7 +140,7 @@ def build(short_id: str, progress=None) -> dict:
     if bad:
         raise MediaError("; ".join(p["text"] for p in bad) + ": fix this on the checks list first")
     chosen = {sh["id"]: clips.chosen_clip(short, sh) for sh in short["shots"]}
-    used = {"clips": {k: v["id"] for k, v in chosen.items()}, "voice": {} if no_voice else {k: v["id"] for k, v in voices.items()}}
+    used = {"clips": {k: v["id"] for k, v in chosen.items()}, "voice": {} if no_voice else {k: v["id"] for k, v in voices.items()}, "upscale": short["settings"].get("upscale") or ""}
     h = final_hash(short, tl, used)
     for it in media.items(short_id, store.FINAL, "final"):
         if it["status"] == "done" and it["meta"].get("input_hash") == h and it["file"]:
@@ -149,11 +150,12 @@ def build(short_id: str, progress=None) -> dict:
     t0 = time.time()
     try:
         segs = []
+        shots = {sh["id"]: sh for sh in short["shots"]}
         for i, t in enumerate(tl["shots"]):
             if progress:
                 progress(i, len(tl["shots"]) + 2, f"cutting shot {i + 1} of {len(tl['shots'])}")
             seg = work / f"seg{i:03d}.mp4"
-            encode_segment(media.path_of(chosen[t["id"]]), seg, t["frames"])
+            encode_segment(upscale.source_for(short, shots[t["id"]]), seg, t["frames"], models.out_size(short["settings"]))
             segs.append(seg)
         if progress:
             progress(len(tl["shots"]), len(tl["shots"]) + 2, "joining the shots and the voice")

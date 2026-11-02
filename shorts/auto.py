@@ -5,7 +5,7 @@ Order, quick and keyframe: plan, voice, fit the shots to the voice, [start pictu
 Order, remix: (link, window and the rights boxes are done by hand) voice-over, animate, put together."""
 from story3 import store as media
 
-from . import checks, clips, pipelines as P, planner, remix, stitch, store, voice as svoice
+from . import checks, clips, pipelines as P, planner, remix, stitch, store, upscale, voice as svoice
 
 
 def changed_since(short: dict, final: dict) -> bool:
@@ -16,7 +16,7 @@ def changed_since(short: dict, final: dict) -> bool:
         return not all(parts) or final["meta"].get("input_hash") is None
     now_clips = {sh["id"]: (clips.chosen_clip(short, sh) or {}).get("id") for sh in short["shots"]}
     now_voice = {b["id"]: (svoice.chosen(short, b) or {}).get("id") for b in short["beats"]}
-    return used.get("clips") != now_clips or used.get("voice") != now_voice
+    return used.get("clips") != now_clips or used.get("voice") != now_voice or (used.get("upscale") or "") != (short["settings"].get("upscale") or "")
 
 
 def steps(short: dict) -> list[dict]:
@@ -42,6 +42,8 @@ def steps(short: dict) -> list[dict]:
         add("keyframes", "Make the start pictures", short["shots"] and all(clips.chosen_keyframe(short, sh) for sh in short["shots"]))
         add("review", "Look at the start pictures", short.get("keyframes_confirmed") or not short["settings"].get("review_keyframes", True), optional=not short["settings"].get("review_keyframes", True))
     add("clips", "Make the clips", short["shots"] and all(clips.chosen_clip(short, sh) for sh in short["shots"]))
+    if upscale.wanted(short):
+        add("upscale", "Upscale the clips to 2K", short["shots"] and not upscale.missing(short))
     add("final", "Put the short together", short.get("status") == "made" and _final_ok(short))
     return out
 
@@ -107,6 +109,11 @@ async def run(short_id: str, backend, s: dict, progress, key: str = "") -> str:
         if res["failed"] or res["skipped"]:
             bad = (res["failed"] or res["skipped"])[0]
             return f"Stopped at the clips: shot {bad['shot']}: {bad['error']}. Everything finished is kept; press Auto-run to try the rest again."
+    if upscale.wanted(short) and upscale.missing(short):
+        res = await upscale.make(short_id, progress=sub("2K"), s=s, key=key)
+        did.append(f"2K ({res['made']} clips)")
+        if res["failed"]:
+            return f"Stopped at the 2K step: shot {res['failed'][0]['shot']}: {res['failed'][0]['error']}. Everything finished is kept; press Auto-run to try the rest again, or turn 2K off."
     progress(0, 1, "putting the short together")
     import asyncio
     await asyncio.to_thread(stitch.build, short_id, sub("final"))

@@ -60,6 +60,7 @@ class VideoGateway:
         self.cache: dict[tuple, bytes] = {}
         self.status_code = 202
         self.images: list[dict] = []                    # the picture requests (POST /images/generations)
+        self.upscales: list[dict] = []                  # the upscale requests (POST /video/upscale)
         self.pic_edits: list[dict] = []                 # the picture edit requests (POST /images/edits): prompt, number of pictures, size
 
     def mp4(self, frames: int, fps: int) -> bytes:
@@ -84,6 +85,12 @@ class VideoGateway:
             self.pic_edits.append({"prompt": prompt, "images": raw.count(b'name="image'), "size": size})
             w, h = (int(v) for v in size.split("x"))
             return httpx.Response(200, json={"data": [{"b64_json": base64.b64encode(png_bytes(w // 8, h // 8)).decode()}]})
+        if req.method == "POST" and path.endswith("/video/upscale"):
+            body = json.loads(req.content)
+            self.upscales.append(body)
+            jid = f"job_{900 + len(self.upscales)}"
+            self.jobs[jid] = {"body": {"upscale": True, "fps": 30}, "polls": 0}
+            return httpx.Response(202, json={"id": jid, "status": "queued"})
         if req.method == "POST" and path.endswith("/video/generations"):
             body = json.loads(req.content)
             if self.fail_first > 0:
@@ -104,6 +111,8 @@ class VideoGateway:
             if j["polls"] < 2:
                 return httpx.Response(200, json={"id": m.group(1), "status": "running"})
             b = j["body"]
+            if b.get("upscale"):
+                return httpx.Response(200, json={"id": m.group(1), "status": "succeeded", "result": {"url": f"/video/{m.group(1)}.mp4", "input_width": 480, "input_height": 832, "output_width": 1440, "output_height": 2496, "generation_s": 1.0}})
             w, h = (int(v) for v in b.get("size", "480x832").split("x"))
             fps = int(b.get("fps") or 16)
             frames = int(b.get("num_frames") or round(float(b.get("duration", 5)) * fps))
@@ -116,6 +125,8 @@ class VideoGateway:
             if not self.under_api and path.startswith("/v1/"):
                 return httpx.Response(404)
             b = self.jobs[m.group(1)]["body"]
+            if b.get("upscale"):
+                return httpx.Response(200, content=self.mp4(10, 30))
             fps = int(b.get("fps") or 16)
             return httpx.Response(200, content=self.mp4(int(b.get("num_frames") or round(float(b.get("duration", 5)) * fps)), fps))
         return httpx.Response(404, json={"error": "not found " + path})

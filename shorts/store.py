@@ -36,6 +36,7 @@ DEFAULT_SETTINGS = {
     "cast": [],                       # characters from the Character Studio library: [{"character_id", "look_id"}], at most two people (shorts/cast.py)
     "place_id": "",                   # a place from the library
     "target_s": 30,                   # desired video length in seconds: 5 to 180, default 30 (models.MIN_TARGET_S, MAX_TARGET_S)
+    "upscale": "",                    # "" = 1080x1920 | "2k" = 1440x2560: each clip is upscaled by the gateway before the short is put together (shorts/upscale.py)
     "script_engine": "room",          # room = the writers' room (shorts/script.py: bible, retention map, beat drafts, punch-up) | single = the old one-call plan
 }
 

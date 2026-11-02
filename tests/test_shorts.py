@@ -947,3 +947,38 @@ def test_cast_must_be_named_by_the_second_beat_and_story_personas_exist():
     assert {t["id"] for t in tones.public()["tones"] if t["group"] == "Story personas"} == {"survivor", "campfire", "investigator", "memoir"}
     real = {"source": {"kind": "story"}}
     assert "never invent a person" in script._people_rules(real)[0] and "name that fits" in script._people_rules({"source": {"kind": "idea"}})[0]
+
+
+@needs_ffmpeg
+def test_2k_upscales_each_clip_then_puts_the_short_together_at_1440x2560(gw):
+    from shorts import auto, upscale
+    sid = planned("quick", image_mode="wan", upscale="2k")["id"]
+    run(svoice.make(sid, s=S, key="k"))
+    run(clips.make_clips(sid, s=S, key="k"))
+    n = len(store.get(sid)["shots"])
+    assert upscale.missing(store.get(sid)) and not stitch.checklist(store.get(sid))["ready"], "the 2K clips are a step of their own"
+    with pytest.raises(Exception):
+        stitch.build(sid)
+    assert next(x for x in auto.steps(store.get(sid)) if x["id"] == "upscale")["done"] is False
+    res = run(upscale.make(sid, s=S, key="k"))
+    assert res["made"] == n and not res["failed"] and len(gw.upscales) == n
+    assert gw.upscales[0]["resolution"] == "2k" and gw.upscales[0]["video"].startswith("data:video/mp4") and not upscale.missing(store.get(sid))
+    assert run(upscale.make(sid, s=S, key="k"))["made"] == 0, "a finished 2K clip is kept"
+    final = stitch.build(sid)
+    info = frames.info(store.media_dir(sid) / final["file"])
+    assert info["streams"][0]["width"] == 1440 and info["streams"][0]["height"] == 2560 and abs(info["duration_s"] - 30.0) < 0.2
+    assert auto.changed_since(store.get(sid), media.get(final["id"])) is False
+    short = store.get(sid)
+    short["settings"]["upscale"] = ""
+    store.save(short)
+    assert auto.changed_since(store.get(sid), media.get(final["id"])), "turning 2K off makes the video old"
+
+
+def test_2k_is_never_wanted_for_a_remix_short(gw):
+    from shorts import upscale
+    short = new_short("quick")
+    assert not upscale.wanted(short)
+    short["settings"]["upscale"] = "2k"
+    assert upscale.wanted(short)
+    short["pipeline"] = "remix"
+    assert not upscale.wanted(short)
