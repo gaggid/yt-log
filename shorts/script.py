@@ -155,6 +155,10 @@ def _people_rules(short: dict) -> tuple[str, str]:
     if short["source"].get("kind") == "story":
         return ("The facts are real: put every person the facts name in the cast with exactly that name and role, and never invent a person, a name or a nickname.",
                 "Default to third. A real person is never made to say words the facts do not give; quote only what the facts quote.")
+    fmt = (short.get("plan") or {}).get("format") or short["settings"].get("format", "auto")
+    if fmt in ("documentary", "comparison"):
+        return ("The subjects are real entities (countries, armies, organisations, people). The cast name of each entity must be exactly the name stated in the brief — never give a real country, army, organisation or person a dramatic nickname, codename or alias.",
+                "Default to third. The narrator observes and compares; never put words in a real entity's mouth.")
     return ("Give every person the story needs a name that fits the place and time; if the brief already names someone, or the brief is about real, known people, use exactly those names and invent nobody real.",
             "Default to third or first, whichever the brief reads best in; use you only when asked.")
 

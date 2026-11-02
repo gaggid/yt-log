@@ -3,7 +3,7 @@ Hinglish, so any other language needs Maya. `hinglish` is the old behaviour: Hin
 DEFAULT = "hinglish"
 NEEDS_ENGINE = "maya-tts"
 
-HINGLISH_RULE = ("Plain, spoken Hinglish in mixed script: Hindi words in Devanagari, English words in Latin letters, numbers written as words (never digits), no other script.")
+HINGLISH_RULE = ("Plain, spoken Hinglish in mixed script: Hindi words in Devanagari, English words in Latin letters, numbers written as words (never digits), no other script. End each sentence with the Devanagari danda (।), not a full stop (.).")
 
 
 def _rule(name: str, script: str) -> str:
