@@ -17,6 +17,7 @@ def default_profile() -> dict:
     return {
         "personality": "",
         "city": "",
+        "phone": "",
         "interests": dict(DEFAULT_INTERESTS),
         "spaces": [dict(s) for s in DEFAULT_SPACES],
         "current_context": "",

@@ -455,6 +455,7 @@ function lifeView(busy) {
       <h3 style="margin-top:0">Profile</h3>
       <label class="f">Personality<input id="vl-pers" value="${esc(prof.personality || '')}" placeholder="warm, curious, slightly introverted" ${dis}></label>
       <label class="f mt-s">City (for weather context)<input id="vl-city" value="${esc(prof.city || '')}" placeholder="Mumbai" ${dis}></label>
+      <label class="f mt-s">Phone model<input id="vl-phone" value="${esc(prof.phone || '')}" placeholder="iPhone 15, Samsung Galaxy S24, Nothing Phone 2…" ${dis}></label>
       <h4 style="margin:12px 0 4px">Interests</h4>
       ${['books','movies','music','food','hobbies'].map(k => `<label class="ch-slot"><span>${k}</span><input id="vl-int-${k}" value="${esc(interests[k] || '')}" placeholder="" ${dis}></label>`).join('')}
       <h4 style="margin:12px 0 4px">Spaces she lives in</h4>
@@ -554,6 +555,7 @@ function wireLife() {
     const body = {
       personality: ($e('vl-pers') || {}).value || '',
       city: ($e('vl-city') || {}).value || '',
+      phone: ($e('vl-phone') || {}).value || '',
       interests: Object.fromEntries(['books','movies','music','food','hobbies'].map(k => [k, ($e('vl-int-'+k)||{}).value||''])),
       spaces: readSpaces(),
       current_context: ($e('vl-ctx') || {}).value || '',

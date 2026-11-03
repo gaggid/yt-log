@@ -117,12 +117,13 @@ def _system_prompt(char: dict) -> str:
     personality = prof.get("personality") or "warm, curious"
     interests   = prof.get("interests") or {}
     spaces_text = ", ".join(s["name"] for s in (prof.get("spaces") or []) if s.get("name")) or "bedroom, living room, kitchen"
+    phone = prof.get("phone") or ""
 
     return f"""You are {name}, a {age}-year-old {gender} ({ethnicity}) living in India.
 Personality: {personality}.
 Interests — books: {interests.get('books','')}, movies: {interests.get('movies','')}, \
 music: {interests.get('music','')}, food: {interests.get('food','')}, hobbies: {interests.get('hobbies','')}.
-Your spaces: {spaces_text}.
+Your spaces: {spaces_text}.{(' Phone: ' + phone + '.') if phone else ''}
 
 You think and speak in the first person, in English. Be specific, human, and grounded.
 Stay true to your personality — neither too positive nor too dramatic.
@@ -162,7 +163,7 @@ Return ONLY valid JSON:
   "space":         "one of your spaces by name, or a specific outside location",
   "mood":          "one word",
   "outfit":        "what you are wearing right now, specific and casual — feel free to imagine a different outfit if the moment calls for it",
-  "image_idea":    "2-3 sentences: what the frame shows, the framing, the light, the setting. Camera direction, no pronouns.",
+  "image_idea":    "2-3 sentences describing the photograph. Choose the shot setup that fits naturally — for example: front-camera selfie at arm's length (close face/shoulders); mirror selfie (full body visible in mirror, phone in hand); phone propped on a surface so she can move back (timer-style, full or half body); phone held out showing her point of view (book, food, window — she is barely or not visible); candid from the side with no phone visible. Then describe the light, the setting, what fills the frame. Camera direction only, no pronouns. If a specific phone model is known, name it.",
   "goal_progress": "if this activity is progress on one of your goals, name it in 6-10 words; else empty string",
   "note":          "if you just realized something worth remembering — a reminder, an insight, a decision — write it in one sentence; else empty string"
 }""")
@@ -270,16 +271,6 @@ async def think(char: dict, backend, s: dict, trigger: str = "manual", context_o
 
 # ── draw ──────────────────────────────────────────────────────────────────────
 
-HOME_FRAMING   = ("Candid lifestyle photograph, vertical 9:16 frame, warm indoor light, "
-                   "mid-close shot, slightly off-centre natural composition.")
-CANDID_FRAMING = ("Candid lifestyle photograph, vertical 9:16 frame, natural available light.")
-_HOME_WORDS     = {"bedroom", "living room", "kitchen", "bathroom", "study", "balcony", "home"}
-
-
-def _framing(space: str) -> str:
-    return HOME_FRAMING if any(w in space.lower() for w in _HOME_WORDS) else CANDID_FRAMING
-
-
 async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: str,
                        trigger: str = "manual") -> dict:
     """Generate a picture from a thought and save it as a char_moment media row."""
@@ -287,7 +278,6 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
     from . import studio
 
     image_idea = thought.get("image_idea", "")
-    space      = thought.get("space", "")
     outfit     = thought.get("outfit", "")
 
     canon     = store.canon_items(char)
@@ -298,13 +288,13 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
         refs    = [_path(canon["portrait"]), _path(canon["body"])]
         ref_ids = [canon["portrait"]["id"], canon["body"]["id"]]
         prompt  = (f"Picture 1 shows the person's face. Picture 2 shows their body. "
-                   f"Create a new photograph: {_framing(space)} {image_idea}"
+                   f"Create a new vertical 9:16 photograph: {image_idea}"
                    + (f" Wearing: {outfit}." if outfit else "")
                    + " Each person keeps exactly the face, hair, skin tone, build and clothes of their own picture.")
         how = "edit"
     else:
         char_desc = (char.get("identity") or "").strip()
-        prompt = f"{_framing(space)} {image_idea}" + (f" Wearing: {outfit}." if outfit else "") + (f" {char_desc}" if char_desc else "")
+        prompt = f"Vertical 9:16 photograph. {image_idea}" + (f" Wearing: {outfit}." if outfit else "") + (f" {char_desc}" if char_desc else "")
         refs, ref_ids = [], []
         how = "draw"
 
