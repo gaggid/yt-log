@@ -532,8 +532,8 @@ async function loadLifeEvents() {
 function wireLife() {
   const $e = id => document.getElementById(id);
   if (!$e('vl-save')) return; // not on life tab
-  // load events if not yet loaded
-  if (LIFE_EVENTS === null) { loadLifeEvents().then(() => { const box = document.getElementById('life-feed-box'); if (box) { LIFE_EVENTS = LIFE_EVENTS || []; refreshCenter(); } }); }
+  // load events/goals/memories async; re-render once they arrive so the UI shows real data
+  if (LIFE_EVENTS === null) { loadLifeEvents().then(() => { if (CH_TAB === 'life') render(); }); }
   const readSpaces = () => {
     const names = [...document.querySelectorAll('[data-sp-name]')];
     const descs = [...document.querySelectorAll('[data-sp-desc]')];
