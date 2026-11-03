@@ -7,18 +7,22 @@
 
 ## Build status — 2026-11-03
 
-All phases 0–G are **done and committed** (commits 90400f7 → 6f101d2).
+All phases 0–H are **done and committed** (commits 90400f7 → 201ad6d).
 
 | Area | Shipped |
 |------|---------|
 | Place picker | Replaced with text + optional image upload in character edits |
-| Profile | Personality, city, interests ×5, spaces (editable list), current context, save |
+| Profile | Core character (immutable), personality, city, phone model, fashion taste, interests ×5, spaces, current context |
 | Brain pipeline | 5-stage: context assembly → first-pass thought → self-review → goal alignment → memory formation |
 | World context | Weather (wttr.in), Google News RSS by interest keyword, Indian season — 30-min cache, fail-silent |
+| Day arc | 6 time bands (pre-dawn → night); energy level; appropriate/avoid activity lists; "already done today" guard |
 | Goals | CRUD (add/pause/achieve/delete); active summary injected into brain; auto progress-note from ThoughtOut |
 | Memory | Episodic; 7-day half-life decay; retrieval by strength × keyword overlap; strength bars in UI |
 | Idle loop | Fires when gateway quiet 5+ min; respects `life_enabled` toggle + interval; 15-min retry on busy |
-| UI | Virtual Life tab: profile panel, goals panel, memory panel, life feed with pipeline debug |
+| Wardrobe | Brain sees full wardrobe listing; picks garment via `outfit_id` → garment used as draw reference instead of body canon; `wardrobe_want` saved as memory |
+| Shot variety | Brain chooses shot style in `image_idea` (selfie, mirror, propped, POV, candid); phone model named |
+| Notes | `note` field in ThoughtOut saved as `[note]` memory for later retrieval |
+| UI | Life tab: core char + fashion taste fields; feed shows time, note, wardrobe wish, outfit badge, thumbnail + zoom |
 
 ---
 
@@ -794,6 +798,7 @@ These are not started. Add a phase row and spec section before building.
 |------|-------|
 | **Phase H — 24-hour day rhythm** | See full spec below |
 | **Phase I — Character evolution (skills, mastery)** | See full spec below |
+| **Internet suite (Phase J)** | Full-fledged browsing: character opens real URLs, reads pages, reacts to content, discovers fashion/trends/news organically. Not limited to RSS. Needs a browser tool layer. Parked until that layer is built. |
 | Space reference image generation | Text description is good enough for v1; add when "in a place" image quality proves insufficient |
 | Multi-character interaction | Two characters in one life moment — needs cast + shared scene logic |
 | Social feed / sharing | Export life feed as Instagram-style reel or image grid |
