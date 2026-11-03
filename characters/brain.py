@@ -365,7 +365,7 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
         store.media_dir(char["id"], "char_moment").mkdir(parents=True, exist_ok=True)
         it = media.add(char["id"], "char_moment", "moment", 0, "done",
                        {"event_id": event_id, "thought": thought.get("thought", ""),
-                        "activity": thought.get("activity", ""), "space": space,
+                        "activity": thought.get("activity", ""), "space": thought.get("space", ""),
                         "mood": thought.get("mood", ""), "how": how, "prompt": prompt[:500]})
         fname = f"char_moment/moment-a{it['attempt']}.png"
         (store.media_dir(char["id"]) / fname).write_bytes(raw)
