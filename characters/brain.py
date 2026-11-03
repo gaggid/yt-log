@@ -55,15 +55,22 @@ def _time_of_day() -> str:
 # ── stage 1: context assembly ─────────────────────────────────────────────────
 
 async def _assemble_context(char: dict, context_override: str, recent_events: list[dict]) -> dict:
-    """Fetch world brief, retrieve memories, build goals summary. All fail-silent."""
+    """Fetch world brief + day arc, retrieve memories, build goals summary. All fail-silent."""
     prof = profile_mod.get(char)
 
-    # world context (weather + news)
+    # world context (weather + news) — async fetch
     try:
         world = await world_mod.brief(char)
         world_line = world_mod.format_for_prompt(world)
     except Exception:
         world_line = ""
+
+    # day arc — sync, always present (falls back to defaults if DB unavailable)
+    try:
+        arc = world_mod.day_arc(char)
+        day_arc_text = world_mod.format_day_arc(arc)
+    except Exception:
+        arc, day_arc_text = {}, ""
 
     # memories
     activity_context = context_override or prof.get("current_context") or ""
@@ -87,6 +94,8 @@ async def _assemble_context(char: dict, context_override: str, recent_events: li
 
     return {
         "world_line":    world_line,
+        "day_arc_text":  day_arc_text,
+        "day_arc":       arc,
         "memories_text": memories_text,
         "memories":      mems,
         "goals_text":    goals_text,
@@ -120,12 +129,13 @@ Only one thing happens at a time; pick the most realistic activity for this time
 
 
 def _first_pass_user(ctx: dict, char: dict, context_override: str) -> str:
-    prof = profile_mod.get(char)
+    prof    = profile_mod.get(char)
     context = (context_override or prof.get("current_context") or "").strip()
     today   = datetime.now().strftime("%A, %d %B %Y")
-    tod     = _time_of_day()
 
-    sections = [f"Today: {today}. Time: {tod}."]
+    sections = [f"Today: {today}."]
+    if ctx["day_arc_text"]:
+        sections.append(ctx["day_arc_text"])
     if ctx["world_line"]:
         sections.append(f"World: {ctx['world_line']}")
     if context:
@@ -191,7 +201,7 @@ async def think(char: dict, backend, s: dict, trigger: str = "manual", context_o
     caller.last_attempt = True
 
     pipeline_log: dict = {
-        "stage1_context": {k: v for k, v in ctx.items() if k != "memories"},
+        "stage1_context": {k: v for k, v in ctx.items() if k not in ("memories", "day_arc")},
         "stage2_system":  system,
         "stage2_user":    user1,
     }

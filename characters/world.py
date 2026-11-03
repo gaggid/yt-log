@@ -1,9 +1,12 @@
 """Real-world context for the character brain: weather for her city and news headlines
-relevant to her interests. Both are optional — failures are silent. Results cached 30 min."""
+relevant to her interests. Both are optional — failures are silent. Results cached 30 min.
+Also provides the 24-hour day arc: time band, energy, appropriate/avoid activities, day type,
+and what the character has already done today (so she never repeats herself)."""
 import asyncio
 import re
 import time
 import xml.etree.ElementTree as ET
+from datetime import datetime
 
 import httpx
 
@@ -135,3 +138,94 @@ def format_for_prompt(b: dict) -> str:
     if b.get("news"):
         parts.append("Trending: " + " · ".join(b["news"][:3]))
     return " | ".join(parts) if parts else ""
+
+
+# ── 24-hour day arc ────────────────────────────────────────────────────────────
+
+# (start_h, end_h, name, energy 0-3, appropriate[], never[])
+_BANDS = [
+    ( 0,  6, "pre-dawn",  0,
+      ["sleep", "late-night reflection", "insomnia scrolling"],
+      ["exercise", "social outings", "work calls", "cooking full meals"]),
+    ( 6, 10, "morning",   2,
+      ["morning routine", "chai", "breakfast", "workout", "planning the day", "commute"],
+      ["heavy social events", "late-night content"]),
+    (10, 14, "midday",    3,
+      ["focused work", "study", "errands", "lunch", "skill practice", "calls"],
+      ["wind-down", "passive TV watching", "napping (unless very tired)"]),
+    (14, 18, "afternoon", 2,
+      ["creative work", "casual social", "snack", "light practice", "browsing", "short nap"],
+      ["heavy decisions", "intense workouts late in this band"]),
+    (18, 22, "evening",   3,
+      ["dinner", "friends", "outings", "phone calls", "hobbies", "cooking", "watching something"],
+      ["focused deep work", "studying", "starting new projects"]),
+    (22, 24, "night",     1,
+      ["wind-down", "reading", "reflection", "journalling", "skincare routine"],
+      ["exercise", "social outings", "starting meals", "intense screen time"]),
+]
+
+
+def _current_band() -> dict:
+    h = datetime.now().hour
+    for start, end, name, energy, appropriate, never in _BANDS:
+        if start <= h < end:
+            return {"name": name, "hours": f"{start:02d}–{end:02d}",
+                    "energy": energy, "appropriate": appropriate, "never": never}
+    return _BANDS[-1]  # fallback
+
+
+def _day_type() -> dict:
+    dt  = datetime.now()
+    dow = dt.weekday()   # 0=Mon … 6=Sun
+    if dow == 6:
+        kind = "Sunday — rest and reflection; good for introspection and week-prep"
+    elif dow == 5:
+        kind = "Saturday — free day; high energy for outings, social and creative experiments"
+    else:
+        kind = "weekday — work or study obligations; goal-directed activities more likely"
+    month_start = dt.day == 1
+    return {"kind": kind, "month_start": month_start}
+
+
+def _done_today(char_id: str) -> list[str]:
+    """Activities already logged in think events since midnight today. Fail-silent."""
+    try:
+        from story import db
+        midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        rows = db.q(
+            "SELECT outputs FROM char_life_events WHERE char_id=? AND event_type='think' AND created_at >= ?",
+            (char_id, midnight),
+        )
+        done = []
+        for r in rows:
+            out = db.jload(r["outputs"], {})
+            a = out.get("activity", "").strip()
+            if a:
+                done.append(a)
+        return done
+    except Exception:
+        return []
+
+
+def day_arc(char: dict) -> dict:
+    """Full day-arc context: band, day type, already-done-today list."""
+    band = _current_band()
+    dtype = _day_type()
+    done = _done_today(char["id"])
+    return {**band, **dtype, "done_today": done}
+
+
+def format_day_arc(arc: dict) -> str:
+    """Multi-line block injected into stage-1 context."""
+    lines = [
+        f"Time band: {arc['name']} ({arc['hours']}), energy {arc['energy']}/3.",
+        f"Good activities now: {', '.join(arc['appropriate'][:4])}.",
+        f"Not appropriate now: {', '.join(arc['never'][:3])}.",
+        f"Day type: {arc['kind']}.",
+    ]
+    if arc.get("done_today"):
+        activities = ", ".join(arc["done_today"][:6])
+        lines.append(f"You have already done today: {activities}. Do not repeat these — pick something different.")
+    if arc.get("month_start"):
+        lines.append("It is the first of the month — a natural moment to reflect on the past month and review your goals.")
+    return "\n".join(lines)
