@@ -6,6 +6,7 @@ import traceback
 
 _jobs: dict[str, dict] = {}
 _current: dict = {"task": None, "plan_id": None}
+_last_activity: float = 0.0   # updated on every start(); read by characters/loop.py for idle detection
 
 
 def busy() -> bool:
@@ -31,6 +32,8 @@ class JobBusy(Exception):
 
 def start(plan_id: str, kind: str, work) -> dict:
     """work(progress) is an async callable; progress(done, total, label) records where it is."""
+    global _last_activity
+    _last_activity = time.time()
     if busy():
         raise JobBusy(f"another planning job is running ({_current['plan_id']}); wait for it to finish")
     job = {"state": "running", "kind": kind, "started": time.time(), "done": 0, "total": 0, "label": "starting", "error": ""}

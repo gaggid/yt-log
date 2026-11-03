@@ -50,7 +50,12 @@ async def lifespan(app: FastAPI):
     resumed = manager.resume_interrupted()      # unfinished sources continue after a restart / auto-deploy
     if resumed:
         print(f"Resuming interrupted processing: {', '.join(resumed)}", flush=True)
+    from characters import loop as _vl_loop
+    from story import settings as _settings
+    _s = _settings.get()
+    _vl_loop.start(_s, _settings.api_key())
     yield
+    _vl_loop.stop()
 
 
 app = FastAPI(title="Source-to-Story", lifespan=lifespan)

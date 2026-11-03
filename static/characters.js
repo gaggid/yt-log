@@ -452,6 +452,7 @@ function lifeView(busy) {
         <label class="small" style="display:flex;align-items:center;gap:4px">Every <input type="number" id="vl-interval" min="15" max="1440" value="${prof.life_interval_m || 60}" style="width:60px" ${dis}> min</label>
       </div>
       <div class="mute small mt-s">Thinks and draws when the gateway key is idle. Retries after 15 min if busy.</div>
+      <div id="vl-loop-status" class="mute small mt-s"></div>
     </div>
 
     <div class="card pad mt">
@@ -583,6 +584,13 @@ function wireLife() {
   document.querySelectorAll('[data-draw-ev]').forEach(b => b.onclick = async () => {
     await act(b, async () => { await call('/' + CID + '/life/' + b.dataset.drawEv + '/draw', {method: 'POST', json: {}}); await window._chLoad(true); return true; }, 'Drawing the moment…');
   });
+  // show loop status
+  call('/' + CID + '/life/status').then(st => {
+    const el = document.getElementById('vl-loop-status'); if (!el) return;
+    const relMin = ts => { if (!ts) return '—'; const m = Math.round((ts - Date.now()/1000)/60); return m < 1 ? 'soon' : m + ' min'; };
+    const lastMin = ts => { if (!ts) return 'never'; const m = Math.round((Date.now()/1000 - ts)/60); return m < 1 ? 'just now' : m < 60 ? m+'m ago' : Math.round(m/60)+'h ago'; };
+    el.textContent = `Loop ${st.loop_running ? '● running' : '○ stopped'} · last: ${lastMin(st.last_run_at)} · next: ${st.life_enabled ? relMin(st.next_run_at) : 'off'}`;
+  }).catch(() => {});
   $e('vl-enabled') && ($e('vl-enabled').onchange = async () => {
     const body = {life_enabled: $e('vl-enabled').checked};
     await act(null, async () => { await call('/' + CID + '/profile', {method: 'PATCH', json: body}); return true; }, $e('vl-enabled').checked ? 'Auto life on' : 'Auto life off');

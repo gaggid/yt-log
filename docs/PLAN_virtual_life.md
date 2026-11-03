@@ -28,7 +28,7 @@ image instead.
 | A | Profile (personality, interests, spaces) | done | `characters/profile.py`, `characters/api.py`, `static/characters.js` |
 | B | Brain / Think endpoint + Draw | done | `characters/brain.py`, `characters/api.py` |
 | C | ~~Draw from thought~~ | merged into B | — |
-| D | Idle auto-loop | pending | `characters/loop.py`, `main.py` |
+| D | Idle auto-loop | done | `characters/loop.py`, `main.py`, `story2/jobs.py` |
 | E | Real-world context (weather + news) | pending | `characters/world.py`, `characters/brain.py` |
 | F | Goals — set future goals, brain plans toward them | pending | `characters/goals.py`, `characters/profile.py`, `characters/brain.py` |
 | G | Memory — episodic memory with time-decay and retrieval | pending | `characters/memory.py`, `characters/store.py`, `characters/brain.py` |

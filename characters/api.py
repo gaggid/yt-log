@@ -757,6 +757,25 @@ async def delete_memory(char_id: str, memory_id: str):
     return {"ok": True}
 
 
+@router.get("/{char_id}/life/status")
+async def life_status(char_id: str):
+    """Loop status for this character: last think time, next scheduled time, loop running."""
+    from characters import loop as loop_mod
+    c = _get(char_id)
+    prof = profile_mod.get(c)
+    last = profile_mod.last_run_time(char_id)
+    interval_s = (prof.get("life_interval_m") or 60) * 60
+    next_at = (last + interval_s) if last else None
+    loop_running = loop_mod._task is not None and not loop_mod._task.done()
+    return {
+        "life_enabled": prof.get("life_enabled", False),
+        "last_run_at": last,
+        "next_run_at": next_at,
+        "interval_m": prof.get("life_interval_m") or 60,
+        "loop_running": loop_running,
+    }
+
+
 class ThinkReq(BaseModel):
     context_override: str = ""
 
