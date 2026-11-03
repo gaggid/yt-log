@@ -248,7 +248,7 @@ function wire() {
   wireCenter();
 }
 function drawArgs(v) {
-  const refEl = v === 'body' ? $e('body-ref') : null;
+  const refEl = v === 'body' ? document.getElementById('body-ref') : null;
   const nEl = document.querySelector(`[data-n="${v}"]`);
   return {views: [v], n: nEl ? +nEl.value : 1, body_ref: refEl ? refEl.value : ''};
 }
