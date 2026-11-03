@@ -455,9 +455,13 @@ function lifeView(busy) {
   <div>
     <div class="card pad">
       <h3 style="margin-top:0">Profile</h3>
-      <label class="f">Personality<input id="vl-pers" value="${esc(prof.personality || '')}" placeholder="warm, curious, slightly introverted" ${dis}></label>
+      <label class="f">Core character <span class="mute small">upbringing, formative experiences, values — never changes</span>
+        <textarea id="vl-core" style="min-height:72px" placeholder="Grew up in Chandigarh, trained in classical dance for 10 years, moved to Pune at 22 for work. Values discipline and loyalty above all." ${dis}>${esc(prof.core_character || '')}</textarea></label>
+      <label class="f mt-s">Personality <span class="mute small">current traits — can drift over time</span><input id="vl-pers" value="${esc(prof.personality || '')}" placeholder="warm, curious, slightly introverted" ${dis}></label>
       <label class="f mt-s">City (for weather context)<input id="vl-city" value="${esc(prof.city || '')}" placeholder="Mumbai" ${dis}></label>
       <label class="f mt-s">Phone model<input id="vl-phone" value="${esc(prof.phone || '')}" placeholder="iPhone 15, Samsung Galaxy S24, Nothing Phone 2…" ${dis}></label>
+      <label class="f mt-s">Fashion &amp; style <span class="mute small">what she gravitates toward — updated as she discovers new things</span>
+        <textarea id="vl-fashion" style="min-height:52px" placeholder="Prefers kurtas and co-ords over western wear, likes earthy tones and block prints, always watches Myntra sale." ${dis}>${esc(prof.fashion_taste || '')}</textarea></label>
       <h4 style="margin:12px 0 4px">Interests</h4>
       ${['books','movies','music','food','hobbies'].map(k => `<label class="ch-slot"><span>${k}</span><input id="vl-int-${k}" value="${esc(interests[k] || '')}" placeholder="" ${dis}></label>`).join('')}
       <h4 style="margin:12px 0 4px">Spaces she lives in</h4>
@@ -555,9 +559,11 @@ function wireLife() {
   };
   $e('vl-save').onclick = async () => {
     const body = {
+      core_character: ($e('vl-core') || {}).value || '',
       personality: ($e('vl-pers') || {}).value || '',
       city: ($e('vl-city') || {}).value || '',
       phone: ($e('vl-phone') || {}).value || '',
+      fashion_taste: ($e('vl-fashion') || {}).value || '',
       interests: Object.fromEntries(['books','movies','music','food','hobbies'].map(k => [k, ($e('vl-int-'+k)||{}).value||''])),
       spaces: readSpaces(),
       current_context: ($e('vl-ctx') || {}).value || '',

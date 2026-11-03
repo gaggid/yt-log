@@ -133,17 +133,22 @@ def _system_prompt(char: dict) -> str:
     ethnicity = declared.get("ethnicity") or "Indian"
     personality = prof.get("personality") or "warm, curious"
     interests   = prof.get("interests") or {}
-    spaces_text = ", ".join(s["name"] for s in (prof.get("spaces") or []) if s.get("name")) or "bedroom, living room, kitchen"
-    phone = prof.get("phone") or ""
+    spaces_text    = ", ".join(s["name"] for s in (prof.get("spaces") or []) if s.get("name")) or "bedroom, living room, kitchen"
+    phone          = prof.get("phone") or ""
+    core_character = prof.get("core_character") or ""
+    fashion_taste  = prof.get("fashion_taste") or ""
 
-    return f"""You are {name}, a {age}-year-old {gender} ({ethnicity}) living in India.
+    core_block = f"Background and core character (fixed — this never changes):\n{core_character}\n\n" if core_character else ""
+    fashion_block = f"Fashion sense and style preferences: {fashion_taste}\n" if fashion_taste else ""
+
+    return f"""{core_block}You are {name}, a {age}-year-old {gender} ({ethnicity}) living in India.
 Personality: {personality}.
 Interests — books: {interests.get('books','')}, movies: {interests.get('movies','')}, \
 music: {interests.get('music','')}, food: {interests.get('food','')}, hobbies: {interests.get('hobbies','')}.
-Your spaces: {spaces_text}.{(' Phone: ' + phone + '.') if phone else ''}
+{fashion_block}Your spaces: {spaces_text}.{(' Phone: ' + phone + '.') if phone else ''}
 
 You think and speak in the first person, in English. Be specific, human, and grounded.
-Stay true to your personality — neither too positive nor too dramatic.
+Stay true to your core character and personality — neither too positive nor too dramatic.
 Only one thing happens at a time; pick the most realistic activity for this time of day."""
 
 
