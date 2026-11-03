@@ -29,10 +29,11 @@ class ThoughtOut(M):
     mood:           Str = ""   # one word
     expression:     Str = ""   # specific facial expression for this moment
     face_state:     Str = ""   # physical face condition (makeup, tiredness, flush, etc.)
+    shot_type:      Str = ""   # one of the defined shot types — controls camera and phone visibility
     outfit:         Str = ""   # text description of what she is wearing
     outfit_id:      Str = ""   # wardrobe garment id if wearing an item from wardrobe
     wardrobe_want:  Str = ""   # garment she wants to add to wardrobe, described in one line
-    image_idea:     Str = ""   # 2-3 sentence visual description for the image model
+    image_idea:     Str = ""   # scene content, light and setting only — no camera or phone
     goal_progress:  Str = ""   # if non-empty, progress on an active goal
     note:           Str = ""   # self-reminder or realization worth keeping, if any
 
@@ -193,7 +194,8 @@ Return ONLY valid JSON:
   "outfit":        "text description of what you are wearing right now — for display only; the actual clothes in the photo come from your wardrobe or your approved body picture",
   "outfit_id":     "the id of the wardrobe item you want to wear (exactly as listed above); set this to change your outfit in the photo. If empty, your default approved outfit is shown.",
   "wardrobe_want": "if you spot or imagine a piece of clothing you want to own — describe it in one line (e.g. 'dark green silk kurti with mirror work'); else empty string",
-  "image_idea":    "2-3 sentences describing the photograph. Choose the shot setup that fits naturally — for example: front-camera selfie at arm's length (close face/shoulders); mirror selfie (full body visible in mirror, phone in hand); phone propped on a surface so she can move back (timer-style, full or half body); phone held out showing her point of view (book, food, window — she is barely or not visible); candid from the side with no phone visible. Then describe the light, the setting, what fills the frame. Camera direction only, no pronouns. If a phone is visible, use the exact phone model declared in her profile — do not invent a different model or sequel.",
+  "shot_type":     "choose exactly one: front_selfie (arm-length selfie, face close-up, phone not visible) | mirror_selfie (full or half body reflection in mirror, phone in hand in the reflection) | propped_timer (phone on a surface, person in background, phone not visible) | pov_first_person (what she sees — hands, food, book, no face) | candid_side (lifestyle shot, no phone). Pick what fits the activity and space most naturally.",
+  "image_idea":    "2-3 sentences: what fills the frame, the light, the setting, visible props. Describe ONLY the scene content — do NOT mention the camera, the phone, or how the picture was taken. No pronouns.",
   "goal_progress": "if this activity made concrete progress on a goal, describe WHAT YOU ACTUALLY DID in 6-10 words (e.g. 'practiced first 10 minutes of Bhangra footwork', 'finished chapter 3 of the book'). Do not write meta-reflections or intentions about the goal. Else empty string.",
   "note":          "if you just realized something worth remembering — a reminder, an insight, a decision — write it in one sentence; else empty string"
 }""")
@@ -304,6 +306,35 @@ async def think(char: dict, backend, s: dict, trigger: str = "manual", context_o
     return {**final, "event_id": ev["id"], "ok": True}
 
 
+# ── shot-type → camera direction ─────────────────────────────────────────────
+
+SHOT_DIRECTIONS: dict[str, str] = {
+    "front_selfie": (
+        "Front-camera selfie held at arm's length. Close-up on face and shoulders. "
+        "Phone NOT in frame. Slight upward angle, casual and natural."
+    ),
+    "mirror_selfie": (
+        "Mirror selfie. Full-length or half-body reflection visible in the mirror. "
+        "Phone held in one hand at chest or hip height, its screen facing the mirror. "
+        "The reflection of the person and the phone are both visible in the mirror. "
+        "Slight side-angle so person and reflection are both in frame."
+    ),
+    "propped_timer": (
+        "Phone placed on a surface (shelf, desk, windowsill) acting as a stationary camera. "
+        "Person visible in the mid or full background. Phone NOT in frame. "
+        "Eye-level or slight angle, person looks relaxed, not posing directly at the lens."
+    ),
+    "pov_first_person": (
+        "First-person point-of-view shot. Shows what the person sees: hands, a book, food, "
+        "a view outside, a screen. Person's face not in frame. Phone not visible."
+    ),
+    "candid_side": (
+        "Candid lifestyle shot from a slight side angle. Person unaware of camera. "
+        "No phone in frame. Natural moment."
+    ),
+}
+_DEFAULT_SHOT = "front_selfie"
+
 # ── draw ──────────────────────────────────────────────────────────────────────
 
 async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: str,
@@ -317,6 +348,8 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
     outfit_id   = thought.get("outfit_id", "").strip()
     expression  = thought.get("expression", "")
     face_state  = thought.get("face_state", "")
+    shot_type   = thought.get("shot_type", "") or _DEFAULT_SHOT
+    shot_dir    = SHOT_DIRECTIONS.get(shot_type, SHOT_DIRECTIONS[_DEFAULT_SHOT])
 
     canon     = store.canon_items(char)
     has_refs  = "portrait" in canon
@@ -338,12 +371,13 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
         if expression or face_state:
             expr_line = " Expression: " + (expression or "") + ("." if expression else "") + (" Face: " + face_state + "." if face_state else "") + " Apply this expression — do not copy the neutral look from the reference picture."
 
+        scene = f"{shot_dir} {image_idea}".strip()
         if garment_ref:
             refs    = [portrait_path, garment_ref["path"]]
             ref_ids = [portrait_id, garment_ref["id"]]
             prompt  = (f"Picture 1 is an identity reference only (face shape, skin tone, hair colour and length, build). "
                        f"Picture 2 shows the garment/outfit to wear. "
-                       f"Create a new vertical 9:16 photograph: {image_idea}"
+                       f"Create a new vertical 9:16 photograph: {scene}"
                        + (f" Wear the outfit from Picture 2." if outfit else "")
                        + expr_line
                        + " Match the person's face identity from Picture 1 exactly.")
@@ -352,24 +386,22 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
             if body_in_canon:
                 refs    = [portrait_path, _path(body_in_canon)]
                 ref_ids = [portrait_id, body_in_canon["id"]]
-                # Do NOT add outfit text — body canon is the clothes reference.
-                # Adding text here conflicts with Picture 2 and causes the model to invent.
                 prompt  = (f"Picture 1 is an identity reference only (face shape, skin tone, hair colour and length, build). "
                            f"Picture 2 shows their body and outfit — keep the outfit exactly as in Picture 2. "
-                           f"Create a new vertical 9:16 photograph: {image_idea}"
+                           f"Create a new vertical 9:16 photograph: {scene}"
                            + expr_line
                            + " Match the person's face identity from Picture 1 exactly.")
             else:
                 refs, ref_ids = [portrait_path], [portrait_id]
                 prompt  = (f"Picture 1 is an identity reference only (face shape, skin tone, hair colour and length, build). "
-                           f"Create a new vertical 9:16 photograph: {image_idea}"
+                           f"Create a new vertical 9:16 photograph: {scene}"
                            + (f" Wearing: {outfit}." if outfit else "")
                            + expr_line
                            + " Match the person's face identity from Picture 1 exactly.")
         how = "edit"
     else:
         char_desc = (char.get("identity") or "").strip()
-        prompt = f"Vertical 9:16 photograph. {image_idea}" + (f" Wearing: {outfit}." if outfit else "") + (f" {char_desc}" if char_desc else "")
+        prompt = f"Vertical 9:16 photograph. {shot_dir} {image_idea}" + (f" Wearing: {outfit}." if outfit else "") + (f" {char_desc}" if char_desc else "")
         refs, ref_ids = [], []
         how = "draw"
 

@@ -150,6 +150,18 @@ async def wardrobe_job():
     return jobs.status("wardrobe")
 
 
+@router.post("/wardrobe/generate/{char_id}")
+async def wardrobe_generate(char_id: str, n: int = 8):
+    """Generate n garment flat-lays for this character and save them to the wardrobe."""
+    _get(char_id)
+    s   = settings_mod.get()
+    key = settings_mod.api_key()
+    _n  = min(n, 15)
+    from .wardrobe_gen import generate as _gen
+    return jobs.start("wardrobe", f"Generating {_n} wardrobe items",
+                      lambda progress: _gen(char_id, _n, s, key))
+
+
 @router.post("/import")
 async def import_pack(file: UploadFile = File(...)):
     raw = await file.read()

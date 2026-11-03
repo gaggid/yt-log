@@ -445,7 +445,7 @@ function lifeView(busy) {
         <div style="font-style:italic;margin:6px 0">${esc(out.thought||'')}</div>${gp}${noteHtml}${wishHtml}${drawn}
         ${!drawEv ? `<button class="small primary mt-s" data-draw-ev="${esc(ev.id)}">Draw this look</button>` : '<span class="mute small mt-s">✓ drawn</span>'}
         <details class="mt-s"><summary class="mute small" style="cursor:pointer">Pipeline debug</summary>
-          <pre style="font-size:10px;white-space:pre-wrap;max-height:200px;overflow:auto">${esc(JSON.stringify({expression:out.expression,face_state:out.face_state,image_idea:out.image_idea,outfit:out.outfit,outfit_id:out.outfit_id,wardrobe_want:out.wardrobe_want,goal_progress:out.goal_progress,note:out.note},null,2))}</pre>
+          <pre style="font-size:10px;white-space:pre-wrap;max-height:200px;overflow:auto">${esc(JSON.stringify({shot_type:out.shot_type,expression:out.expression,face_state:out.face_state,image_idea:out.image_idea,outfit:out.outfit,outfit_id:out.outfit_id,wardrobe_want:out.wardrobe_want,goal_progress:out.goal_progress,note:out.note},null,2))}</pre>
         </details>
       </div>`;
     }
@@ -478,6 +478,17 @@ function lifeView(busy) {
       </div>
       <div class="mute small mt-s">Thinks and draws when the gateway key is idle. Retries after 15 min if busy.</div>
       <div id="vl-loop-status" class="mute small mt-s"></div>
+    </div>
+
+    <div class="card pad mt">
+      <div class="row"><h3 style="margin:0">Wardrobe</h3><span class="sp"></span>
+        <label class="small" style="display:flex;align-items:center;gap:4px">
+          <input type="number" id="vl-ward-n" min="3" max="15" value="8" style="width:48px"> outfits
+        </label>
+        <button class="small primary" id="vl-ward-gen" ${dis}>Generate for current weather</button>
+      </div>
+      <div class="mute small mt-s">AI plans outfits suited to the city weather, season and fashion taste, then draws each as a flat-lay image and saves to the wardrobe. One job at a time — check <a href="#/characters/wardrobe">Wardrobe</a> when done.</div>
+      <div id="vl-ward-job" class="mt-s"></div>
     </div>
 
     <div class="card pad mt">
@@ -538,6 +549,22 @@ async function loadLists() {
   WARD = await call('/wardrobe').catch(() => []);
 }
 
+function pollWardrobeJob() {
+  const box = document.getElementById('vl-ward-job');
+  if (!box) return;
+  call('/wardrobe/job').then(j => {
+    if (!j || j.state === 'idle') { box.innerHTML = ''; return; }
+    if (j.state === 'running') {
+      box.innerHTML = `<div class="small mute"><span class="spin"></span> ${esc(j.label||'working')} · ${Math.round(j.elapsed_s||0)}s</div>`;
+      setTimeout(pollWardrobeJob, 4000);
+    } else if (j.state === 'done') {
+      box.innerHTML = `<div class="small" style="color:var(--ok)">Done — check <a href="#/characters/wardrobe">Wardrobe</a> for the new items.</div>`;
+    } else if (j.state === 'error') {
+      box.innerHTML = `<div class="errbox small">${esc(j.error||'failed')}</div>`;
+    }
+  }).catch(() => {});
+}
+
 async function loadLifeEvents() {
   const [evs, goals, mems] = await Promise.allSettled([
     call('/' + CID + '/life'),
@@ -554,6 +581,7 @@ function wireLife() {
   if (!$e('vl-save')) return; // not on life tab
   // load events/goals/memories async; re-render once they arrive so the UI shows real data
   if (LIFE_EVENTS === null) { loadLifeEvents().then(() => { if (CH_TAB === 'life') render(); }); }
+  pollWardrobeJob();
   const readSpaces = () => {
     const names = [...document.querySelectorAll('[data-sp-name]')];
     const descs = [...document.querySelectorAll('[data-sp-desc]')];
@@ -609,6 +637,16 @@ function wireLife() {
     } catch(e) { toast('Could not think: ' + e.message, {bad: true}); }
     finally { if (btn) { btn.disabled = false; btn.textContent = 'What is she thinking?'; } }
   });
+  // wardrobe generation
+  $e('vl-ward-gen') && ($e('vl-ward-gen').onclick = async () => {
+    const n = parseInt(($e('vl-ward-n')||{}).value||'8');
+    await act($e('vl-ward-gen'), async () => {
+      await call('/wardrobe/generate/' + CID + '?n=' + n, {method: 'POST', json: {}});
+      pollWardrobeJob();
+      return true;
+    }, 'Generating outfits…');
+  });
+
   document.querySelectorAll('[data-dismiss-ev]').forEach(b => b.onclick = async () => {
     await act(b, async () => { await call('/' + CID + '/life/' + b.dataset.dismissEv, {method: 'DELETE'}); LIFE_EVENTS = null; await loadLifeEvents(); render(); return true; });
   });
