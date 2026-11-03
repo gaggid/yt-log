@@ -23,7 +23,7 @@ css.textContent = `
 document.head.append(css);
 
 const call = (path, opts = {}) => api('/characters' + path, opts);
-let C = null, CID = null, OPT = null, pollT = null;
+let C = null, CID = null, OPT = null, pollT = null, CH_TAB = 'gallery';
 const SLOT_ORDER = {person: null, place: null};
 
 /* ───────── library ───────── */
@@ -32,7 +32,7 @@ window.viewCharacters = async function () {
   clearTimeout(pollT);
   $('#app').innerHTML = `<div class="row"><h2 style="margin:0">Characters</h2><span class="mute">a library of people and places you can reuse in every short</span><span class="sp"></span>
     <button class="small" id="ch-import">Import pack</button>
-    <select id="ch-kind" style="width:auto"><option value="">All</option><option value="person">People</option><option value="place">Places</option></select>
+    <select id="ch-kind" style="width:auto"><option value="">All</option><option value="person">People</option></select>
     <button class="primary" id="ch-new">New character</button></div><div id="ch-list"><div class="skel"></div></div>`;
   $('#ch-new').onclick = newCharacter;
   $('#ch-import').onclick = () => { const i = document.createElement('input'); i.type = 'file'; i.accept = '.zip'; i.onchange = async () => { const fd = new FormData(); fd.append('file', i.files[0]);
@@ -59,7 +59,7 @@ const readDeclared = root => Object.fromEntries([...root.querySelectorAll('[data
 async function newCharacter() {
   OPT = OPT || await call('/options');
   const html = `<label class="f">Name<input id="n-name" placeholder="Raju, the night-shift courier"></label>
-    <label class="f mt-s">What is it<select id="n-kind"><option value="person">A person</option><option value="place">A place</option></select></label>
+    <label class="f mt-s">What is it<select id="n-kind"><option value="person">A person</option></select></label>
     <div id="n-declared"><div class="small mute mt-s">You decide these; the app never invents them. Pick from the list or type your own.</div>${declaredFields('person')}</div>
     <label class="f mt-s">The idea, in a sentence or two<textarea id="n-idea" placeholder="A confident delivery rider who films reels between orders, always in a yellow jacket"></textarea></label>
     <label class="f mt-s">Look<select id="n-style">${Object.entries(OPT.styles).map(([k, v]) => `<option value="${k}">${esc(v.label)}</option>`).join('')}</select></label>
@@ -118,6 +118,8 @@ function render() {
       <button class="small" onclick="chRename()">Rename</button><a class="small" href="/api/characters/${C.id}/pack" download><button class="small">Export pack</button></a><button class="small" onclick="chDup(this)">Duplicate</button><button class="small bad" onclick="chDelete()">Delete</button></div>
     <div id="ch-job">${jobBox()}</div>
     <div class="ch-studio"><div class="ch-side card pad">${sideView(busy)}</div><div id="ch-center">${centerView(busy)}</div></div>`;
+  document.getElementById('tab-gallery').onclick = () => { CH_TAB = 'gallery'; render(); };
+  document.getElementById('tab-life').onclick    = () => { CH_TAB = 'life';    render(); };
   wire();
 }
 function refreshCenter() { $('#ch-job').innerHTML = jobBox(); $('#ch-center').innerHTML = centerView(C.job && C.job.state === 'running'); wireCenter(); }
@@ -173,7 +175,19 @@ function sideView(busy) {
     ${loras.length ? '' : '<div class="mute small mt-s">The gateway lists no LoRAs for this model.</div>'}`;
 }
 
+function tabBar() {
+  return `<div class="row" style="gap:6px;margin-bottom:14px;border-bottom:1px solid var(--line);padding-bottom:10px">
+    <button id="tab-gallery" class="${CH_TAB==='gallery'?'primary':'small'}">Gallery &amp; Edits</button>
+    <button id="tab-life" class="${CH_TAB==='life'?'primary':'small'}">Virtual Life</button>
+  </div>`;
+}
+
 function centerView(busy) {
+  if (CH_TAB === 'life') return tabBar() + lifeView(busy);
+  return tabBar() + galleryView(busy);
+}
+
+function galleryView(busy) {
   const dis = busy ? 'disabled' : '';
   const draw = C.views.filter(v => OPT && OPT.views[v].how === 'draw'), sheet = C.views.filter(v => OPT && OPT.views[v].how === 'edit');
   const pics = v => (C.gallery[v] || []).slice().reverse();
@@ -194,7 +208,7 @@ function centerView(busy) {
     ${C.kind === 'person' ? `<div class="card pad mt"><div class="row"><h3 style="margin:0">Character sheet</h3><span class="mute small">three-quarter, side and back views and six expressions, each made from the canon</span><span class="sp"></span>
       <button class="small primary" id="ch-sheet" ${dis} ${haveCanon ? '' : 'disabled title="Approve a portrait and a full-body picture first"'}>Make the sheet</button></div>
       <div class="ch-views mt-s">${sheet.flatMap(v => pics(v).slice(0, 1).map(card)).join('') || '<div class="mute small">' + (haveCanon ? 'not made yet' : 'Approve a portrait and a full-body picture first.') + '</div>'}</div></div>` : ''}
-    ${editCard(busy)}${refBlendCard(busy)}${placeCard(busy)}${editsGallery(busy)}${matrixCard(busy)}`;
+    ${editCard(busy)}${refBlendCard(busy)}${inPlaceCard(busy)}${editsGallery(busy)}${matrixCard(busy)}`;
 }
 
 window.chZoom = url => dialog({title: 'Picture', html: `<img src="${esc(url)}" style="max-width:100%;max-height:72vh;display:block;margin:auto;border-radius:8px">`, buttons: [{label: 'Close', value: true, primary: true}]});
@@ -272,7 +286,7 @@ function wireCenter() {
 }
 
 /* ───────── edits, try-on, places, looks, matrix (C2, C3) ───────── */
-let EB = '', EX = [], CMP = [], WARD = null, PLACES = null, ED_OPEN = false, RB_FILE = null;
+let EB = '', EX = [], CMP = [], WARD = null, ED_OPEN = false, RB_FILE = null;
 const RETRY_EYES = 'Both eyes sharp, natural and the same size, looking in the same direction as image 1. Clear round irises, natural eyelids, no blur or smudging around the eyes.';
 const RB = {part: 'face_into', lora: true, expr: false, sharp: false, pure: false};   // the reference-photo card's choices; the card is redrawn often and must not forget them
 const allPics = () => Object.values(C.gallery).flat().filter(p => p.url);
@@ -342,13 +356,59 @@ function refBlendCard(busy) {
     <div class="row mt-s"><button class="small primary" id="rb-run" ${dis}>Apply</button></div></div>`;
 }
 
-function placeCard(busy) {
+function inPlaceCard(busy) {
   if (C.kind !== 'person' || !C.canon.portrait || !C.canon.body) return '';
-  return `<div class="card pad mt"><div class="row"><h3 style="margin:0">Put the character in a place</h3><span class="mute small">uses the face, the body and the place picture</span></div>
-    <div class="row mt-s" style="gap:10px;flex-wrap:wrap;align-items:flex-end"><label class="f">Place<select id="pl-place"><option value="">— choose —</option>${(PLACES || []).map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></label>
-      <label class="f" style="flex:1;min-width:220px">What is the person doing<input id="pl-action" placeholder="leaning on a steel pillar, looking at the track"></label>
-      <button class="small primary" id="pl-run" ${busy ? 'disabled' : ''}>Place them</button></div>
-    ${PLACES && !PLACES.length ? '<div class="mute small mt-s">No place with an approved picture yet: make one in Characters → New character → A place.</div>' : ''}</div>`;
+  const dis = busy ? 'disabled' : '';
+  return `<div class="card pad mt"><div class="row"><h3 style="margin:0">Put the character in a place</h3><span class="mute small">describe the setting; optionally upload a reference image</span></div>
+    <div class="row mt-s" style="gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <label class="f" style="flex:2;min-width:220px">Describe the place<input id="pl-text" placeholder="a sun-lit café in Mumbai, wooden tables, warm morning light" ${dis}></label>
+      <label class="f" style="flex:1;min-width:180px">What is the person doing<input id="pl-action" placeholder="sipping chai, looking out the window" ${dis}></label>
+    </div>
+    <div class="row mt-s" style="gap:10px;flex-wrap:wrap;align-items:center">
+      <label class="small" style="display:flex;align-items:center;gap:6px">Reference image (optional)<input type="file" id="pl-img" accept="image/jpeg,image/png,image/webp" ${dis}></label>
+      <span class="mute small">Leave empty to use text only</span>
+      <span class="sp"></span>
+      <button class="small primary" id="pl-run" ${dis}>Place them</button>
+    </div></div>`;
+}
+
+function lifeView(busy) {
+  const dis = busy ? 'disabled' : '';
+  const prof = C.profile || {};
+  const interests = prof.interests || {};
+  const spaces = (prof.spaces || []);
+  const spacesHtml = spaces.map((sp, i) => `
+    <div class="row mt-s" style="gap:6px;align-items:center">
+      <input style="width:110px" data-sp-name="${i}" value="${esc(sp.name || '')}" placeholder="e.g. Bedroom" ${dis}>
+      <input style="flex:1" data-sp-desc="${i}" value="${esc(sp.description || '')}" placeholder="cosy room with fairy lights and books" ${dis}>
+      <button class="small bad" data-sp-del="${i}" ${dis}>×</button>
+    </div>`).join('');
+  const lifeFeedHtml = `<div id="life-feed-box"><div class="mute small" style="padding:12px 0">No moments yet — profile is ready. Phase B (brain / think) will fill this feed.</div></div>`;
+  return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start">
+    <div>
+      <div class="card pad"><h3 style="margin-top:0">Profile</h3>
+        <label class="f">Personality<input id="vl-pers" value="${esc(prof.personality || '')}" placeholder="warm, curious, slightly introverted" ${dis}></label>
+        <h4 style="margin:12px 0 4px">Interests</h4>
+        ${['books','movies','music','food','hobbies'].map(k => `<label class="ch-slot"><span>${k}</span><input id="vl-int-${k}" value="${esc(interests[k] || '')}" placeholder="" ${dis}></label>`).join('')}
+        <h4 style="margin:12px 0 4px">Spaces she lives in</h4>
+        <div id="vl-spaces">${spacesHtml}</div>
+        <button class="small mt-s" id="vl-sp-add" ${dis}>+ Add space</button>
+        <label class="f mt-s">Current context <span class="mute small">(what is happening in her life right now)</span><input id="vl-ctx" value="${esc(prof.current_context || '')}" placeholder="just moved to a new city for a job" ${dis}></label>
+        <div class="row mt-s" style="gap:8px;align-items:center">
+          <button class="primary" id="vl-save" ${dis}>Save profile</button>
+        </div>
+        <h4 style="margin:16px 0 4px">Auto life</h4>
+        <div class="row" style="gap:10px;align-items:center">
+          <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="vl-enabled" ${prof.life_enabled ? 'checked' : ''} ${dis}> Enable idle auto-run</label>
+          <label class="small" style="display:flex;align-items:center;gap:4px">Every <input type="number" id="vl-interval" min="15" max="1440" value="${prof.life_interval_m || 60}" style="width:60px" ${dis}> min</label>
+        </div>
+        <div class="mute small mt-s">Character thinks and draws a moment when the gateway key is idle. If the key is busy it retries after 15 minutes.</div>
+      </div>
+    </div>
+    <div>
+      <div class="card pad"><h3 style="margin-top:0">Life feed</h3>${lifeFeedHtml}</div>
+    </div>
+  </div>`;
 }
 
 function editsGallery(busy) {
@@ -379,9 +439,42 @@ function matrixCard(busy) {
 
 async function loadLists() {
   WARD = await call('/wardrobe').catch(() => []);
-  const ps = await call('?kind=place').catch(() => []);
-  PLACES = [];
-  for (const p of ps) { if (p.status === 'ready') PLACES.push(p); }
+}
+
+function wireLife() {
+  const $e = id => document.getElementById(id);
+  if (!$e('vl-save')) return; // not on life tab
+  const readSpaces = () => {
+    const names = [...document.querySelectorAll('[data-sp-name]')];
+    const descs = [...document.querySelectorAll('[data-sp-desc]')];
+    return names.map((n, i) => ({name: n.value.trim(), description: descs[i] ? descs[i].value.trim() : ''})).filter(s => s.name);
+  };
+  $e('vl-save').onclick = async () => {
+    const body = {
+      personality: ($e('vl-pers') || {}).value || '',
+      interests: Object.fromEntries(['books','movies','music','food','hobbies'].map(k => [k, ($e('vl-int-'+k)||{}).value||''])),
+      spaces: readSpaces(),
+      current_context: ($e('vl-ctx') || {}).value || '',
+    };
+    await act($e('vl-save'), async () => { const prof = await call('/' + CID + '/profile', {method: 'PATCH', json: body}); C.profile = prof; render(); return true; }, 'Profile saved');
+  };
+  $e('vl-enabled') && ($e('vl-enabled').onchange = async () => {
+    const body = {life_enabled: $e('vl-enabled').checked};
+    await act(null, async () => { await call('/' + CID + '/profile', {method: 'PATCH', json: body}); return true; }, $e('vl-enabled').checked ? 'Auto life on' : 'Auto life off');
+  });
+  $e('vl-interval') && ($e('vl-interval').onchange = async () => {
+    const v = parseInt($e('vl-interval').value) || 60;
+    await act(null, () => call('/' + CID + '/profile', {method: 'PATCH', json: {life_interval_m: v}}), '');
+  });
+  $e('vl-sp-add') && ($e('vl-sp-add').onclick = () => {
+    const box = document.getElementById('vl-spaces');
+    const i = box.querySelectorAll('[data-sp-name]').length;
+    const row = document.createElement('div'); row.className = 'row mt-s'; row.style.cssText = 'gap:6px;align-items:center';
+    row.innerHTML = `<input style="width:110px" data-sp-name="${i}" placeholder="e.g. Balcony"><input style="flex:1" data-sp-desc="${i}" placeholder="morning sun, cane chair, street below"><button class="small bad" data-sp-del="${i}">×</button>`;
+    row.querySelector('[data-sp-del]').onclick = e => { e.target.closest('.row').remove(); };
+    box.appendChild(row);
+  });
+  document.querySelectorAll('[data-sp-del]').forEach(b => b.onclick = e => e.target.closest('.row').remove());
 }
 
 function wireEdit() {
@@ -414,7 +507,22 @@ function wireEdit() {
   if ($e('e-prev')) $e('e-prev').onclick = b => act($e('e-prev'), async () => { const r = await call('/' + CID + '/edit/preview', {method: 'POST', json: args()}); const box = $e('e-preview'); box.hidden = false;
     box.innerHTML = `<b>${esc(r.model)} · ${esc(r.size)} · ${r.refs.length} picture${r.refs.length > 1 ? 's' : ''} · chain ${r.depth}</b><div style="white-space:pre-wrap;margin-top:4px">${esc(r.prompt)}</div>`; document.querySelector('#ch-edit details').open = true; return true; });
   if ($e('e-run')) $e('e-run').onclick = () => post($e('e-run'), '/edit', args(), 'Edit started');
-  if ($e('pl-run')) $e('pl-run').onclick = () => { if (!$e('pl-place').value) { toast('Choose a place first', {bad: true}); return; } post($e('pl-run'), '/place', {place: $e('pl-place').value, action: $e('pl-action').value, base: EB, n: 1}, 'Placing started'); };
+  if ($e('pl-run')) $e('pl-run').onclick = async () => {
+    const text = ($e('pl-text') || {}).value || '';
+    const action = ($e('pl-action') || {}).value || '';
+    const img = $e('pl-img') && $e('pl-img').files[0];
+    if (!text.trim() && !img) { toast('Describe the setting or upload a reference image', {bad: true}); return; }
+    const btn = $e('pl-run');
+    btn.disabled = true; btn.textContent = 'Uploading…';
+    try {
+      const fd = new FormData();
+      fd.append('action', action); fd.append('place_text', text); fd.append('base', EB); fd.append('n', '1');
+      if (img) fd.append('place_image', img);
+      await act(null, async () => { await call('/' + CID + '/in-place', {method: 'POST', form: fd}); await window._chLoad(true); return true; }, 'Placing started');
+    } finally { btn.disabled = false; btn.textContent = 'Place them'; }
+  };
+  // virtual life wiring
+  wireLife();
   if ($e('mx-run')) $e('mx-run').onclick = () => post($e('mx-run'), '/matrix', {expressions: [...document.querySelectorAll('[data-mx]:checked')].map(x => x.dataset.mx), looks: [...document.querySelectorAll('[data-ml]:checked')].map(x => x.dataset.ml)}, 'Grid started');
   // ref-blend card
   const RB_INSTRUCTIONS = {

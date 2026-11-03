@@ -16,6 +16,10 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS chars(
   id TEXT PRIMARY KEY, name TEXT DEFAULT '', kind TEXT DEFAULT 'person', status TEXT DEFAULT 'draft', data TEXT DEFAULT '{}', created_at REAL, updated_at REAL
 );
+CREATE TABLE IF NOT EXISTS char_life_events(
+  id TEXT PRIMARY KEY, char_id TEXT NOT NULL, event_type TEXT NOT NULL, trigger TEXT NOT NULL,
+  attempt INTEGER DEFAULT 1, inputs TEXT DEFAULT '{}', outputs TEXT DEFAULT '{}', created_at REAL
+);
 """
 COLUMNS = ("id", "name", "kind", "status", "created_at", "updated_at")
 GEN, SHEET, EDIT = "char_gen", "char_sheet", "char_edit"

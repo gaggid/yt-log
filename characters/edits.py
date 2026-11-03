@@ -131,6 +131,40 @@ def build(char: dict, base: dict, preset: str, value: str, attempt: int, extra: 
     return {"how": "edit", "body": body, "refs": refs, "ref_ids": ref_ids, "meta": meta}
 
 
+def build_in_place(char: dict, action: str, place_text: str, place_path, attempt: int, base: dict | None = None, seed: int | None = None, override: str = "") -> dict:
+    """Put the character in a described setting (no place character needed).
+    With a reference image (place_path): 3 refs — portrait, body, image.
+    Without: falls back to the 'background' preset using text only."""
+    from pathlib import Path
+    canon = store.canon_items(char)
+    if "portrait" not in canon or "body" not in canon:
+        raise store.CharError("approve a portrait and a full-body picture first")
+    body_pic = base or canon["body"]
+    if place_path:
+        place_p = Path(place_path)
+        if not place_p.is_file():
+            raise store.CharError("the place reference image was not saved correctly")
+        desc = place_text.strip().rstrip(".")
+        if action.strip():
+            desc = (desc + ", " if desc else "") + action.strip().rstrip(".")
+        prompt = override.strip() or (PLACE.replace("{v}", desc or "standing naturally, looking at the camera") + " " + R.NO_TEXT)
+        if seed is not None:
+            body = {"model": char["render"]["model"], "size": "720x1280", "n": 1, "seed": seed, "response_format": "b64_json", "prompt": prompt}
+        else:
+            body = {"model": char["render"]["model"], "size": "720x1280", "n": 1, "response_format": "b64_json", "prompt": prompt}
+        refs = [media.path_of(canon["portrait"]), media.path_of(body_pic), place_p]
+        ref_ids = [canon["portrait"]["id"], body_pic["id"], f"upload:{place_p.name}"]
+        meta = _meta(char, body, body_pic, ref_ids, "place", "in-place", action, {"place_text": place_text})
+        return {"how": "edit", "body": body, "refs": refs, "ref_ids": ref_ids, "meta": meta}
+    # text-only — use the background preset (2 refs: portrait + body)
+    value = place_text.strip()
+    if action.strip():
+        value = (value + ". " if value else "") + action.strip()
+    if not value:
+        value = "a natural indoor setting"
+    return build(char, body_pic, "background", value, attempt, [], None, "", seed=seed, override=override)
+
+
 def build_place(char: dict, place: dict, action: str, attempt: int, base: dict | None = None, seed: int | None = None, override: str = "") -> dict:
     """The character in a place (C0: three references hold the face): references are the canon portrait, the canon body (or `base`, a look) and the place picture."""
     canon = store.canon_items(char)

@@ -13,7 +13,7 @@ from story2 import describe, jobs, providers, voices
 from story3 import store as media
 from story3.voice import MediaError
 
-from . import avatar, choices, pack, check, edits, render, requests as R, store, studio, studio_edit, wardrobe
+from . import avatar, choices, pack, check, edits, profile as profile_mod, render, requests as R, store, studio, studio_edit, wardrobe
 
 router = APIRouter(prefix="/api/characters")
 NO_CACHE = {"Cache-Control": "no-cache"}               # the browser asks again every time (cheap: 304 when the file is unchanged)
@@ -251,7 +251,7 @@ async def state(char_id: str):
     return {**_card(c), "idea": c["idea"], "slots": c["slots"], "personality": c["personality"], "styling": c.get("styling", ""), "avatar": {"voice": avatar.voice_of(c), "ready": avatar.ready_state(c), "look_id": av_look_id, "picture_url": av_picture_url, "clip": next((f"/api/characters/file/{char_id}/{i['file']}" for i in reversed(media.items(char_id, avatar.KIND)) if i["status"] == "done" and i["file"]), "")}, "glamour_problem": store.glamour_problem(c) if c["kind"] == "person" else "", "notes": c["notes"], "render": c["render"], "locked": store.locked(c), "canon": c["canon"],
             "rights": c["rights"], "photo": f"/api/characters/file/{char_id}/{c['source_photo']}" if store.photo_path(c) else "", "gaps": describe.missing(c["kind"] if c["kind"] != "person" else "person", c["slots"]),
             "identity": R.identity_text(c), "declared": c.get("declared", {}), "declared_keys": [{"key": k, "label": store.DECLARED_LABEL[k]} for k in store.DECLARED[c["kind"]]], "looks": [{**x, "stale": x["version"] != c["version"]} for x in c["looks"]], "recipes": c.get("recipes", []), "gallery": gallery, "views": views, "job": jobs.status(char_id), "identity_hash": ident,
-            "estimate_s": {"draw": 70, "edit": 110}}
+            "estimate_s": {"draw": 70, "edit": 110}, "profile": profile_mod.get(c)}
 
 
 class PatchReq(BaseModel):
@@ -610,6 +610,73 @@ async def place_character(char_id: str, body: PlaceReq):
     _guard(edits.build_place, c, pl, body.action, 1, None, override=body.prompt)
     s, key = settings_mod.get(), settings_mod.api_key()
     return _start(char_id, "char_place", lambda progress: studio_edit.make_place(char_id, body.place, body.action, body.base, body.n, body.prompt, progress, s, key))
+
+
+@router.post("/{char_id}/in-place")
+async def in_place(char_id: str, action: str = Form(""), place_text: str = Form(""), base: str = Form(""),
+                   n: int = Form(1), prompt: str = Form(""), place_image: UploadFile | None = File(None)):
+    """Put the character in a place described by text, with an optional reference image — no place character needed."""
+    import time as _time
+    from pathlib import Path
+    c = _get(char_id)
+    if c["kind"] != "person":
+        raise HTTPException(400, "only a person can be placed in a place")
+    if not 1 <= n <= 4:
+        raise HTTPException(400, "n is between 1 and 4")
+    if not place_text.strip() and not (place_image and place_image.filename):
+        raise HTTPException(400, "describe the setting or upload a reference image")
+    place_image_path: str | None = None
+    if place_image and place_image.filename:
+        raw = await place_image.read()
+        if len(raw) > MAX_UPLOAD:
+            raise HTTPException(400, "the image is over 12 MB")
+        ext = (place_image.filename.rsplit(".", 1)[-1] or "jpg").lower().replace("jpeg", "jpg")
+        if ext not in ("jpg", "png", "webp"):
+            raise HTTPException(400, "jpeg, png or webp only")
+        ref_dir = store.media_dir(char_id, "place_refs")
+        ref_dir.mkdir(parents=True, exist_ok=True)
+        fname = f"place-{int(_time.time() * 1000)}.{ext}"
+        (ref_dir / fname).write_bytes(raw)
+        place_image_path = str(ref_dir / fname)
+    if base:
+        _guard(studio_edit._item, char_id, base)
+    _guard(edits.build_in_place, c, action, place_text, place_image_path, 1)
+    s, key = settings_mod.get(), settings_mod.api_key()
+    _action, _place_text, _image_path = action, place_text, place_image_path
+    return _start(char_id, "char_place",
+                  lambda progress: studio_edit.make_in_place(char_id, _action, _place_text, _image_path, base, n, prompt, progress, s, key))
+
+
+# ── virtual life: profile and life feed ──────────────────────────────────────
+
+class ProfilePatch(BaseModel):
+    personality: str | None = None
+    interests: dict | None = None
+    spaces: list | None = None
+    current_context: str | None = None
+    life_enabled: bool | None = None
+    life_interval_m: int | None = None
+
+
+@router.get("/{char_id}/profile")
+async def get_profile(char_id: str):
+    c = _get(char_id)
+    return profile_mod.get(c)
+
+
+@router.patch("/{char_id}/profile")
+async def patch_profile(char_id: str, body: ProfilePatch):
+    c = _get(char_id)
+    updates = body.model_dump(exclude_unset=True)
+    profile_mod.patch(c, updates)
+    store.save(c)
+    return profile_mod.get(c)
+
+
+@router.get("/{char_id}/life")
+async def life_feed(char_id: str, limit: int = 50):
+    _get(char_id)
+    return profile_mod.list_events(char_id, min(limit, 200))
 
 
 @router.post("/item/{item_id}/check")

@@ -113,6 +113,16 @@ async def make_place(char_id: str, place_id: str, action: str, base_id: str = ""
     return await _run(char_id, store.EDIT, "edit", lambda a: edits.build_place(char, place, action, a, base, override=override), n, "Place the character", progress, s, key, do_check)
 
 
+async def make_in_place(char_id: str, action: str, place_text: str, place_image_path: str | None,
+                        base_id: str = "", n: int = 1, override: str = "", progress=None,
+                        s: dict | None = None, key: str = "", do_check: bool = True) -> dict:
+    char = store.get(char_id)
+    base = _item(char_id, base_id) if base_id else None
+    return await _run(char_id, store.EDIT, "edit",
+                      lambda a: edits.build_in_place(char, action, place_text, place_image_path, a, base, override=override),
+                      n, "Place the character", progress, s, key, do_check)
+
+
 async def flatlay_png(path, s: dict | None = None, key: str = "") -> bytes:
     """The clothing a person wears in a picture, as a flat lay with no person in it. An edit that takes a picture of a person wearing the outfit as its second picture edits THAT picture
     (the model, the room and the pose stay and the first person's clothes appear on her), so every outfit goes through a flat lay first."""
