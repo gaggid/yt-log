@@ -113,16 +113,26 @@ window.chStop = async () => { await call('/' + CID + '/cancel', {method: 'POST'}
 
 function render() {
   const busy = C.job && C.job.state === 'running';
+  const studioHtml = CH_TAB === 'life'
+    ? lifeView(busy)
+    : `<div class="ch-studio"><div class="ch-side card pad">${sideView(busy)}</div><div id="ch-center">${galleryView(busy)}</div></div>`;
   $('#app').innerHTML = `
     <div class="row"><a href="#/characters">← Characters</a><h2 style="margin:0 0 0 8px">${esc(C.name)}</h2>${badge(C.status === 'ready' ? 'done' : 'queued', C.status)}<span class="mute small">v${C.version} · ${esc(C.kind)}</span><span class="sp"></span>
       <button class="small" onclick="chRename()">Rename</button><a class="small" href="/api/characters/${C.id}/pack" download><button class="small">Export pack</button></a><button class="small" onclick="chDup(this)">Duplicate</button><button class="small bad" onclick="chDelete()">Delete</button></div>
     <div id="ch-job">${jobBox()}</div>
-    <div class="ch-studio"><div class="ch-side card pad">${sideView(busy)}</div><div id="ch-center">${centerView(busy)}</div></div>`;
+    ${tabBar()}
+    ${studioHtml}`;
   document.getElementById('tab-gallery').onclick = () => { CH_TAB = 'gallery'; render(); };
   document.getElementById('tab-life').onclick    = () => { CH_TAB = 'life'; LIFE_EVENTS = null; LIFE_GOALS = null; LIFE_MEMORIES = null; render(); };
   wire();
 }
-function refreshCenter() { $('#ch-job').innerHTML = jobBox(); $('#ch-center').innerHTML = centerView(C.job && C.job.state === 'running'); wireCenter(); }
+function refreshCenter() {
+  $('#ch-job').innerHTML = jobBox();
+  if (CH_TAB === 'gallery') {
+    const c = document.getElementById('ch-center');
+    if (c) { c.innerHTML = galleryView(C.job && C.job.state === 'running'); wireCenter(); }
+  }
+}
 
 function avatarBlock(dis) {
   const a = C.avatar || {voice: {}, ready: {}}, r = a.ready || {}, vs = window._chVoices || [];
@@ -180,11 +190,6 @@ function tabBar() {
     <button id="tab-gallery" class="${CH_TAB==='gallery'?'primary':'small'}">Gallery &amp; Edits</button>
     <button id="tab-life" class="${CH_TAB==='life'?'primary':'small'}">Virtual Life</button>
   </div>`;
-}
-
-function centerView(busy) {
-  if (CH_TAB === 'life') return tabBar() + lifeView(busy);
-  return tabBar() + galleryView(busy);
 }
 
 function galleryView(busy) {
@@ -577,7 +582,7 @@ function wireLife() {
     btn.disabled = true; btn.textContent = 'Thinking…';
     try {
       const ev = await call('/' + CID + '/think', {method: 'POST', json: {}});
-      if (ev.ok) { LIFE_EVENTS = null; await loadLifeEvents(); refreshCenter(); toast('Thought recorded'); }
+      if (ev.ok) { LIFE_EVENTS = null; await loadLifeEvents(); render(); toast('Thought recorded'); }
     } catch(e) { toast('Could not think: ' + e.message, {bad: true}); }
     finally { if (btn) { btn.disabled = false; btn.textContent = 'What is she thinking?'; } }
   });

@@ -792,15 +792,136 @@ These are not started. Add a phase row and spec section before building.
 
 | Item | Notes |
 |------|-------|
+| **Phase H — 24-hour day rhythm** | See full spec below |
+| **Phase I — Character evolution (skills, mastery)** | See full spec below |
 | Space reference image generation | Text description is good enough for v1; add when "in a place" image quality proves insufficient |
 | Multi-character interaction | Two characters in one life moment — needs cast + shared scene logic |
 | Social feed / sharing | Export life feed as Instagram-style reel or image grid |
 | Auto "Save as look" | Brain rates its own image (≥7/10) → auto-saves as a named look; manual for now |
 | Voice lines | Character speaks her thought as a short audio clip (TTS) |
-| Profile auto-suggest | LLM fills blank interest/personality fields from the character's idea — `POST /{char_id}/profile/suggest` endpoint spec'd in Phase A but not built |
-| Goal-driven image planning | Brain notices a goal (e.g. "learn Kathak") and *proactively imagines* a practice session rather than reacting to the current moment |
+| Profile auto-suggest | LLM fills blank interest/personality fields from the character's idea — endpoint spec'd in Phase A but not built |
+| Goal-driven image planning | Brain proactively imagines a goal-related activity rather than reacting to the current moment only |
 | Memory reinforcement | Recalling a memory during think boosts its strength slightly (currently pure time-decay) |
 | Cross-character memory | Two characters share an experience and both form memories of it |
+
+---
+
+## Phase H — 24-hour day rhythm (not started)
+
+### The problem today
+The brain knows the time of day but treats every think cycle identically.
+A 25-year-old does not paint at 3 am or do cardio at 11 pm. The day is a
+structured arc and the brain should know exactly where it sits in that arc —
+and what has already happened today so it does not repeat itself.
+
+### Day arc: 6 bands
+
+| Band | Hours | Energy | Appropriate | Never |
+|------|-------|--------|-------------|-------|
+| Pre-dawn | 00–05 | 0 | sleep, insomnia scroll, late-night reflection | exercise, social outings |
+| Morning | 06–10 | rising | routine (chai, skincare, workout), planning, commute | heavy social events |
+| Midday | 10–14 | peak | focused work, errands, lunch, learning practice | wind-down, passive TV |
+| Afternoon | 14–18 | moderate | creative work, casual social, snack, light practice | heavy decisions |
+| Evening | 18–22 | social | dinner, friends, outings, phone calls, hobbies | focused work, study |
+| Night | 22–00 | falling | wind-down, reading, reflection, skincare | exercise, social outings |
+
+### Week-level awareness
+- **Weekday**: work/study obligations; goal-directed activities more likely
+- **Saturday**: highest energy for outings, social, creative experiments
+- **Sunday**: rest and reflection; introspective mood; week-prep
+- **Month start (day 1)**: special — review goals, reflect on last month
+
+### "Already done today" guard
+Stage-1 context assembly queries today's think events to prevent repetition:
+```python
+# world.py or brain.py
+done_today = [ev["outputs"]["activity"] for ev in recent if is_today(ev["created_at"])]
+# Injected: "Today you have already: made chai, went for a walk, had a work call."
+```
+The brain will not repeat these naturally once it knows.
+
+### Implementation sketch
+Extend `world.py` with `day_arc(char)` returning band, energy, appropriate
+activities list, avoid list, day type, and any month/week milestone note.
+Inject as a short paragraph into stage-1 context. No new DB table needed.
+
+---
+
+## Phase I — Character evolution: experience → skills → mastery (not started)
+
+### The idea
+A character who has practiced Kathak for 3 months thinks about it differently
+than someone who started last week. Skills have levels. How fast a character
+levels up depends on hours spent AND a natural efficiency modifier declared
+at creation. Over weeks and months the character genuinely changes — not just
+accumulating memories but becoming someone new.
+
+### Skill model
+
+Each skill:
+- **Name** — "Kathak", "home cooking", "Hindustani vocals", "watercolour"
+- **Category** — creative / physical / professional / social / knowledge
+- **Level** — 0 to 10 (0 = curious newcomer, 10 = mastery)
+- **Efficiency** — 0.5–2.0 (talent modifier; declared at profile creation, never changes)
+- **Practice hours** — accumulated total
+- **Goal link** — `goal_id` this skill is tied to (practice flows from goal progress)
+
+| Level | Label | Base hours to reach next |
+|-------|-------|--------------------------|
+| 0 | Curious | 2 |
+| 1 | Beginner | 8 |
+| 2 | Trying | 20 |
+| 3 | Consistent | 40 |
+| 4 | Developing | 80 |
+| 5 | Competent | 150 |
+| 6 | Skilled | 250 |
+| 7 | Proficient | 400 |
+| 8 | Advanced | 600 |
+| 9 | Expert | 900 |
+| 10 | Mastery | — |
+
+Actual hours to level up = `BASE_HOURS[level] / efficiency`. A naturally
+talented character (efficiency 1.5) reaches Competent in 100 hours instead of 150.
+
+### How skills grow
+`goals.try_log_progress()` calls `skills.accumulate(char, goal_id, hours)`.
+Practice hours per session are estimated from the time-band (Phase H) — an
+evening hobby session ≈ 1.0 hr, a weekend deep-dive ≈ 2.5 hr.
+
+Skills can also be seeded at any level in the profile: "she has been cooking
+since childhood" → owner sets starting level 5.
+
+### How skills enter the brain
+Stage-1 context summary:
+```
+Your skills: Kathak (level 3 — Consistent, 42h), home cooking (level 6 — Skilled).
+```
+The brain writes `image_idea` and `thought` with this context so:
+- Level 1 Kathak → clumsy stance, practice clothes, basic room
+- Level 8 Kathak → confident performance posture, studio, expressive face
+
+No extra code path — the image prompt is written by the brain naturally.
+
+### Milestone events
+On level-up, a `skill_levelup` event is logged to `char_life_events`.
+The brain is told "you just reached level 4 in Kathak" and produces a
+milestone reflection + a distinct image to mark the moment.
+
+### Storage
+```python
+# profile["skills"] = [
+#   {"name": "Kathak", "category": "creative", "level": 3,
+#    "efficiency": 1.2, "practice_hours": 42.5, "goal_id": "g-abc12"},
+# ]
+```
+Stored in `profile["skills"]` — no new table needed.
+
+### Implementation order (when the time comes)
+1. Skill declaration at profile creation (or linked to a goal, starts at level 0)
+2. `skills.accumulate(char, goal_id, hours)` — called by `goals.try_log_progress`
+3. `skills.summary(char)` — plain text block for stage-1 context
+4. Level-up detection + milestone event in `skills.accumulate`
+5. UI: skills panel in Virtual Life tab (below goals), level bars + hours shown
 
 ---
 
