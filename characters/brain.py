@@ -27,6 +27,8 @@ class ThoughtOut(M):
     activity:       Str = ""   # plain description of what she is doing
     space:          Str = ""   # which declared space, or "outside" / a place name
     mood:           Str = ""   # one word
+    expression:     Str = ""   # specific facial expression for this moment
+    face_state:     Str = ""   # physical face condition (makeup, tiredness, flush, etc.)
     outfit:         Str = ""   # text description of what she is wearing
     outfit_id:      Str = ""   # wardrobe garment id if wearing an item from wardrobe
     wardrobe_want:  Str = ""   # garment she wants to add to wardrobe, described in one line
@@ -186,11 +188,13 @@ Return ONLY valid JSON:
   "activity":      "plain description of the activity, 5-10 words",
   "space":         "one of your spaces by name, or a specific outside location",
   "mood":          "one word",
+  "expression":    "the specific facial expression for this moment — be precise, not generic (e.g. 'tired half-smile, eyes slightly heavy', 'wide genuine laugh, teeth showing', 'focused frown, lips pressed', 'soft contemplative gaze', 'surprised and delighted'). It must match the mood and activity.",
+  "face_state":    "physical condition of the face right now based on time of day and what you have been doing (e.g. 'no makeup, natural skin', 'light day makeup', 'post-workout flush, dewy skin', 'makeup worn off, bare face with slight shine', 'evening makeup, defined eyes'). Be honest about the time of day.",
   "outfit":        "text description of what you are wearing right now — pick from your wardrobe if something fits the mood, or describe something else you own",
   "outfit_id":     "the id of the wardrobe item you are wearing (exactly as listed), if applicable; else empty string",
   "wardrobe_want": "if you spot or imagine a piece of clothing you want to own — describe it in one line (e.g. 'dark green silk kurti with mirror work'); else empty string",
-  "image_idea":    "2-3 sentences describing the photograph. Choose the shot setup that fits naturally — for example: front-camera selfie at arm's length (close face/shoulders); mirror selfie (full body visible in mirror, phone in hand); phone propped on a surface so she can move back (timer-style, full or half body); phone held out showing her point of view (book, food, window — she is barely or not visible); candid from the side with no phone visible. Then describe the light, the setting, what fills the frame. Camera direction only, no pronouns. If a specific phone model is known, name it.",
-  "goal_progress": "if this activity is progress on one of your goals, name it in 6-10 words; else empty string",
+  "image_idea":    "2-3 sentences describing the photograph. Choose the shot setup that fits naturally — for example: front-camera selfie at arm's length (close face/shoulders); mirror selfie (full body visible in mirror, phone in hand); phone propped on a surface so she can move back (timer-style, full or half body); phone held out showing her point of view (book, food, window — she is barely or not visible); candid from the side with no phone visible. Then describe the light, the setting, what fills the frame. Camera direction only, no pronouns. If a phone is visible, use the exact phone model declared in her profile — do not invent a different model or sequel.",
+  "goal_progress": "if this activity made concrete progress on a goal, describe WHAT YOU ACTUALLY DID in 6-10 words (e.g. 'practiced first 10 minutes of Bhangra footwork', 'finished chapter 3 of the book'). Do not write meta-reflections or intentions about the goal. Else empty string.",
   "note":          "if you just realized something worth remembering — a reminder, an insight, a decision — write it in one sentence; else empty string"
 }""")
     return "\n\n".join(sections)
@@ -311,6 +315,8 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
     image_idea  = thought.get("image_idea", "")
     outfit      = thought.get("outfit", "")
     outfit_id   = thought.get("outfit_id", "").strip()
+    expression  = thought.get("expression", "")
+    face_state  = thought.get("face_state", "")
 
     canon     = store.canon_items(char)
     has_refs  = "portrait" in canon
@@ -328,14 +334,19 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
         from story3.store import path_of as _path
         portrait_path = _path(canon["portrait"])
         portrait_id   = canon["portrait"]["id"]
+        expr_line = ""
+        if expression or face_state:
+            expr_line = " Expression: " + (expression or "") + ("." if expression else "") + (" Face: " + face_state + "." if face_state else "") + " Apply this expression — do not copy the neutral look from the reference picture."
+
         if garment_ref:
-            # face + garment; skip the canon body so the model uses the new garment
             refs    = [portrait_path, garment_ref["path"]]
             ref_ids = [portrait_id, garment_ref["id"]]
-            prompt  = (f"Picture 1 shows the person's face. Picture 2 shows the garment/outfit to wear. "
+            prompt  = (f"Picture 1 is an identity reference only (face shape, skin tone, hair colour and length, build). "
+                       f"Picture 2 shows the garment/outfit to wear. "
                        f"Create a new vertical 9:16 photograph: {image_idea}"
-                       + (f" The person wears the outfit from Picture 2." if outfit else "")
-                       + " Keep exactly the face, hair, skin tone and build from Picture 1.")
+                       + (f" Wear the outfit from Picture 2." if outfit else "")
+                       + expr_line
+                       + " Match the person's face identity from Picture 1 exactly.")
         else:
             body_in_canon = canon.get("body")
             if body_in_canon:
@@ -343,10 +354,12 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
                 ref_ids = [portrait_id, body_in_canon["id"]]
             else:
                 refs, ref_ids = [portrait_path], [portrait_id]
-            prompt  = (f"Picture 1 shows the person's face. Picture 2 shows their body. "
+            prompt  = (f"Picture 1 is an identity reference only (face shape, skin tone, hair colour and length, build). "
+                       f"Picture 2 shows their body and default outfit. "
                        f"Create a new vertical 9:16 photograph: {image_idea}"
                        + (f" Wearing: {outfit}." if outfit else "")
-                       + " Each person keeps exactly the face, hair, skin tone, build and clothes of their own picture.")
+                       + expr_line
+                       + " Match the person's face identity from Picture 1 exactly.")
         how = "edit"
     else:
         char_desc = (char.get("identity") or "").strip()
@@ -354,8 +367,12 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
         refs, ref_ids = [], []
         how = "draw"
 
-    body_req = {"model": char["render"]["model"], "size": "720x1280", "n": 1,
+    render_cfg = char.get("render", {})
+    body_req = {"model": render_cfg.get("model", ""), "size": "720x1280", "n": 1,
                 "response_format": "b64_json", "prompt": prompt[:3900]}
+    _loras = [{"name": x["name"], "strength": x["strength"]} for x in render_cfg.get("loras", []) if x.get("name")]
+    if _loras:
+        body_req["lora"] = _loras
     t0 = time.time()
     inputs_draw = {"prompt": prompt[:500], "refs": ref_ids, "how": how, "event_id": event_id}
     try:

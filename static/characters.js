@@ -438,16 +438,18 @@ function lifeView(busy) {
       const noteHtml = out.note ? `<div style="margin-top:6px;font-size:12px;padding:4px 8px;background:var(--panel);border-radius:6px;border-left:2px solid var(--warn)">note: ${esc(out.note)}</div>` : '';
       const wishHtml = out.wardrobe_want ? `<div style="margin-top:6px;font-size:12px;padding:4px 8px;background:var(--panel);border-radius:6px;border-left:2px solid var(--ok)">wants: ${esc(out.wardrobe_want)}</div>` : '';
       const outfitTag = out.outfit_id ? `<span class="badge b-info" style="font-size:10px" title="wardrobe item">outfit from wardrobe</span>` : '';
+      const exprTag = out.expression ? `<span class="mute small" style="font-size:11px" title="${esc(out.face_state||'')}">${esc(out.expression)}</span>` : '';
       return `<div class="card pad mt-s" style="border-left:3px solid var(--accent)">
         <div class="row"><span class="badge b-info">${esc(out.mood||'')}</span>${outfitTag}<span class="mute small">${esc(out.activity||'')} · ${esc(out.space||'')} · ${absTime(ev.created_at)}</span></div>
+        ${exprTag ? `<div style="margin:2px 0 4px">${exprTag}</div>` : ''}
         <div style="font-style:italic;margin:6px 0">${esc(out.thought||'')}</div>${gp}${noteHtml}${wishHtml}${drawn}
         ${!drawEv ? `<button class="small primary mt-s" data-draw-ev="${esc(ev.id)}">Draw this look</button>` : '<span class="mute small mt-s">✓ drawn</span>'}
         <details class="mt-s"><summary class="mute small" style="cursor:pointer">Pipeline debug</summary>
-          <pre style="font-size:10px;white-space:pre-wrap;max-height:200px;overflow:auto">${esc(JSON.stringify({image_idea:out.image_idea,outfit:out.outfit,outfit_id:out.outfit_id,wardrobe_want:out.wardrobe_want,goal_progress:out.goal_progress,note:out.note},null,2))}</pre>
+          <pre style="font-size:10px;white-space:pre-wrap;max-height:200px;overflow:auto">${esc(JSON.stringify({expression:out.expression,face_state:out.face_state,image_idea:out.image_idea,outfit:out.outfit,outfit_id:out.outfit_id,wardrobe_want:out.wardrobe_want,goal_progress:out.goal_progress,note:out.note},null,2))}</pre>
         </details>
       </div>`;
     }
-    if (ev.event_type === 'error') return `<div class="errbox small mt-s">${esc(ev.trigger)} error · ${absTime(ev.created_at)}: ${esc(out.error||'unknown')}</div>`;
+    if (ev.event_type === 'error') return `<div class="errbox small mt-s" style="display:flex;align-items:center;gap:8px"><span style="flex:1">${esc(ev.trigger)} error · ${absTime(ev.created_at)}: ${esc(out.error||'unknown')}</span><button class="small" data-dismiss-ev="${esc(ev.id)}" style="flex-shrink:0">Dismiss</button></div>`;
     return '';
   };
 
@@ -606,6 +608,9 @@ function wireLife() {
       if (ev.ok) { LIFE_EVENTS = null; await loadLifeEvents(); render(); toast('Thought recorded'); }
     } catch(e) { toast('Could not think: ' + e.message, {bad: true}); }
     finally { if (btn) { btn.disabled = false; btn.textContent = 'What is she thinking?'; } }
+  });
+  document.querySelectorAll('[data-dismiss-ev]').forEach(b => b.onclick = async () => {
+    await act(b, async () => { await call('/' + CID + '/life/' + b.dataset.dismissEv, {method: 'DELETE'}); LIFE_EVENTS = null; await loadLifeEvents(); render(); return true; });
   });
   document.querySelectorAll('[data-draw-ev]').forEach(b => b.onclick = async () => {
     await act(b, async () => { await call('/' + CID + '/life/' + b.dataset.drawEv + '/draw', {method: 'POST', json: {}}); LIFE_EVENTS = null; await loadLifeEvents(); render(); return true; }, 'Drawing the moment…');

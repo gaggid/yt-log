@@ -7,7 +7,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
-from story import llm, settings as settings_mod
+from story import db, llm, settings as settings_mod
 from story.pipeline import manager
 from story2 import describe, jobs, providers, voices
 from story3 import store as media
@@ -681,6 +681,13 @@ async def patch_profile(char_id: str, body: ProfilePatch):
 async def life_feed(char_id: str, limit: int = 50):
     _get(char_id)
     return profile_mod.list_events(char_id, min(limit, 200))
+
+
+@router.delete("/{char_id}/life/{event_id}")
+async def delete_life_event(char_id: str, event_id: str):
+    _get(char_id)
+    db.ex("DELETE FROM char_life_events WHERE id=? AND char_id=?", (event_id, char_id))
+    return {"deleted": event_id}
 
 
 # ── goals ─────────────────────────────────────────────────────────────────────
