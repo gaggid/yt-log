@@ -23,14 +23,16 @@ from . import goals as goals_mod, memory as memory_mod, profile as profile_mod, 
 # ── schemas ───────────────────────────────────────────────────────────────────
 
 class ThoughtOut(M):
-    thought:       Str = ""   # first-person inner monologue, 1-2 sentences
-    activity:      Str = ""   # plain description of what she is doing
-    space:         Str = ""   # which declared space, or "outside" / a place name
-    mood:          Str = ""   # one word
-    outfit:        Str = ""   # what she is wearing right now
-    image_idea:    Str = ""   # 2-3 sentence visual description for the image model
-    goal_progress: Str = ""   # if non-empty, progress on an active goal
-    note:          Str = ""   # self-reminder or realization worth keeping, if any
+    thought:        Str = ""   # first-person inner monologue, 1-2 sentences
+    activity:       Str = ""   # plain description of what she is doing
+    space:          Str = ""   # which declared space, or "outside" / a place name
+    mood:           Str = ""   # one word
+    outfit:         Str = ""   # text description of what she is wearing
+    outfit_id:      Str = ""   # wardrobe garment id if wearing an item from wardrobe
+    wardrobe_want:  Str = ""   # garment she wants to add to wardrobe, described in one line
+    image_idea:     Str = ""   # 2-3 sentence visual description for the image model
+    goal_progress:  Str = ""   # if non-empty, progress on an active goal
+    note:           Str = ""   # self-reminder or realization worth keeping, if any
 
 
 class ThoughtRevised(M):
@@ -93,14 +95,29 @@ async def _assemble_context(char: dict, context_override: str, recent_events: li
     except Exception:
         goals_text, neglect_nudge = "", ""
 
+    # wardrobe
+    try:
+        from . import wardrobe as wardrobe_mod
+        garments = wardrobe_mod.listing()
+        if garments:
+            wardrobe_text = "Wardrobe items you own: " + "; ".join(
+                f"{g['name']} (id: {g['id']})" + (f" [{', '.join(g['tags'][:3])}]" if g.get("tags") else "")
+                for g in garments[:20]
+            )
+        else:
+            wardrobe_text = "Your wardrobe is currently empty."
+    except Exception:
+        wardrobe_text = ""
+
     return {
-        "world_line":    world_line,
-        "day_arc_text":  day_arc_text,
-        "day_arc":       arc,
-        "memories_text": memories_text,
-        "memories":      mems,
-        "goals_text":    goals_text,
-        "neglect_nudge": neglect_nudge,
+        "world_line":     world_line,
+        "day_arc_text":   day_arc_text,
+        "day_arc":        arc,
+        "memories_text":  memories_text,
+        "memories":       mems,
+        "goals_text":     goals_text,
+        "neglect_nudge":  neglect_nudge,
+        "wardrobe_text":  wardrobe_text,
     }
 
 
@@ -148,6 +165,8 @@ def _first_pass_user(ctx: dict, char: dict, context_override: str) -> str:
         sections.append(ctx["goals_text"])
     if ctx["neglect_nudge"]:
         sections.append(ctx["neglect_nudge"])
+    if ctx.get("wardrobe_text"):
+        sections.append(ctx["wardrobe_text"])
     if ctx["memories_text"]:
         sections.append(ctx["memories_text"])
 
@@ -162,7 +181,9 @@ Return ONLY valid JSON:
   "activity":      "plain description of the activity, 5-10 words",
   "space":         "one of your spaces by name, or a specific outside location",
   "mood":          "one word",
-  "outfit":        "what you are wearing right now, specific and casual — feel free to imagine a different outfit if the moment calls for it",
+  "outfit":        "text description of what you are wearing right now — pick from your wardrobe if something fits the mood, or describe something else you own",
+  "outfit_id":     "the id of the wardrobe item you are wearing (exactly as listed), if applicable; else empty string",
+  "wardrobe_want": "if you spot or imagine a piece of clothing you want to own — describe it in one line (e.g. 'dark green silk kurti with mirror work'); else empty string",
   "image_idea":    "2-3 sentences describing the photograph. Choose the shot setup that fits naturally — for example: front-camera selfie at arm's length (close face/shoulders); mirror selfie (full body visible in mirror, phone in hand); phone propped on a surface so she can move back (timer-style, full or half body); phone held out showing her point of view (book, food, window — she is barely or not visible); candid from the side with no phone visible. Then describe the light, the setting, what fills the frame. Camera direction only, no pronouns. If a specific phone model is known, name it.",
   "goal_progress": "if this activity is progress on one of your goals, name it in 6-10 words; else empty string",
   "note":          "if you just realized something worth remembering — a reminder, an insight, a decision — write it in one sentence; else empty string"
@@ -262,6 +283,11 @@ async def think(char: dict, backend, s: dict, trigger: str = "manual", context_o
             memory_mod.add_manual(char["id"], f"[note] {thought.note}")
     except Exception:
         pass
+    try:
+        if thought.wardrobe_want:
+            memory_mod.add_manual(char["id"], f"[wardrobe wish] {thought.wardrobe_want}")
+    except Exception:
+        pass
 
     final = thought.model_dump()
     final["latency_ms"] = round((time.time() - t0) * 1000)
@@ -277,20 +303,45 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
     from story3 import store as media
     from . import studio
 
-    image_idea = thought.get("image_idea", "")
-    outfit     = thought.get("outfit", "")
+    image_idea  = thought.get("image_idea", "")
+    outfit      = thought.get("outfit", "")
+    outfit_id   = thought.get("outfit_id", "").strip()
 
     canon     = store.canon_items(char)
-    has_refs  = "portrait" in canon and "body" in canon
+    has_refs  = "portrait" in canon
+
+    # resolve garment reference if the character picked a wardrobe item
+    garment_ref = None
+    if outfit_id:
+        try:
+            from . import wardrobe as wardrobe_mod
+            garment_ref = wardrobe_mod.usable(outfit_id)
+        except Exception:
+            garment_ref = None
 
     if has_refs:
         from story3.store import path_of as _path
-        refs    = [_path(canon["portrait"]), _path(canon["body"])]
-        ref_ids = [canon["portrait"]["id"], canon["body"]["id"]]
-        prompt  = (f"Picture 1 shows the person's face. Picture 2 shows their body. "
-                   f"Create a new vertical 9:16 photograph: {image_idea}"
-                   + (f" Wearing: {outfit}." if outfit else "")
-                   + " Each person keeps exactly the face, hair, skin tone, build and clothes of their own picture.")
+        portrait_path = _path(canon["portrait"])
+        portrait_id   = canon["portrait"]["id"]
+        if garment_ref:
+            # face + garment; skip the canon body so the model uses the new garment
+            refs    = [portrait_path, garment_ref["path"]]
+            ref_ids = [portrait_id, garment_ref["id"]]
+            prompt  = (f"Picture 1 shows the person's face. Picture 2 shows the garment/outfit to wear. "
+                       f"Create a new vertical 9:16 photograph: {image_idea}"
+                       + (f" The person wears the outfit from Picture 2." if outfit else "")
+                       + " Keep exactly the face, hair, skin tone and build from Picture 1.")
+        else:
+            body_in_canon = canon.get("body")
+            if body_in_canon:
+                refs    = [portrait_path, _path(body_in_canon)]
+                ref_ids = [portrait_id, body_in_canon["id"]]
+            else:
+                refs, ref_ids = [portrait_path], [portrait_id]
+            prompt  = (f"Picture 1 shows the person's face. Picture 2 shows their body. "
+                       f"Create a new vertical 9:16 photograph: {image_idea}"
+                       + (f" Wearing: {outfit}." if outfit else "")
+                       + " Each person keeps exactly the face, hair, skin tone, build and clothes of their own picture.")
         how = "edit"
     else:
         char_desc = (char.get("identity") or "").strip()

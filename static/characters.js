@@ -436,12 +436,14 @@ function lifeView(busy) {
       const drawn = drawnUrl ? `<img src="${drawnUrl}" style="width:120px;height:160px;object-fit:cover;border-radius:8px;margin-top:6px;cursor:zoom-in" onclick="chZoom('${drawnUrl}')" onerror="this.style.display='none'">` : '';
       const gp = out.goal_progress ? `<div class="mute small" style="margin-top:4px">↳ goal: ${esc(out.goal_progress)}</div>` : '';
       const noteHtml = out.note ? `<div style="margin-top:6px;font-size:12px;padding:4px 8px;background:var(--panel);border-radius:6px;border-left:2px solid var(--warn)">note: ${esc(out.note)}</div>` : '';
+      const wishHtml = out.wardrobe_want ? `<div style="margin-top:6px;font-size:12px;padding:4px 8px;background:var(--panel);border-radius:6px;border-left:2px solid var(--ok)">wants: ${esc(out.wardrobe_want)}</div>` : '';
+      const outfitTag = out.outfit_id ? `<span class="badge b-info" style="font-size:10px" title="wardrobe item">outfit from wardrobe</span>` : '';
       return `<div class="card pad mt-s" style="border-left:3px solid var(--accent)">
-        <div class="row"><span class="badge b-info">${esc(out.mood||'')}</span><span class="mute small">${esc(out.activity||'')} · ${esc(out.space||'')} · ${absTime(ev.created_at)}</span></div>
-        <div style="font-style:italic;margin:6px 0">${esc(out.thought||'')}</div>${gp}${noteHtml}${drawn}
+        <div class="row"><span class="badge b-info">${esc(out.mood||'')}</span>${outfitTag}<span class="mute small">${esc(out.activity||'')} · ${esc(out.space||'')} · ${absTime(ev.created_at)}</span></div>
+        <div style="font-style:italic;margin:6px 0">${esc(out.thought||'')}</div>${gp}${noteHtml}${wishHtml}${drawn}
         ${!drawEv ? `<button class="small primary mt-s" data-draw-ev="${esc(ev.id)}">Draw this look</button>` : '<span class="mute small mt-s">✓ drawn</span>'}
         <details class="mt-s"><summary class="mute small" style="cursor:pointer">Pipeline debug</summary>
-          <pre style="font-size:10px;white-space:pre-wrap;max-height:200px;overflow:auto">${esc(JSON.stringify({image_idea:out.image_idea,outfit:out.outfit,goal_progress:out.goal_progress,note:out.note},null,2))}</pre>
+          <pre style="font-size:10px;white-space:pre-wrap;max-height:200px;overflow:auto">${esc(JSON.stringify({image_idea:out.image_idea,outfit:out.outfit,outfit_id:out.outfit_id,wardrobe_want:out.wardrobe_want,goal_progress:out.goal_progress,note:out.note},null,2))}</pre>
         </details>
       </div>`;
     }
