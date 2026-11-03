@@ -982,3 +982,20 @@ def test_2k_is_never_wanted_for_a_remix_short(gw):
     assert upscale.wanted(short)
     short["pipeline"] = "remix"
     assert not upscale.wanted(short)
+
+
+def test_style_motion_hint_reaches_motion_writer_and_negative_keeps_what_the_style_needs():
+    from shorts import looks, motionwriter, pipelines as P
+    short = {"settings": {"visual_style": "claymation"}, "plan": {"title": "t", "logline": "l"}, "beats": [{"id": "b1", "sentences": [], "shot_ids": []}]}
+    assert "Stop-motion" in looks.motion_hint(short)
+    assert "MOTION FEEL" in motionwriter._context(short, short["beats"][0], [], None)
+    neg = looks.negative(short, P.NEGATIVE_MOVE)
+    assert "noise" not in neg.split(", ") and "film grain" not in neg.split(", ") and "warping" in neg
+    tiny = {"settings": {"visual_style": "tinyworld"}}
+    assert "blurry" not in looks.negative(tiny, P.NEGATIVE).split(", ")
+    assert "flicker" not in looks.negative({"settings": {"visual_style": "cyberpunk"}}, P.NEGATIVE_MOVE).split(", ")
+    plain = {**short, "settings": {"visual_style": "realism"}}
+    assert looks.motion_hint(plain) == "" and looks.negative(plain, P.NEGATIVE) == P.NEGATIVE
+    assert "MOTION FEEL" not in motionwriter._context(plain, short["beats"][0], [], None)
+    for k, v in looks.TRENDING.items():
+        assert v["motion"] and not motionwriter.LOOKS.search(v["motion"]), k

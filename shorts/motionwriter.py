@@ -8,6 +8,7 @@ from story import llm, settings as settings_mod
 from story.schemas import Str
 from story2.schemas import M
 
+from . import looks
 from .stillwriter import NEGATION
 
 MIN_WORDS, MAX_WORDS = 12, 60
@@ -41,6 +42,8 @@ HOW TO WRITE A "move" (20 to 45 words, plain present-tense sentences, English):
 8. NEVER describe looks: no clothes, hair, colours of things, faces, materials, light mood, mood words, style words. Expressions are allowed only as a movement ("his brow tightens", "her eyes widen").
 9. Exact counts where more than one thing moves ("both hands", "the two jets", "the three men"). Say which one moves when there are two ("the woman on the right reaches out, the man on the left stays still").
 
+10. If a line "MOTION FEEL" is given, shape every move to that rhythm and kind of movement, in plain movement words. Never name the style or the medium itself.
+
 Test every move before you answer: could Wan draw a different clip from these words (which subject? how far? how fast? what does the camera do)? Then fix it. Does the motion fit the seconds?"""
 
 
@@ -72,6 +75,8 @@ def _context(short: dict, beat: dict, shots: list[dict], only: set[str] | None) 
     lines.append("THE LINE THE VIEWER HEARS WHILE THESE SHOTS PLAY: " + (" ".join(x["text"] for x in beat["sentences"]) or "(no voice; the pictures tell it)"))
     if i + 1 < len(beats):
         lines.append("THE LINE AFTER: " + " ".join(x["text"] for x in beats[i + 1]["sentences"]))
+    if looks.motion_hint(short):
+        lines.append("MOTION FEEL (how things move in this short): " + looks.motion_hint(short))
     rows = []
     for sh in shots:
         row = f"- {sh['id']} ({sh.get('seconds') or '2'} s, planner's camera: {sh.get('camera', 'static')})"

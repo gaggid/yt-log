@@ -102,7 +102,7 @@ def request(short: dict, shot: dict, attempt: int) -> dict:
     model = model_of(short)
     body = {"model": model, "prompt": prompt(short, shot), "size": SIZE, "n": 1, "seed": P.seed_for(short, shot, attempt), "response_format": "b64_json"}
     if providers.PROVIDERS.get(model, {}).get("negative_prompt"):          # FLUX runs with guidance and honours one; Qwen (cfg 1) ignores it, so only the sentence in the prompt counts
-        body["negative_prompt"] = ", ".join([P.NEGATIVE, *avoid_items(shot)])
+        body["negative_prompt"] = ", ".join([looks.negative(short, P.NEGATIVE), *avoid_items(shot)])
     return body
 
 

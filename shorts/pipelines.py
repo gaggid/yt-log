@@ -104,7 +104,7 @@ def steps_of(short: dict, model: str) -> int:
 
 def quick_request(short: dict, shot: dict, attempt: int, image: str | None = None) -> dict:
     """Wan 5B, text or picture. `image` is a data URL."""
-    body = {"model": models.TI2V, "prompt": compose(short, shot, bool(image)), "negative_prompt": NEGATIVE_MOVE if image else NEGATIVE, "size": short["settings"].get("size") or models.SIZE_PORTRAIT,
+    body = {"model": models.TI2V, "prompt": compose(short, shot, bool(image)), "negative_prompt": looks.negative(short, NEGATIVE_MOVE if image else NEGATIVE), "size": short["settings"].get("size") or models.SIZE_PORTRAIT,
             "num_frames": models.gen_frames(shot["seconds"], models.TI2V), "fps": models.MODELS[models.TI2V]["fps"], "steps": steps_of(short, models.TI2V),
             "seed": seed_for(short, shot, attempt), "response_format": "mp4"}
     if image:
@@ -114,7 +114,7 @@ def quick_request(short: dict, shot: dict, attempt: int, image: str | None = Non
 
 def keyframe_request(short: dict, shot: dict, attempt: int) -> dict:
     """A still from Wan: the 14B text-to-video model asked for the fewest frames it takes, full quality; the last frame is the keyframe."""
-    return {"model": models.T2V, "prompt": compose(short, shot), "negative_prompt": NEGATIVE, "size": models.SIZE_PORTRAIT, "num_frames": KEYFRAME_FRAMES, "fps": models.MODELS[models.T2V]["fps"],
+    return {"model": models.T2V, "prompt": compose(short, shot), "negative_prompt": looks.negative(short, NEGATIVE), "size": models.SIZE_PORTRAIT, "num_frames": KEYFRAME_FRAMES, "fps": models.MODELS[models.T2V]["fps"],
             "speed_lora": False, "steps": DEFAULT_STEPS[models.T2V], "seed": seed_for(short, shot, attempt), "response_format": "mp4"}
 
 
@@ -122,7 +122,7 @@ def animate_request(short: dict, shot: dict, attempt: int, image: str) -> dict:
     """Picture to video at full quality (speed LoRA off), or a fast draft when the person turned `speed_lora` on (the gateway then uses its own 4 steps and guidance 1, so no
     steps are sent unless the person set them). The prompt describes the motion; the picture already shows the subject."""
     fast = bool(short["settings"].get("speed_lora"))
-    body = {"model": models.I2V, "prompt": compose(short, shot, True), "negative_prompt": NEGATIVE_MOVE, "image": image, "size": size_14b(short),
+    body = {"model": models.I2V, "prompt": compose(short, shot, True), "negative_prompt": looks.negative(short, NEGATIVE_MOVE), "image": image, "size": size_14b(short),
             "num_frames": models.gen_frames(shot["seconds"], models.I2V), "fps": models.MODELS[models.I2V]["fps"], "speed_lora": fast, "steps": steps_of(short, models.I2V),
             "seed": seed_for(short, shot, attempt), "response_format": "mp4"}
     if fast and not short["settings"].get("steps"):
