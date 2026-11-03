@@ -83,7 +83,13 @@ def looks_line(short: dict, shot: dict, character: str) -> tuple[str, str]:
     still_lower = (shot.get("still") or shot.get("prompt") or "").lower()
     listed = {s["name"] for s in subs}
     for ps in (short.get("plan") or {}).get("subjects") or []:
-        if ps.get("name") and ps["name"] not in listed and ps["name"].lower() in still_lower:
+        name = ps.get("name", "")
+        if not name or name in listed:
+            continue
+        first = name.lower().split()[0]
+        # Match full subject name ("ant army") OR first word with optional plural ("ant"→"ant"/"ants").
+        # \bants?\b matches "ant" and "ants" but not "antenna", so this is safe.
+        if re.search(r'\b' + re.escape(first) + r's?\b', still_lower) or name.lower() in still_lower:
             subs = subs + [ps]
     shown = [f"{s['name']}: {subjects.plain_visual(s['visual']).rstrip('. ')}." for s in subs if s.get("kind") != "place" and not (character and _same(character, s["visual"]))]
     places = [s for s in subs if s.get("kind") == "place"]
