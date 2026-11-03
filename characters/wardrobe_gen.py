@@ -72,15 +72,20 @@ async def generate(char_id: str, n: int, s: dict, key: str) -> list[dict]:
     backend  = llm_mod.ChatBackend(s, key)
     garments = await _plan(char, weather, season, n, backend)
 
-    render = char.get("render", {})
-    model  = render.get("model", "")
-    loras  = [{"name": x["name"], "strength": x["strength"]}
-               for x in render.get("loras", []) if x.get("name")]
+    from . import render as render_mod
+
+    render     = char.get("render", {})
+    model      = render.get("model", "")
+    base_loras = [{"name": x["name"], "strength": x["strength"]}
+                  for x in render.get("loras", []) if x.get("name")]
+    existing   = {x["name"] for x in base_loras}
+    loras      = base_loras + ([{"name": render_mod.RAW_LORA, "strength": 0.7}] if render_mod.RAW_LORA not in existing else [])
+    triggers   = render_mod.trigger_words(render)
 
     base_url, api_key = studio._ctx(s, key)
     saved = []
     for g in garments:
-        prompt   = f"{g['description']} {_FLATLAY}"
+        prompt   = f"{triggers + ' ' if triggers else ''}{g['description']} {_FLATLAY}"
         body_req = {"model": model, "size": "1024x1024", "n": 1,
                     "response_format": "b64_json", "prompt": prompt[:3900]}
         if loras:

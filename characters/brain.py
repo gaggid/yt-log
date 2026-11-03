@@ -405,12 +405,23 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
         refs, ref_ids = [], []
         how = "draw"
 
-    render_cfg = char.get("render", {})
+    from . import render as render_mod
+
+    render_cfg   = char.get("render", {})
+    base_loras   = [{"name": x["name"], "strength": x["strength"]} for x in render_cfg.get("loras", []) if x.get("name")]
+    existing_names = {x["name"] for x in base_loras}
+    # always add raw-photo-v3 for life moments (flat camera look); skip if already present
+    all_loras = base_loras + ([{"name": render_mod.RAW_LORA, "strength": 0.7}] if render_mod.RAW_LORA not in existing_names else [])
+
+    # prepend trigger words for active LoRAs (purelens-realism → "p3r4l4ns")
+    triggers = render_mod.trigger_words(render_cfg)
+    if triggers:
+        prompt = f"{triggers} {prompt}"
+
     body_req = {"model": render_cfg.get("model", ""), "size": "720x1280", "n": 1,
                 "response_format": "b64_json", "prompt": prompt[:3900]}
-    _loras = [{"name": x["name"], "strength": x["strength"]} for x in render_cfg.get("loras", []) if x.get("name")]
-    if _loras:
-        body_req["lora"] = _loras
+    if all_loras:
+        body_req["lora"] = all_loras
     t0 = time.time()
     inputs_draw = {"prompt": prompt[:500], "refs": ref_ids, "how": how, "event_id": event_id}
     try:

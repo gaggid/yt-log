@@ -6,7 +6,9 @@ from story2 import styles
 DEFAULT_MODEL = "qwen-image-2.1"
 REALISM_LORA = "purelens-realism"
 REALISM_STRENGTH = 0.7                               # the gateway advises 0.6-0.8 to keep some of the model's own style
+RAW_LORA = "raw-photo-v3"
 TRIGGERS = {REALISM_LORA: "p3r4l4ns"}                # used when the gateway's listing cannot be read; the listing is the authority (studio.lora_listing)
+# raw-photo-v3 has no trigger word
 
 PHOTOREAL = {
     "label": "Photographic realism",
