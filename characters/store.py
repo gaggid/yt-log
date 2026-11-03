@@ -20,6 +20,11 @@ CREATE TABLE IF NOT EXISTS char_life_events(
   id TEXT PRIMARY KEY, char_id TEXT NOT NULL, event_type TEXT NOT NULL, trigger TEXT NOT NULL,
   attempt INTEGER DEFAULT 1, inputs TEXT DEFAULT '{}', outputs TEXT DEFAULT '{}', created_at REAL
 );
+CREATE TABLE IF NOT EXISTS char_memories(
+  id TEXT PRIMARY KEY, char_id TEXT NOT NULL, content TEXT NOT NULL,
+  tags TEXT DEFAULT '[]', category TEXT DEFAULT 'episodic',
+  base_strength REAL DEFAULT 1.0, formed_at REAL, last_accessed_at REAL
+);
 """
 COLUMNS = ("id", "name", "kind", "status", "created_at", "updated_at")
 GEN, SHEET, EDIT = "char_gen", "char_sheet", "char_edit"

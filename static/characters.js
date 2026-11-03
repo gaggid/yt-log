@@ -77,7 +77,7 @@ async function newCharacter() {
 
 /* ───────── studio ───────── */
 window.viewCharacter = async function (id) {
-  CID = id; clearTimeout(pollT); LIFE_EVENTS = null; CH_TAB = 'gallery';
+  CID = id; clearTimeout(pollT); LIFE_EVENTS = null; LIFE_GOALS = null; LIFE_MEMORIES = null; CH_TAB = 'gallery';
   OPT = OPT || await call('/options').catch(() => null);
   const my = route_id;
   const load = async (force) => {
@@ -119,7 +119,7 @@ function render() {
     <div id="ch-job">${jobBox()}</div>
     <div class="ch-studio"><div class="ch-side card pad">${sideView(busy)}</div><div id="ch-center">${centerView(busy)}</div></div>`;
   document.getElementById('tab-gallery').onclick = () => { CH_TAB = 'gallery'; render(); };
-  document.getElementById('tab-life').onclick    = () => { CH_TAB = 'life'; LIFE_EVENTS = null; render(); };
+  document.getElementById('tab-life').onclick    = () => { CH_TAB = 'life'; LIFE_EVENTS = null; LIFE_GOALS = null; LIFE_MEMORIES = null; render(); };
   wire();
 }
 function refreshCenter() { $('#ch-job').innerHTML = jobBox(); $('#ch-center').innerHTML = centerView(C.job && C.job.state === 'running'); wireCenter(); }
@@ -372,67 +372,114 @@ function inPlaceCard(busy) {
     </div></div>`;
 }
 
+let LIFE_GOALS = null, LIFE_MEMORIES = null;
+
 function lifeView(busy) {
   const dis = busy ? 'disabled' : '';
   const prof = C.profile || {};
   const interests = prof.interests || {};
   const spaces = (prof.spaces || []);
+
+  // ── profile panel ──
   const spacesHtml = spaces.map((sp, i) => `
     <div class="row mt-s" style="gap:6px;align-items:center">
       <input style="width:110px" data-sp-name="${i}" value="${esc(sp.name || '')}" placeholder="e.g. Bedroom" ${dis}>
       <input style="flex:1" data-sp-desc="${i}" value="${esc(sp.description || '')}" placeholder="cosy room with fairy lights and books" ${dis}>
       <button class="small bad" data-sp-del="${i}" ${dis}>×</button>
     </div>`).join('');
+
+  // ── goals panel ──
+  const goals = LIFE_GOALS || [];
+  const statusBadge = s => s === 'active' ? badge('done','active') : s === 'achieved' ? badge('info','achieved') : badge('queued','paused');
+  const goalCards = goals.length ? goals.map(g => `
+    <div class="card pad mt-s" style="padding:8px 10px">
+      <div class="row"><b>${esc(g.title)}</b>${statusBadge(g.status)}<span class="badge b-info" style="font-size:10px">${esc(g.category)}</span><span class="sp"></span>
+        <button class="small" data-goal-done="${esc(g.id)}" title="Mark achieved">✓</button>
+        <button class="small bad" data-goal-del="${esc(g.id)}" title="Delete">×</button></div>
+      ${g.description ? `<div class="mute small">${esc(g.description)}</div>` : ''}
+      ${g.progress_notes && g.progress_notes.length ? `<details class="mt-s"><summary class="mute small">${g.progress_notes.length} progress note${g.progress_notes.length>1?'s':''}</summary>${g.progress_notes.map(n=>`<div class="small">· ${esc(n)}</div>`).join('')}</details>` : ''}
+    </div>`).join('') : '<div class="mute small">No goals yet.</div>';
+
+  // ── memory panel ──
+  const mems = LIFE_MEMORIES || [];
+  const strengthBar = s => { const f=Math.round(s*5); return '<span style="letter-spacing:-1px">'+'█'.repeat(f)+'░'.repeat(5-f)+'</span>'; };
+  const relTime = ts => { const d = Math.round((Date.now()/1000 - ts)/86400); return d < 1 ? 'today' : d < 7 ? d+'d ago' : d < 30 ? Math.round(d/7)+'w ago' : Math.round(d/30)+'mo ago'; };
+  const memCards = mems.length ? mems.slice(0,20).map(m => `
+    <div class="row mt-s" style="gap:6px;align-items:flex-start;font-size:12px">
+      <span title="strength ${m.current_strength}" style="color:var(--mute);white-space:nowrap">${strengthBar(m.current_strength||0)}</span>
+      <span style="flex:1;color:${(m.current_strength||0)<0.2?'var(--mute)':'inherit'}">${esc(m.content)}</span>
+      <span class="mute" style="white-space:nowrap">${relTime(m.formed_at)}</span>
+      <button class="small bad" style="padding:0 4px;font-size:11px" data-mem-del="${esc(m.id)}">×</button>
+    </div>`).join('') : '<div class="mute small">No memories yet — they form automatically after each think.</div>';
+
+  // ── life feed ──
   const events = LIFE_EVENTS || [];
-  const relTime = ts => { const d = Math.round((Date.now()/1000 - ts)/60); return d < 1 ? 'just now' : d < 60 ? d+'m ago' : Math.round(d/60)+'h ago'; };
   const eventCard = ev => {
     const out = ev.outputs || {};
     if (ev.event_type === 'think') {
-      // find matching draw event for this think event_id
       const drawEv = events.find(e => e.event_type === 'draw' && (e.inputs||{}).event_id === ev.id);
       const drawn = drawEv ? `<img src="${esc((drawEv.outputs||{}).url||'')}" style="width:100%;border-radius:8px;margin-top:6px" onerror="this.style.display='none'">` : '';
+      const gp = out.goal_progress ? `<div class="mute small" style="margin-top:4px">↳ goal: ${esc(out.goal_progress)}</div>` : '';
       return `<div class="card pad mt-s" style="border-left:3px solid var(--accent)">
         <div class="row"><span class="badge b-info">${esc(out.mood||'')}</span><span class="mute small">${esc(out.activity||'')} · ${esc(out.space||'')} · ${relTime(ev.created_at)}</span></div>
-        <div style="font-style:italic;margin:6px 0">${esc(out.thought||'')}</div>
-        ${drawn}
-        ${!drawEv ? `<button class="small primary mt-s" data-draw-ev="${esc(ev.id)}">Draw this look</button>` : '<span class="mute small">✓ drawn</span>'}
-        <details class="mt-s"><summary class="mute small" style="cursor:pointer">Debug</summary><pre style="font-size:10px;white-space:pre-wrap;max-height:200px;overflow:auto">${esc(JSON.stringify({image_idea:out.image_idea,outfit:out.outfit},null,2))}</pre></details>
+        <div style="font-style:italic;margin:6px 0">${esc(out.thought||'')}</div>${gp}${drawn}
+        ${!drawEv ? `<button class="small primary mt-s" data-draw-ev="${esc(ev.id)}">Draw this look</button>` : '<span class="mute small mt-s">✓ drawn</span>'}
+        <details class="mt-s"><summary class="mute small" style="cursor:pointer">Pipeline debug</summary>
+          <pre style="font-size:10px;white-space:pre-wrap;max-height:200px;overflow:auto">${esc(JSON.stringify({image_idea:out.image_idea,outfit:out.outfit,goal_progress:out.goal_progress},null,2))}</pre>
+        </details>
       </div>`;
     }
-    if (ev.event_type === 'error') return `<div class="errbox small mt-s">${esc(ev.trigger)} error · ${relTime(ev.created_at)}: ${esc((ev.outputs||{}).error||'unknown')}</div>`;
+    if (ev.event_type === 'error') return `<div class="errbox small mt-s">${esc(ev.trigger)} error · ${relTime(ev.created_at)}: ${esc(out.error||'unknown')}</div>`;
     return '';
   };
-  const feedContent = events.length ? events.map(eventCard).join('') : '<div class="mute small" style="padding:12px 0">No moments yet. Hit "What is she thinking?" to start.</div>';
-  const lifeFeedHtml = `<div class="row" style="gap:8px;align-items:center;margin-bottom:10px">
-    <button class="primary" id="vl-think" ${dis}>What is she thinking?</button>
-    <span class="mute small">manual trigger — runs one LLM call</span>
-  </div>
-  <div id="life-feed-box">${feedContent}</div>`;
-  return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start">
-    <div>
-      <div class="card pad"><h3 style="margin-top:0">Profile</h3>
-        <label class="f">Personality<input id="vl-pers" value="${esc(prof.personality || '')}" placeholder="warm, curious, slightly introverted" ${dis}></label>
-        <h4 style="margin:12px 0 4px">Interests</h4>
-        ${['books','movies','music','food','hobbies'].map(k => `<label class="ch-slot"><span>${k}</span><input id="vl-int-${k}" value="${esc(interests[k] || '')}" placeholder="" ${dis}></label>`).join('')}
-        <h4 style="margin:12px 0 4px">Spaces she lives in</h4>
-        <div id="vl-spaces">${spacesHtml}</div>
-        <button class="small mt-s" id="vl-sp-add" ${dis}>+ Add space</button>
-        <label class="f mt-s">Current context <span class="mute small">(what is happening in her life right now)</span><input id="vl-ctx" value="${esc(prof.current_context || '')}" placeholder="just moved to a new city for a job" ${dis}></label>
-        <div class="row mt-s" style="gap:8px;align-items:center">
-          <button class="primary" id="vl-save" ${dis}>Save profile</button>
-        </div>
-        <h4 style="margin:16px 0 4px">Auto life</h4>
-        <div class="row" style="gap:10px;align-items:center">
-          <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="vl-enabled" ${prof.life_enabled ? 'checked' : ''} ${dis}> Enable idle auto-run</label>
-          <label class="small" style="display:flex;align-items:center;gap:4px">Every <input type="number" id="vl-interval" min="15" max="1440" value="${prof.life_interval_m || 60}" style="width:60px" ${dis}> min</label>
-        </div>
-        <div class="mute small mt-s">Character thinks and draws a moment when the gateway key is idle. If the key is busy it retries after 15 minutes.</div>
+
+  return `<div style="display:grid;grid-template-columns:340px minmax(0,1fr);gap:18px;align-items:start">
+  <div>
+    <div class="card pad">
+      <h3 style="margin-top:0">Profile</h3>
+      <label class="f">Personality<input id="vl-pers" value="${esc(prof.personality || '')}" placeholder="warm, curious, slightly introverted" ${dis}></label>
+      <label class="f mt-s">City (for weather context)<input id="vl-city" value="${esc(prof.city || '')}" placeholder="Mumbai" ${dis}></label>
+      <h4 style="margin:12px 0 4px">Interests</h4>
+      ${['books','movies','music','food','hobbies'].map(k => `<label class="ch-slot"><span>${k}</span><input id="vl-int-${k}" value="${esc(interests[k] || '')}" placeholder="" ${dis}></label>`).join('')}
+      <h4 style="margin:12px 0 4px">Spaces she lives in</h4>
+      <div id="vl-spaces">${spacesHtml}</div>
+      <button class="small mt-s" id="vl-sp-add" ${dis}>+ Add space</button>
+      <label class="f mt-s">Current context<input id="vl-ctx" value="${esc(prof.current_context || '')}" placeholder="just moved to a new city for a job" ${dis}></label>
+      <div class="row mt-s" style="gap:8px"><button class="primary" id="vl-save" ${dis}>Save profile</button></div>
+      <h4 style="margin:16px 0 4px">Auto life</h4>
+      <div class="row" style="gap:10px;align-items:center">
+        <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="vl-enabled" ${prof.life_enabled ? 'checked' : ''} ${dis}> Auto-run when idle</label>
+        <label class="small" style="display:flex;align-items:center;gap:4px">Every <input type="number" id="vl-interval" min="15" max="1440" value="${prof.life_interval_m || 60}" style="width:60px" ${dis}> min</label>
+      </div>
+      <div class="mute small mt-s">Thinks and draws when the gateway key is idle. Retries after 15 min if busy.</div>
+    </div>
+
+    <div class="card pad mt">
+      <div class="row"><h3 style="margin:0">Goals</h3><span class="sp"></span><button class="small primary" id="vl-goal-add" ${dis}>+ Add goal</button></div>
+      <div class="mute small">Things she is working toward — the brain plans thoughts around active goals.</div>
+      <div id="vl-goals-list">${goalCards}</div>
+    </div>
+
+    <div class="card pad mt">
+      <h3 style="margin-top:0">Memories <span class="mute small">${mems.length} total · fades after ~40 days</span></h3>
+      <div id="vl-mem-list">${memCards}</div>
+      <div class="row mt-s" style="gap:6px">
+        <input id="vl-mem-add" style="flex:1" placeholder="Add a memory manually…" ${dis}>
+        <button class="small" id="vl-mem-save" ${dis}>Add</button>
       </div>
     </div>
-    <div>
-      <div class="card pad"><h3 style="margin-top:0">Life feed</h3>${lifeFeedHtml}</div>
+  </div>
+
+  <div>
+    <div class="card pad">
+      <div class="row"><h3 style="margin:0">Life feed</h3><span class="sp"></span>
+        <button class="primary" id="vl-think" ${dis}>What is she thinking?</button>
+      </div>
+      <div class="mute small mt-s">2-stage pipeline: first-pass thought → self-review → memory formed → image ready to draw.</div>
+      <div id="life-feed-box" style="margin-top:10px">${events.length ? events.map(eventCard).join('') : '<div class="mute small" style="padding:12px 0">No moments yet.</div>'}</div>
     </div>
-  </div>`;
+  </div>
+</div>`;
 }
 
 function editsGallery(busy) {
@@ -466,7 +513,14 @@ async function loadLists() {
 }
 
 async function loadLifeEvents() {
-  try { LIFE_EVENTS = await call('/' + CID + '/life'); } catch { LIFE_EVENTS = []; }
+  const [evs, goals, mems] = await Promise.allSettled([
+    call('/' + CID + '/life'),
+    call('/' + CID + '/goals'),
+    call('/' + CID + '/memories'),
+  ]);
+  LIFE_EVENTS   = evs.status   === 'fulfilled' ? evs.value   : [];
+  LIFE_GOALS    = goals.status === 'fulfilled' ? goals.value : [];
+  LIFE_MEMORIES = mems.status  === 'fulfilled' ? mems.value  : [];
 }
 
 function wireLife() {
@@ -482,12 +536,41 @@ function wireLife() {
   $e('vl-save').onclick = async () => {
     const body = {
       personality: ($e('vl-pers') || {}).value || '',
+      city: ($e('vl-city') || {}).value || '',
       interests: Object.fromEntries(['books','movies','music','food','hobbies'].map(k => [k, ($e('vl-int-'+k)||{}).value||''])),
       spaces: readSpaces(),
       current_context: ($e('vl-ctx') || {}).value || '',
     };
     await act($e('vl-save'), async () => { const prof = await call('/' + CID + '/profile', {method: 'PATCH', json: body}); C.profile = prof; render(); return true; }, 'Profile saved');
   };
+  // goals
+  $e('vl-goal-add') && ($e('vl-goal-add').onclick = async () => {
+    const cats = ['career','personal','creative','health','social','learning','financial'];
+    const html = `<label class="f">Goal title<input id="ga-title" placeholder="Learn Kathak"></label>
+      <label class="f mt-s">Category<select id="ga-cat">${cats.map(c=>`<option value="${c}">${c}</option>`).join('')}</select></label>
+      <label class="f mt-s">Description (optional)<input id="ga-desc" placeholder="Take one class a week, practice 20 min daily"></label>`;
+    const v = await dialog({title:'Add a goal', html, buttons:[{label:'Cancel',value:null},{label:'Add',primary:true,
+      collect:l=>({title:l.querySelector('#ga-title').value.trim(),category:l.querySelector('#ga-cat').value,description:l.querySelector('#ga-desc').value.trim()}),
+      validate:x=>x.title?'':'Write the goal title.'}]});
+    if (!v) return;
+    await act(null, async () => { await call('/' + CID + '/goals', {method:'POST', json:v}); await loadLifeEvents(); refreshCenter(); return true; }, 'Goal added');
+  });
+  document.querySelectorAll('[data-goal-done]').forEach(b => b.onclick = async () => {
+    await act(null, async () => { await call('/' + CID + '/goals/' + b.dataset.goalDone, {method:'PATCH', json:{status:'achieved'}}); await loadLifeEvents(); refreshCenter(); return true; }, 'Marked achieved');
+  });
+  document.querySelectorAll('[data-goal-del]').forEach(b => b.onclick = async () => {
+    if (!await confirmDlg('Delete goal', 'This cannot be undone.', 'Delete', true)) return;
+    await act(null, async () => { await call('/' + CID + '/goals/' + b.dataset.goalDel, {method:'DELETE'}); await loadLifeEvents(); refreshCenter(); return true; });
+  });
+  // memories
+  $e('vl-mem-save') && ($e('vl-mem-save').onclick = async () => {
+    const content = ($e('vl-mem-add') || {}).value || '';
+    if (!content.trim()) return;
+    await act(null, async () => { await call('/' + CID + '/memories', {method:'POST', json:{content}}); $e('vl-mem-add').value = ''; await loadLifeEvents(); refreshCenter(); return true; }, 'Memory added');
+  });
+  document.querySelectorAll('[data-mem-del]').forEach(b => b.onclick = async () => {
+    await act(null, async () => { await call('/' + CID + '/memories/' + b.dataset.memDel, {method:'DELETE'}); await loadLifeEvents(); refreshCenter(); return true; });
+  });
   $e('vl-think') && ($e('vl-think').onclick = async () => {
     const btn = $e('vl-think');
     btn.disabled = true; btn.textContent = 'Thinking…';

@@ -24,10 +24,14 @@ image instead.
 
 | Phase | Name | Status | Files |
 |-------|------|--------|-------|
-| 0 | Remove places as characters | pending | `characters/store.py`, `characters/api.py`, `characters/edits.py`, `static/characters.js` |
-| A | Profile (personality, interests, spaces) | pending | `characters/profile.py`, `characters/api.py`, `static/characters.js` |
-| B | Brain / Think endpoint | pending | `characters/brain.py`, `characters/api.py` |
-| C | Draw from thought | pending | `characters/brain.py`, `characters/api.py` |
+| 0 | Remove places as characters | done | `characters/store.py`, `characters/api.py`, `characters/edits.py`, `static/characters.js` |
+| A | Profile (personality, interests, spaces) | done | `characters/profile.py`, `characters/api.py`, `static/characters.js` |
+| B | Brain / Think endpoint + Draw | done | `characters/brain.py`, `characters/api.py` |
+| C | ~~Draw from thought~~ | merged into B | — |
+| D | Idle auto-loop | pending | `characters/loop.py`, `main.py` |
+| E | Real-world context (weather + news) | pending | `characters/world.py`, `characters/brain.py` |
+| F | Goals — set future goals, brain plans toward them | pending | `characters/goals.py`, `characters/profile.py`, `characters/brain.py` |
+| G | Memory — episodic memory with time-decay and retrieval | pending | `characters/memory.py`, `characters/store.py`, `characters/brain.py` |
 | D | Autonomous idle loop | pending | `characters/loop.py`, `main.py` |
 
 ---
@@ -500,6 +504,266 @@ Each entry in the Life Feed:
 | `story2/jobs.py` | Add `_last_job_time` update hook (one line) | D |
 | `main.py` | Start loop.run_forever() on startup | D |
 | `static/characters.js` | Remove places UI, add Virtual Life tab | 0+A+B+C |
+
+---
+
+## Phase E — Real-world context (weather + news)
+
+### Goal
+Before each `think()` call, fetch a brief about the character's current world:
+weather for her city and 2–3 news headlines relevant to her interests.
+The brain sees this as additional context and reacts naturally — rain →
+stays home, IPL final → thinks about the match.
+
+### New file: `characters/world.py`
+
+```python
+CACHE: dict = {}          # {key: (timestamp, data)}
+CACHE_TTL_S = 1800        # 30 minutes
+
+async def brief(char: dict) -> dict:
+    """Return {weather: str, news: list[str]} — both optional, fail silently."""
+
+# Weather: wttr.in (no API key, simple one-line format)
+async def _weather(city: str) -> str:
+    url = f"https://wttr.in/{city}?format=3"
+    # "Mumbai: ⛅️  +28°C"
+
+# News: Google News RSS filtered by interest keywords
+# https://news.google.com/rss/search?q={topic}&hl=en-IN&gl=IN&ceid=IN:en
+# Parse XML, take first 3 titles, strip source suffix
+async def _news(interests: dict) -> list[str]:
+    keywords = _top_keywords(interests)   # up to 3 most specific interest terms
+    ...
+```
+
+### City in profile
+Add `city: str` field to profile (default "Mumbai"). Used for weather lookup.
+`profile["city"] = "Mumbai"`
+
+### Integration in `brain.think()`
+```python
+world = await world_mod.brief(char)
+# Injected into system prompt:
+# "Today: ⛅️ 28°C in Mumbai. Trending in India: IPL Finals today, Ranveer interview."
+```
+
+### Acceptance
+- Weather and news are fetched and injected before think
+- If both fail → think proceeds with no world context
+- Results cached 30 min (no duplicate calls on rapid manual triggers)
+
+---
+
+## Phase F — Goals
+
+### Goal
+A character can hold 3–5 goals at a time (career, personal, creative, health,
+social). Active goals are summarised in the brain's prompt so thoughts tend
+toward them. The brain can note progress and the owner can mark goals done.
+
+### Storage
+Goals live in `profile["goals"]` — a list of dicts. No new table.
+
+```json
+"goals": [
+  {
+    "id": "g-abc12",
+    "title": "Learn Kathak",
+    "category": "creative",
+    "description": "Take one class a week, practice 20 min at home every day",
+    "status": "active",      // active | paused | achieved
+    "created_at": 1762000000,
+    "progress_notes": ["Enrolled in a class near home", "First session felt hard but fun"]
+  }
+]
+```
+
+### New file: `characters/goals.py`
+```python
+def list_goals(char: dict) -> list[dict]:
+def add_goal(char: dict, title, category, description) -> dict:
+def update_goal(char: dict, goal_id, **updates) -> dict:
+def delete_goal(char: dict, goal_id) -> dict:
+def active_summary(char: dict) -> str:
+    """2-3 sentence summary of active goals for the brain's prompt."""
+```
+
+### API endpoints
+```
+GET    /{char_id}/goals           → list
+POST   /{char_id}/goals           → add
+PATCH  /{char_id}/goals/{goal_id} → update (status, progress_notes, etc.)
+DELETE /{char_id}/goals/{goal_id} → remove
+```
+
+### Brain integration
+System prompt gains a section:
+```
+Current goals (working toward):
+- Learn Kathak (creative): take one class a week, practice daily
+- Get promoted to senior marketing (career): lead one campaign this quarter
+```
+
+The brain naturally references these in its thoughts ("I should practice today")
+and the `ThoughtOut` schema gets an optional `goal_progress` field:
+```
+"goal_progress": "practiced Kathak for 20 min"  // or "" if irrelevant
+```
+When non-empty, it is appended as a progress note to the matching goal.
+
+### UI
+- Goals section in the Virtual Life tab (below Profile)
+- Add / edit / mark achieved / delete
+- Each goal shows status badge + progress notes (expandable)
+
+### Acceptance
+- Goals appear in brain system prompt
+- Brain occasionally references them in thoughts
+- Progress notes grow over time
+
+---
+
+## Phase G — Memory
+
+### Goal
+The character builds episodic memories from her daily thoughts. Memories
+decay with age (newer = stronger = more likely recalled). Before each think
+the brain gets her 4–5 most relevant memories so she stays consistent and
+builds on past experience.
+
+### Memory decay
+Half-life = 7 days. `strength(t) = 0.5^(days_since_formed / 7.0)`.
+Memories with `strength < 0.04` (≈ 40 days old at full formation) are
+considered faded and not retrieved (but kept in DB for history).
+
+### New table: `char_memories`
+```sql
+CREATE TABLE IF NOT EXISTS char_memories (
+    id            TEXT PRIMARY KEY,
+    char_id       TEXT NOT NULL,
+    content       TEXT NOT NULL,     -- the memory sentence(s)
+    tags          TEXT DEFAULT '[]', -- JSON [keyword, ...]
+    category      TEXT DEFAULT 'episodic',  -- episodic | goal | reflection
+    base_strength REAL DEFAULT 1.0,  -- set at formation, never changed
+    formed_at     REAL,
+    last_accessed_at REAL
+);
+```
+
+### New file: `characters/memory.py`
+
+```python
+HALF_LIFE_DAYS = 7.0
+FADE_THRESHOLD = 0.04     # below this → faded, not retrieved
+
+def strength(mem: dict) -> float:
+    days = (time.time() - mem["formed_at"]) / 86400
+    return mem["base_strength"] * (0.5 ** (days / HALF_LIFE_DAYS))
+
+def form(char_id: str, thought: dict) -> dict:
+    """Extract and save a memory from a ThoughtOut. Called automatically after think."""
+    content = f"{thought.get('activity','?')} at {thought.get('space','?')}. {thought.get('thought','')}"
+    tags = _extract_tags(thought)
+    # Save to char_memories
+    ...
+
+def retrieve(char_id: str, context: str, n: int = 5) -> list[dict]:
+    """Top n memories by strength × keyword_overlap(context). Skips faded ones."""
+    ...
+
+def memories_prompt(mems: list[dict]) -> str:
+    """A short block injected into the brain's user prompt."""
+    if not mems: return ""
+    lines = [f"- {m['content']} (strength {strength(m):.2f})" for m in mems]
+    return "Recent memories (freshest first):\n" + "\n".join(lines)
+```
+
+### Brain integration
+Before `think()`:
+```python
+mems = memory.retrieve(char["id"], context=activity_context, n=5)
+# Injected into user prompt:
+# "Recent memories:
+#  - Made great pasta at home last Tuesday. (0.92)
+#  - Felt disconnected at Priya's party. (0.74)
+#  - Started 'The White Tiger'. Gripping so far. (0.41)"
+```
+
+After `think()`:
+```python
+memory.form(char["id"], thought_out)
+```
+
+### Memory retrieval algorithm
+1. Load all char memories with `strength > FADE_THRESHOLD`
+2. Score each: `score = strength × (1 + 0.5 × keyword_overlap(content, context))`
+3. Sort by score descending, return top n
+4. Update `last_accessed_at` for retrieved memories
+
+### UI
+- Memory viewer in the Virtual Life tab — a list of memories with their
+  strength bars (0–1 visualised as a thin bar, greyed when < 0.2)
+- Search/filter by tag
+- Owner can manually add a memory or delete one
+
+### Acceptance
+- Memory formed after every think (no extra LLM call)
+- 5 strongest memories appear in brain's user prompt
+- After 40 days without reinforcement, memory fades below threshold
+- Memory list visible in the UI with strength bars
+
+---
+
+## Agentic think pipeline (Phases E + F + G combined)
+
+The `think()` call is not a single linear prompt. It runs an iterative pipeline:
+
+```
+Stage 1: CONTEXT ASSEMBLY
+  - World brief (weather, news)          → world.py
+  - Active memories (top 5 by strength)  → memory.py
+  - Active goals summary                 → goals.py
+  - Time of day, season, day of week
+
+Stage 2: FIRST-PASS THOUGHT (LLM call 1)
+  System: character identity + personality + interests + spaces
+  User:   assembled context above
+  Out:    ThoughtOut (thought, activity, space, mood, outfit, image_idea)
+
+Stage 3: SELF-REVIEW (LLM call 2 — the character "reads back" her thought)
+  System: same character identity
+  User:   "You just thought this: [thought]. Does it feel true to you right now,
+           given your goals and recent memories? Revise if needed or confirm."
+  Out:    ThoughtRevised { confirmed: bool, revised_thought: str, revised_image_idea: str }
+  — if confirmed: use original; if revised: use revised values
+
+Stage 4: GOAL ALIGNMENT CHECK (code, no LLM)
+  - If ThoughtOut.activity is semantically close to an active goal → append
+    progress note to that goal automatically
+  - If no goal touched in last 3 days → nudge: inject "she has been neglecting
+    her Kathak practice" into Stage 1 next time
+
+Stage 5: POST-THINK
+  - Form memory from final thought
+  - Log full pipeline inputs/outputs to char_life_events
+  - Return final ThoughtOut
+```
+
+### Why iterative (not one big prompt)
+A single prompt asking the character to think, self-review, align with goals
+and produce an image idea reliably in one shot is too long a chain — the model
+drifts. Two small focused calls (think → review) with the second grounded in
+the first produces more coherent, self-consistent output.
+
+### ThoughtRevised schema
+```python
+class ThoughtRevised(M):
+    confirmed:          bool = True
+    revised_thought:    Str = ""
+    revised_image_idea: Str = ""
+    goal_progress:      Str = ""   # if non-empty, append to matching goal
+```
 
 ---
 

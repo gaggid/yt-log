@@ -13,7 +13,7 @@ from story2 import describe, jobs, providers, voices
 from story3 import store as media
 from story3.voice import MediaError
 
-from . import avatar, brain as brain_mod, choices, pack, check, edits, profile as profile_mod, render, requests as R, store, studio, studio_edit, wardrobe
+from . import avatar, brain as brain_mod, choices, goals as goals_mod, memory as memory_mod, pack, check, edits, profile as profile_mod, render, requests as R, store, studio, studio_edit, wardrobe
 
 router = APIRouter(prefix="/api/characters")
 NO_CACHE = {"Cache-Control": "no-cache"}               # the browser asks again every time (cheap: 304 when the file is unchanged)
@@ -677,6 +677,84 @@ async def patch_profile(char_id: str, body: ProfilePatch):
 async def life_feed(char_id: str, limit: int = 50):
     _get(char_id)
     return profile_mod.list_events(char_id, min(limit, 200))
+
+
+# ── goals ─────────────────────────────────────────────────────────────────────
+
+class GoalReq(BaseModel):
+    title: str
+    category: str = "personal"
+    description: str = ""
+
+
+class GoalPatch(BaseModel):
+    title: str | None = None
+    category: str | None = None
+    description: str | None = None
+    status: str | None = None
+    progress_note: str | None = None   # appended to progress_notes list
+
+
+@router.get("/{char_id}/goals")
+async def list_goals(char_id: str):
+    c = _get(char_id)
+    return goals_mod.list_goals(c)
+
+
+@router.post("/{char_id}/goals")
+async def add_goal(char_id: str, body: GoalReq):
+    c = _get(char_id)
+    try:
+        return _guard(goals_mod.add_goal, c, body.title, body.category, body.description)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.patch("/{char_id}/goals/{goal_id}")
+async def update_goal(char_id: str, goal_id: str, body: GoalPatch):
+    c = _get(char_id)
+    updates = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
+    if "progress_note" in updates:
+        updates["progress_notes"] = updates.pop("progress_note")
+    try:
+        return goals_mod.update_goal(c, goal_id, **updates)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@router.delete("/{char_id}/goals/{goal_id}")
+async def delete_goal(char_id: str, goal_id: str):
+    c = _get(char_id)
+    _guard(goals_mod.delete_goal, c, goal_id)
+    return {"ok": True}
+
+
+# ── memories ───────────────────────────────────────────────────────────────────
+
+class MemoryReq(BaseModel):
+    content: str
+    tags: list[str] = []
+
+
+@router.get("/{char_id}/memories")
+async def list_memories(char_id: str, limit: int = 40):
+    _get(char_id)
+    return memory_mod.list_memories(char_id, min(limit, 100))
+
+
+@router.post("/{char_id}/memories")
+async def add_memory(char_id: str, body: MemoryReq):
+    _get(char_id)
+    if not body.content.strip():
+        raise HTTPException(400, "content required")
+    return memory_mod.add_manual(char_id, body.content, body.tags)
+
+
+@router.delete("/{char_id}/memories/{memory_id}")
+async def delete_memory(char_id: str, memory_id: str):
+    _get(char_id)
+    memory_mod.delete_memory(char_id, memory_id)
+    return {"ok": True}
 
 
 class ThinkReq(BaseModel):
