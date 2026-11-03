@@ -24,7 +24,7 @@ TRENDING = {
     "tinyworld": {
         "label": "Tiny world (miniature diorama)",
         "description": "Everything looks like a handmade miniature model seen through a macro lens: tilt-shift blur, tiny figures, toy-like detail.",
-        "look": ("Miniature diorama look, every subject and the whole scene is a handmade miniature model with toy-like textures of clay, felt and painted wood, tilt-shift macro lens with strong "
+        "look": ("Miniature diorama look, every subject and the whole scene is a handmade miniature model with toy-like textures of clay, felt and painted wood, every animal or creature sculpted as a clay toy in its exact real-world species form (an ant is a clay ant, a dog is a clay dog, not a human figure), tilt-shift macro lens with strong "
                  "soft focus falloff, bright soft studio light, cheerful saturated colour, clean tabletop setting. Miniature model, not a full-size real place, not a photograph of real animals, not a painting."),
         "lead": 'Clay and felt stop-motion miniature set, every subject in the picture is a hand-sculpted toy with fingerprints in the clay.',
         "motion": 'Small, gentle movements of the tiny subjects and toy-like parts; slow macro camera moves such as a slow slide or a slow push in; the soft tilt-shift focus stays as it is.',
@@ -42,7 +42,7 @@ TRENDING = {
     "claymation": {
         "label": "Claymation (stop-motion)",
         "description": "Soft clay characters with visible fingerprints and handmade sets, like a stop-motion short film.",
-        "look": ("Stop-motion clay animation frame, every subject sculpted from soft plasticine with visible fingerprint texture and slight imperfections, handmade miniature sets of card and fabric, "
+        "look": ("Stop-motion clay animation frame, every subject sculpted from soft plasticine with visible fingerprint texture and slight imperfections, every animal or creature sculpted in its exact real-world species form (an ant is a clay ant, a robot is a clay robot, not a human figure unless the story calls for one), handmade miniature sets of card and fabric, "
                  "warm practical studio lights, shallow depth of field, charming handcrafted feel. Clay puppets, not a photograph, not a smooth digital render."),
         "lead": 'Stop-motion clay animation frame, every subject is sculpted from soft plasticine.',
         "motion": 'Stop-motion rhythm: movements go in small distinct steps like handmade puppet poses, slightly uneven and bouncy, never smooth fluid blur; clay shapes keep their sculpted form.',

@@ -188,6 +188,7 @@ Check:
 1. Narration alignment: does each picture prove its narration line?
 2. Visual variety: are any two shots the same composition (same subject + framing + setting)?
 3. Concept delivery: do the pictures together tell the story?
+4. Creature/character type consistency: the plan names the main character and subjects with their species (ant, robot, dragon, cockroach, etc.). If any shot's still describes or implies a human-like figure where the plan calls for a non-human subject (insect, animal, machine, etc.), flag that shot. A still that says "ants" but gives no visual description of what ants look like will likely render as human figurines — flag it and instruct the rewrite to include the creature's appearance (colour, size, body shape) inline in the still text.
 
 Return ONLY a JSON object:
 {"ok": true/false, "score": 1-10, "issues": ["..."], "weak_shots": ["shot-id"], "instruction": "per-shot rewrite order: 's5: show a close-up of …; s20: …'", "problem": "one-line summary", "solution_desc": "what the agent is doing"}
@@ -196,6 +197,10 @@ If ok=true, weak_shots=[], instruction="", problem="", solution_desc=""."""
 
 _STILLS_USER = """THE BRIEF:
 {brief}
+
+PLAN CHARACTER: {character}
+PLAN SUBJECTS (name · kind · visual):
+{subjects}
 
 THE SHOTS (id · narration · still prompt):
 {shots_block}
@@ -220,8 +225,15 @@ def _shots_block(short: dict) -> str:
 async def stills(short: dict, backend, s: dict, examples: list[dict]) -> StillsEval:
     caller = llm_mod.JsonCaller(backend, s)
     caller.last_attempt = True
+    plan = short.get("plan") or {}
+    subjects_block = "\n".join(
+        f"  {s['name']} · {s.get('kind') or 'subject'} · {(s.get('visual') or '')[:80]}"
+        for s in (plan.get("subjects") or [])
+    ) or "  (none)"
     user = _STILLS_USER.format(
         brief=_brief(short),
+        character=plan.get("character") or "(none)",
+        subjects=subjects_block,
         shots_block=_shots_block(short),
         examples=_examples_block(examples),
     )
