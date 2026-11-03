@@ -207,12 +207,26 @@ def _done_today(char_id: str) -> list[str]:
         return []
 
 
+_MEAL_KEYWORDS = {
+    "breakfast": ["breakfast", "morning meal", "poha", "paratha", "idli", "upma", "toast"],
+    "lunch":     ["lunch", "midday meal", "dal rice", "roti sabzi", "thali"],
+    "dinner":    ["dinner", "evening meal", "supper", "night meal"],
+    "snack":     ["snack", "snacking", "chai snack", "evening snack"],
+}
+
+
+def _meals_done(activities: list[str]) -> list[str]:
+    """Which meal slots are already filled today based on activity descriptions."""
+    text = " ".join(activities).lower()
+    return [meal for meal, kw in _MEAL_KEYWORDS.items() if any(k in text for k in kw)]
+
+
 def day_arc(char: dict) -> dict:
     """Full day-arc context: band, day type, already-done-today list."""
     band = _current_band()
     dtype = _day_type()
     done = _done_today(char["id"])
-    return {**band, **dtype, "done_today": done}
+    return {**band, **dtype, "done_today": done, "meals_done": _meals_done(done)}
 
 
 def format_day_arc(arc: dict) -> str:
@@ -226,6 +240,8 @@ def format_day_arc(arc: dict) -> str:
     if arc.get("done_today"):
         activities = ", ".join(arc["done_today"][:6])
         lines.append(f"You have already done today: {activities}. Do not repeat these — pick something different.")
+    if arc.get("meals_done"):
+        lines.append(f"Meals already eaten today: {', '.join(arc['meals_done'])}. You only eat each meal once — do not eat this again.")
     if arc.get("month_start"):
         lines.append("It is the first of the month — a natural moment to reflect on the past month and review your goals.")
     return "\n".join(lines)

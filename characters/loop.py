@@ -10,10 +10,12 @@ whole loop per-character via the life_enabled toggle in the Virtual Life tab.
 """
 import asyncio
 import time
+from datetime import datetime
 
 CHECK_INTERVAL_S = 60        # how often the loop wakes to check conditions
 IDLE_AFTER_S     = 5 * 60   # gateway must have been quiet this long before we fire
 RETRY_DELAY_S    = 15 * 60  # wait after a JobBusy before retrying
+SLEEP_HOURS      = (0, 6)    # pre-dawn: loop skips entirely, character is asleep
 
 _task: asyncio.Task | None = None
 
@@ -65,6 +67,10 @@ async def run_forever(s: dict, key: str) -> None:
     print("[virtual-life] idle loop started", flush=True)
     while True:
         await asyncio.sleep(CHECK_INTERVAL_S)
+
+        # skip during sleep hours — character is asleep (pre-dawn 0–6 am)
+        if SLEEP_HOURS[0] <= datetime.now().hour < SLEEP_HOURS[1]:
+            continue
 
         # skip while any job is running
         if jobs.busy() or manager.busy():
