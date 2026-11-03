@@ -23,7 +23,7 @@ css.textContent = `
 document.head.append(css);
 
 const call = (path, opts = {}) => api('/characters' + path, opts);
-let C = null, CID = null, OPT = null, pollT = null, CH_TAB = 'gallery';
+let C = null, CID = null, OPT = null, pollT = null, CH_TAB = 'gallery', LIFE_EVENTS = null;
 const SLOT_ORDER = {person: null, place: null};
 
 /* ───────── library ───────── */
@@ -77,7 +77,7 @@ async function newCharacter() {
 
 /* ───────── studio ───────── */
 window.viewCharacter = async function (id) {
-  CID = id; clearTimeout(pollT);
+  CID = id; clearTimeout(pollT); LIFE_EVENTS = null; CH_TAB = 'gallery';
   OPT = OPT || await call('/options').catch(() => null);
   const my = route_id;
   const load = async (force) => {
@@ -119,7 +119,7 @@ function render() {
     <div id="ch-job">${jobBox()}</div>
     <div class="ch-studio"><div class="ch-side card pad">${sideView(busy)}</div><div id="ch-center">${centerView(busy)}</div></div>`;
   document.getElementById('tab-gallery').onclick = () => { CH_TAB = 'gallery'; render(); };
-  document.getElementById('tab-life').onclick    = () => { CH_TAB = 'life';    render(); };
+  document.getElementById('tab-life').onclick    = () => { CH_TAB = 'life'; LIFE_EVENTS = null; render(); };
   wire();
 }
 function refreshCenter() { $('#ch-job').innerHTML = jobBox(); $('#ch-center').innerHTML = centerView(C.job && C.job.state === 'running'); wireCenter(); }
@@ -383,7 +383,31 @@ function lifeView(busy) {
       <input style="flex:1" data-sp-desc="${i}" value="${esc(sp.description || '')}" placeholder="cosy room with fairy lights and books" ${dis}>
       <button class="small bad" data-sp-del="${i}" ${dis}>×</button>
     </div>`).join('');
-  const lifeFeedHtml = `<div id="life-feed-box"><div class="mute small" style="padding:12px 0">No moments yet — profile is ready. Phase B (brain / think) will fill this feed.</div></div>`;
+  const events = LIFE_EVENTS || [];
+  const relTime = ts => { const d = Math.round((Date.now()/1000 - ts)/60); return d < 1 ? 'just now' : d < 60 ? d+'m ago' : Math.round(d/60)+'h ago'; };
+  const eventCard = ev => {
+    const out = ev.outputs || {};
+    if (ev.event_type === 'think') {
+      // find matching draw event for this think event_id
+      const drawEv = events.find(e => e.event_type === 'draw' && (e.inputs||{}).event_id === ev.id);
+      const drawn = drawEv ? `<img src="${esc((drawEv.outputs||{}).url||'')}" style="width:100%;border-radius:8px;margin-top:6px" onerror="this.style.display='none'">` : '';
+      return `<div class="card pad mt-s" style="border-left:3px solid var(--accent)">
+        <div class="row"><span class="badge b-info">${esc(out.mood||'')}</span><span class="mute small">${esc(out.activity||'')} · ${esc(out.space||'')} · ${relTime(ev.created_at)}</span></div>
+        <div style="font-style:italic;margin:6px 0">${esc(out.thought||'')}</div>
+        ${drawn}
+        ${!drawEv ? `<button class="small primary mt-s" data-draw-ev="${esc(ev.id)}">Draw this look</button>` : '<span class="mute small">✓ drawn</span>'}
+        <details class="mt-s"><summary class="mute small" style="cursor:pointer">Debug</summary><pre style="font-size:10px;white-space:pre-wrap;max-height:200px;overflow:auto">${esc(JSON.stringify({image_idea:out.image_idea,outfit:out.outfit},null,2))}</pre></details>
+      </div>`;
+    }
+    if (ev.event_type === 'error') return `<div class="errbox small mt-s">${esc(ev.trigger)} error · ${relTime(ev.created_at)}: ${esc((ev.outputs||{}).error||'unknown')}</div>`;
+    return '';
+  };
+  const feedContent = events.length ? events.map(eventCard).join('') : '<div class="mute small" style="padding:12px 0">No moments yet. Hit "What is she thinking?" to start.</div>';
+  const lifeFeedHtml = `<div class="row" style="gap:8px;align-items:center;margin-bottom:10px">
+    <button class="primary" id="vl-think" ${dis}>What is she thinking?</button>
+    <span class="mute small">manual trigger — runs one LLM call</span>
+  </div>
+  <div id="life-feed-box">${feedContent}</div>`;
   return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start">
     <div>
       <div class="card pad"><h3 style="margin-top:0">Profile</h3>
@@ -441,9 +465,15 @@ async function loadLists() {
   WARD = await call('/wardrobe').catch(() => []);
 }
 
+async function loadLifeEvents() {
+  try { LIFE_EVENTS = await call('/' + CID + '/life'); } catch { LIFE_EVENTS = []; }
+}
+
 function wireLife() {
   const $e = id => document.getElementById(id);
   if (!$e('vl-save')) return; // not on life tab
+  // load events if not yet loaded
+  if (LIFE_EVENTS === null) { loadLifeEvents().then(() => { const box = document.getElementById('life-feed-box'); if (box) { LIFE_EVENTS = LIFE_EVENTS || []; refreshCenter(); } }); }
   const readSpaces = () => {
     const names = [...document.querySelectorAll('[data-sp-name]')];
     const descs = [...document.querySelectorAll('[data-sp-desc]')];
@@ -458,6 +488,18 @@ function wireLife() {
     };
     await act($e('vl-save'), async () => { const prof = await call('/' + CID + '/profile', {method: 'PATCH', json: body}); C.profile = prof; render(); return true; }, 'Profile saved');
   };
+  $e('vl-think') && ($e('vl-think').onclick = async () => {
+    const btn = $e('vl-think');
+    btn.disabled = true; btn.textContent = 'Thinking…';
+    try {
+      const ev = await call('/' + CID + '/think', {method: 'POST', json: {}});
+      if (ev.ok) { LIFE_EVENTS = null; await loadLifeEvents(); refreshCenter(); toast('Thought recorded'); }
+    } catch(e) { toast('Could not think: ' + e.message, {bad: true}); }
+    finally { if (btn) { btn.disabled = false; btn.textContent = 'What is she thinking?'; } }
+  });
+  document.querySelectorAll('[data-draw-ev]').forEach(b => b.onclick = async () => {
+    await act(b, async () => { await call('/' + CID + '/life/' + b.dataset.drawEv + '/draw', {method: 'POST', json: {}}); await window._chLoad(true); return true; }, 'Drawing the moment…');
+  });
   $e('vl-enabled') && ($e('vl-enabled').onchange = async () => {
     const body = {life_enabled: $e('vl-enabled').checked};
     await act(null, async () => { await call('/' + CID + '/profile', {method: 'PATCH', json: body}); return true; }, $e('vl-enabled').checked ? 'Auto life on' : 'Auto life off');

@@ -13,7 +13,7 @@ from story2 import describe, jobs, providers, voices
 from story3 import store as media
 from story3.voice import MediaError
 
-from . import avatar, choices, pack, check, edits, profile as profile_mod, render, requests as R, store, studio, studio_edit, wardrobe
+from . import avatar, brain as brain_mod, choices, pack, check, edits, profile as profile_mod, render, requests as R, store, studio, studio_edit, wardrobe
 
 router = APIRouter(prefix="/api/characters")
 NO_CACHE = {"Cache-Control": "no-cache"}               # the browser asks again every time (cheap: 304 when the file is unchanged)
@@ -677,6 +677,45 @@ async def patch_profile(char_id: str, body: ProfilePatch):
 async def life_feed(char_id: str, limit: int = 50):
     _get(char_id)
     return profile_mod.list_events(char_id, min(limit, 200))
+
+
+class ThinkReq(BaseModel):
+    context_override: str = ""
+
+
+@router.post("/{char_id}/think")
+async def think(char_id: str, body: ThinkReq | None = None):
+    """Run the brain: one LLM call → thought + image idea. Logs the event."""
+    c = _get(char_id)
+    if c["kind"] != "person":
+        raise HTTPException(400, "only a person has a brain")
+    if jobs.busy() or manager.busy():
+        raise HTTPException(409, "the model server is busy; try again when it finishes")
+    s, be = _backend()
+    try:
+        return await brain_mod.think(c, be, s, trigger="manual",
+                                     context_override=(body.context_override if body else ""))
+    except Exception as e:
+        raise HTTPException(500, f"the brain could not think: {e}")
+
+
+class DrawThoughtReq(BaseModel):
+    event_id: str
+
+
+@router.post("/{char_id}/life/{event_id}/draw")
+async def draw_thought(char_id: str, event_id: str):
+    """Generate a picture from a logged thought. Starts a background job."""
+    c = _get(char_id)
+    ev = profile_mod.get_event(event_id)
+    if not ev or ev["char_id"] != char_id:
+        raise HTTPException(404, "no such event for this character")
+    if ev["event_type"] != "think":
+        raise HTTPException(400, "can only draw from a 'think' event")
+    thought = ev["outputs"]
+    s, key = settings_mod.get(), settings_mod.api_key()
+    return _start(char_id, "char_moment",
+                  lambda progress: brain_mod.draw_thought(c, event_id, thought, s, key))
 
 
 @router.post("/item/{item_id}/check")
