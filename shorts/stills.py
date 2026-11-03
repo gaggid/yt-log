@@ -119,6 +119,14 @@ def prompt(short: dict, shot: dict) -> str:
         parts.append(AVATAR_FRAMING)
     if avoid_line(shot):
         parts.append(avoid_line(shot))
+    # Tell Qwen exactly what is in the picture so it does not invent extra figures or animals.
+    # Positive wording only — Qwen ignores "no x" but follows "only these".
+    all_subs = subjects.in_shot(short, shot)
+    subject_names = [s["name"] for s in all_subs if s.get("kind") != "place"]
+    if character:
+        subject_names = [character.split(":")[0].strip()] + [n for n in subject_names if n.lower() not in character.lower()]
+    if subject_names:
+        parts.append("Only these subjects are in this picture: " + ", ".join(subject_names) + ". Nothing else added.")
     parts.append(keep_out(short))
     return " ".join(parts)[:3900]
 
