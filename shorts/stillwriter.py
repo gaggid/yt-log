@@ -14,6 +14,7 @@ from . import cast, subjects as subj
 MIN_WORDS, MAX_WORDS = 15, 70
 VAGUE = re.compile(r"\b(many|several|multiple|numerous|dozens?|hundreds?|thousands?|crowds?|crowded|group of|groups of|swarm|army of|lots of|a number of|some|few|bunch(?:es)? of|handful)\b", re.I)
 NEGATION = re.compile(r"\b(no|not|without|never|instead of|rather than|nothing|none|isn't|aren't|doesn't|don't|empty of)\b", re.I)
+BIG_COUNT = re.compile(r"\b(?:six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|hundred|[6-9]|[1-9]\d+)\s+(?!o'clock|am\b|pm\b|years?|months?|days?|hours?|minutes?|seconds?|percent|%)[a-z]", re.I)
 FILLER = re.compile(r"\b(sleek|beautiful|stunning|ethereal|haunting|ominous|menacing|majestic|epic|cinematic|dramatic|moody|gritty|gleaming|shimmering|mysterious|powerful|imposing|grey metal|metallic)\b", re.I)
 
 
@@ -62,6 +63,9 @@ def problems(item: StillOut) -> list[str]:
         m = rx.search(t)
         if m:
             out.append(f"{item.id}: \"{m.group(0)}\" is {what}")
+    big = BIG_COUNT.search(t)
+    if big:
+        out.append(f"{item.id}: \"{big.group(0)}\" is too many to draw (the image model cannot count above five): show at most five and let the picture suggest the rest")
     if re.search(r"\bsplit screen|collage|diptych|side by side\b", t, re.I):
         out.append(f"{item.id}: one picture only, no split screen or collage")
     return out
@@ -78,7 +82,7 @@ def _context(short: dict, beat: dict, shots: list[dict], only: set[str] | None) 
     if members:
         lines.append("CAST (drawn from library pictures; their looks are fixed by those pictures): " + "; ".join(f"{m['char']['name']} ({m['char'].get('kind', 'person')})" for m in members))
     if subj.of(short):
-        lines.append("SUBJECTS (their looks are added by code, so you do not repeat them; they tell you what each one is and has):\n" + "\n".join(f"- {x['name']} ({x['kind'] or 'subject'}): {x['visual']}" for x in subj.of(short)))
+        lines.append("SUBJECTS (their looks are added by code, so you do not repeat them; they tell you what each one is and has):\n" + "\n".join(f"- {x['name']} ({x['kind'] or 'subject'}): {subj.plain_visual(x['visual'])}" for x in subj.of(short) if subj.drawable(x)))
     if i:
         lines.append("THE BEAT BEFORE: " + " ".join(x["text"] for x in beats[i - 1]["sentences"]))
     lines.append(f"THIS BEAT (the picture proves it; the viewer hears it while the shots play): " + " ".join(x["text"] for x in beat["sentences"]))

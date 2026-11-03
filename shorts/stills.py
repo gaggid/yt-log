@@ -66,14 +66,22 @@ def _same(a: str, b: str) -> bool:
     return len(ta & tb) >= 5 and len(ta & tb) / min(len(ta), len(tb)) >= 0.6              # a few shared words (brown, white, beard) are not the same person
 
 
+_MOVES_ON = re.compile(r",?\s+(?:that |which )?(?:transitions? (?:in)?to|turns? into|leads? (?:in)?to|opens? (?:in)?to|and then|then)\b.*$", re.I)
+
+
+def one_place(text: str) -> str:
+    """A place written as a journey ("a kitchen counter that transitions into a fridge") is drawn all at once by the image model, so every shot gets both; a shot with no place of its own is set in the first one."""
+    return _MOVES_ON.sub("", text).strip(" ,.") if text else text
+
+
 def looks_line(short: dict, shot: dict, character: str) -> tuple[str, str]:
     """(who and what looks like, the place) for a shot, each said once. The main character is not repeated as a subject, and the place is the shot's own place, else a place subject it shows,
     else the plan's main place."""
     subs = subjects.in_shot(short, shot)
-    shown = [f"{s['name']}: {s['visual'].rstrip('. ')}." for s in subs if s.get("kind") != "place" and not (character and _same(character, s["visual"]))]
+    shown = [f"{s['name']}: {subjects.plain_visual(s['visual']).rstrip('. ')}." for s in subs if s.get("kind") != "place" and not (character and _same(character, s["visual"]))]
     places = [s for s in subs if s.get("kind") == "place"]
-    setting = (shot.get("setting") or "").strip() or (places[0]["visual"].strip() if places else "") or (short["plan"].get("place") or "").strip()
-    return " ".join(([character.rstrip(". ") + "."] if character else []) + shown), setting
+    setting = (shot.get("setting") or "").strip() or (places[0]["visual"].strip() if places else "") or one_place((short["plan"].get("place") or "").strip())
+    return " ".join(([subjects.plain_visual(character).rstrip(". ") + "."] if character else []) + shown), setting
 
 
 def prompt(short: dict, shot: dict) -> str:
@@ -82,7 +90,7 @@ def prompt(short: dict, shot: dict) -> str:
     plan = short["plan"]
     character = framed_character(plan["character"], shot) if shot.get("character") and plan.get("character") else ""
     who, setting = looks_line(short, shot, character)
-    parts = [(shot.get("still") or shot["prompt"]).strip()]
+    parts = ([looks.lead(short)] if looks.lead(short) else []) + [(shot.get("still") or shot["prompt"]).strip()]
     if who:
         parts.append("How they look: " + who)
     if setting:

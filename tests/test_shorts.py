@@ -999,3 +999,35 @@ def test_style_motion_hint_reaches_motion_writer_and_negative_keeps_what_the_sty
     assert "MOTION FEEL" not in motionwriter._context(plain, short["beats"][0], [], None)
     for k, v in looks.TRENDING.items():
         assert v["motion"] and not motionwriter.LOOKS.search(v["motion"]), k
+
+
+def test_trending_looks_name_no_content_so_they_cannot_add_people_buildings_or_sky():
+    import re
+    from shorts import looks
+    content = re.compile(r"\b(figures?|characters?|people|person|buildings?|city|cities|streets?|sky|clouds?|nature|trees?|town|crowd)\b", re.I)
+    for k, v in looks.TRENDING.items():
+        assert not content.search(v["look"]), (k, content.search(v["look"]).group(0))
+
+
+def test_a_period_is_not_a_subject_and_camera_words_leave_a_subjects_look():
+    from shorts import stills, stillwriter, subjects
+    assert not subjects.drawable({"name": "The Construction Era", "kind": "period of history"}) and subjects.drawable({"name": "Cold Kingdom", "kind": "place"})
+    assert subjects.plain_visual("A tiny ant with a black shell, seen from a macro perspective.") == "A tiny ant with a black shell."
+    assert stills.one_place("A vast kitchen counter that transitions into the frosty interior of a fridge.") == "A vast kitchen counter"
+    assert stills.one_place("A rooftop at night") == "A rooftop at night"
+    short = {"plan": {"subjects": [{"name": "The Construction Era", "kind": "period", "visual": "A scene of ants building."}, {"name": "Ant", "kind": "person", "visual": "A tiny ant."}]}}
+    assert [x["name"] for x in subjects.in_shot(short, {"prompt": "Wide shot of The Construction Era with one Ant", "subjects": ["The Construction Era", "Ant"]})] == ["Ant"]
+    big = stillwriter.StillOut(id="s1", still="Wide shot of twelve ants on the left and twelve cockroaches on the right, in a cold hall, facing each other now.")
+    assert any("too many to draw" in p for p in stillwriter.problems(big))
+    ok = stillwriter.StillOut(id="s1", still="Wide shot of five ants on the left and five cockroaches on the right, in a cold hall, facing each other now.")
+    assert not any("too many" in p for p in stillwriter.problems(ok))
+
+
+def test_a_trending_style_leads_the_picture_prompt_and_the_other_styles_do_not():
+    from shorts import looks, stills
+    short = planned("keyframe", visual_style="tinyworld")
+    p = stills.prompt(short, short["shots"][0])
+    assert p.startswith(looks.TRENDING["tinyworld"]["lead"]) and p.count("Miniature diorama") == 1
+    assert all(v["lead"].startswith(tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZ")) and "every subject" in v["lead"] for v in looks.TRENDING.values())
+    plain = planned("keyframe", visual_style="realism")
+    assert looks.lead(plain) == "" and not stills.prompt(plain, plain["shots"][0]).startswith("Clay")

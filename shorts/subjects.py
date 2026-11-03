@@ -26,7 +26,7 @@ organisation, place, product, animal or software. Keep every side of a story: a 
 
 Return ONLY a JSON object: {"subjects": [{"name": "...", "kind": "person | group | machine | organisation | place | product | software | other", "visual": "..."}]}
 
-- At most 10, the most important first. Do not stop at machines: when the facts allow, also list the people who use them (pilots, crew, soldiers, engineers, leaders), the places, a period of history, and an object that proves a point. Use the exact names the facts use (and the common short form, for example "Chinese J-20 stealth fighter").
+- At most 10, the most important first. Do not stop at machines: when the facts allow, also list the people who use them (pilots, crew, soldiers, engineers, leaders), the places, a place, an object or a person from the period of history the facts mention, and an object that proves a point. A period, an era, an idea or a feeling is never a subject: it cannot be drawn. Use the exact names the facts use (and the common short form, for example "Chinese J-20 stealth fighter").
 - "visual" is English, 20 to 45 words, one concrete description an image model can draw WITHOUT knowing the story: shape, size, colours, markings, insignia, clothing, materials, the setting it is usually seen in.
   EVERY machine, vehicle, person or group MUST say whose it is by what can be seen: the national roundel or flag colours on aircraft and vehicles (for example a red and yellow star on Chinese aircraft, an orange, white and green roundel on Indian aircraft), the uniform, the logo shown only as a shape (no readable text), a software window by its layout and theme.
   Never write the subject's name inside the visual as text to be printed; describe how it looks.
@@ -40,6 +40,20 @@ Return ONLY a JSON object: {"subjects": [{"name": "...", "kind": "person | group
 
 def _norm(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
+NOT_DRAWABLE = re.compile(r"\b(period|era|epoch|age of|history|historical|idea|concept|theme|feeling|mood|emotion|time)\b", re.I)
+CAMERA_WORDS = re.compile(r",?\s*(?:seen |viewed |shown |photographed )?(?:from|in|with) an? (?:macro|close-up|wide|low-angle|high-angle|aerial|top-down|bird's-eye|ground-level)[a-z' -]{0,20}(?:perspective|view|angle|lens|shot)\b", re.I)
+
+
+def drawable(sub: dict) -> bool:
+    """A subject the picture can show: not a period, an idea or a feeling (a model sometimes lists \"The Construction Era\", and a shot then names it as if it were a place)."""
+    return not (NOT_DRAWABLE.search(sub.get("kind", "")) or NOT_DRAWABLE.search(sub.get("name", "")))
+
+
+def plain_visual(text: str) -> str:
+    """A subject's look without camera words ("seen from a macro perspective"): the shot chooses the camera, and a macro or photographic phrase in a look pulls the whole picture toward a real photograph, whatever the style."""
+    return CAMERA_WORDS.sub("", text or "").strip(" ,")
 
 
 def of(short: dict) -> list[dict]:
@@ -59,7 +73,7 @@ def clean(items: list[dict]) -> list[dict]:
 
 def in_shot(short: dict, shot: dict) -> list[dict]:
     """The subjects a shot shows: the ones the planner listed for it, plus any whose name its own words mention (the model sometimes forgets to list one)."""
-    subs = of(short)
+    subs = [x for x in of(short) if drawable(x)]
     if not subs:
         return []
     wanted = {_norm(n) for n in shot.get("subjects") or []}
@@ -77,7 +91,7 @@ def block(short: dict, shot: dict) -> str:
     subs = in_shot(short, shot)
     if not subs:
         return ""
-    return "Subjects in this shot: " + " ".join(f"{s['name']}: {s['visual'].rstrip('. ')}." for s in subs)
+    return "Subjects in this shot: " + " ".join(f"{s['name']}: {plain_visual(s['visual']).rstrip('. ')}." for s in subs)
 
 
 def parse_lines(text: str) -> list[dict]:
