@@ -651,7 +651,17 @@ function wireLife() {
     await act(b, async () => { await call('/' + CID + '/life/' + b.dataset.dismissEv, {method: 'DELETE'}); LIFE_EVENTS = null; await loadLifeEvents(); render(); return true; });
   });
   document.querySelectorAll('[data-draw-ev]').forEach(b => b.onclick = async () => {
-    await act(b, async () => { await call('/' + CID + '/life/' + b.dataset.drawEv + '/draw', {method: 'POST', json: {}}); LIFE_EVENTS = null; await loadLifeEvents(); render(); return true; }, 'Drawing the moment…');
+    b.disabled = true; b.textContent = 'Drawing…';
+    try {
+      await call('/' + CID + '/life/' + b.dataset.drawEv + '/draw', {method: 'POST', json: {}});
+      // draw runs as a background job — poll until done
+      for (let i = 0; i < 90; i++) {
+        await new Promise(r => setTimeout(r, 3000));
+        const s = await call('/' + CID).catch(() => null);
+        if (s) { C = s; if (!s.job || s.job.state !== 'running') break; }
+      }
+      LIFE_EVENTS = null; await loadLifeEvents(); render();
+    } catch(e) { toast(e.message, {bad: true}); b.disabled = false; b.textContent = 'Draw this look'; }
   });
   // show loop status
   call('/' + CID + '/life/status').then(st => {
