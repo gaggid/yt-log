@@ -40,8 +40,9 @@ def test_typed_tags_are_sorted_back_into_the_vocabulary():
 def test_the_request_is_one_instrumental_loop_with_empty_sections():
     cfg = music.norm({"enabled": True, "plan": music.fallback("documentary")})
     short, long = music.request(cfg, 30), music.request(cfg, 900)
-    assert short["model"] == "yue2-3b" and short["lyrics"] == "[Intro]\n\n[Outro]\n"
-    assert long["lyrics"].count("[Instrumental]") == music.MAX_SECTIONS - 2 and long["duration"] <= 300       # a long film loops a track of about two minutes
+    assert short["model"] == "yue2-3b" and short["lyrics"] == "[intro]\n\n[outro]\n"
+    # [Instrumental] is not a valid YuE2 tag; empty [verse]/[bridge] sections are used instead
+    assert "[Instrumental]" not in long["lyrics"] and long["lyrics"].count("[verse]") + long["lyrics"].count("[bridge]") == music.MAX_SECTIONS - 2 and long["duration"] <= 300
     assert "no vocals" in long["caption"] and "instrumental" in long["caption"]
     with pytest.raises(music.MediaError):
         music.request(music.norm({"enabled": True}), 30)

@@ -184,8 +184,12 @@ def sections_for(total_s: float) -> int:
 
 
 def lyrics_for(sections: int) -> str:
-    """Section tags with no words: every one is an instrumental passage."""
-    return "[Intro]\n\n" + "[Instrumental]\n\n" * max(0, sections - 2) + "[Outro]\n"
+    """Empty valid section tags only — no words under any tag forces YuE2 into instrumental mode.
+    [Instrumental] is not a recognised tag and gets treated as lyric text; use [verse]/[bridge] empty."""
+    middle = int(sections - 2)
+    tags = ["[verse]", "[bridge]"]
+    mid = "\n\n".join(tags[i % 2] for i in range(max(0, middle)))
+    return "[intro]\n\n" + (mid + "\n\n" if mid else "") + "[outro]\n"
 
 
 def request(cfg: dict, total_s: float) -> dict:
