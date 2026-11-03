@@ -200,6 +200,63 @@ async def state(short_id: str):
     return out
 
 
+@router.get("/{short_id}/export-debug.json")
+async def export_debug(short_id: str):
+    """Diagnostic JSON export: everything needed to troubleshoot a short (settings, prompts, narration, composed Wan prompts)."""
+    from fastapi.responses import JSONResponse
+    short = _get(short_id)
+    plan = short.get("plan") or {}
+
+    beat_index = {b["id"]: b for b in short.get("beats", [])}
+
+    shots_out = []
+    for sh in short.get("shots", []):
+        beat_id = next((b["id"] for b in short.get("beats", []) if sh["id"] in b.get("shot_ids", [])), "")
+        shots_out.append({
+            "id": sh["id"],
+            "beat_id": beat_id,
+            "prompt": sh.get("prompt", ""),
+            "still": sh.get("still", ""),
+            "move": sh.get("move", ""),
+            "camera": sh.get("camera", ""),
+            "seconds": sh.get("seconds"),
+            "character": sh.get("character", False),
+            "continues": sh.get("continues", False),
+            "avatar": sh.get("avatar", False),
+            "start_source": P.start_source(short, sh),
+            "wan_prompt_text": P.compose(short, sh, with_picture=False),
+            "wan_prompt_picture": P.compose(short, sh, with_picture=True),
+        })
+
+    beats_out = []
+    for b in short.get("beats", []):
+        sents = b.get("narration") or b.get("sentences") or []
+        beats_out.append({
+            "id": b["id"],
+            "beat": b.get("beat", ""),
+            "seconds": b.get("seconds"),
+            "narration": sents,
+            "voice_text": " ".join(s["text"] if isinstance(s, dict) else s for s in sents),
+            "shot_ids": b.get("shot_ids", []),
+        })
+
+    out = {
+        "id": short["id"],
+        "title": short["title"],
+        "pipeline": short["pipeline"],
+        "status": short["status"],
+        "created_at": short.get("created_at"),
+        "settings": short.get("settings", {}),
+        "source": short.get("source", {}),
+        "plan": plan,
+        "script": short.get("script"),
+        "beats": beats_out,
+        "shots": shots_out,
+    }
+    headers = {"Content-Disposition": f'attachment; filename="{short_id}-debug.json"'}
+    return JSONResponse(out, headers=headers)
+
+
 # ── settings and edits ───────────────────────────────────────────────────────
 
 class SettingsReq(BaseModel):
