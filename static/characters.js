@@ -409,13 +409,21 @@ function lifeView(busy) {
   const mems = LIFE_MEMORIES || [];
   const strengthBar = s => { const f=Math.round(s*5); return '<span style="letter-spacing:-1px">'+'█'.repeat(f)+'░'.repeat(5-f)+'</span>'; };
   const relTime = ts => { const d = Math.round((Date.now()/1000 - ts)/86400); return d < 1 ? 'today' : d < 7 ? d+'d ago' : d < 30 ? Math.round(d/7)+'w ago' : Math.round(d/30)+'mo ago'; };
-  const memCards = mems.length ? mems.slice(0,20).map(m => `
+  const memRow = m => `
     <div class="row mt-s" style="gap:6px;align-items:flex-start;font-size:12px">
       <span title="strength ${m.current_strength}" style="color:var(--mute);white-space:nowrap">${strengthBar(m.current_strength||0)}</span>
       <span style="flex:1;color:${(m.current_strength||0)<0.2?'var(--mute)':'inherit'}">${esc(m.content)}</span>
       <span class="mute" style="white-space:nowrap">${relTime(m.formed_at)}</span>
       <button class="small bad" style="padding:0 4px;font-size:11px" data-mem-del="${esc(m.id)}">×</button>
-    </div>`).join('') : '<div class="mute small">No memories yet — they form automatically after each think.</div>';
+    </div>`;
+  const _memGroup = (label, items) => items.length ? `<div class="mute small" style="margin-top:10px;margin-bottom:2px;font-weight:600">${label}</div>${items.map(memRow).join('')}` : '';
+  const _memBycat = cat => mems.filter(m => m.category === cat);
+  const memCards = mems.length ? (
+    _memGroup('Wardrobe & fashion wishes', _memBycat('wish')) +
+    _memGroup('Notes & insights', _memBycat('note')) +
+    _memGroup('Recent activity', mems.filter(m => m.category !== 'wish' && m.category !== 'note').slice(0, 10))
+  ) || '<div class="mute small">No memories yet — they form automatically after each think.</div>'
+    : '<div class="mute small">No memories yet — they form automatically after each think.</div>';
 
   // ── life feed ──
   const events = LIFE_EVENTS || [];

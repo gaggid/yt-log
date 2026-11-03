@@ -112,20 +112,31 @@ def retrieve(char_id: str, context: str = "", n: int = MAX_RETRIEVE) -> list[dic
 
 
 def memories_prompt(mems: list[dict], at: float | None = None) -> str:
-    """Short block for the brain's user prompt — oldest first so timeline reads naturally."""
+    """Short block for the brain's user prompt — grouped by category, oldest first within group."""
     if not mems:
         return ""
     now = at or time.time()
-    # sort oldest→newest so reading order is chronological
-    ordered = sorted(mems, key=lambda m: m["formed_at"])
-    lines = []
-    for m in ordered:
+
+    def _fmt(m: dict) -> str:
         days = (now - m["formed_at"]) / 86400
-        age = "today" if days < 1 else (f"{int(days)}d ago" if days < 30 else f"{int(days/30)}mo ago")
-        s = strength(m, now)
-        bar = "█" * round(s * 5) + "░" * (5 - round(s * 5))   # e.g. "███░░"
-        lines.append(f"[{bar} {age}] {m['content']}")
-    return "Your memories (freshest feel strongest):\n" + "\n".join(lines)
+        age  = "today" if days < 1 else (f"{int(days)}d ago" if days < 30 else f"{int(days/30)}mo ago")
+        s    = strength(m, now)
+        bar  = "█" * round(s * 5) + "░" * (5 - round(s * 5))
+        return f"[{bar} {age}] {m['content']}"
+
+    by_cat: dict[str, list] = {"wish": [], "note": [], "other": []}
+    for m in sorted(mems, key=lambda x: x["formed_at"]):
+        cat = m.get("category", "episodic")
+        by_cat["wish" if cat == "wish" else "note" if cat == "note" else "other"].append(m)
+
+    parts = []
+    if by_cat["other"]:
+        parts.append("Recent activity:\n" + "\n".join(_fmt(m) for m in by_cat["other"]))
+    if by_cat["note"]:
+        parts.append("Notes & insights:\n" + "\n".join(_fmt(m) for m in by_cat["note"]))
+    if by_cat["wish"]:
+        parts.append("Fashion & wardrobe wishes:\n" + "\n".join(_fmt(m) for m in by_cat["wish"]))
+    return "\n\n".join(parts)
 
 
 # ── list / delete (for UI) ────────────────────────────────────────────────────
@@ -143,13 +154,19 @@ def delete_memory(char_id: str, memory_id: str) -> None:
     db.ex("DELETE FROM char_memories WHERE id=? AND char_id=?", (memory_id, char_id))
 
 
-def add_manual(char_id: str, content: str, tags: list[str] | None = None) -> dict:
-    """Let the owner inject a memory manually."""
+def add_manual(char_id: str, content: str, tags: list[str] | None = None,
+               category: str = "manual", dedup: bool = False) -> dict:
+    """Let the owner inject a memory manually. dedup=True skips if identical content already exists."""
+    if dedup:
+        existing = db.one("SELECT id FROM char_memories WHERE char_id=? AND content=?",
+                          (char_id, content.strip()))
+        if existing:
+            return _load(db.one("SELECT * FROM char_memories WHERE id=?", (existing["id"],)))
     mid = _mid()
     now = time.time()
     db.ex(
         "INSERT INTO char_memories(id,char_id,content,tags,category,base_strength,formed_at,last_accessed_at)"
         " VALUES(?,?,?,?,?,?,?,?)",
-        (mid, char_id, content.strip(), db.jdump(tags or []), "manual", 1.0, now, now),
+        (mid, char_id, content.strip(), db.jdump(tags or []), category, 1.0, now, now),
     )
     return _load(db.one("SELECT * FROM char_memories WHERE id=?", (mid,)))

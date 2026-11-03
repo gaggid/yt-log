@@ -317,12 +317,12 @@ async def think(char: dict, backend, s: dict, trigger: str = "manual", context_o
         pass
     try:
         if thought.note:
-            memory_mod.add_manual(char["id"], f"[note] {thought.note}")
+            memory_mod.add_manual(char["id"], thought.note, category="note", dedup=True)
     except Exception:
         pass
     try:
         if thought.wardrobe_want:
-            memory_mod.add_manual(char["id"], f"[wardrobe wish] {thought.wardrobe_want}")
+            memory_mod.add_manual(char["id"], thought.wardrobe_want, category="wish", dedup=True)
     except Exception:
         pass
 
