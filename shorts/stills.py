@@ -78,6 +78,13 @@ def looks_line(short: dict, shot: dict, character: str) -> tuple[str, str]:
     """(who and what looks like, the place) for a shot, each said once. The main character is not repeated as a subject, and the place is the shot's own place, else a place subject it shows,
     else the plan's main place."""
     subs = subjects.in_shot(short, shot)
+    # Pull in visuals for plan subjects mentioned by name in the still but absent from the shot's subjects list.
+    # Without this, Qwen sees e.g. "four ants" with no description and draws clay humans (the style's default).
+    still_lower = (shot.get("still") or shot.get("prompt") or "").lower()
+    listed = {s["name"] for s in subs}
+    for ps in (short.get("plan") or {}).get("subjects") or []:
+        if ps.get("name") and ps["name"] not in listed and ps["name"].lower() in still_lower:
+            subs = subs + [ps]
     shown = [f"{s['name']}: {subjects.plain_visual(s['visual']).rstrip('. ')}." for s in subs if s.get("kind") != "place" and not (character and _same(character, s["visual"]))]
     places = [s for s in subs if s.get("kind") == "place"]
     setting = (shot.get("setting") or "").strip() or (places[0]["visual"].strip() if places else "") or one_place((short["plan"].get("place") or "").strip())
