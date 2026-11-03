@@ -6,7 +6,7 @@ import re
 import time
 from pathlib import Path
 
-from story3 import audio as audio_mod, store as media, video
+from story3 import audio as audio_mod, music, store as media, video
 from story3.voice import MediaError
 
 from . import clips, frames, models, planner, store, timeline, upscale, voice as svoice
@@ -79,19 +79,26 @@ def short_events(short: dict, tl: dict) -> list[tuple[float, float, str]]:
     return ev
 
 
-def mix_and_mux(silent: Path, voice_wav: Path | None, bed_parts: list[dict], captions: Path | None, out: Path, work: Path, settings: dict, total_s: float) -> dict:
-    """Video + voice + bed + captions -> the final file. Returns notes (for example when the bed could not be made)."""
-    notes = {"bed": False}
+def mix_and_mux(silent: Path, voice_wav: Path | None, bed_parts: list[dict], captions: Path | None, out: Path, work: Path, settings: dict, total_s: float, track: dict | None = None) -> dict:
+    """Video + voice + bed + captions -> the final file. `track` is the planned background music (a media row): it is the bed when it can be mixed, else the synthetic pad is. Returns notes."""
+    notes = {"bed": False, "music": False}
     args = ["-i", str(silent.name)]
     vf = "null"
     if captions:
         vf = f"ass={captions.name}:fontsdir='{video.FONTS_DIR.replace(':', chr(92) + ':')}'"
-    if voice_wav is None:
+    music_bed = music.bed_from_track(video.FFMPEG, track, total_s + 0.5, work, float(music.norm({"level": settings.get("music_level", music.DEFAULT["level"])})["level"])) if track else None
+    if voice_wav is None and music_bed:                                        # a silent video with background music: the music is the whole sound
+        args += ["-i", str(music_bed.name)]
+        graph = f"[0:v]{vf}[v];[1:a]{video.LOUDNORM}[a]"
+        maps = ["-map", "[v]", "-map", "[a]", "-c:a", "aac", "-b:a", "192k"]
+        notes["music"] = True
+    elif voice_wav is None:
         graph = f"[0:v]{vf}[v]"
         maps = ["-map", "[v]", "-an"]
     else:
         args += ["-i", str(voice_wav.name)]
-        bed = audio_mod.build_bed(video.FFMPEG, bed_parts, work, level_db=-30) if (settings.get("bed", True) and bed_parts) else None
+        bed = music_bed or (audio_mod.build_bed(video.FFMPEG, bed_parts, work, level_db=-30) if (settings.get("bed", True) and bed_parts) else None)
+        notes["music"] = bool(music_bed)
         if bed:
             args += ["-i", str(bed.name)]
             graph = f"[0:v]{vf}[v];{audio_mod.mix_args(2)};[mix]{video.LOUDNORM}[a]"
@@ -105,7 +112,8 @@ def mix_and_mux(silent: Path, voice_wav: Path | None, bed_parts: list[dict], cap
 
 
 def final_hash(short: dict, tl: dict, used: dict) -> str:
-    return store.input_hash(VERSION, json.dumps([short["settings"].get("upscale") or "", tl["tempo"], [(s["id"], s["frames"]) for s in tl["shots"]], used, short["settings"].get("captions"), short["settings"].get("bed")], sort_keys=True))
+    return store.input_hash(VERSION, json.dumps([short["settings"].get("upscale") or "", tl["tempo"], [(s["id"], s["frames"]) for s in tl["shots"]], used, short["settings"].get("captions"), short["settings"].get("bed"),
+                                                 short["settings"].get("music_level") if used.get("music") else None], sort_keys=True))
 
 
 def checklist(short: dict) -> dict:
@@ -140,7 +148,7 @@ def build(short_id: str, progress=None) -> dict:
     if bad:
         raise MediaError("; ".join(p["text"] for p in bad) + ": fix this on the checks list first")
     chosen = {sh["id"]: clips.chosen_clip(short, sh) for sh in short["shots"]}
-    used = {"clips": {k: v["id"] for k, v in chosen.items()}, "voice": {} if no_voice else {k: v["id"] for k, v in voices.items()}, "upscale": short["settings"].get("upscale") or ""}
+    used = {"clips": {k: v["id"] for k, v in chosen.items()}, "voice": {} if no_voice else {k: v["id"] for k, v in voices.items()}, "upscale": short["settings"].get("upscale") or "", "music": (music.short_current(short) or {}).get("id") or ""}
     h = final_hash(short, tl, used)
     for it in media.items(short_id, store.FINAL, "final"):
         if it["status"] == "done" and it["meta"].get("input_hash") == h and it["file"]:
@@ -177,7 +185,7 @@ def build(short_id: str, progress=None) -> dict:
             ass = work / "captions.ass"
             write_ass(short_events(short, tl), ass)
         out = store.media_dir(short_id, "final") / f"short-a{it['attempt']}.mp4"
-        notes = mix_and_mux(silent, voice_wav, [{"duration_s": t["span"]} for _, t in parts], ass, out, work, short["settings"], float(short["settings"].get("target_s") or models.TARGET_S))
+        notes = mix_and_mux(silent, voice_wav, [{"duration_s": t["span"]} for _, t in parts], ass, out, work, short["settings"], float(short["settings"].get("target_s") or models.TARGET_S), music.short_current(short))
         info = frames.info(out)
         media.update(it["id"], status="done", file=f"final/{out.name}", meta={"input_hash": h, "duration_s": round(info["duration_s"], 2), "used": used, "tempo": tl["tempo"],
                                                                               "shots": len(tl["shots"]), "seconds_taken": round(time.time() - t0, 1), **notes})

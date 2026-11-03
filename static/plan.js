@@ -89,7 +89,7 @@ window.newPlan = async function (cid, status) {
 
 window.viewPlan = async function (id) {
   const my = route_id;
-  let P = null, PV = {}, LK = null, MS = null, RS = null, SS = null, CL = null, GS = null, VS = null, TH = null, PUB = null, AU = null, ADEC = null, PF = 'open', VOPT = {captions: false, gaps: false}, sig = '', seenRun = false;
+  let P = null, PV = {}, LK = null, MS = null, RS = null, SS = null, CL = null, GS = null, VS = null, TH = null, MU = null, PUB = null, AU = null, ADEC = null, PF = 'open', VOPT = {captions: false, gaps: false}, sig = '', seenRun = false;
   const app = $('#app');
   const busyJob = () => P && P.job && P.job.state === 'running';
   const errHint = e => /failed to load|model_load_failed|llama-server exited|\b503\b/i.test(e || '') ? 'The model server could not load the chat model. Most often another model worker (a voice worker) is still holding the GPU memory: end it or restart the model server, then press Try again.'
@@ -115,7 +115,7 @@ window.viewPlan = async function (id) {
   };
   async function load(force) {
     const [p, m, ad] = await Promise.all([api('/plans/' + id), api('/media/' + id).catch(() => null), api('/media/' + id + '/agent_decisions').catch(() => null)]);
-    LK = m && m.likeness; MS = m && m.voice; RS = m && m.refs; SS = m && m.scenes; CL = m && m.clips; GS = m && m.graphics; VS = m && m.video; TH = m && m.thumbnail; PUB = m && m.publish; AU = m && m.auto; ADEC = ad;
+    LK = m && m.likeness; MS = m && m.voice; RS = m && m.refs; SS = m && m.scenes; CL = m && m.clips; GS = m && m.graphics; VS = m && m.video; TH = m && m.thumbnail; MU = m && m.music; PUB = m && m.publish; AU = m && m.auto; ADEC = ad;
     const s = JSON.stringify([LK, AU && [AU.next, AU.remaining], TH && [TH.done, TH.attempts], VS && [VS.done, VS.ready, VS.blockers.length, VS.warnings.length, VS.changes ? VS.changes.changed.length + ":" + VS.changes.stale.length : 0, VS.videos.map(v => v.id + v.current)], GS && [GS.approved, GS.needs_build, GS.thin, GS.scenes.map(r => r.items.map(a => a.id + a.approved + a.current))], SS && [SS.approved, SS.needs_choice, SS.needs_picture, SS.settings, SS.trial, SS.scenes.map(r => r.candidates.map(a => a.id + a.status + a.approved + a.current + (a.score ? a.score.total : '')))], CL && [CL.enabled, CL.total, CL.approved, CL.done, CL.scenes.map(r => r.approved + (r.best || ''))], RS && [RS.approved, RS.skipped, RS.without_pictures, RS.assets.map(r => r.candidates.map(a => a.id + a.status + a.approved + a.current + (a.score ? a.score.total : '')))], MS && [MS.have, MS.approved, MS.export.current, MS.segments.map(r => r.attempts.map(a => a.id + a.status + a.approved + a.current))], p.cast_gaps && p.cast_gaps.map(g => g.id + g.missing.join()), p.settings.visual_style, p.style && [p.style.registry_stale, p.style.storyboard_stale], p.rev, p.job.state, p.job.done, p.job.label, p.segments.map(x => x.rev), p.scenes.map(x => [x.rev, x.stale, x.start_s, x.status, x.locked, x.data && x.data.motion_clip]), p.assets.map(x => x.rev), p.validation ? 1 : 0, p.narrator.name, p.content_hash, p.approval && p.approval.state, p.exports.length, ((p.validation || {}).scores || {}).computed_at]);
     const changed = s !== sig; P = p;
     if (changed || force) { sig = s; if (!editing() || force) render(); }
@@ -395,6 +395,10 @@ Be concrete: colours, materials, numbers. Leave empty to skip.`); if (v === null
       await run(b, `/media/${id}/agent_run`, {}); toast('Agent run started.');
     },
     vidOpt(k, v) { VOPT[k] = v; render(); },
+    async musicOn(on) { await act(null, () => api(`/media/${id}/music`, {method: 'PATCH', json: {enabled: on}}), on ? 'Background music on' : 'Background music off'); await load(true); },
+    async musicSet(f) { await act(null, () => api(`/media/${id}/music`, {method: 'PATCH', json: f}), 'Saved'); await load(true); },
+    async musicPlan(b) { await run(b, `/media/${id}/music/plan`); toast('Planning the music.'); },
+    async musicMake(b) { await run(b, `/media/${id}/music`); toast('Making the music: about two minutes.'); },
     async thumb(b) { await run(b, `/media/${id}/thumbnail`); toast('Drawing the thumbnail.'); },
     async vidBuild(b, profile) {
       const ps = VS.profiles[profile] || {};
@@ -741,6 +745,14 @@ Be concrete: colours, materials, numbers. Leave empty to skip.`); if (v === null
           ${c ? `<div class="mt-s"><a href="${esc(c.url)}" target="_blank"><img src="${esc(c.url)}" loading="lazy" style="width:420px;border-radius:6px;border:${c.approved ? '3px solid var(--good,#2a9d5c)' : '1px solid var(--line,#ccc)'}"></a><div class="small mute mt-s">Animation in the video: ${esc((c.animation || '').replace(/_/g, ' '))}${c.numbers.length ? ' · numbers shown: ' + esc(c.numbers.join(', ')) : ''}</div></div>` : ''}</div>`; }).join('')}</div>` : ''}
 
       ${p.blueprint ? `<div class="card pad mt" id="sec-thumbnail"><div class="row"><h3 style="margin:0">Video thumbnail</h3>${TH && TH.done ? badge('good', 'made') : badge('queued', 'not made yet')}<span class="sp"></span><button class="small" ${running ? 'disabled' : ''} onclick="_plan.thumb(this)">${TH && TH.done ? 'Make another' : 'Make the thumbnail'}</button></div>${TH && TH.item ? `<img src="${TH.item.url}" style="width:100%;max-width:640px;border-radius:8px;margin-top:8px"><div class="small mt-s"><b>Words on it:</b> ${esc(TH.item.text)}${TH.item.text_ok === false ? ' <span class="mute">(the words may not be drawn exactly: look at it)</span>' : ''}</div>` : '<div class="small mute mt-s">A movie-poster style picture with a short question on it, made when the other steps are done.</div>'}</div>` : ''}
+      ${p.blueprint && MU ? `<div class="card pad mt" id="sec-music"><div class="row"><h3 style="margin:0">Background music</h3>${!MU.enabled ? badge('queued', 'off') : MU.have ? badge('good', 'made') : MU.plan.caption ? badge('info', 'planned, not made yet') : badge('queued', 'not planned yet')}<span class="sp"></span>
+        <label class="row small"><input type="checkbox" ${MU.enabled ? 'checked' : ''} onchange="_plan.musicOn(this.checked)"> Add quiet background music</label></div>
+        ${MU.enabled ? `<div class="small mute mt-s">One quiet instrumental loop for the whole film, planned from the story and its audience: common instruments, steady tempo, no changes. It sits low under the voice and is made by the music model (non-commercial licence). Without it the film has the plain quiet pad.</div>
+        ${MU.plan.caption ? `<label class="f mt-s">Style tags (checked against a short list of calm moods and common instruments)<input type="text" value="${esc(MU.plan.caption)}" onchange="_plan.musicSet({caption: this.value})"></label><div class="small mute mt-s">${esc(MU.plan.why || '')}</div>` : ''}
+        <label class="f mt-s">Loudness under the voice: ${MU.level} LUFS (lower is quieter)<input type="range" min="-46" max="-24" value="${MU.level}" onchange="_plan.musicSet({level: +this.value})"></label>
+        <div class="row mt-s"><button class="small" ${running ? 'disabled' : ''} onclick="_plan.musicPlan(this)">${MU.plan.caption ? 'Plan again' : 'Plan the music'}</button><button class="small" ${running || !MU.plan.caption ? 'disabled' : ''} onclick="_plan.musicMake(this)">${MU.have ? 'Make it again' : 'Make the music'}</button></div>
+        ${MU.current ? `<audio controls preload="none" src="${esc(MU.current.url)}" style="width:100%;margin-top:6px"></audio><div class="small mute">${Math.round(MU.current.duration_s || 0)} s loop, repeated softly across the film</div>` : ''}
+        ${(MU.attempts.slice(-1)[0] || {}).status === 'failed' ? `<div class="small mt-s" style="color:var(--bad,#c33)">${esc(MU.attempts.slice(-1)[0].error)}</div>` : ''}` : ''}</div>` : ''}
       ${vidOn ? `<div class="card pad mt" id="sec-video"><div class="row"><h3 style="margin:0">Draft video</h3>${vidDone ? badge('good', 'made, up to date') : VS.ready ? badge('info', 'ready to build') : badge('queued', VS.blockers.length + ' missing')}<span class="sp"></span>
           <button class="small" ${dis || !VS.tools.ffmpeg || (VS.blockers.length && !VOPT.gaps) ? 'disabled' : ''} onclick="_plan.vidBuild(this,'preview')">Make a preview (${hd((VS.profiles.preview || {}).eta_s || 0)})</button>
           <button class="small primary" ${dis || !VS.tools.ffmpeg || (VS.blockers.length && !VOPT.gaps) ? 'disabled' : ''} onclick="_plan.vidBuild(this,'draft')">Make the draft video (${hd((VS.profiles.draft || {}).eta_s || 0)})</button></div>

@@ -16,7 +16,7 @@ from story import db
 from story2 import era, planner, storyboard, store as plan_store
 from story2.scene_schemas import NEEDS_ASSET
 
-from . import audio as audio_mod, clips as clips_mod, graphics, scenes, store
+from . import audio as audio_mod, clips as clips_mod, graphics, music as music_mod, scenes, store
 from .voice import MediaError
 
 KIND = "video"
@@ -427,7 +427,8 @@ def write_ass(events: list[tuple[float, float, str]], path: Path, size: tuple[in
 
 def inputs_hash(chk: dict, prof_name: str, captions: bool, speed: float = 1.0) -> str:
     st = planner.get_plan(chk["plan"]["id"])["settings"]
-    extra = repr((audio_mod.settings({"settings": st}), st.get("structure") or {}, st.get("overlays") or {}, (st.get("captions") or {}).get("style")))
+    track, mcfg = music_mod.current_for_plan(chk["plan"]["id"])
+    extra = repr((audio_mod.settings({"settings": st}), st.get("structure") or {}, st.get("overlays") or {}, (st.get("captions") or {}).get("style"), (track["id"], mcfg["level"], music_mod.MIX_VERSION) if track else None))
     key = json.dumps([prof_name, captions, speed, LOUDNORM, ERA_LOOK, STRUCTURE, audio_mod.MIX_VERSION, extra, [(k, str(v.get("item"))) for k, v in sorted(chk["visuals"].items())], [(a["segment"], a["item"]) for a in chk["audio"]],
                       [(s["id"], s["start_s"], s["duration_s"]) for s in sorted(storyboard.get_scenes(chk["plan"]["id"]), key=lambda x: x["id"])]])
     return hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
@@ -533,7 +534,15 @@ def build(plan_id: str, profile: str = "draft", captions: bool = False, allow_ga
         audio = longer
     bed = None
     aset = audio_mod.settings(plan_now)
-    if aset["enabled"]:
+    track, mcfg = music_mod.current_for_plan(plan_id)
+    if track:                                                                                          # the planned background music replaces the synthetic pad
+        bed_s = sum(float(a["duration_s"]) for a in chk["audio"]) + (END_CARD_S if with_end_card else 0) + 1.0
+        bed = music_mod.bed_from_track(FFMPEG, track, bed_s, work, float(mcfg["level"]))
+        if bed is None:
+            chk["warnings"].append("the background music could not be mixed: the film has the quiet pad instead")
+    elif mcfg["enabled"]:
+        chk["warnings"].append("background music is on but not made yet: the film has the quiet pad instead")
+    if bed is None and aset["enabled"]:
         set_piece = (((plan_now.get("blueprint") or {}).get("experience") or {}).get("set_piece") or {}).get("beat")
         bed = audio_mod.build_bed(FFMPEG, chk["audio"], work, float(aset["music_level"]), {i for i, a in enumerate(chk["audio"]) if beat_of.get(a["segment"]) == set_piece and set_piece}, int((plan_now["settings"].get("signature") or {}).get("music", 0)))
         if bed is None:

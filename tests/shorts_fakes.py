@@ -190,6 +190,8 @@ class FakeChat:
         elif task == "p4_still":
             ids = re.search(r"Write the pictures of: ([^.]+)\.", messages[1]["content"]).group(1).split(", ")
             body = {"shots": [{"id": i, "still": self.still_text or f"Close-up of one courier holding one wallet beside a rusty bus stop, picture {i}, a single streetlight behind him.", "must_show": ["exactly 1 courier", "wallet in his hand"]} for i in ids]}
+        elif task == "music_plan":
+            body = {"genre": "ambient", "moods": ["gentle"], "bpm": 78, "instruments": ["soft piano", "warm pad"], "why": "A gentle bed under the story."}
         elif task == "p4_shotlist":
             if getattr(self, "no_director", False):
                 raise RuntimeError("director is down")

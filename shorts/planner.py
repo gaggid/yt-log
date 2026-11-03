@@ -6,6 +6,7 @@ from story import llm, settings as settings_mod
 from story.schemas import Str
 from story2 import intake, leak, lexicon, maya, safety, svara, voices
 from story2.schemas import M
+from story3 import music
 
 from . import voice as svoice
 from . import cast, formats, languages, looks, models, motionwriter, script as scriptmod, shotlist, stillwriter, tones, prompts as P, store, subjects as subj, timeline
@@ -336,6 +337,7 @@ async def make_plan(short_id: str, backend, s: dict | None = None, progress=None
     if progress:
         progress(len(beats) + 1, len(beats) + 2, "writing the motion of every shot")
     await motionwriter.write_all(short, backend, s)                          # needs the seconds of each shot, so it comes after the timeline
+    await music.plan_for_short(short, backend, s)                            # optional background music: one quiet loop planned from the story (story3/music.py)
     return store.save(short)
 
 

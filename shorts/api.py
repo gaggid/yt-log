@@ -18,6 +18,7 @@ from story3.voice import MediaError
 from characters import store as cstore, studio_edit
 from story.agent_store import for_plan as agent_decisions_for_plan
 
+from story3 import music
 from . import agent, auto, cast, checks, clips, formats, frames, languages, looks, tones, models, motion, pipelines as P, planner, remix, stitch, store, subjects as subj, timeline, upscale, voice as svoice, wan
 
 router = APIRouter(prefix="/api/shorts")
@@ -222,6 +223,9 @@ class SettingsReq(BaseModel):
     format: str | None = None            # auto | story | documentary | explainer | comparison (shorts/formats.py)
     captions: bool | None = None
     bed: bool | None = None
+    music: bool | None = None            # optional background music (story3/music.py)
+    music_level: int | None = None
+    music_caption: str | None = None     # edited style tags; sorted into the music vocabulary
     review_keyframes: bool | None = None
     character_text: str | None = None
     tone: str | None = None
@@ -289,7 +293,14 @@ async def patch_settings(short_id: str, body: SettingsReq):
             patch["voice"] = voices.choose({}, patch["voice"].get("engine", ""), patch["voice"].get("voice"))["tts"]
         except ValueError as e:
             raise HTTPException(400, str(e))
+    if "music_level" in patch and not music.LEVEL_MIN <= (patch["music_level"] if patch["music_level"] is not None else 0) <= music.LEVEL_MAX:
+        raise HTTPException(400, f"music_level is between {music.LEVEL_MIN} and {music.LEVEL_MAX} LUFS")
+    cap = patch.pop("music_caption", None)
+    if patch.get("music_level") is None:
+        patch.pop("music_level", None)
     short["settings"].update(patch)
+    if cap:
+        music.save_short_caption(short, cap)
     store.save(short)
     if short["shots"]:
         planner.sync_timing(short_id)
@@ -629,6 +640,38 @@ async def make_upscale(short_id: str):
     return _start(short_id, "short_upscale", work)
 
 
+@router.post("/{short_id}/music/plan")
+async def music_plan(short_id: str):
+    """Plan the background music again from the short's story (a chat-model step)."""
+    short = _get(short_id)
+    if not short["settings"].get("music"):
+        raise HTTPException(400, "background music is off")
+    if not short["shots"]:
+        raise HTTPException(400, "plan the short first")
+    s, be = _backend()
+
+    async def work(progress):
+        progress(0, 1, "planning the background music")
+        sh = store.get(short_id)
+        await music.plan_for_short(sh, be, s)
+        store.save(sh)
+        return "the music is planned"
+    return _start(short_id, "short_music_plan", work)
+
+
+@router.post("/{short_id}/music")
+async def make_music(short_id: str):
+    short = _get(short_id)
+    if not short["settings"].get("music"):
+        raise HTTPException(400, "background music is off")
+    s, be = _backend()
+
+    async def work(progress):
+        await music.make_for_short(short_id, s, settings_mod.api_key(), be, lambda d, t, l="": progress(d, t, l), force=True)
+        return "the music is made"
+    return _start(short_id, "short_music", work)
+
+
 @router.post("/{short_id}/final")
 async def make_final(short_id: str):
     short = _get(short_id)
@@ -641,6 +684,11 @@ async def make_final(short_id: str):
             res = await upscale.make(short_id, progress=lambda d, t, l="": progress(d, t, l), s=settings_mod.get(), key=settings_mod.api_key())
             if res["failed"]:
                 raise RuntimeError(f"2K step, shot {res['failed'][0]['shot']}: {res['failed'][0]['error']}")
+        if short["pipeline"] != "remix" and music.short_missing(store.get(short_id)):
+            try:
+                await music.make_for_short(short_id, settings_mod.get(), settings_mod.api_key(), _backend()[1], lambda d, t, l="": progress(d, t, l))
+            except music.MediaError:
+                pass                                                      # optional: the short is put together with the quiet bed and says so
         await asyncio.to_thread(fn, short_id, lambda d, t, l="": progress(d, t, l))
         return "the short is put together"
     return _start(short_id, "short_final", work)

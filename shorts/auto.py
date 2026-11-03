@@ -3,7 +3,7 @@ checkpoint of the keyframe pipeline) and says which; everything finished is kept
 
 Order, quick and keyframe: plan, voice, fit the shots to the voice, [start pictures, look at them], clips, put together.
 Order, remix: (link, window and the rights boxes are done by hand) voice-over, animate, put together."""
-from story3 import store as media
+from story3 import music, store as media
 
 from . import checks, clips, pipelines as P, planner, remix, stitch, store, upscale, voice as svoice
 
@@ -16,7 +16,8 @@ def changed_since(short: dict, final: dict) -> bool:
         return not all(parts) or final["meta"].get("input_hash") is None
     now_clips = {sh["id"]: (clips.chosen_clip(short, sh) or {}).get("id") for sh in short["shots"]}
     now_voice = {b["id"]: (svoice.chosen(short, b) or {}).get("id") for b in short["beats"]}
-    return used.get("clips") != now_clips or used.get("voice") != now_voice or (used.get("upscale") or "") != (short["settings"].get("upscale") or "")
+    now_music = (music.short_current(short) or {}).get("id") or ""
+    return used.get("clips") != now_clips or used.get("voice") != now_voice or (used.get("upscale") or "") != (short["settings"].get("upscale") or "") or (used.get("music") or "") != now_music
 
 
 def steps(short: dict) -> list[dict]:
@@ -44,6 +45,8 @@ def steps(short: dict) -> list[dict]:
     add("clips", "Make the clips", short["shots"] and all(clips.chosen_clip(short, sh) for sh in short["shots"]))
     if upscale.wanted(short):
         add("upscale", "Upscale the clips to 2K", short["shots"] and not upscale.missing(short))
+    if music.short_wanted(short):
+        add("music", "Make the background music", not music.short_missing(short), optional=True)
     add("final", "Put the short together", short.get("status") == "made" and _final_ok(short))
     return out
 
@@ -114,6 +117,13 @@ async def run(short_id: str, backend, s: dict, progress, key: str = "") -> str:
         did.append(f"2K ({res['made']} clips)")
         if res["failed"]:
             return f"Stopped at the 2K step: shot {res['failed'][0]['shot']}: {res['failed'][0]['error']}. Everything finished is kept; press Auto-run to try the rest again, or turn 2K off."
+    if music.short_missing(short):
+        try:
+            await music.make_for_short(short_id, s, key, backend, sub("music"))
+            did.append("music")
+        except music.MediaError as e:                                # optional: the short is put together with the quiet bed
+            did.append(f"no music ({e})")
+        short = store.get(short_id)
     progress(0, 1, "putting the short together")
     import asyncio
     await asyncio.to_thread(stitch.build, short_id, sub("final"))

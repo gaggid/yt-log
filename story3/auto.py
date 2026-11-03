@@ -9,13 +9,13 @@ import re
 from story import db, llm, settings as settings_mod
 from story2 import api as plans_api, director, editorial, events, export, gates, imgplan, material, planner, storyboard, store as plan_store, titles, version, voicetags, voices
 
-from . import cards, clips, dupes, graphics, publish, refs, scenes, store, thumbnail, video, voice
+from . import cards, clips, dupes, graphics, music, publish, refs, scenes, store, thumbnail, video, voice
 from .voice import MediaError
 
-STAGES = [("material", "Collect the story's material"), ("blueprint", "Plan the story"), ("narration", "Write the narration"), ("events", "Plan what the camera sees"), ("characters", "Create characters and places"),
+STAGES = [("material", "Collect the story's material"), ("blueprint", "Plan the story"), ("musicplan", "Plan the background music"), ("narration", "Write the narration"), ("events", "Plan what the camera sees"), ("characters", "Create characters and places"),
           ("storyboard", "Design the storyboard"), ("voicetags", "Direct the narrator's voice"), ("references", "Make and approve reference pictures"), ("prompts", "Write image prompts"), ("repeats", "Fix camera repeats"), ("approve", "Check, review and approve the plan"),
           ("export", "Export"), ("voice", "Make and approve the voice"), ("pictures", "Draw and approve the scene pictures"), ("clips", "Animate scene clips"), ("graphics", "Build and approve the graphics"),
-          ("video", "Make the draft video"), ("title", "Choose the video title"), ("thumbnail", "Make the video thumbnail"),
+          ("music", "Make the background music"), ("video", "Make the draft video"), ("title", "Choose the video title"), ("thumbnail", "Make the video thumbnail"),
           ("publish", "Write the publish pack")]
 
 
@@ -55,6 +55,12 @@ def done(plan_id: str, key: str, st: dict | None = None) -> bool:
         return not version.at_least(plan["settings"], "q2") or material.has(plan)           # a plan made before the Material Pack does not need one
     if key == "blueprint":
         return bool(plan["blueprint"])
+    if key == "musicplan":
+        cfg = music.settings(plan)
+        return not cfg["enabled"] or bool(cfg["plan"].get("caption"))                  # optional: only when the person turned background music on
+    if key == "music":
+        cfg = music.settings(plan)
+        return not cfg["enabled"] or bool(music.chosen(plan_id, cfg, music.plan_total_s(plan_id)))
     if key == "narration":
         return bool(plan["blueprint"]) and bool(plan["segments"]) and not _beats_missing(plan)
     if key == "events":
@@ -205,6 +211,18 @@ async def run_stage(plan_id: str, key: str, be, s: dict, api_key: str, progress,
         await material.make_material(plan_id, be, s)
     elif key == "blueprint":
         await planner.make_blueprint(plan_id, be, s)
+    elif key == "musicplan":
+        if not planner.get_plan(plan_id)["blueprint"]:
+            raise AutoStop("the story is not planned")
+        await music.replan(plan_id, be, s)
+    elif key == "music":
+        cfg = music.settings(planner.get_plan(plan_id))
+        if not cfg["plan"].get("caption"):
+            cfg = await music.replan(plan_id, be, s)
+        try:
+            await music.make(plan_id, cfg, music.plan_total_s(plan_id), s, api_key, sub)
+        except MediaError as e:                                    # music is optional: the film is made with the quiet pad and says so
+            notes.append(f"background music was not made ({e}); the video uses the quiet pad. Press Auto-run again to retry the music")
     elif key == "narration":
         plan = planner.get_plan(plan_id)
         if not plan["blueprint"]:

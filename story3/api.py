@@ -11,7 +11,7 @@ from story.agent_store import for_plan as agent_decisions_for_plan
 from story.pipeline import manager
 from story2 import jobs, planner, providers
 
-from . import agent, auto, cards, clips, graphics, publish, likeness, refs, scenes, store, thumbnail, video, voice
+from . import agent, auto, cards, clips, graphics, music, publish, likeness, refs, scenes, store, thumbnail, video, voice
 
 router = APIRouter(prefix="/api/media")
 
@@ -46,7 +46,7 @@ async def media_file(plan_id: str, name: str):
 async def media_state(plan_id: str):
     _guard(planner.get_plan, plan_id)
     await asyncio.to_thread(providers.refresh, settings_mod.get(), settings_mod.api_key())             # image models the gateway lists become choices
-    st = {"voice": voice.state(plan_id), "refs": refs.state(plan_id), "scenes": scenes.state(plan_id), "clips": clips.state(plan_id), "graphics": graphics.state(plan_id), "video": video.state(plan_id), "thumbnail": thumbnail.state(plan_id), "publish": publish.state(plan_id), "likeness": likeness.state(plan_id)}
+    st = {"voice": voice.state(plan_id), "refs": refs.state(plan_id), "scenes": scenes.state(plan_id), "clips": clips.state(plan_id), "graphics": graphics.state(plan_id), "video": video.state(plan_id), "thumbnail": thumbnail.state(plan_id), "music": music.plan_state(plan_id), "publish": publish.state(plan_id), "likeness": likeness.state(plan_id)}
     return {**st, "auto": auto.state(plan_id, st)}
 
 
@@ -341,6 +341,51 @@ class VideoReq(BaseModel):
     profile: str = "draft"
     captions: bool = False
     allow_gaps: bool = False
+
+
+class MusicReq(BaseModel):
+    enabled: bool | None = None
+    level: int | None = None                 # loudness of the bed in LUFS (-46 to -24), quiet under the voice
+    caption: str | None = None               # the style tags; they are checked against the music vocabulary
+
+
+@router.patch("/{plan_id}/music")
+async def music_settings(plan_id: str, body: MusicReq):
+    """Turn background music on or off, set its level, or edit its style tags. Nothing is made here."""
+    _guard(planner.get_plan, plan_id)
+    _guard(music.save_plan_settings, plan_id, body.model_dump(exclude_unset=True))
+    return music.plan_state(plan_id)
+
+
+@router.post("/{plan_id}/music/plan")
+async def music_plan(plan_id: str):
+    """Plan the background music again from the story, its type and its audience (a chat-model step)."""
+    plan = _guard(planner.get_plan, plan_id)
+    if not plan["blueprint"]:
+        raise HTTPException(400, "plan the story first")
+
+    async def work(progress):
+        progress(0, 1, "planning the background music")
+        be = llm.ChatBackend(settings_mod.get(), settings_mod.api_key())
+        await music.replan(plan_id, be, settings_mod.get())
+    return _start(plan_id, "music_plan", work)
+
+
+@router.post("/{plan_id}/music")
+async def make_music(plan_id: str):
+    """Make the background track with the music model (about two minutes of work for a track of 1 to 2 minutes). Needs the music planned."""
+    plan = _guard(planner.get_plan, plan_id)
+    cfg = music.settings(plan)
+    if not cfg["enabled"]:
+        raise HTTPException(400, "background music is off")
+
+    async def work(progress):
+        c = cfg
+        if not c["plan"].get("caption"):
+            progress(0, 1, "planning the background music")
+            c = await music.replan(plan_id, llm.ChatBackend(settings_mod.get(), settings_mod.api_key()), settings_mod.get())
+        await music.make(plan_id, c, music.plan_total_s(plan_id), settings_mod.get(), settings_mod.api_key(), progress, force=True)
+    return _start(plan_id, "music", work)
 
 
 @router.post("/{plan_id}/thumbnail")

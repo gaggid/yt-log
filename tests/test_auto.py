@@ -80,7 +80,7 @@ def test_a_planned_storyboard_is_taken_all_the_way_to_a_draft_video(env, monkeyp
     assert refs.state(plan_id)["done"] and scenes.state(plan_id)["done"] and voice.state(plan_id)["approved"] == len(plan["segments"])
     v = video.state(plan_id)
     assert v["done"] and v["videos"][-1]["profile"] == "draft" and store.path_of(store.get(v["videos"][-1]["id"])).is_file()
-    assert any("step 1 of" in x[2] or "step 7 of" in x[2] for x in log) and log[-1][2] == "done"
+    assert any(x[2].startswith("step ") and " of " in x[2] for x in log) and log[-1][2] == "done"
 
 
 def test_the_first_outcome_is_approved_and_pictures_default_to_plain_qwen(env, monkeypatch, fast):

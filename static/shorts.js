@@ -203,6 +203,11 @@ function sideView() {
     ${s.pipeline !== 'remix' ? `<label class="f mt-s">Final video size<select id="st-up"><option value="" ${!st.upscale ? 'selected' : ''}>1080x1920 (as made)</option><option value="2k" ${st.upscale === '2k' ? 'selected' : ''}>2K, 1440x2560 (every clip upscaled by the model server, minutes per clip)</option></select></label>` : ''}
     <label class="row mt-s"><input type="checkbox" id="st-cap" ${st.captions ? 'checked' : ''}> Burn captions into the video</label>
     <label class="row mt-s"><input type="checkbox" id="st-bed" ${st.bed ? 'checked' : ''}> Quiet sound bed under the voice</label>
+    <label class="row mt-s"><input type="checkbox" id="st-music" ${st.music ? 'checked' : ''}> Background music (one quiet instrumental loop, planned from the story)</label>
+    ${st.music ? `<div class="small mute">Common instruments, steady tempo, no changes; the music model is non-commercial. ${st.music_plan && st.music_plan.caption ? 'Planned with the short.' : 'It is planned when the short is planned.'}</div>
+    ${st.music_plan && st.music_plan.caption ? `<label class="f">Music style tags<input type="text" id="st-music-tags" value="${esc(st.music_plan.caption)}"></label><div class="small mute">${esc(st.music_plan.why || '')}</div>` : ''}
+    <label class="f">Music loudness: ${st.music_level ?? -34} LUFS (lower is quieter)<input type="range" id="st-music-level" min="-46" max="-24" value="${st.music_level ?? -34}"></label>
+    <div class="row mt-s"><button class="small" id="b-music-plan">Plan the music again</button><button class="small" id="b-music-make">Make the music</button></div>` : ''}
     <div class="row mt-s"><label class="f">Steps (empty = full quality)<input type="number" id="st-steps" value="${st.steps || ''}" min="1" max="100"></label><label class="f">Seed<input type="number" id="st-seed" value="${st.seed}"></label></div>
   </div>
   <div class="card pad mt"><h2>Steps</h2>${s.auto.steps.map((x, i) => `<div class="sh-step ${x.done ? 'done' : (!s.auto.steps.slice(0, i).some(y => !y.done) ? 'next' : '')}"><span class="n">${x.done ? '✓' : i + 1}</span>${esc(x.label)}</div>`).join('')}
@@ -520,7 +525,8 @@ function wire() {
   const on = (sel, fn) => { const e = q(sel); if (e) e.onclick = () => fn(e); };
   const st = (id, key, conv = v => v) => { const e = q(id); if (e) e.onchange = () => patch('/settings', {[key]: conv(e.type === 'checkbox' ? e.checked : e.value)}); };
   st('#st-target', 'target_s', v => +v); st('#st-script', 'script_engine'); st('#st-mode', 'image_mode'); st('#st-imodel', 'image_model'); st('#st-style', 'visual_style'); st('#st-char', 'character_text'); st('#st-tone', 'tone'); st('#st-format', 'format'); st('#st-size', 'size'); st('#st-chain', 'chain'); st('#st-fast', 'speed_lora'); st('#st-lang', 'language'); st('#st-toneid', 'tone_id'); st('#st-edge', 'edge'); st('#st-vspeed', 'voice_speed', v => +v); st('#st-size14', 'size_14b'); st('#st-review', 'review_keyframes');
-  st('#st-up', 'upscale'); st('#st-cap', 'captions'); st('#st-bed', 'bed'); st('#st-steps', 'steps', v => v === '' ? null : +v); st('#st-seed', 'seed', v => +v || 0);
+  st('#st-up', 'upscale'); st('#st-cap', 'captions'); st('#st-bed', 'bed'); st('#st-music', 'music'); st('#st-music-tags', 'music_caption'); st('#st-music-level', 'music_level', v => +v);
+  on('#b-music-plan', b => post(b, '/music/plan', {}, 'Planning the music')); on('#b-music-make', b => post(b, '/music', {}, 'Making the music')); st('#st-steps', 'steps', v => v === '' ? null : +v); st('#st-seed', 'seed', v => +v || 0);
   const vm = q('#st-vmode'); if (vm) vm.onchange = () => patch('/settings', {voice_mode: vm.value});
   const vs = q('#st-voice'); if (vs) vs.onchange = () => { const [engine, voice] = vs.value.split('|'); patch('/settings', {voice: {engine, voice}}); };
   on('#st-anchor', () => pick('image/*', f => upload('/images/anchor', f))); on('#st-anchor2', () => pick('image/*', f => upload('/images/anchor', f)));

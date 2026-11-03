@@ -31,6 +31,10 @@ DEFAULT_SETTINGS = {
     "voice": {"engine": "maya-tts", "voice": "Siddhant"},
     "captions": True,
     "bed": True,                      # the quiet sound bed under the voice
+    "music": False,                   # optional background music: one quiet instrumental loop made by the music model (story3/music.py)
+    "music_level": -34,               # its loudness in LUFS before it is ducked under the voice
+    "music_plan": {},                 # {genre, moods, bpm, instruments, caption, why}: planned with the script, the tags are editable
+    "music_seed": 7,
     "review_keyframes": True,         # keyframe pipeline: auto-run stops once for the contact sheet
     "language": "hinglish",           # narration language (shorts/languages.py): hinglish | en | hi | bn | ta | te | mr | gu | kn | ml | pa | or | as; all but hinglish need the Maya voice
     "cast": [],                       # characters from the Character Studio library: [{"character_id", "look_id"}], at most two people (shorts/cast.py)
