@@ -156,6 +156,7 @@ function render() {
   $('#app').innerHTML = `
     <div class="row"><a href="#/shorts">← Shorts</a><h2 style="margin:0 0 0 8px">${esc(s.title)}</h2>${badge('info', s.pipeline_label)}<span class="sp"></span>
       ${s.estimate_s ? `<span class="mute small" title="Estimated model time for every clip, one request at a time">about ${hd(s.estimate_s)} of model time</span>` : ''}
+      <a class="button small" href="/api/shorts/${esc(s.id)}/export-debug.json" download>Export JSON</a>
       <button class="small" onclick="shRename()">Rename</button><button class="small bad" onclick="shDelete()">Delete</button></div>
     ${jobBox()}
     <div class="nextbar"><div><b>${s.auto.done ? 'Everything is made.' : 'Next: ' + esc(next.label)}</b> <span class="mute small">${s.auto.steps.map(x => (x.done ? '✓ ' : '· ') + esc(x.label)).join('  ')}</span></div>
