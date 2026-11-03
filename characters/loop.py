@@ -10,12 +10,11 @@ whole loop per-character via the life_enabled toggle in the Virtual Life tab.
 """
 import asyncio
 import time
-from datetime import datetime
 
-CHECK_INTERVAL_S = 60        # how often the loop wakes to check conditions
-IDLE_AFTER_S     = 5 * 60   # gateway must have been quiet this long before we fire
-RETRY_DELAY_S    = 15 * 60  # wait after a JobBusy before retrying
-SLEEP_HOURS      = (0, 6)    # pre-dawn: loop skips entirely, character is asleep
+CHECK_INTERVAL_S  = 60        # how often the loop wakes to check conditions
+IDLE_AFTER_S      = 5 * 60   # gateway must have been quiet this long before we fire
+RETRY_DELAY_S     = 15 * 60  # wait after a JobBusy before retrying
+RESTORE_PER_HOUR  = 12        # energy restored per hour of sleep/rest
 
 _task: asyncio.Task | None = None
 
@@ -47,10 +46,10 @@ async def _run_one(char: dict, s: dict, key: str) -> None:
     if jobs.busy():
         return   # something else grabbed the key; skip draw this cycle
 
-    # skip drawing if the character is sleeping (activity says so, or it's pre-dawn)
+    # skip drawing if the activity is sleep/rest (energy system already prevented
+    # this cycle from running when energy < threshold, but handle edge cases)
     activity = (thought.get("activity") or "").lower()
-    is_sleep = any(w in activity for w in ("sleep", "sleeping", "asleep", "napping", "nap"))
-    if is_sleep or SLEEP_HOURS[0] <= datetime.now().hour < SLEEP_HOURS[1]:
+    if any(w in activity for w in ("sleep", "sleeping", "asleep", "napping", "nap")):
         return
 
     try:
@@ -74,17 +73,10 @@ async def run_forever(s: dict, key: str) -> None:
     while True:
         await asyncio.sleep(CHECK_INTERVAL_S)
 
-        # skip during sleep hours — character is asleep (pre-dawn 0–6 am)
-        if SLEEP_HOURS[0] <= datetime.now().hour < SLEEP_HOURS[1]:
-            continue
-
-        # skip while any job is running
+        # skip while any job is running or gateway was used recently
         if jobs.busy() or manager.busy():
             continue
-
-        # skip if the gateway was used very recently
-        idle_s = time.time() - jobs._last_activity
-        if idle_s < IDLE_AFTER_S:
+        if time.time() - jobs._last_activity < IDLE_AFTER_S:
             continue
 
         chars = []
@@ -99,9 +91,27 @@ async def run_forever(s: dict, key: str) -> None:
                 continue
 
             interval_s = (prof.get("life_interval_m") or 60) * 60
-            last_run = profile_mod.last_run_time(char["id"])
+            last_run   = profile_mod.last_run_time(char["id"])
             if last_run and (time.time() - last_run) < interval_s:
                 continue
+
+            # energy guard: if below sleep_threshold, restore passively instead of thinking
+            energy          = int(prof.get("energy") or 80)
+            sleep_threshold = int(prof.get("sleep_threshold") or 20)
+            if energy <= sleep_threshold:
+                restore = min(round(RESTORE_PER_HOUR * interval_s / 3600), 100 - energy)
+                if restore > 0:
+                    try:
+                        fresh = store.get(char["id"])
+                        profile_mod.patch(fresh, {"energy": energy + restore})
+                        store.save(fresh)
+                        profile_mod.log_event(char["id"], "sleep", "auto",
+                                              {"energy_before": energy},
+                                              {"energy_after": energy + restore, "restored": restore})
+                        print(f"[virtual-life] {char['name']} sleeping — energy {energy} → {energy + restore}", flush=True)
+                    except Exception:
+                        pass
+                continue   # skip think + draw while asleep
 
             if jobs.busy() or manager.busy():
                 break   # something started while iterating — abort this pass

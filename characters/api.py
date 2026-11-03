@@ -670,6 +670,9 @@ class ProfilePatch(BaseModel):
     interests: dict | None = None
     spaces: list | None = None
     current_context: str | None = None
+    chronotype: str | None = None
+    energy: int | None = None
+    sleep_threshold: int | None = None
     life_enabled: bool | None = None
     life_interval_m: int | None = None
     auto_draw: bool | None = None

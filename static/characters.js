@@ -464,6 +464,12 @@ function lifeView(busy) {
       <label class="f mt-s">Phone model<input id="vl-phone" value="${esc(prof.phone || '')}" placeholder="iPhone 15, Samsung Galaxy S24, Nothing Phone 2…" ${dis}></label>
       <label class="f mt-s">Fashion &amp; style <span class="mute small">what she gravitates toward — updated as she discovers new things</span>
         <textarea id="vl-fashion" style="min-height:52px" placeholder="Prefers kurtas and co-ords over western wear, likes earthy tones and block prints, always watches Myntra sale." ${dis}>${esc(prof.fashion_taste || '')}</textarea></label>
+      <label class="f mt-s">Chronotype
+        <select id="vl-chrono" ${dis}>
+          <option value="" ${!prof.chronotype?'selected':''}>balanced (adapts to a normal day)</option>
+          <option value="early bird" ${prof.chronotype==='early bird'?'selected':''}>early bird — peaks in the morning, winds down by 9–10 pm</option>
+          <option value="night owl" ${prof.chronotype==='night owl'?'selected':''}>night owl — slow mornings, peak energy in the evening</option>
+        </select></label>
       <h4 style="margin:12px 0 4px">Interests</h4>
       ${['books','movies','music','food','hobbies'].map(k => `<label class="ch-slot"><span>${k}</span><input id="vl-int-${k}" value="${esc(interests[k] || '')}" placeholder="" ${dis}></label>`).join('')}
       <h4 style="margin:12px 0 4px">Spaces she lives in</h4>
@@ -471,6 +477,17 @@ function lifeView(busy) {
       <button class="small mt-s" id="vl-sp-add" ${dis}>+ Add space</button>
       <label class="f mt-s">Current context<input id="vl-ctx" value="${esc(prof.current_context || '')}" placeholder="just moved to a new city for a job" ${dis}></label>
       <div class="row mt-s" style="gap:8px"><button class="primary" id="vl-save" ${dis}>Save profile</button></div>
+      <h4 style="margin:16px 0 4px">Energy</h4>
+      ${(() => { const e = prof.energy ?? 80; const col = e > 60 ? 'var(--ok)' : e > 30 ? 'var(--warn)' : 'var(--bad,#c0392b)';
+        return `<div class="row" style="align-items:center;gap:8px">
+          <div style="flex:1;height:8px;background:var(--line);border-radius:4px">
+            <div style="width:${e}%;height:100%;border-radius:4px;background:${col};transition:width .4s"></div>
+          </div>
+          <span class="mute small" style="white-space:nowrap">${e}/100</span>
+        </div>
+        <div class="mute small mt-s" style="display:flex;align-items:center;gap:8px">
+          Sleep below <input type="number" id="vl-sleep-thr" min="5" max="40" value="${prof.sleep_threshold ?? 20}" style="width:48px" ${dis}> energy — restores ~12/hour while asleep.
+        </div>`; })()}
       <h4 style="margin:16px 0 4px">Auto life</h4>
       <label style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
         <input type="checkbox" id="vl-enabled" ${prof.life_enabled ? 'checked' : ''} ${dis}> Auto-run when idle
@@ -600,6 +617,8 @@ function wireLife() {
       city: ($e('vl-city') || {}).value || '',
       phone: ($e('vl-phone') || {}).value || '',
       fashion_taste: ($e('vl-fashion') || {}).value || '',
+      chronotype: ($e('vl-chrono') || {}).value || '',
+      sleep_threshold: parseInt(($e('vl-sleep-thr') || {}).value || '20'),
       interests: Object.fromEntries(['books','movies','music','food','hobbies'].map(k => [k, ($e('vl-int-'+k)||{}).value||''])),
       spaces: readSpaces(),
       current_context: ($e('vl-ctx') || {}).value || '',

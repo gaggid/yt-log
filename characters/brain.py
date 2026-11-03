@@ -35,6 +35,7 @@ class ThoughtOut(M):
     wardrobe_want:  Str = ""   # garment she wants to add to wardrobe, described in one line
     image_idea:     Str = ""   # scene content, light and setting only — no camera or phone
     goal_progress:  Str = ""   # if non-empty, progress on an active goal
+    energy_delta:   int = 0    # energy change this activity causes (negative = draining, positive = restoring)
     note:           Str = ""   # self-reminder or realization worth keeping, if any
 
 
@@ -140,15 +141,39 @@ def _system_prompt(char: dict) -> str:
     phone          = prof.get("phone") or ""
     core_character = prof.get("core_character") or ""
     fashion_taste  = prof.get("fashion_taste") or ""
+    chronotype     = prof.get("chronotype") or ""
+    energy         = int(prof.get("energy") or 80)
+    sleep_threshold = int(prof.get("sleep_threshold") or 20)
 
-    core_block = f"Background and core character (fixed — this never changes):\n{core_character}\n\n" if core_character else ""
+    core_block    = f"Background and core character (fixed — this never changes):\n{core_character}\n\n" if core_character else ""
     fashion_block = f"Fashion sense and style preferences: {fashion_taste}\n" if fashion_taste else ""
+
+    _chrono_desc = {
+        "early bird": "naturally wakes early, peak energy in the morning, winds down by 9–10 pm",
+        "night owl":  "naturally stays up late, slow to start in the morning, peak energy in the evening",
+        "balanced":   "no strong preference — adapts to a normal 7am–11pm day",
+    }
+    chrono_line = ""
+    if chronotype:
+        chrono_line = f"Chronotype: {_chrono_desc.get(chronotype, chronotype)}.\n"
+
+    if energy > 70:
+        energy_desc = "fully charged and alert"
+    elif energy > 50:
+        energy_desc = "moderately energised"
+    elif energy > 30:
+        energy_desc = "noticeably tired"
+    elif energy > sleep_threshold:
+        energy_desc = "quite exhausted — winding down"
+    else:
+        energy_desc = "utterly drained — needs to sleep"
 
     return f"""{core_block}You are {name}, a {age}-year-old {gender} ({ethnicity}) living in India.
 Personality: {personality}.
 Interests — books: {interests.get('books','')}, movies: {interests.get('movies','')}, \
 music: {interests.get('music','')}, food: {interests.get('food','')}, hobbies: {interests.get('hobbies','')}.
-{fashion_block}Your spaces: {spaces_text}.{(' Phone: ' + phone + '.') if phone else ''}
+{fashion_block}{chrono_line}Your spaces: {spaces_text}.{(' Phone: ' + phone + '.') if phone else ''}
+Current energy: {energy}/100 — {energy_desc}. Let this shape what you choose to do right now.
 
 You think and speak in the first person, in English. Be specific, human, and grounded.
 Stay true to your core character and personality — neither too positive nor too dramatic.
@@ -197,6 +222,7 @@ Return ONLY valid JSON:
   "shot_type":     "choose exactly one: front_selfie (arm-length selfie, face close-up, phone not visible) | mirror_selfie (full or half body reflection in mirror, phone in hand in the reflection) | propped_timer (phone on a surface, person in background, phone not visible) | pov_first_person (what she sees — hands, food, book, no face) | candid_side (lifestyle shot, no phone). Pick what fits the activity and space most naturally.",
   "image_idea":    "2-3 sentences: what fills the frame, the light, the setting, visible props. Describe ONLY the scene content — do NOT mention the camera, the phone, or how the picture was taken. No pronouns.",
   "goal_progress": "if this activity made concrete progress on a goal, describe WHAT YOU ACTUALLY DID in 6-10 words (e.g. 'practiced first 10 minutes of Bhangra footwork', 'finished chapter 3 of the book'). Do not write meta-reflections or intentions about the goal. Else empty string.",
+  "energy_delta":  "integer: how much energy this activity changes. Draining: intense exercise/dance -15 to -20, focused work/study -10 to -15, errands/commute -8 to -12, socialising -6 to -10, casual browsing/reading -2 to -5. Restoring: full meal +8, short nap +20, full night sleep +65, light rest +5. Return a plain integer like -12 or 8.",
   "note":          "if you just realized something worth remembering — a reminder, an insight, a decision — write it in one sentence; else empty string"
 }""")
     return "\n\n".join(sections)
@@ -297,6 +323,16 @@ async def think(char: dict, backend, s: dict, trigger: str = "manual", context_o
     try:
         if thought.wardrobe_want:
             memory_mod.add_manual(char["id"], f"[wardrobe wish] {thought.wardrobe_want}")
+    except Exception:
+        pass
+
+    # apply energy delta — reload fresh to avoid clobbering concurrent saves
+    try:
+        fresh = store.get(char["id"])
+        prof  = profile_mod.get(fresh)
+        new_energy = max(0, min(100, int(prof.get("energy") or 80) + int(thought.energy_delta or 0)))
+        profile_mod.patch(fresh, {"energy": new_energy})
+        store.save(fresh)
     except Exception:
         pass
 

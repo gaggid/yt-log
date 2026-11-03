@@ -20,9 +20,12 @@ def default_profile() -> dict:
         "city": "",
         "phone": "",
         "fashion_taste": "",
+        "chronotype": "",        # "early bird" / "night owl" / "balanced"
         "interests": dict(DEFAULT_INTERESTS),
         "spaces": [dict(s) for s in DEFAULT_SPACES],
         "current_context": "",
+        "energy": 80,            # 0–100; drains through the day, restores during sleep
+        "sleep_threshold": 20,   # energy below this → character sleeps (loop skips think+draw)
         "life_enabled": False,
         "life_interval_m": 60,
         "auto_draw": False,
@@ -89,9 +92,9 @@ def list_events(char_id: str, limit: int = 50) -> list[dict]:
 
 
 def last_run_time(char_id: str) -> float | None:
-    """Timestamp of the most recent 'think' event for this character, or None."""
+    """Timestamp of the most recent think OR sleep event (sleep events also count toward the interval)."""
     r = db.one(
-        "SELECT created_at FROM char_life_events WHERE char_id=? AND event_type='think' ORDER BY created_at DESC LIMIT 1",
+        "SELECT created_at FROM char_life_events WHERE char_id=? AND event_type IN ('think','sleep') ORDER BY created_at DESC LIMIT 1",
         (char_id,),
     )
     return r["created_at"] if r else None
