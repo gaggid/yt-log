@@ -37,12 +37,17 @@ async def _plan(char: dict, weather: str, season: str, n: int, backend) -> list[
     fashion  = prof.get("fashion_taste") or "Indian casual and ethnic wear"
     context  = weather or season or "mild weather"
 
+    existing = wardrobe.listing()
+    existing_note = (
+        f"Already in wardrobe (do NOT repeat): {', '.join(it['name'] for it in existing)}. "
+        if existing else ""
+    )
     system = (f"You are a personal stylist planning a wardrobe for {name}, "
               f"a {age}-year-old {gender} living in {city}, India. "
               f"Fashion sense: {fashion}. Current conditions: {context}. "
               "Generate garments that are realistic, culturally grounded and weather-appropriate. "
               "Mix Indian ethnic (kurtas, co-ords, salwar, dupattas) with casual western. "
-              "No duplicates. Cover home, work, casual outings, exercise and festive.")
+              f"No duplicates. Cover home, work, casual outings, exercise and festive. {existing_note}")
     user = (f"Return exactly {n} garments as JSON: "
             '{"garments": [{"name": "short name 3-5 words", '
             '"description": "precise flat-lay visual: exact colour, fabric, cut, print or embroidery details — 20-30 words", '
@@ -82,9 +87,14 @@ async def generate(char_id: str, n: int, s: dict, key: str) -> list[dict]:
     loras      = base_loras + ([{"name": render_mod.RAW_LORA, "strength": 0.7}] if render_mod.RAW_LORA not in existing else [])
     triggers   = render_mod.trigger_words(render)
 
+    existing_names = {it["name"].lower() for it in wardrobe.listing()}
+
     base_url, api_key = studio._ctx(s, key)
     saved = []
     for g in garments:
+        if g["name"].lower() in existing_names:
+            print(f"[wardrobe-gen] skip duplicate: {g['name']}", flush=True)
+            continue
         prompt   = f"{triggers + ' ' if triggers else ''}{g['description']} {_FLATLAY}"
         body_req = {"model": model, "size": "1024x1024", "n": 1,
                     "response_format": "b64_json", "prompt": prompt[:3900]}
