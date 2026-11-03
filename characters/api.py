@@ -650,7 +650,11 @@ async def in_place(char_id: str, action: str = Form(""), place_text: str = Form(
 # ── virtual life: profile and life feed ──────────────────────────────────────
 
 class ProfilePatch(BaseModel):
+    core_character: str | None = None
     personality: str | None = None
+    city: str | None = None
+    phone: str | None = None
+    fashion_taste: str | None = None
     interests: dict | None = None
     spaces: list | None = None
     current_context: str | None = None
