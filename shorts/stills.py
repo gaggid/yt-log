@@ -82,14 +82,18 @@ def looks_line(short: dict, shot: dict, character: str) -> tuple[str, str]:
     # Without this, Qwen sees e.g. "four ants" with no description and draws clay humans (the style's default).
     still_lower = (shot.get("still") or shot.get("prompt") or "").lower()
     listed = {s["name"] for s in subs}
+    _ARTICLES = {"the", "a", "an"}
     for ps in (short.get("plan") or {}).get("subjects") or []:
         name = ps.get("name", "")
         if not name or name in listed:
             continue
-        first = name.lower().split()[0]
-        # Match full subject name ("ant army") OR first word with optional plural ("ant"→"ant"/"ants").
-        # \bants?\b matches "ant" and "ants" but not "antenna", so this is safe.
-        if re.search(r'\b' + re.escape(first) + r's?\b', still_lower) or name.lower() in still_lower:
+        name_lower = name.lower()
+        # Skip leading articles so "The Human"→"human", "Ant Army"→"ant".
+        words = name_lower.split()
+        first = next((w for w in words if w not in _ARTICLES), words[0])
+        # Match full subject name OR first significant word with optional plural suffix.
+        # \bants?\b matches "ant"/"ants" but not "antenna".
+        if name_lower in still_lower or re.search(r'\b' + re.escape(first) + r's?\b', still_lower):
             subs = subs + [ps]
     shown = [f"{s['name']}: {subjects.plain_visual(s['visual']).rstrip('. ')}." for s in subs if s.get("kind") != "place" and not (character and _same(character, s["visual"]))]
     places = [s for s in subs if s.get("kind") == "place"]
