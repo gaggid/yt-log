@@ -190,8 +190,8 @@ Return ONLY valid JSON:
   "mood":          "one word",
   "expression":    "the specific facial expression for this moment — be precise, not generic (e.g. 'tired half-smile, eyes slightly heavy', 'wide genuine laugh, teeth showing', 'focused frown, lips pressed', 'soft contemplative gaze', 'surprised and delighted'). It must match the mood and activity.",
   "face_state":    "physical condition of the face right now based on time of day and what you have been doing (e.g. 'no makeup, natural skin', 'light day makeup', 'post-workout flush, dewy skin', 'makeup worn off, bare face with slight shine', 'evening makeup, defined eyes'). Be honest about the time of day.",
-  "outfit":        "text description of what you are wearing right now — pick from your wardrobe if something fits the mood, or describe something else you own",
-  "outfit_id":     "the id of the wardrobe item you are wearing (exactly as listed), if applicable; else empty string",
+  "outfit":        "text description of what you are wearing right now — for display only; the actual clothes in the photo come from your wardrobe or your approved body picture",
+  "outfit_id":     "the id of the wardrobe item you want to wear (exactly as listed above); set this to change your outfit in the photo. If empty, your default approved outfit is shown.",
   "wardrobe_want": "if you spot or imagine a piece of clothing you want to own — describe it in one line (e.g. 'dark green silk kurti with mirror work'); else empty string",
   "image_idea":    "2-3 sentences describing the photograph. Choose the shot setup that fits naturally — for example: front-camera selfie at arm's length (close face/shoulders); mirror selfie (full body visible in mirror, phone in hand); phone propped on a surface so she can move back (timer-style, full or half body); phone held out showing her point of view (book, food, window — she is barely or not visible); candid from the side with no phone visible. Then describe the light, the setting, what fills the frame. Camera direction only, no pronouns. If a phone is visible, use the exact phone model declared in her profile — do not invent a different model or sequel.",
   "goal_progress": "if this activity made concrete progress on a goal, describe WHAT YOU ACTUALLY DID in 6-10 words (e.g. 'practiced first 10 minutes of Bhangra footwork', 'finished chapter 3 of the book'). Do not write meta-reflections or intentions about the goal. Else empty string.",
@@ -352,14 +352,20 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
             if body_in_canon:
                 refs    = [portrait_path, _path(body_in_canon)]
                 ref_ids = [portrait_id, body_in_canon["id"]]
+                # Do NOT add outfit text — body canon is the clothes reference.
+                # Adding text here conflicts with Picture 2 and causes the model to invent.
+                prompt  = (f"Picture 1 is an identity reference only (face shape, skin tone, hair colour and length, build). "
+                           f"Picture 2 shows their body and outfit — keep the outfit exactly as in Picture 2. "
+                           f"Create a new vertical 9:16 photograph: {image_idea}"
+                           + expr_line
+                           + " Match the person's face identity from Picture 1 exactly.")
             else:
                 refs, ref_ids = [portrait_path], [portrait_id]
-            prompt  = (f"Picture 1 is an identity reference only (face shape, skin tone, hair colour and length, build). "
-                       f"Picture 2 shows their body and default outfit. "
-                       f"Create a new vertical 9:16 photograph: {image_idea}"
-                       + (f" Wearing: {outfit}." if outfit else "")
-                       + expr_line
-                       + " Match the person's face identity from Picture 1 exactly.")
+                prompt  = (f"Picture 1 is an identity reference only (face shape, skin tone, hair colour and length, build). "
+                           f"Create a new vertical 9:16 photograph: {image_idea}"
+                           + (f" Wearing: {outfit}." if outfit else "")
+                           + expr_line
+                           + " Match the person's face identity from Picture 1 exactly.")
         how = "edit"
     else:
         char_desc = (char.get("identity") or "").strip()
