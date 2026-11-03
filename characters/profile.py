@@ -25,6 +25,7 @@ def default_profile() -> dict:
         "current_context": "",
         "life_enabled": False,
         "life_interval_m": 60,
+        "auto_draw": False,
     }
 
 

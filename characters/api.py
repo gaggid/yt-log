@@ -672,6 +672,7 @@ class ProfilePatch(BaseModel):
     current_context: str | None = None
     life_enabled: bool | None = None
     life_interval_m: int | None = None
+    auto_draw: bool | None = None
 
 
 @router.get("/{char_id}/profile")

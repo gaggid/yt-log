@@ -472,11 +472,17 @@ function lifeView(busy) {
       <label class="f mt-s">Current context<input id="vl-ctx" value="${esc(prof.current_context || '')}" placeholder="just moved to a new city for a job" ${dis}></label>
       <div class="row mt-s" style="gap:8px"><button class="primary" id="vl-save" ${dis}>Save profile</button></div>
       <h4 style="margin:16px 0 4px">Auto life</h4>
-      <div class="row" style="gap:10px;align-items:center">
-        <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="vl-enabled" ${prof.life_enabled ? 'checked' : ''} ${dis}> Auto-run when idle</label>
-        <label class="small" style="display:flex;align-items:center;gap:4px">Every <input type="number" id="vl-interval" min="15" max="1440" value="${prof.life_interval_m || 60}" style="width:60px" ${dis}> min</label>
-      </div>
-      <div class="mute small mt-s">Thinks and draws when the gateway key is idle. Retries after 15 min if busy.</div>
+      <label style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+        <input type="checkbox" id="vl-enabled" ${prof.life_enabled ? 'checked' : ''} ${dis}> Auto-run when idle
+        <span class="mute small" style="margin-left:4px">every</span>
+        <input type="number" id="vl-interval" min="15" max="1440" value="${prof.life_interval_m || 60}" style="width:56px" ${dis}>
+        <span class="mute small">min</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:6px">
+        <input type="checkbox" id="vl-auto-draw" ${prof.auto_draw ? 'checked' : ''} ${dis}> Auto-draw after thinking
+        <span class="mute small">(manual think button also draws)</span>
+      </label>
+      <div class="mute small mt-s">Auto-run always thinks + draws. Manual button respects the auto-draw toggle above.</div>
       <div id="vl-loop-status" class="mute small mt-s"></div>
     </div>
 
@@ -630,10 +636,22 @@ function wireLife() {
   });
   $e('vl-think') && ($e('vl-think').onclick = async () => {
     const btn = $e('vl-think');
+    const autoDraw = ($e('vl-auto-draw') || {}).checked;
     btn.disabled = true; btn.textContent = 'Thinking…';
     try {
       const ev = await call('/' + CID + '/think', {method: 'POST', json: {}});
-      if (ev.ok) { LIFE_EVENTS = null; await loadLifeEvents(); render(); toast('Thought recorded'); }
+      if (ev.ok) {
+        if (autoDraw) {
+          btn.textContent = 'Drawing…';
+          await call('/' + CID + '/life/' + ev.event_id + '/draw', {method: 'POST', json: {}});
+          for (let i = 0; i < 90; i++) {
+            await new Promise(r => setTimeout(r, 3000));
+            const s = await call('/' + CID).catch(() => null);
+            if (s) { C = s; if (!s.job || s.job.state !== 'running') break; }
+          }
+        }
+        LIFE_EVENTS = null; await loadLifeEvents(); render(); toast('Thought recorded');
+      }
     } catch(e) { toast('Could not think: ' + e.message, {bad: true}); }
     finally { if (btn) { btn.disabled = false; btn.textContent = 'What is she thinking?'; } }
   });
@@ -673,6 +691,9 @@ function wireLife() {
   $e('vl-enabled') && ($e('vl-enabled').onchange = async () => {
     const body = {life_enabled: $e('vl-enabled').checked};
     await act(null, async () => { await call('/' + CID + '/profile', {method: 'PATCH', json: body}); return true; }, $e('vl-enabled').checked ? 'Auto life on' : 'Auto life off');
+  });
+  $e('vl-auto-draw') && ($e('vl-auto-draw').onchange = async () => {
+    await act(null, async () => { await call('/' + CID + '/profile', {method: 'PATCH', json: {auto_draw: $e('vl-auto-draw').checked}}); return true; }, $e('vl-auto-draw').checked ? 'Auto-draw on' : 'Auto-draw off');
   });
   $e('vl-interval') && ($e('vl-interval').onchange = async () => {
     const v = parseInt($e('vl-interval').value) || 60;

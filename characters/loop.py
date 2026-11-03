@@ -47,6 +47,12 @@ async def _run_one(char: dict, s: dict, key: str) -> None:
     if jobs.busy():
         return   # something else grabbed the key; skip draw this cycle
 
+    # skip drawing if the character is sleeping (activity says so, or it's pre-dawn)
+    activity = (thought.get("activity") or "").lower()
+    is_sleep = any(w in activity for w in ("sleep", "sleeping", "asleep", "napping", "nap"))
+    if is_sleep or SLEEP_HOURS[0] <= datetime.now().hour < SLEEP_HOURS[1]:
+        return
+
     try:
         await brain_mod.draw_thought(char, thought["event_id"], thought, s, key, trigger="auto")
     except jobs.JobBusy:
