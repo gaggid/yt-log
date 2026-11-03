@@ -419,22 +419,33 @@ function lifeView(busy) {
 
   // ── life feed ──
   const events = LIFE_EVENTS || [];
+  const absTime = ts => {
+    const diff = Date.now()/1000 - ts;
+    if (diff < 86400) {
+      const dt = new Date(ts * 1000);
+      return dt.toLocaleTimeString('en-IN', {hour: '2-digit', minute: '2-digit', hour12: true});
+    }
+    const d = Math.round(diff/86400);
+    return d < 7 ? d+'d ago' : d < 30 ? Math.round(d/7)+'w ago' : Math.round(d/30)+'mo ago';
+  };
   const eventCard = ev => {
     const out = ev.outputs || {};
     if (ev.event_type === 'think') {
       const drawEv = events.find(e => e.event_type === 'draw' && (e.inputs||{}).event_id === ev.id);
-      const drawn = drawEv ? `<img src="${esc((drawEv.outputs||{}).url||'')}" style="width:100%;border-radius:8px;margin-top:6px" onerror="this.style.display='none'">` : '';
+      const drawnUrl = drawEv ? esc((drawEv.outputs||{}).url||'') : '';
+      const drawn = drawnUrl ? `<img src="${drawnUrl}" style="width:120px;height:160px;object-fit:cover;border-radius:8px;margin-top:6px;cursor:zoom-in" onclick="chZoom('${drawnUrl}')" onerror="this.style.display='none'">` : '';
       const gp = out.goal_progress ? `<div class="mute small" style="margin-top:4px">↳ goal: ${esc(out.goal_progress)}</div>` : '';
+      const noteHtml = out.note ? `<div style="margin-top:6px;font-size:12px;padding:4px 8px;background:var(--panel);border-radius:6px;border-left:2px solid var(--warn)">note: ${esc(out.note)}</div>` : '';
       return `<div class="card pad mt-s" style="border-left:3px solid var(--accent)">
-        <div class="row"><span class="badge b-info">${esc(out.mood||'')}</span><span class="mute small">${esc(out.activity||'')} · ${esc(out.space||'')} · ${relTime(ev.created_at)}</span></div>
-        <div style="font-style:italic;margin:6px 0">${esc(out.thought||'')}</div>${gp}${drawn}
+        <div class="row"><span class="badge b-info">${esc(out.mood||'')}</span><span class="mute small">${esc(out.activity||'')} · ${esc(out.space||'')} · ${absTime(ev.created_at)}</span></div>
+        <div style="font-style:italic;margin:6px 0">${esc(out.thought||'')}</div>${gp}${noteHtml}${drawn}
         ${!drawEv ? `<button class="small primary mt-s" data-draw-ev="${esc(ev.id)}">Draw this look</button>` : '<span class="mute small mt-s">✓ drawn</span>'}
         <details class="mt-s"><summary class="mute small" style="cursor:pointer">Pipeline debug</summary>
-          <pre style="font-size:10px;white-space:pre-wrap;max-height:200px;overflow:auto">${esc(JSON.stringify({image_idea:out.image_idea,outfit:out.outfit,goal_progress:out.goal_progress},null,2))}</pre>
+          <pre style="font-size:10px;white-space:pre-wrap;max-height:200px;overflow:auto">${esc(JSON.stringify({image_idea:out.image_idea,outfit:out.outfit,goal_progress:out.goal_progress,note:out.note},null,2))}</pre>
         </details>
       </div>`;
     }
-    if (ev.event_type === 'error') return `<div class="errbox small mt-s">${esc(ev.trigger)} error · ${relTime(ev.created_at)}: ${esc(out.error||'unknown')}</div>`;
+    if (ev.event_type === 'error') return `<div class="errbox small mt-s">${esc(ev.trigger)} error · ${absTime(ev.created_at)}: ${esc(out.error||'unknown')}</div>`;
     return '';
   };
 
@@ -478,7 +489,7 @@ function lifeView(busy) {
 
   <div>
     <div class="card pad">
-      <div class="row"><h3 style="margin:0">Life feed</h3><span class="sp"></span>
+      <div class="row"><h3 style="margin:0">Life feed</h3><span class="mute small">${new Date().toLocaleString('en-IN', {weekday:'short', hour:'2-digit', minute:'2-digit', hour12:true})}</span><span class="sp"></span>
         <button class="primary" id="vl-think" ${dis}>What is she thinking?</button>
       </div>
       <div class="mute small mt-s">2-stage pipeline: first-pass thought → self-review → memory formed → image ready to draw.</div>
@@ -559,23 +570,23 @@ function wireLife() {
       collect:l=>({title:l.querySelector('#ga-title').value.trim(),category:l.querySelector('#ga-cat').value,description:l.querySelector('#ga-desc').value.trim()}),
       validate:x=>x.title?'':'Write the goal title.'}]});
     if (!v) return;
-    await act(null, async () => { await call('/' + CID + '/goals', {method:'POST', json:v}); await loadLifeEvents(); refreshCenter(); return true; }, 'Goal added');
+    await act(null, async () => { await call('/' + CID + '/goals', {method:'POST', json:v}); await loadLifeEvents(); render(); return true; }, 'Goal added');
   });
   document.querySelectorAll('[data-goal-done]').forEach(b => b.onclick = async () => {
-    await act(null, async () => { await call('/' + CID + '/goals/' + b.dataset.goalDone, {method:'PATCH', json:{status:'achieved'}}); await loadLifeEvents(); refreshCenter(); return true; }, 'Marked achieved');
+    await act(null, async () => { await call('/' + CID + '/goals/' + b.dataset.goalDone, {method:'PATCH', json:{status:'achieved'}}); await loadLifeEvents(); render(); return true; }, 'Marked achieved');
   });
   document.querySelectorAll('[data-goal-del]').forEach(b => b.onclick = async () => {
     if (!await confirmDlg('Delete goal', 'This cannot be undone.', 'Delete', true)) return;
-    await act(null, async () => { await call('/' + CID + '/goals/' + b.dataset.goalDel, {method:'DELETE'}); await loadLifeEvents(); refreshCenter(); return true; });
+    await act(null, async () => { await call('/' + CID + '/goals/' + b.dataset.goalDel, {method:'DELETE'}); await loadLifeEvents(); render(); return true; });
   });
   // memories
   $e('vl-mem-save') && ($e('vl-mem-save').onclick = async () => {
     const content = ($e('vl-mem-add') || {}).value || '';
     if (!content.trim()) return;
-    await act(null, async () => { await call('/' + CID + '/memories', {method:'POST', json:{content}}); $e('vl-mem-add').value = ''; await loadLifeEvents(); refreshCenter(); return true; }, 'Memory added');
+    await act(null, async () => { await call('/' + CID + '/memories', {method:'POST', json:{content}}); $e('vl-mem-add').value = ''; await loadLifeEvents(); render(); return true; }, 'Memory added');
   });
   document.querySelectorAll('[data-mem-del]').forEach(b => b.onclick = async () => {
-    await act(null, async () => { await call('/' + CID + '/memories/' + b.dataset.memDel, {method:'DELETE'}); await loadLifeEvents(); refreshCenter(); return true; });
+    await act(null, async () => { await call('/' + CID + '/memories/' + b.dataset.memDel, {method:'DELETE'}); await loadLifeEvents(); render(); return true; });
   });
   $e('vl-think') && ($e('vl-think').onclick = async () => {
     const btn = $e('vl-think');
@@ -587,7 +598,7 @@ function wireLife() {
     finally { if (btn) { btn.disabled = false; btn.textContent = 'What is she thinking?'; } }
   });
   document.querySelectorAll('[data-draw-ev]').forEach(b => b.onclick = async () => {
-    await act(b, async () => { await call('/' + CID + '/life/' + b.dataset.drawEv + '/draw', {method: 'POST', json: {}}); await window._chLoad(true); return true; }, 'Drawing the moment…');
+    await act(b, async () => { await call('/' + CID + '/life/' + b.dataset.drawEv + '/draw', {method: 'POST', json: {}}); LIFE_EVENTS = null; await loadLifeEvents(); render(); return true; }, 'Drawing the moment…');
   });
   // show loop status
   call('/' + CID + '/life/status').then(st => {

@@ -30,6 +30,7 @@ class ThoughtOut(M):
     outfit:        Str = ""   # what she is wearing right now
     image_idea:    Str = ""   # 2-3 sentence visual description for the image model
     goal_progress: Str = ""   # if non-empty, progress on an active goal
+    note:          Str = ""   # self-reminder or realization worth keeping, if any
 
 
 class ThoughtRevised(M):
@@ -131,9 +132,11 @@ Only one thing happens at a time; pick the most realistic activity for this time
 def _first_pass_user(ctx: dict, char: dict, context_override: str) -> str:
     prof    = profile_mod.get(char)
     context = (context_override or prof.get("current_context") or "").strip()
-    today   = datetime.now().strftime("%A, %d %B %Y")
+    _now    = datetime.now()
+    today   = _now.strftime("%A, %d %B %Y")
+    time_now = _now.strftime("%I:%M %p")
 
-    sections = [f"Today: {today}."]
+    sections = [f"Today: {today}. Time now: {time_now}."]
     if ctx["day_arc_text"]:
         sections.append(ctx["day_arc_text"])
     if ctx["world_line"]:
@@ -148,6 +151,8 @@ def _first_pass_user(ctx: dict, char: dict, context_override: str) -> str:
         sections.append(ctx["memories_text"])
 
     sections.append("""
+Goals matter, but not every moment is about a goal. On a typical day you might do one or two goal-directed things — the rest is just life: chai, music, calling someone, resting, browsing, cooking, thinking about nothing in particular. Pick whatever fits the time of day and your mood, whether or not it touches a goal.
+
 What are you doing right now? What does the moment look like?
 
 Return ONLY valid JSON:
@@ -156,9 +161,10 @@ Return ONLY valid JSON:
   "activity":      "plain description of the activity, 5-10 words",
   "space":         "one of your spaces by name, or a specific outside location",
   "mood":          "one word",
-  "outfit":        "what you are wearing right now, specific and casual",
+  "outfit":        "what you are wearing right now, specific and casual — feel free to imagine a different outfit if the moment calls for it",
   "image_idea":    "2-3 sentences: what the frame shows, the framing, the light, the setting. Camera direction, no pronouns.",
-  "goal_progress": "if this activity is progress on one of your goals, name it in 6-10 words; else empty string"
+  "goal_progress": "if this activity is progress on one of your goals, name it in 6-10 words; else empty string",
+  "note":          "if you just realized something worth remembering — a reminder, an insight, a decision — write it in one sentence; else empty string"
 }""")
     return "\n\n".join(sections)
 
@@ -250,6 +256,11 @@ async def think(char: dict, backend, s: dict, trigger: str = "manual", context_o
         memory_mod.form(char["id"], thought.model_dump())
     except Exception:
         pass
+    try:
+        if thought.note:
+            memory_mod.add_manual(char["id"], f"[note] {thought.note}")
+    except Exception:
+        pass
 
     final = thought.model_dump()
     final["latency_ms"] = round((time.time() - t0) * 1000)
@@ -259,14 +270,14 @@ async def think(char: dict, backend, s: dict, trigger: str = "manual", context_o
 
 # ── draw ──────────────────────────────────────────────────────────────────────
 
-SELFIE_FRAMING  = ("Mobile front-camera selfie, vertical 9:16 frame, natural available light, "
-                   "slightly candid angle, close-mid shot, as if glancing at the phone.")
-CANDID_FRAMING  = ("Candid lifestyle photograph, vertical 9:16 frame, natural available light.")
+HOME_FRAMING   = ("Candid lifestyle photograph, vertical 9:16 frame, warm indoor light, "
+                   "mid-close shot, slightly off-centre natural composition.")
+CANDID_FRAMING = ("Candid lifestyle photograph, vertical 9:16 frame, natural available light.")
 _HOME_WORDS     = {"bedroom", "living room", "kitchen", "bathroom", "study", "balcony", "home"}
 
 
 def _framing(space: str) -> str:
-    return SELFIE_FRAMING if any(w in space.lower() for w in _HOME_WORDS) else CANDID_FRAMING
+    return HOME_FRAMING if any(w in space.lower() for w in _HOME_WORDS) else CANDID_FRAMING
 
 
 async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: str,
