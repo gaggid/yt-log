@@ -5,6 +5,23 @@
 
 ---
 
+## Build status — 2026-11-03
+
+All phases 0–G are **done and committed** (commits 90400f7 → 6f101d2).
+
+| Area | Shipped |
+|------|---------|
+| Place picker | Replaced with text + optional image upload in character edits |
+| Profile | Personality, city, interests ×5, spaces (editable list), current context, save |
+| Brain pipeline | 5-stage: context assembly → first-pass thought → self-review → goal alignment → memory formation |
+| World context | Weather (wttr.in), Google News RSS by interest keyword, Indian season — 30-min cache, fail-silent |
+| Goals | CRUD (add/pause/achieve/delete); active summary injected into brain; auto progress-note from ThoughtOut |
+| Memory | Episodic; 7-day half-life decay; retrieval by strength × keyword overlap; strength bars in UI |
+| Idle loop | Fires when gateway quiet 5+ min; respects `life_enabled` toggle + interval; 15-min retry on busy |
+| UI | Virtual Life tab: profile panel, goals panel, memory panel, life feed with pipeline debug |
+
+---
+
 ## What this is
 
 A "Virtual Life" system layered on top of Character Studio. A character has a
@@ -29,9 +46,9 @@ image instead.
 | B | Brain / Think endpoint + Draw | done | `characters/brain.py`, `characters/api.py` |
 | C | ~~Draw from thought~~ | merged into B | — |
 | D | Idle auto-loop | done | `characters/loop.py`, `main.py`, `story2/jobs.py` |
-| E | Real-world context (weather + news) | pending | `characters/world.py`, `characters/brain.py` |
-| F | Goals — set future goals, brain plans toward them | pending | `characters/goals.py`, `characters/profile.py`, `characters/brain.py` |
-| G | Memory — episodic memory with time-decay and retrieval | pending | `characters/memory.py`, `characters/store.py`, `characters/brain.py` |
+| E | Real-world context (weather + news) | done | `characters/world.py`, `characters/brain.py` |
+| F | Goals — set future goals, brain plans toward them | done | `characters/goals.py`, `characters/profile.py`, `characters/brain.py` |
+| G | Memory — episodic memory with time-decay and retrieval | done | `characters/memory.py`, `characters/store.py`, `characters/brain.py` |
 | D | Autonomous idle loop | pending | `characters/loop.py`, `main.py` |
 
 ---
@@ -491,19 +508,21 @@ Each entry in the Life Feed:
 
 ## Files summary
 
-| File | Action | Phase |
-|------|--------|-------|
-| `characters/store.py` | Remove place kind | 0 |
-| `characters/edits.py` | Replace place ref with PlaceDesc | 0 |
-| `characters/api.py` | Remove /place, add /in-place, /profile, /think, /life | 0+A+B+C |
-| `characters/studio_edit.py` | Update make_place callers | 0 |
-| `characters/profile.py` | New — profile get/patch/suggest | A |
-| `characters/brain.py` | New — think(), draw_thought(), event logging | B+C |
-| `characters/loop.py` | New — idle loop, retry logic | D |
-| `characters/db_init.py` (or wherever tables are created) | Add char_life_events table | B |
-| `story2/jobs.py` | Add `_last_job_time` update hook (one line) | D |
-| `main.py` | Start loop.run_forever() on startup | D |
-| `static/characters.js` | Remove places UI, add Virtual Life tab | 0+A+B+C |
+| File | Action | Phase | Status |
+|------|--------|-------|--------|
+| `characters/store.py` | KINDS kept (shorts cast); `char_life_events` + `char_memories` tables added to SCHEMA | 0+B+G | done |
+| `characters/edits.py` | `build_in_place()` added (text + optional image path, no place character) | 0 | done |
+| `characters/studio_edit.py` | `make_in_place()` added | 0 | done |
+| `characters/api.py` | `/in-place`, `/profile`, `/goals`, `/memories`, `/think`, `/life`, `/life/status`, `/life/{id}/draw` | 0+A+B+D+F+G | done |
+| `characters/profile.py` | New — get/patch/default_profile, log_event/list_events/last_run_time | A | done |
+| `characters/brain.py` | New — 5-stage pipeline (context assembly → think → self-review → goal alignment → post-think), draw_thought() | B+E+F+G | done |
+| `characters/world.py` | New — weather (wttr.in), news (Google RSS), season; 30-min cache | E | done |
+| `characters/goals.py` | New — add/update/delete/active_summary/neglected_goals/try_log_progress | F | done |
+| `characters/memory.py` | New — form/retrieve/decay/list/delete/add_manual, 7-day half-life | G | done |
+| `characters/loop.py` | New — idle loop, 5-min quiet guard, 15-min retry on JobBusy | D | done |
+| `story2/jobs.py` | `_last_activity` float + one-line update in `start()` | D | done |
+| `main.py` | `loop.start(s, key)` in lifespan, `loop.stop()` on shutdown | D | done |
+| `static/characters.js` | Places removed from UI; Virtual Life tab (profile/goals/memory/feed) | 0+A+B+D+F+G | done |
 
 ---
 
@@ -767,15 +786,21 @@ class ThoughtRevised(M):
 
 ---
 
-## What NOT to build yet
+## Remaining / future work
 
-- Space reference image generation (text description is sufficient for v1;
-  add when image quality of "in a place" looks proves insufficient)
-- Multi-character interaction (two characters in one life moment)
-- Social feed / sharing
-- Character-initiated outfit try-on automation (manual "Save as look" first,
-  auto-save when the brain rates its own output ≥ 7)
-- Voice lines from the character's thought
+These are not started. Add a phase row and spec section before building.
+
+| Item | Notes |
+|------|-------|
+| Space reference image generation | Text description is good enough for v1; add when "in a place" image quality proves insufficient |
+| Multi-character interaction | Two characters in one life moment — needs cast + shared scene logic |
+| Social feed / sharing | Export life feed as Instagram-style reel or image grid |
+| Auto "Save as look" | Brain rates its own image (≥7/10) → auto-saves as a named look; manual for now |
+| Voice lines | Character speaks her thought as a short audio clip (TTS) |
+| Profile auto-suggest | LLM fills blank interest/personality fields from the character's idea — `POST /{char_id}/profile/suggest` endpoint spec'd in Phase A but not built |
+| Goal-driven image planning | Brain notices a goal (e.g. "learn Kathak") and *proactively imagines* a practice session rather than reacting to the current moment |
+| Memory reinforcement | Recalling a memory during think boosts its strength slightly (currently pure time-decay) |
+| Cross-character memory | Two characters share an experience and both form memories of it |
 
 ---
 
