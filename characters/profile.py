@@ -105,7 +105,7 @@ def list_events(char_id: str, limit: int = 50, before: float | None = None) -> l
 
 def list_events_range(char_id: str, start: float, end: float) -> list[dict]:
     rows = db.q(
-        "SELECT * FROM char_life_events WHERE char_id=? AND created_at >= ? AND created_at <= ? ORDER BY created_at ASC",
+        "SELECT * FROM char_life_events WHERE char_id=? AND created_at >= ? AND created_at <= ? ORDER BY created_at DESC",
         (char_id, start, end),
     )
     return [{**r, "inputs": db.jload(r["inputs"], {}), "outputs": db.jload(r["outputs"], {})} for r in rows]
