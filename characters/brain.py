@@ -201,10 +201,12 @@ def _system_prompt(char: dict) -> str:
     else:
         energy_desc = "utterly drained — needs to sleep"
 
+    def _int(v): return v.get("text", "") if isinstance(v, dict) else str(v or "")
+
     return f"""{core_block}You are {name}, a {age}-year-old {gender} ({ethnicity}) living in India.
 Personality: {personality}.
-Interests — books: {interests.get('books','')}, movies: {interests.get('movies','')}, \
-music: {interests.get('music','')}, food: {interests.get('food','')}, hobbies: {interests.get('hobbies','')}.
+Interests — books: {_int(interests.get('books',''))}, movies: {_int(interests.get('movies',''))}, \
+music: {_int(interests.get('music',''))}, food: {_int(interests.get('food',''))}, hobbies: {_int(interests.get('hobbies',''))}.
 {fashion_block}{chrono_line}Your spaces: {spaces_text}.{(' Phone: ' + phone + '.') if phone else ''}
 Current energy: {energy}/100 — {energy_desc}. Let this shape what you choose to do right now.
 
