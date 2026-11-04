@@ -1043,69 +1043,99 @@ function openSpaceStudio(initialSpName) {
 
   let spName = initialSpName || allSpaces[0].name || '';
 
-  const buildCtrl = () => {
-    const spaceData = allSpaces.find(s => (s.name||'').toLowerCase() === spName.toLowerCase()) || {};
-    const spacePicker = allSpaces.length > 1
-      ? `<select id="ss-space-pick" style="width:100%;font-size:13px;margin-bottom:8px">${allSpaces.map(s => `<option value="${esc(s.name||'')}" ${s.name===spName?'selected':''}>${esc(s.name||'')}</option>`).join('')}</select>`
-      : `<div style="font-weight:600;font-size:14px;margin-bottom:8px">${esc(spName)}</div>`;
-    return `${spacePicker}
-      <label class="f" style="font-size:12px">Name<input id="ss-name" value="${esc(spName)}"></label>
-      <label class="f mt-s" style="font-size:12px">Description<textarea id="ss-desc" style="min-height:52px" placeholder="cosy room with fairy lights and books">${esc(spaceData.description||'')}</textarea></label>
-      <button class="small mt-s" id="ss-save-details">Save details</button>
-      <hr style="border:none;border-top:1px solid var(--line);margin:8px 0">
-      <label class="f" style="font-size:12px">Instruction <span class="mute" style="font-size:10px">optional — what to change</span>
-        <textarea id="ss-instr" style="min-height:48px" placeholder="add a bookshelf, warmer light, more plants…"></textarea>
-      </label>
-      <button class="small primary mt-s" id="ss-gen">⚡ Generate main view</button>
-      <button class="small mt-s" id="ss-corners">▣ Generate 4 corners</button>
-      <div class="sp-status" id="ss-status"></div>
-      <hr style="border:none;border-top:1px solid var(--line);margin:8px 0">
-      <div style="font-size:12px;margin-bottom:4px">Upload reference</div>
-      <input type="file" id="ss-upload" accept="image/*" style="font-size:11px;width:100%">`;
-  };
-
+  // ── build overlay with 100% inline styles so no page CSS can interfere ──
   const ov = document.createElement('div');
   ov.id = 'sp-studio-overlay';
-  ov.className = 'sp-studio-overlay';
-  ov.innerHTML = `
-    <div class="sp-studio" id="sp-studio-box">
-      <div class="sp-studio-head">
-        <b style="font-size:16px">Space Studio</b>
-        <span class="sp"></span>
-        <button class="small" id="ss-close">× Close</button>
-      </div>
-      <div class="sp-studio-body">
-        <div class="sp-studio-ctrl" id="ss-ctrl">${buildCtrl()}</div>
-        <div class="sp-studio-imgs" id="ss-images"><div class="mute small">Loading…</div></div>
-      </div>
-    </div>`;
-  document.body.appendChild(ov);
+  Object.assign(ov.style, {
+    position:'fixed', top:'0', left:'0', width:'100%', height:'100%',
+    zIndex:'99999', background:'rgba(0,0,0,0.75)',
+    display:'flex', alignItems:'center', justifyContent:'center',
+    padding:'16px', boxSizing:'border-box'
+  });
 
+  const isNarrow = () => window.innerWidth < 700;
+
+  const buildCtrlHtml = () => {
+    const sp = allSpaces.find(s => (s.name||'').toLowerCase() === spName.toLowerCase()) || {};
+    const picker = allSpaces.length > 1
+      ? `<select id="ss-space-pick" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:8px;font-size:14px;background:#fff">${allSpaces.map(s=>`<option value="${esc(s.name||'')}" ${s.name===spName?'selected':''}>${esc(s.name||'')}</option>`).join('')}</select>`
+      : `<div style="font-size:15px;font-weight:700;color:#111">${esc(spName)}</div>`;
+    return `
+      <div style="margin-bottom:12px">${picker}</div>
+      <div style="margin-bottom:8px">
+        <label style="display:block;font-size:11px;font-weight:600;color:#888;margin-bottom:3px;text-transform:uppercase;letter-spacing:.4px">Name</label>
+        <input id="ss-name" value="${esc(spName)}" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:13px;box-sizing:border-box">
+      </div>
+      <div style="margin-bottom:8px">
+        <label style="display:block;font-size:11px;font-weight:600;color:#888;margin-bottom:3px;text-transform:uppercase;letter-spacing:.4px">Description</label>
+        <textarea id="ss-desc" placeholder="cosy room with fairy lights and books" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:13px;min-height:56px;resize:vertical;box-sizing:border-box">${esc(sp.description||'')}</textarea>
+      </div>
+      <button id="ss-save-details" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:8px;background:#f5f5f5;font-size:13px;cursor:pointer;margin-bottom:14px">Save details</button>
+      <div style="border-top:1px solid #eee;padding-top:14px;margin-bottom:8px">
+        <label style="display:block;font-size:11px;font-weight:600;color:#888;margin-bottom:3px;text-transform:uppercase;letter-spacing:.4px">Instruction <span style="font-weight:400;font-size:10px;text-transform:none">(optional)</span></label>
+        <textarea id="ss-instr" placeholder="add a bookshelf on the left wall, warmer lighting, more plants near window…" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:13px;min-height:60px;resize:vertical;box-sizing:border-box"></textarea>
+      </div>
+      <button id="ss-gen" style="width:100%;padding:9px;border:none;border-radius:8px;background:#4f46e5;color:#fff;font-size:14px;font-weight:600;cursor:pointer;margin-bottom:6px">⚡ Generate main view</button>
+      <button id="ss-corners" style="width:100%;padding:8px;border:1px solid #4f46e5;border-radius:8px;background:#fff;color:#4f46e5;font-size:13px;cursor:pointer;margin-bottom:6px" disabled>▣ Generate 4 corners</button>
+      <div id="ss-status" style="font-size:12px;color:#888;min-height:16px;text-align:center;margin-bottom:10px"></div>
+      <div style="border-top:1px solid #eee;padding-top:12px">
+        <label style="display:block;font-size:11px;font-weight:600;color:#888;margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px">Upload reference</label>
+        <input type="file" id="ss-upload" accept="image/*" style="width:100%;font-size:12px">
+      </div>`;
+  };
+
+  const renderModal = () => {
+    const narrow = isNarrow();
+    ov.innerHTML = `
+      <div id="ss-box" style="background:#fff;border-radius:16px;width:100%;max-width:960px;max-height:calc(100vh - 32px);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,.45)">
+        <div style="display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid #eee;flex-shrink:0">
+          <span style="font-size:18px;font-weight:700;color:#111">Space Studio</span>
+          <span style="flex:1"></span>
+          <button id="ss-close" style="padding:6px 14px;border:1px solid #ddd;border-radius:8px;background:#f5f5f5;font-size:13px;cursor:pointer">× Close</button>
+        </div>
+        <div style="display:flex;flex-direction:${narrow?'column':'row'};flex:1;overflow:hidden;min-height:0">
+          <div id="ss-ctrl" style="width:${narrow?'100%':'260px'};min-width:${narrow?'0':'240px'};padding:16px;border-${narrow?'bottom':'right'}:1px solid #eee;overflow-y:auto;flex-shrink:0;background:#fafafa">
+            ${buildCtrlHtml()}
+          </div>
+          <div id="ss-images" style="flex:1;padding:16px;overflow-y:auto;background:#fff">
+            <div style="color:#999;font-size:13px">Loading…</div>
+          </div>
+        </div>
+      </div>`;
+    document.getElementById('ss-close').onclick = () => ov.remove();
+    wireCtrl();
+    loadImages();
+  };
+
+  document.body.appendChild(ov);
   ov.onclick = e => { if (e.target === ov) ov.remove(); };
-  document.getElementById('ss-close').onclick = () => ov.remove();
+  window.addEventListener('keydown', function ssKey(e) { if (e.key === 'Escape') { ov.remove(); window.removeEventListener('keydown', ssKey); } });
+
+  renderModal();
 
   const wireCtrl = () => {
     const $s = id => document.getElementById(id);
-
     const picker = $s('ss-space-pick');
     if (picker) picker.onchange = () => {
       spName = picker.value;
-      document.getElementById('ss-ctrl').innerHTML = buildCtrl();
+      document.getElementById('ss-ctrl').innerHTML = buildCtrlHtml();
       wireCtrl();
       loadImages();
     };
 
-    let jobRunning = false;
     const setStatus = (msg, running=false) => {
       const el = $s('ss-status'); if (el) el.textContent = msg;
-      jobRunning = running;
-      const g = $s('ss-gen'); if (g) { g.disabled = running; g.textContent = running ? '…generating…' : '⚡ Generate main view'; }
+      const g = $s('ss-gen'); if (g) {
+        g.disabled = running;
+        g.textContent = running ? '…generating…' : '⚡ Generate main view';
+        g.style.opacity = running ? '0.6' : '1';
+      }
       const co = $s('ss-corners'); if (co) co.disabled = running;
     };
     const pollJob = async (maxS=180) => {
       for (let t = 0; t < maxS/3; t++) {
         await new Promise(r => setTimeout(r, 3000));
-        const st = await call('/' + CID).catch(() => null);
+        const st = await call('/'+CID).catch(()=>null);
         if (st && (!st.job || st.job.state !== 'running')) break;
       }
     };
@@ -1116,29 +1146,25 @@ function openSpaceStudio(initialSpName) {
       if (!newName) return;
       const spaces = (C.profile?.spaces||[]).map(s => s.name?.toLowerCase()===spName.toLowerCase() ? {...s,name:newName,description:newDesc} : s);
       await call('/'+CID+'/profile', {method:'PATCH', json:{spaces}}).catch(e=>showErr(e.detail||e.message));
-      spName = newName;
-      C = await call('/'+CID);
-      render(); toast('Space details saved.');
+      spName = newName; C = await call('/'+CID); render(); toast('Saved.');
     });
 
     $s('ss-gen') && ($s('ss-gen').onclick = async () => {
       const instr = ($s('ss-instr').value||'').trim();
-      setStatus('Generating main view…', true);
+      setStatus('Generating…', true);
       try {
         await call('/'+CID+'/spaces/'+encodeURIComponent(spName)+'/generate', {method:'POST', json:{instruction:instr}});
-        setStatus('Waiting for job…', true);
-        await pollJob(180);
+        setStatus('Working…', true); await pollJob(180);
         setStatus(''); C = await call('/'+CID); await loadImages(); render();
       } catch(e) { setStatus(''); showErr('Generate failed: '+(e.detail||e.message||e)); }
     });
 
     $s('ss-corners') && ($s('ss-corners').onclick = async () => {
       const instr = ($s('ss-instr').value||'').trim();
-      setStatus('Generating 4 corners…', true);
+      setStatus('Generating corners…', true);
       try {
         await call('/'+CID+'/spaces/'+encodeURIComponent(spName)+'/corners', {method:'POST', json:{instruction:instr}});
-        setStatus('Waiting for corners job…', true);
-        await pollJob(300);
+        setStatus('Working…', true); await pollJob(300);
         setStatus(''); C = await call('/'+CID); await loadImages(); render();
       } catch(e) { setStatus(''); showErr('Corners failed: '+(e.detail||e.message||e)); }
     });
@@ -1148,7 +1174,7 @@ function openSpaceStudio(initialSpName) {
       const fd = new FormData(); fd.append('file', f);
       try {
         await call('/'+CID+'/spaces/'+encodeURIComponent(spName)+'/ref', {method:'POST', form:fd});
-        C = await call('/'+CID); render(); toast('Reference image uploaded.');
+        C = await call('/'+CID); render(); toast('Reference uploaded.');
       } catch(e) { showErr('Upload failed: '+(e.detail||e.message||e)); }
     });
   };
@@ -1157,31 +1183,45 @@ function openSpaceStudio(initialSpName) {
     const imgs = await call('/'+CID+'/spaces/'+encodeURIComponent(spName)+'/images').catch(()=>({main:[],corners:[]}));
     const box = document.getElementById('ss-images');
     if (!box) return;
-    const hasApprovedMain = (imgs.main||[]).some(r => r.approved && r.status==='done');
-    const co = document.getElementById('ss-corners'); if (co) co.disabled = !hasApprovedMain;
+    const hasApproved = (imgs.main||[]).some(r => r.approved && r.status==='done');
+    const co = document.getElementById('ss-corners');
+    if (co) { co.disabled = !hasApproved; co.style.opacity = hasApproved?'1':'0.4'; }
+
     const mkCard = (it, corner=false) => {
       const url = it.file ? `/api/characters/file/${CID}/${it.file}` : '';
       const ap = it.approved, fail = it.status==='failed', run = it.status==='running';
       const pr = (it.meta||{}).prompt||'';
-      return `<div class="sp-img-card ${ap?'approved':''}" data-img-id="${esc(it.id)}">
-        ${url ? `<img src="${esc(url)}" onclick="chZoom('${esc(url)}')" onerror="this.style.display='none'">` :
-          `<div style="height:${corner?'140px':'200px'};background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--mute)">${fail?'✕ failed':run?'⏳ generating…':'—'}</div>`}
-        <div class="sp-img-actions">
-          ${ap ? '<span class="badge b-ok" style="font-size:10px">✓ approved</span>' : ''}
-          ${url && !ap ? `<button class="small primary" data-ss-approve="${esc(it.id)}">✓ Approve</button>` : ''}
-          <button class="small bad" data-ss-delete="${esc(it.id)}">✕ Reject</button>
-          ${pr ? `<details style="font-size:10px;width:100%"><summary class="mute" style="cursor:pointer">prompt</summary><div style="white-space:pre-wrap;padding:4px;color:var(--mute)">${esc(pr)}</div></details>` : ''}
+      const thumbH = corner ? '120px' : '160px';
+      return `<div data-img-id="${esc(it.id)}" style="border:2px solid ${ap?'#22c55e':'#e5e7eb'};border-radius:12px;overflow:hidden;background:#f9f9f9;margin-bottom:12px">
+        ${url
+          ? `<img src="${esc(url)}" style="width:100%;height:${thumbH};display:block;object-fit:cover;cursor:pointer" onclick="chZoom('${esc(url)}')" title="Click to view full size" onerror="this.style.display='none'">`
+          : `<div style="height:${thumbH};display:flex;align-items:center;justify-content:center;font-size:13px;color:#999">${fail?'✕ failed':run?'⏳ generating…':'—'}</div>`}
+        <div style="padding:8px 10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;border-top:1px solid #eee;background:#fff">
+          ${ap ? '<span style="font-size:11px;background:#dcfce7;color:#15803d;border-radius:6px;padding:2px 7px;font-weight:600">✓ approved</span>' : ''}
+          ${url && !ap ? `<button data-ss-approve="${esc(it.id)}" style="padding:5px 12px;border:none;border-radius:7px;background:#4f46e5;color:#fff;font-size:12px;font-weight:600;cursor:pointer">✓ Approve</button>` : ''}
+          <button data-ss-delete="${esc(it.id)}" style="padding:5px 10px;border:1px solid #fca5a5;border-radius:7px;background:#fff;color:#dc2626;font-size:12px;cursor:pointer">✕ Reject</button>
+          ${url ? `<a href="${esc(url)}" target="_blank" style="font-size:11px;color:#6366f1;margin-left:auto;text-decoration:none">↗ full size</a>` : ''}
+          ${pr ? `<details style="font-size:11px;color:#888;width:100%;margin-top:2px"><summary style="cursor:pointer">prompt</summary><div style="white-space:pre-wrap;padding:4px 0;color:#666">${esc(pr)}</div></details>` : ''}
         </div>
       </div>`;
     };
-    let html = '';
+
     if (!imgs.main.length && !imgs.corners.length) {
-      html = '<div class="mute small">No images yet — click Generate main view to start.</div>';
+      box.innerHTML = `<div style="color:#999;font-size:14px;padding:24px 0;text-align:center">No images yet — click <b>Generate main view</b> to start.</div>`;
     } else {
-      if (imgs.main.length) html += `<div class="sp-section-label">Main views (${imgs.main.length})</div>` + imgs.main.slice().reverse().map(it=>mkCard(it)).join('');
-      if (imgs.corners.length) html += `<div class="sp-section-label">Corner views (${imgs.corners.length})</div><div class="sp-corner-grid">` + imgs.corners.slice().reverse().map(it=>mkCard(it,true)).join('') + '</div>';
+      const narrow = isNarrow();
+      let html = '';
+      if (imgs.main.length) {
+        html += `<div style="font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Main views (${imgs.main.length})</div>`;
+        html += imgs.main.slice().reverse().map(it=>mkCard(it)).join('');
+      }
+      if (imgs.corners.length) {
+        html += `<div style="font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.5px;margin:16px 0 8px">Corner views (${imgs.corners.length})</div>`;
+        html += `<div style="display:grid;grid-template-columns:${narrow?'1fr':'1fr 1fr'};gap:10px">` + imgs.corners.slice().reverse().map(it=>mkCard(it,true)).join('') + '</div>';
+      }
+      box.innerHTML = html;
     }
-    box.innerHTML = html;
+
     box.querySelectorAll('[data-ss-approve]').forEach(btn => btn.onclick = async () => {
       await call('/'+CID+'/spaces/'+encodeURIComponent(spName)+'/images/'+btn.dataset.ssApprove+'/approve', {method:'POST'}).catch(()=>{});
       C = await call('/'+CID); await loadImages(); render();
@@ -1192,8 +1232,7 @@ function openSpaceStudio(initialSpName) {
     });
   };
 
-  wireCtrl();
-  loadImages();
+  renderModal();
 }
 
 function wireEdit() {
