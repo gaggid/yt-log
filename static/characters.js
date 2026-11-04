@@ -1058,60 +1058,31 @@ function openSpaceStudio(initialSpName) {
   const buildCtrlHtml = () => {
     const sp = allSpaces.find(s => (s.name||'').toLowerCase() === spName.toLowerCase()) || {};
     const picker = allSpaces.length > 1
-      ? `<select id="ss-space-pick" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:8px;font-size:14px;background:#fff">${allSpaces.map(s=>`<option value="${esc(s.name||'')}" ${s.name===spName?'selected':''}>${esc(s.name||'')}</option>`).join('')}</select>`
-      : `<div style="font-size:15px;font-weight:700;color:#111">${esc(spName)}</div>`;
+      ? `<select id="ss-space-pick" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:14px;background:var(--panel);color:var(--ink)">${allSpaces.map(s=>`<option value="${esc(s.name||'')}" ${s.name===spName?'selected':''}>${esc(s.name||'')}</option>`).join('')}</select>`
+      : `<div style="font-size:15px;font-weight:700;color:var(--ink)">${esc(spName)}</div>`;
     return `
       <div style="margin-bottom:12px">${picker}</div>
       <div style="margin-bottom:8px">
-        <label style="display:block;font-size:11px;font-weight:600;color:#888;margin-bottom:3px;text-transform:uppercase;letter-spacing:.4px">Name</label>
-        <input id="ss-name" value="${esc(spName)}" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:13px;box-sizing:border-box">
+        <label style="display:block;font-size:11px;font-weight:600;color:var(--mute);margin-bottom:3px;text-transform:uppercase;letter-spacing:.4px">Name</label>
+        <input id="ss-name" value="${esc(spName)}" style="width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;box-sizing:border-box">
       </div>
       <div style="margin-bottom:8px">
-        <label style="display:block;font-size:11px;font-weight:600;color:#888;margin-bottom:3px;text-transform:uppercase;letter-spacing:.4px">Description</label>
-        <textarea id="ss-desc" placeholder="cosy room with fairy lights and books" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:13px;min-height:56px;resize:vertical;box-sizing:border-box">${esc(sp.description||'')}</textarea>
+        <label style="display:block;font-size:11px;font-weight:600;color:var(--mute);margin-bottom:3px;text-transform:uppercase;letter-spacing:.4px">Description</label>
+        <textarea id="ss-desc" placeholder="cosy room with fairy lights and books" style="width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;min-height:56px;resize:vertical;box-sizing:border-box">${esc(sp.description||'')}</textarea>
       </div>
-      <button id="ss-save-details" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:8px;background:#f5f5f5;font-size:13px;cursor:pointer;margin-bottom:14px">Save details</button>
-      <div style="border-top:1px solid #eee;padding-top:14px;margin-bottom:8px">
-        <label style="display:block;font-size:11px;font-weight:600;color:#888;margin-bottom:3px;text-transform:uppercase;letter-spacing:.4px">Instruction <span style="font-weight:400;font-size:10px;text-transform:none">(optional)</span></label>
-        <textarea id="ss-instr" placeholder="add a bookshelf on the left wall, warmer lighting, more plants near window…" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:13px;min-height:60px;resize:vertical;box-sizing:border-box"></textarea>
+      <button id="ss-save-details" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font-size:13px;cursor:pointer;margin-bottom:14px">Save details</button>
+      <div style="border-top:1px solid var(--line);padding-top:14px;margin-bottom:8px">
+        <label style="display:block;font-size:11px;font-weight:600;color:var(--mute);margin-bottom:3px;text-transform:uppercase;letter-spacing:.4px">Instruction <span style="font-weight:400;font-size:10px;text-transform:none">(optional)</span></label>
+        <textarea id="ss-instr" placeholder="add a bookshelf on the left wall, warmer lighting, more plants near window…" style="width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;min-height:60px;resize:vertical;box-sizing:border-box"></textarea>
       </div>
-      <button id="ss-gen" style="width:100%;padding:9px;border:none;border-radius:8px;background:#4f46e5;color:#fff;font-size:14px;font-weight:600;cursor:pointer;margin-bottom:6px">⚡ Generate main view</button>
-      <button id="ss-corners" style="width:100%;padding:8px;border:1px solid #4f46e5;border-radius:8px;background:#fff;color:#4f46e5;font-size:13px;cursor:pointer;margin-bottom:6px" disabled>▣ Generate 4 corners</button>
-      <div id="ss-status" style="font-size:12px;color:#888;min-height:16px;text-align:center;margin-bottom:10px"></div>
-      <div style="border-top:1px solid #eee;padding-top:12px">
-        <label style="display:block;font-size:11px;font-weight:600;color:#888;margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px">Upload reference</label>
+      <button id="ss-gen" style="width:100%;padding:9px;border:none;border-radius:8px;background:var(--accent);color:var(--accent-ink);font-size:14px;font-weight:600;cursor:pointer;margin-bottom:6px">⚡ Generate main view</button>
+      <button id="ss-corners" style="width:100%;padding:8px;border:1px solid var(--accent);border-radius:8px;background:var(--panel);color:var(--accent);font-size:13px;cursor:pointer;margin-bottom:6px" disabled>▣ Generate 4 corners</button>
+      <div id="ss-status" style="font-size:12px;color:var(--mute);min-height:16px;text-align:center;margin-bottom:10px"></div>
+      <div style="border-top:1px solid var(--line);padding-top:12px">
+        <label style="display:block;font-size:11px;font-weight:600;color:var(--mute);margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px">Upload reference</label>
         <input type="file" id="ss-upload" accept="image/*" style="width:100%;font-size:12px">
       </div>`;
   };
-
-  const renderModal = () => {
-    const narrow = isNarrow();
-    ov.innerHTML = `
-      <div id="ss-box" style="background:#fff;border-radius:16px;width:100%;max-width:960px;max-height:calc(100vh - 32px);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,.45)">
-        <div style="display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid #eee;flex-shrink:0">
-          <span style="font-size:18px;font-weight:700;color:#111">Space Studio</span>
-          <span style="flex:1"></span>
-          <button id="ss-close" style="padding:6px 14px;border:1px solid #ddd;border-radius:8px;background:#f5f5f5;font-size:13px;cursor:pointer">× Close</button>
-        </div>
-        <div style="display:flex;flex-direction:${narrow?'column':'row'};flex:1;overflow:hidden;min-height:0">
-          <div id="ss-ctrl" style="width:${narrow?'100%':'260px'};min-width:${narrow?'0':'240px'};padding:16px;border-${narrow?'bottom':'right'}:1px solid #eee;overflow-y:auto;flex-shrink:0;background:#fafafa">
-            ${buildCtrlHtml()}
-          </div>
-          <div id="ss-images" style="flex:1;padding:16px;overflow-y:auto;background:#fff">
-            <div style="color:#999;font-size:13px">Loading…</div>
-          </div>
-        </div>
-      </div>`;
-    document.getElementById('ss-close').onclick = () => ov.remove();
-    wireCtrl();
-    loadImages();
-  };
-
-  document.body.appendChild(ov);
-  ov.onclick = e => { if (e.target === ov) ov.remove(); };
-  window.addEventListener('keydown', function ssKey(e) { if (e.key === 'Escape') { ov.remove(); window.removeEventListener('keydown', ssKey); } });
-
-  renderModal();
 
   const wireCtrl = () => {
     const $s = id => document.getElementById(id);
@@ -1192,31 +1163,31 @@ function openSpaceStudio(initialSpName) {
       const ap = it.approved, fail = it.status==='failed', run = it.status==='running';
       const pr = (it.meta||{}).prompt||'';
       const thumbH = corner ? '120px' : '160px';
-      return `<div data-img-id="${esc(it.id)}" style="border:2px solid ${ap?'#22c55e':'#e5e7eb'};border-radius:12px;overflow:hidden;background:#f9f9f9;margin-bottom:12px">
+      return `<div data-img-id="${esc(it.id)}" style="border:2px solid ${ap?'#22c55e':'var(--line)'};border-radius:12px;overflow:hidden;background:var(--bg);margin-bottom:12px">
         ${url
           ? `<img src="${esc(url)}" style="width:100%;height:${thumbH};display:block;object-fit:cover;cursor:pointer" onclick="chZoom('${esc(url)}')" title="Click to view full size" onerror="this.style.display='none'">`
-          : `<div style="height:${thumbH};display:flex;align-items:center;justify-content:center;font-size:13px;color:#999">${fail?'✕ failed':run?'⏳ generating…':'—'}</div>`}
-        <div style="padding:8px 10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;border-top:1px solid #eee;background:#fff">
+          : `<div style="height:${thumbH};display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--mute)">${fail?'✕ failed':run?'⏳ generating…':'—'}</div>`}
+        <div style="padding:8px 10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line);background:var(--panel)">
           ${ap ? '<span style="font-size:11px;background:#dcfce7;color:#15803d;border-radius:6px;padding:2px 7px;font-weight:600">✓ approved</span>' : ''}
-          ${url && !ap ? `<button data-ss-approve="${esc(it.id)}" style="padding:5px 12px;border:none;border-radius:7px;background:#4f46e5;color:#fff;font-size:12px;font-weight:600;cursor:pointer">✓ Approve</button>` : ''}
-          <button data-ss-delete="${esc(it.id)}" style="padding:5px 10px;border:1px solid #fca5a5;border-radius:7px;background:#fff;color:#dc2626;font-size:12px;cursor:pointer">✕ Reject</button>
-          ${url ? `<a href="${esc(url)}" target="_blank" style="font-size:11px;color:#6366f1;margin-left:auto;text-decoration:none">↗ full size</a>` : ''}
-          ${pr ? `<details style="font-size:11px;color:#888;width:100%;margin-top:2px"><summary style="cursor:pointer">prompt</summary><div style="white-space:pre-wrap;padding:4px 0;color:#666">${esc(pr)}</div></details>` : ''}
+          ${url && !ap ? `<button data-ss-approve="${esc(it.id)}" style="padding:5px 12px;border:none;border-radius:7px;background:var(--accent);color:var(--accent-ink);font-size:12px;font-weight:600;cursor:pointer">✓ Approve</button>` : ''}
+          <button data-ss-delete="${esc(it.id)}" style="padding:5px 10px;border:1px solid #fca5a5;border-radius:7px;background:transparent;color:#dc2626;font-size:12px;cursor:pointer">✕ Reject</button>
+          ${url ? `<a href="${esc(url)}" target="_blank" style="font-size:11px;color:var(--accent);margin-left:auto;text-decoration:none">↗ full size</a>` : ''}
+          ${pr ? `<details style="font-size:11px;color:var(--mute);width:100%;margin-top:2px"><summary style="cursor:pointer">prompt</summary><div style="white-space:pre-wrap;padding:4px 0;color:var(--mute)">${esc(pr)}</div></details>` : ''}
         </div>
       </div>`;
     };
 
     if (!imgs.main.length && !imgs.corners.length) {
-      box.innerHTML = `<div style="color:#999;font-size:14px;padding:24px 0;text-align:center">No images yet — click <b>Generate main view</b> to start.</div>`;
+      box.innerHTML = `<div style="color:var(--mute);font-size:14px;padding:24px 0;text-align:center">No images yet — click <b>Generate main view</b> to start.</div>`;
     } else {
       const narrow = isNarrow();
       let html = '';
       if (imgs.main.length) {
-        html += `<div style="font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Main views (${imgs.main.length})</div>`;
+        html += `<div style="font-size:11px;font-weight:700;color:var(--mute);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Main views (${imgs.main.length})</div>`;
         html += imgs.main.slice().reverse().map(it=>mkCard(it)).join('');
       }
       if (imgs.corners.length) {
-        html += `<div style="font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.5px;margin:16px 0 8px">Corner views (${imgs.corners.length})</div>`;
+        html += `<div style="font-size:11px;font-weight:700;color:var(--mute);text-transform:uppercase;letter-spacing:.5px;margin:16px 0 8px">Corner views (${imgs.corners.length})</div>`;
         html += `<div style="display:grid;grid-template-columns:${narrow?'1fr':'1fr 1fr'};gap:10px">` + imgs.corners.slice().reverse().map(it=>mkCard(it,true)).join('') + '</div>';
       }
       box.innerHTML = html;
@@ -1231,6 +1202,33 @@ function openSpaceStudio(initialSpName) {
       C = await call('/'+CID); await loadImages(); render();
     });
   };
+
+  const renderModal = () => {
+    const narrow = isNarrow();
+    ov.innerHTML = `
+      <div id="ss-box" style="background:var(--panel);border-radius:16px;width:100%;max-width:960px;max-height:calc(100vh - 32px);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,.55)">
+        <div style="display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--line);flex-shrink:0">
+          <span style="font-size:18px;font-weight:700;color:var(--ink)">Space Studio</span>
+          <span style="flex:1"></span>
+          <button id="ss-close" style="padding:6px 14px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font-size:13px;cursor:pointer">× Close</button>
+        </div>
+        <div style="display:flex;flex-direction:${narrow?'column':'row'};flex:1;overflow:hidden;min-height:0">
+          <div id="ss-ctrl" style="width:${narrow?'100%':'260px'};min-width:${narrow?'0':'240px'};padding:16px;border-${narrow?'bottom':'right'}:1px solid var(--line);overflow-y:auto;flex-shrink:0;background:var(--bg)">
+            ${buildCtrlHtml()}
+          </div>
+          <div id="ss-images" style="flex:1;padding:16px;overflow-y:auto;background:var(--panel)">
+            <div style="color:var(--mute);font-size:13px">Loading…</div>
+          </div>
+        </div>
+      </div>`;
+    document.getElementById('ss-close').onclick = () => ov.remove();
+    wireCtrl();
+    loadImages();
+  };
+
+  document.body.appendChild(ov);
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  window.addEventListener('keydown', function ssKey(e) { if (e.key === 'Escape') { ov.remove(); window.removeEventListener('keydown', ssKey); } });
 
   renderModal();
 }
