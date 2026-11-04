@@ -139,6 +139,7 @@ function jobBox() {
   return '';
 }
 window.chStop = async () => { await call('/' + CID + '/cancel', {method: 'POST'}); await window._chLoad(true); };
+window.openChat = openChat;
 
 function render() {
   const busy = C.job && C.job.state === 'running';
