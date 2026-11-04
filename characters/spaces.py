@@ -152,8 +152,7 @@ async def generate_corners(char_id: str, space_name: str, s: dict, key: str, pro
         try:
             if progress:
                 progress(i, total, f"Corner {i + 1}/4…")
-            ref_bytes = main_path.read_bytes()
-            data = await studio_mod._post_image("edit", body, [ref_bytes], base, api_key)
+            data = await studio_mod._post_image("edit", body, [main_path], base, api_key)
             rel  = f"space_gen/{ck}-a{it['attempt']}.png"
             (store.media_dir(char_id, "space_gen") / f"{ck}-a{it['attempt']}.png").write_bytes(data)
             media.update(it["id"], status="done", file=rel,
