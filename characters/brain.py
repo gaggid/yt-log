@@ -548,6 +548,7 @@ def shot_choices_text(types: list[str]) -> str:
         "If movement/dance/cooking: propped_timer. "
         "If a quiet atmospheric moment: candid_side. "
         "If mood/face/emotion: front_selfie. "
+        "NEVER selfie when the phone is in use (phone call, video call, voice note) — the phone is occupied; use propped_timer or candid_side instead. "
         "Options: " + choices + ". Empty string if log_photo is false."
     )
 
@@ -576,8 +577,13 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
     face_state  = thought.get("face_state", "")
     allowed     = allowed_shot_types(profile_mod.get(char))
     shot_type   = thought.get("shot_type", "")
-    if shot_type not in allowed:   # the person's shot styles decide; pick the nearest allowed type
+    if shot_type not in allowed:
         shot_type = allowed[0]
+    # phone occupied → selfie impossible; override to propped_timer (or candid_side)
+    _phone_activity = any(kw in (image_idea + " " + thought.get("activity", "")).lower()
+                          for kw in ("phone call", "video call", "voice note", "on the phone", "talking on"))
+    if _phone_activity and shot_type in ("front_selfie", "mirror_selfie"):
+        shot_type = next((t for t in allowed if t in ("propped_timer", "candid_side")), shot_type)
     shot_dir    = SHOT_DIRECTIONS[shot_type]
 
     canon     = store.canon_items(char)
