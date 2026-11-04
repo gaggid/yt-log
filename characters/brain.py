@@ -450,6 +450,18 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
         except Exception:
             garment_ref = None
 
+    # resolve space reference image for the current activity's space
+    space_ref_path = None
+    space_name = thought.get("space", "")
+    if space_name:
+        prof_now = profile_mod.get(char)
+        for sp in (prof_now.get("spaces") or []):
+            if sp.get("name", "").lower() == space_name.lower() and sp.get("ref_image"):
+                candidate = store.media_dir(char["id"]) / sp["ref_image"]
+                if candidate.exists():
+                    space_ref_path = str(candidate)
+                break
+
     if has_refs:
         from story3.store import path_of as _path
         portrait_path = _path(canon["portrait"])
@@ -459,31 +471,41 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
             expr_line = " Expression: " + (expression or "") + ("." if expression else "") + (" Face: " + face_state + "." if face_state else "") + " Apply this expression — do not copy the neutral look from the reference picture."
 
         scene = f"{shot_dir} {image_idea}".strip()
+        space_line = (" Match the room/setting layout, furniture, colours and props from the last picture exactly." if space_ref_path else "")
         if garment_ref:
             refs    = [portrait_path, garment_ref["path"]]
             ref_ids = [portrait_id, garment_ref["id"]]
+            if space_ref_path:
+                refs.append(space_ref_path); ref_ids.append("space-ref")
             prompt  = (f"Picture 1 is an identity reference only (face shape, skin tone, hair colour and length, build). "
                        f"Picture 2 shows the garment/outfit to wear. "
-                       f"Create a new vertical 9:16 photograph: {scene}"
+                       + (f"Picture 3 is the room/setting reference — match its layout and decor exactly. " if space_ref_path else "")
+                       + f"Create a new vertical 9:16 photograph: {scene}"
                        + (f" Wear the outfit from Picture 2." if outfit else "")
-                       + expr_line
+                       + expr_line + space_line
                        + " Match the person's face identity from Picture 1 exactly.")
         else:
             body_in_canon = canon.get("body")
             if body_in_canon:
                 refs    = [portrait_path, _path(body_in_canon)]
                 ref_ids = [portrait_id, body_in_canon["id"]]
+                if space_ref_path:
+                    refs.append(space_ref_path); ref_ids.append("space-ref")
                 prompt  = (f"Picture 1 is an identity reference only (face shape, skin tone, hair colour and length, build). "
                            f"Picture 2 shows their body and outfit — keep the outfit exactly as in Picture 2. "
-                           f"Create a new vertical 9:16 photograph: {scene}"
-                           + expr_line
+                           + (f"Picture 3 is the room/setting reference — match its layout and decor exactly. " if space_ref_path else "")
+                           + f"Create a new vertical 9:16 photograph: {scene}"
+                           + expr_line + space_line
                            + " Match the person's face identity from Picture 1 exactly.")
             else:
                 refs, ref_ids = [portrait_path], [portrait_id]
+                if space_ref_path:
+                    refs.append(space_ref_path); ref_ids.append("space-ref")
                 prompt  = (f"Picture 1 is an identity reference only (face shape, skin tone, hair colour and length, build). "
-                           f"Create a new vertical 9:16 photograph: {scene}"
+                           + (f"Picture 2 is the room/setting reference — match its layout and decor exactly. " if space_ref_path else "")
+                           + f"Create a new vertical 9:16 photograph: {scene}"
                            + (f" Wearing: {outfit}." if outfit else "")
-                           + expr_line
+                           + expr_line + space_line
                            + " Match the person's face identity from Picture 1 exactly.")
         how = "edit"
     else:

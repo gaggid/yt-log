@@ -30,6 +30,7 @@ def default_profile() -> dict:
         "life_interval_m": 60,
         "auto_draw": False,      # draw automatically when the character thinks the moment is worth a picture
         "shot_styles": ["third_person", "selfie", "pov"],   # parent camera categories the character may use
+        "accessories": [],   # [{name, description, ref_image}] recurring props with optional ref photos
     }
 
 
@@ -84,10 +85,24 @@ def get_event(event_id: str) -> dict | None:
     return {**r, "inputs": db.jload(r["inputs"], {}), "outputs": db.jload(r["outputs"], {})}
 
 
-def list_events(char_id: str, limit: int = 50) -> list[dict]:
+def list_events(char_id: str, limit: int = 50, before: float | None = None) -> list[dict]:
+    if before:
+        rows = db.q(
+            "SELECT * FROM char_life_events WHERE char_id=? AND created_at < ? ORDER BY created_at DESC LIMIT ?",
+            (char_id, before, limit),
+        )
+    else:
+        rows = db.q(
+            "SELECT * FROM char_life_events WHERE char_id=? ORDER BY created_at DESC LIMIT ?",
+            (char_id, limit),
+        )
+    return [{**r, "inputs": db.jload(r["inputs"], {}), "outputs": db.jload(r["outputs"], {})} for r in rows]
+
+
+def list_events_range(char_id: str, start: float, end: float) -> list[dict]:
     rows = db.q(
-        "SELECT * FROM char_life_events WHERE char_id=? ORDER BY created_at DESC LIMIT ?",
-        (char_id, limit),
+        "SELECT * FROM char_life_events WHERE char_id=? AND created_at >= ? AND created_at <= ? ORDER BY created_at ASC",
+        (char_id, start, end),
     )
     return [{**r, "inputs": db.jload(r["inputs"], {}), "outputs": db.jload(r["outputs"], {})} for r in rows]
 

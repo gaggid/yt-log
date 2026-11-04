@@ -699,10 +699,136 @@ async def patch_profile(char_id: str, body: ProfilePatch):
     return profile_mod.get(c)
 
 
+@router.post("/{char_id}/spaces/{space_name}/ref")
+async def upload_space_ref(char_id: str, space_name: str, file: UploadFile = File(...)):
+    """Upload a reference photo for a declared space. Stored and injected as draw reference."""
+    import time as _time
+    from pathlib import Path
+    c = _get(char_id)
+    data = await file.read()
+    if len(data) > MAX_UPLOAD:
+        raise HTTPException(413, "file too large")
+    ext = (Path(file.filename or "ref.jpg").suffix.lower() or ".jpg").lstrip(".")
+    if ext not in ("jpg", "jpeg", "png", "webp"):
+        raise HTTPException(400, "jpeg, png or webp only")
+    space_dir = store.media_dir(char_id, "spaces")
+    safe_name = space_name.lower().replace(" ", "_")
+    fname = f"{safe_name}.{ext}"
+    (space_dir / fname).write_bytes(data)
+    rel = f"spaces/{fname}"
+    # update the matching space entry in profile
+    prof = profile_mod.get(c)
+    spaces = prof.get("spaces") or []
+    matched = False
+    for s in spaces:
+        if s.get("name", "").lower() == space_name.lower():
+            s["ref_image"] = rel
+            matched = True
+            break
+    if not matched:
+        raise HTTPException(404, f"space '{space_name}' not in profile — add it first")
+    profile_mod.patch(c, {"spaces": spaces})
+    store.save(c)
+    return {"space": space_name, "ref_image": rel,
+            "url": f"/api/characters/file/{char_id}/{rel}"}
+
+
+@router.delete("/{char_id}/spaces/{space_name}/ref")
+async def delete_space_ref(char_id: str, space_name: str):
+    """Remove the reference photo for a declared space."""
+    c = _get(char_id)
+    prof = profile_mod.get(c)
+    spaces = prof.get("spaces") or []
+    for s in spaces:
+        if s.get("name", "").lower() == space_name.lower():
+            s.pop("ref_image", None)
+            profile_mod.patch(c, {"spaces": spaces})
+            store.save(c)
+            return {"ok": True}
+    raise HTTPException(404, f"space '{space_name}' not found")
+
+
+@router.get("/{char_id}/accessories")
+async def get_accessories(char_id: str):
+    c = _get(char_id)
+    return profile_mod.get(c).get("accessories") or []
+
+
+@router.post("/{char_id}/accessories")
+async def add_accessory(char_id: str, name: str = Form(...), description: str = Form("")):
+    """Add a recurring accessory (phone, bag, mug, etc.) to track as a draw reference."""
+    c = _get(char_id)
+    prof = profile_mod.get(c)
+    accessories = list(prof.get("accessories") or [])
+    if any(a["name"].lower() == name.lower() for a in accessories):
+        raise HTTPException(409, "accessory already exists")
+    accessories.append({"name": name.strip(), "description": description.strip(), "ref_image": None})
+    profile_mod.patch(c, {"accessories": accessories})
+    store.save(c)
+    return accessories
+
+
+@router.post("/{char_id}/accessories/{acc_name}/ref")
+async def upload_accessory_ref(char_id: str, acc_name: str, file: UploadFile = File(...)):
+    """Upload a reference photo for a recurring accessory."""
+    from pathlib import Path
+    c = _get(char_id)
+    data = await file.read()
+    if len(data) > MAX_UPLOAD:
+        raise HTTPException(413, "file too large")
+    ext = (Path(file.filename or "ref.jpg").suffix.lower() or ".jpg").lstrip(".")
+    if ext not in ("jpg", "jpeg", "png", "webp"):
+        raise HTTPException(400, "jpeg, png or webp only")
+    acc_dir = store.media_dir(char_id, "accessories")
+    safe_name = acc_name.lower().replace(" ", "_")
+    fname = f"{safe_name}.{ext}"
+    (acc_dir / fname).write_bytes(data)
+    rel = f"accessories/{fname}"
+    prof = profile_mod.get(c)
+    accessories = list(prof.get("accessories") or [])
+    matched = False
+    for a in accessories:
+        if a["name"].lower() == acc_name.lower():
+            a["ref_image"] = rel
+            matched = True
+            break
+    if not matched:
+        raise HTTPException(404, f"accessory '{acc_name}' not found — add it first")
+    profile_mod.patch(c, {"accessories": accessories})
+    store.save(c)
+    return {"accessory": acc_name, "ref_image": rel,
+            "url": f"/api/characters/file/{char_id}/{rel}"}
+
+
+@router.delete("/{char_id}/accessories/{acc_name}")
+async def delete_accessory(char_id: str, acc_name: str):
+    c = _get(char_id)
+    prof = profile_mod.get(c)
+    accessories = [a for a in (prof.get("accessories") or [])
+                   if a["name"].lower() != acc_name.lower()]
+    profile_mod.patch(c, {"accessories": accessories})
+    store.save(c)
+    return {"ok": True}
+
+
 @router.get("/{char_id}/life")
-async def life_feed(char_id: str, limit: int = 50):
+async def life_feed(char_id: str, limit: int = 50, before: float | None = None):
     _get(char_id)
-    return profile_mod.list_events(char_id, min(limit, 200))
+    return profile_mod.list_events(char_id, min(limit, 200), before=before)
+
+
+@router.get("/{char_id}/life/day")
+async def life_day(char_id: str, date: str):
+    """All life events for a given date (YYYY-MM-DD) in the character's local timezone."""
+    import datetime as _dt
+    _get(char_id)
+    try:
+        d = _dt.date.fromisoformat(date)
+    except ValueError:
+        raise HTTPException(400, "date must be YYYY-MM-DD")
+    start = _dt.datetime(d.year, d.month, d.day, 0, 0, 0).timestamp()
+    end   = _dt.datetime(d.year, d.month, d.day, 23, 59, 59).timestamp()
+    return profile_mod.list_events_range(char_id, start, end)
 
 
 @router.delete("/{char_id}/life/{event_id}")

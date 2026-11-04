@@ -401,12 +401,26 @@ function lifeView(busy) {
   const spaces = (prof.spaces || []);
 
   // ── profile panel ──
-  const spacesHtml = spaces.map((sp, i) => `
-    <div class="row mt-s" style="gap:6px;align-items:center">
-      <input style="width:110px" data-sp-name="${i}" value="${esc(sp.name || '')}" placeholder="e.g. Bedroom" ${dis}>
-      <input style="flex:1" data-sp-desc="${i}" value="${esc(sp.description || '')}" placeholder="cosy room with fairy lights and books" ${dis}>
-      <button class="small bad" data-sp-del="${i}" ${dis}>×</button>
-    </div>`).join('');
+  const spacesHtml = spaces.map((sp, i) => {
+    const hasRef = sp.ref_image;
+    const refUrl = hasRef ? `/api/characters/file/${CH}/spaces/${sp.ref_image.split('/').pop()}` : '';
+    return `
+    <div class="card pad mt-s" style="padding:8px;background:var(--bg2,#f8f8f8)">
+      <div class="row" style="gap:6px;align-items:center">
+        <input style="width:110px" data-sp-name="${i}" value="${esc(sp.name || '')}" placeholder="e.g. Bedroom" ${dis}>
+        <input style="flex:1" data-sp-desc="${i}" value="${esc(sp.description || '')}" placeholder="cosy room with fairy lights and books" ${dis}>
+        <button class="small bad" data-sp-del="${i}" ${dis}>×</button>
+      </div>
+      <div class="row mt-s" style="gap:8px;align-items:center">
+        ${hasRef ? `<img src="${esc(refUrl)}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--line)">` : '<div style="width:48px;height:48px;border-radius:6px;border:2px dashed var(--line);display:flex;align-items:center;justify-content:center;color:var(--mute);font-size:18px">+</div>'}
+        <div style="flex:1">
+          <div class="mute small" style="margin-bottom:3px">Room reference photo</div>
+          <input type="file" data-sp-ref-upload="${i}" accept="image/*" style="font-size:11px;width:100%" ${dis}>
+        </div>
+        ${hasRef ? `<button class="small bad" data-sp-ref-del="${i}" title="Remove room photo" ${dis}>✕ ref</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
 
   // ── goals panel ──
   const goals = LIFE_GOALS || [];
@@ -498,6 +512,29 @@ function lifeView(busy) {
       <h4 style="margin:12px 0 4px">Spaces she lives in</h4>
       <div id="vl-spaces">${spacesHtml}</div>
       <button class="small mt-s" id="vl-sp-add" ${dis}>+ Add space</button>
+      <h4 style="margin:16px 0 4px">Recurring accessories &amp; props</h4>
+      <div class="mute small" style="margin-bottom:6px">Phone, laptop, bag, mug — upload a ref photo so they look the same in every picture.</div>
+      <div id="vl-accessories">${(prof.accessories || []).map(a => {
+        const hasRef = a.ref_image;
+        const refUrl = hasRef ? `/api/characters/file/${CH}/accessories/${a.ref_image.split('/').pop()}` : '';
+        return `<div class="card pad mt-s" style="padding:8px;background:var(--bg2,#f8f8f8)">
+          <div class="row" style="gap:6px;align-items:center">
+            <b style="min-width:80px">${esc(a.name)}</b>
+            <span class="mute small" style="flex:1">${esc(a.description || '')}</span>
+            <button class="small bad" data-acc-del="${esc(a.name)}" ${dis}>×</button>
+          </div>
+          <div class="row mt-s" style="gap:8px;align-items:center">
+            ${hasRef ? `<img src="${esc(refUrl)}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--line)">` : '<div style="width:48px;height:48px;border-radius:6px;border:2px dashed var(--line);display:flex;align-items:center;justify-content:center;color:var(--mute);font-size:18px">+</div>'}
+            <input type="file" data-acc-ref-upload="${esc(a.name)}" accept="image/*" style="font-size:11px;flex:1" ${dis}>
+            ${hasRef ? `<button class="small bad" data-acc-ref-del="${esc(a.name)}" ${dis}>✕ ref</button>` : ''}
+          </div>
+        </div>`;
+      }).join('')}</div>
+      <div class="row mt-s" style="gap:6px">
+        <input id="vl-acc-name" placeholder="e.g. iPhone 17" style="width:120px" ${dis}>
+        <input id="vl-acc-desc" placeholder="description (optional)" style="flex:1" ${dis}>
+        <button class="small" id="vl-acc-add" ${dis}>+ Add</button>
+      </div>
       <label class="f mt-s">Current context<input id="vl-ctx" value="${esc(prof.current_context || '')}" placeholder="just moved to a new city for a job" ${dis}></label>
       <div class="row mt-s" style="gap:8px"><button class="primary" id="vl-save" ${dis}>Save profile</button></div>
       <h4 style="margin:16px 0 4px">Energy</h4>
@@ -751,12 +788,64 @@ function wireLife() {
   $e('vl-sp-add') && ($e('vl-sp-add').onclick = () => {
     const box = document.getElementById('vl-spaces');
     const i = box.querySelectorAll('[data-sp-name]').length;
-    const row = document.createElement('div'); row.className = 'row mt-s'; row.style.cssText = 'gap:6px;align-items:center';
-    row.innerHTML = `<input style="width:110px" data-sp-name="${i}" placeholder="e.g. Balcony"><input style="flex:1" data-sp-desc="${i}" placeholder="morning sun, cane chair, street below"><button class="small bad" data-sp-del="${i}">×</button>`;
-    row.querySelector('[data-sp-del]').onclick = e => { e.target.closest('.row').remove(); };
-    box.appendChild(row);
+    const card = document.createElement('div'); card.className = 'card pad mt-s'; card.style.cssText = 'padding:8px;background:var(--bg2,#f8f8f8)';
+    card.innerHTML = `<div class="row" style="gap:6px;align-items:center"><input style="width:110px" data-sp-name="${i}" placeholder="e.g. Balcony"><input style="flex:1" data-sp-desc="${i}" placeholder="morning sun, cane chair, street below"><button class="small bad" data-sp-del="${i}">×</button></div>`;
+    card.querySelector('[data-sp-del]').onclick = e => { e.target.closest('.card').remove(); };
+    box.appendChild(card);
   });
-  document.querySelectorAll('[data-sp-del]').forEach(b => b.onclick = e => e.target.closest('.row').remove());
+  document.querySelectorAll('[data-sp-del]').forEach(b => b.onclick = e => e.target.closest('.card').remove());
+
+  // space reference image upload
+  document.querySelectorAll('[data-sp-ref-upload]').forEach(inp => inp.onchange = async () => {
+    const idx = inp.getAttribute('data-sp-ref-upload');
+    const nameEl = document.querySelector(`[data-sp-name="${idx}"]`);
+    const spaceName = nameEl ? nameEl.value.trim() : '';
+    if (!spaceName || !inp.files[0]) return;
+    const fd = new FormData(); fd.append('file', inp.files[0]);
+    try {
+      await call('/' + CID + `/spaces/${encodeURIComponent(spaceName)}/ref`, {method: 'POST', form: fd});
+      reload();
+    } catch(e) { showErr('Space ref upload failed: ' + (e.detail || e.message || e)); }
+  });
+  document.querySelectorAll('[data-sp-ref-del]').forEach(b => b.onclick = async () => {
+    const idx = b.getAttribute('data-sp-ref-del');
+    const nameEl = document.querySelector(`[data-sp-name="${idx}"]`);
+    const spaceName = nameEl ? nameEl.value.trim() : '';
+    if (!spaceName) return;
+    await call('/' + CID + `/spaces/${encodeURIComponent(spaceName)}/ref`, {method: 'DELETE'});
+    reload();
+  });
+
+  // accessories
+  $e('vl-acc-add') && ($e('vl-acc-add').onclick = async () => {
+    const name = ($e('vl-acc-name').value || '').trim();
+    const desc = ($e('vl-acc-desc').value || '').trim();
+    if (!name) return;
+    const fd = new FormData(); fd.append('name', name); if (desc) fd.append('description', desc);
+    try {
+      await call('/' + CID + '/accessories', {method: 'POST', form: fd});
+      reload();
+    } catch(e) { showErr('Add accessory failed: ' + (e.detail || e.message || e)); }
+  });
+  document.querySelectorAll('[data-acc-del]').forEach(b => b.onclick = async () => {
+    const name = b.getAttribute('data-acc-del');
+    await call('/' + CID + `/accessories/${encodeURIComponent(name)}`, {method: 'DELETE'});
+    reload();
+  });
+  document.querySelectorAll('[data-acc-ref-upload]').forEach(inp => inp.onchange = async () => {
+    const accName = inp.getAttribute('data-acc-ref-upload');
+    if (!accName || !inp.files[0]) return;
+    const fd = new FormData(); fd.append('file', inp.files[0]);
+    try {
+      await call('/' + CID + `/accessories/${encodeURIComponent(accName)}/ref`, {method: 'POST', form: fd});
+      reload();
+    } catch(e) { showErr('Accessory ref upload failed: ' + (e.detail || e.message || e)); }
+  });
+  document.querySelectorAll('[data-acc-ref-del]').forEach(b => b.onclick = async () => {
+    const accName = b.getAttribute('data-acc-ref-del');
+    await call('/' + CID + `/accessories/${encodeURIComponent(accName)}/ref`, {method: 'DELETE'});
+    reload();
+  });
 }
 
 function wireEdit() {
