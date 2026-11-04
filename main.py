@@ -101,6 +101,19 @@ async def characters_js():
     return FileResponse(STATIC / "characters.js", media_type="application/javascript", headers=NO_STORE)
 
 
+@app.get("/life")
+async def life_page():
+    html = (STATIC / "life.html").read_text(encoding="utf-8").replace(
+        'src="/life.js?v=1"', f'src="/life.js?v={int((STATIC / "life.js").stat().st_mtime)}"'
+    )
+    return HTMLResponse(html, headers=NO_STORE)
+
+
+@app.get("/life.js")
+async def life_js():
+    return FileResponse(STATIC / "life.js", media_type="application/javascript", headers=NO_STORE)
+
+
 @app.get("/nxt")
 async def nxt():
     html = (STATIC / "nxt.html").read_text(encoding="utf-8").replace(

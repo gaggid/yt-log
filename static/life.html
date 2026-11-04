@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Virtual Life</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d0d0d;--bg2:#161616;--bg3:#1e1e1e;--surface:#232323;
+  --text:#e8e8e8;--mute:#888;--line:#2e2e2e;
+  --ok:#4caf50;--warn:#ff9800;--bad:#e53935;--accent:#9c6fe4;
+  --accent2:#e4836f;--blue:#5ba3f5;
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+}
+body{background:var(--bg);color:var(--text);height:100dvh;overflow:hidden;display:flex;flex-direction:column}
+
+/* ── top bar ── */
+#topbar{
+  display:flex;align-items:center;gap:12px;
+  padding:10px 18px;border-bottom:1px solid var(--line);
+  background:var(--bg2);flex-shrink:0;
+}
+#topbar h1{font-size:15px;font-weight:700;letter-spacing:.5px;color:var(--accent)}
+#topbar .sp{flex:1}
+#char-select{background:var(--bg3);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:4px 8px;font-size:13px}
+#think-btn{background:var(--accent);color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:13px;cursor:pointer;font-weight:600}
+#think-btn:disabled{opacity:.5;cursor:default}
+
+/* ── three-panel layout ── */
+#panels{display:flex;flex:1;overflow:hidden;gap:0}
+
+/* ── NOW panel (left) ── */
+#now-panel{
+  width:220px;min-width:200px;flex-shrink:0;
+  background:var(--bg2);border-right:1px solid var(--line);
+  overflow-y:auto;padding:14px 12px;display:flex;flex-direction:column;gap:14px;
+}
+#now-panel h3{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--mute);margin-bottom:6px}
+
+.energy-bar-wrap{background:var(--bg3);border-radius:4px;height:7px;overflow:hidden}
+.energy-bar-fill{height:100%;border-radius:4px;transition:width .6s}
+
+.feeling-badge{
+  display:inline-flex;align-items:center;gap:5px;
+  background:var(--bg3);border-radius:20px;padding:4px 10px;font-size:12px;
+  border:1px solid var(--line);
+}
+.feeling-dot{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+
+.space-pill{background:var(--bg3);border-radius:6px;padding:4px 8px;font-size:12px;color:var(--mute)}
+.outfit-line{font-size:12px;line-height:1.4;color:var(--mute);font-style:italic}
+
+.goal-mini{font-size:12px;padding:3px 0;border-bottom:1px solid var(--line)}
+.goal-mini:last-child{border-bottom:none}
+
+#now-loading{color:var(--mute);font-size:12px;text-align:center;padding:20px 0}
+
+/* ── FEED panel (centre) ── */
+#feed-panel{
+  flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden;
+}
+
+/* calendar strip */
+#cal-strip{
+  display:flex;align-items:center;gap:0;
+  border-bottom:1px solid var(--line);background:var(--bg2);
+  padding:8px 12px;flex-shrink:0;overflow-x:auto;
+}
+#cal-strip .cal-arrow{background:none;border:none;color:var(--mute);font-size:18px;cursor:pointer;padding:2px 6px;border-radius:4px}
+#cal-strip .cal-arrow:hover{background:var(--bg3)}
+.cal-day{
+  min-width:46px;padding:5px 4px;border-radius:8px;cursor:pointer;
+  text-align:center;border:none;background:none;color:var(--mute);font-size:12px;
+  position:relative;transition:background .15s;
+}
+.cal-day:hover{background:var(--bg3)}
+.cal-day.active{background:var(--accent);color:#fff;font-weight:700}
+.cal-day.has-events::after{
+  content:'';position:absolute;bottom:3px;left:50%;transform:translateX(-50%);
+  width:5px;height:5px;border-radius:50%;background:var(--accent2);
+}
+.cal-day.active.has-events::after{background:#fff}
+.cal-day .cal-dn{font-size:10px;opacity:.7}
+.cal-day .cal-dd{font-size:14px;font-weight:600}
+
+/* feed scroll area */
+#feed-scroll{flex:1;overflow-y:auto;padding:12px 14px}
+.feed-date-sep{
+  font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.6px;
+  padding:14px 0 6px;display:flex;align-items:center;gap:8px;
+}
+.feed-date-sep::after{content:'';flex:1;height:1px;background:var(--line)}
+
+.feed-card{
+  background:var(--bg2);border-radius:12px;padding:12px 14px;margin-bottom:10px;
+  border:1px solid var(--line);
+}
+.feed-card-header{display:flex;align-items:center;gap:8px;margin-bottom:7px;flex-wrap:wrap}
+.feed-time{font-size:11px;color:var(--mute);white-space:nowrap}
+.space-tag{
+  font-size:11px;background:var(--bg3);border-radius:10px;padding:2px 7px;color:var(--accent)
+}
+.mood-tag{
+  font-size:11px;background:var(--bg3);border-radius:10px;padding:2px 7px;color:var(--accent2)
+}
+.feeling-tag{
+  font-size:11px;background:var(--bg3);border-radius:10px;padding:2px 7px;color:#8ecdf5
+}
+.feed-thought{font-size:13px;line-height:1.5;font-style:italic;color:var(--text);margin-bottom:8px}
+.feed-activity{font-size:11px;color:var(--mute);margin-bottom:6px}
+.feed-image{width:100%;max-width:200px;border-radius:10px;cursor:zoom-in;display:block;margin:8px 0}
+.feed-gp{font-size:11px;color:var(--ok);margin-top:4px}
+.feed-want{font-size:11px;color:var(--accent2);margin-top:4px}
+.feed-debug{margin-top:6px}
+.feed-debug summary{font-size:10px;color:var(--mute);cursor:pointer}
+.feed-debug pre{font-size:9px;color:var(--mute);white-space:pre-wrap;max-height:120px;overflow-y:auto;margin-top:4px;background:var(--bg3);padding:6px;border-radius:4px}
+.feed-sleep{background:var(--bg3);border:1px dashed var(--line);opacity:.6}
+.feed-error{border-color:var(--bad)}
+
+#feed-empty{text-align:center;color:var(--mute);font-size:13px;padding:60px 20px}
+#feed-loading{text-align:center;color:var(--mute);font-size:12px;padding:20px}
+
+/* ── MIND panel (right) ── */
+#mind-panel{
+  width:260px;min-width:220px;flex-shrink:0;
+  background:var(--bg2);border-left:1px solid var(--line);
+  overflow-y:auto;padding:14px 12px;display:flex;flex-direction:column;gap:0;
+}
+.mind-section{border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:12px}
+.mind-section:last-child{border-bottom:none}
+.mind-h{font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:var(--mute);margin-bottom:8px;cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px}
+.mind-h .arrow{font-size:9px;color:var(--mute);transition:transform .2s}
+.mind-h.open .arrow{transform:rotate(90deg)}
+.mind-body{font-size:12px}
+
+/* memory tabs */
+.mem-tabs{display:flex;gap:4px;margin-bottom:8px}
+.mem-tab{background:none;border:1px solid var(--line);border-radius:10px;padding:2px 7px;font-size:10px;color:var(--mute);cursor:pointer}
+.mem-tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
+
+.mem-row{display:flex;align-items:flex-start;gap:6px;padding:4px 0;border-bottom:1px solid var(--line)}
+.mem-row:last-child{border-bottom:none}
+.mem-bar{width:28px;height:4px;border-radius:2px;background:var(--line);flex-shrink:0;margin-top:5px}
+.mem-bar-fill{height:100%;border-radius:2px;background:var(--accent)}
+.mem-content{flex:1;line-height:1.3;color:var(--text)}
+.mem-age{font-size:10px;color:var(--mute);white-space:nowrap}
+
+/* goals */
+.goal-row{padding:5px 0;border-bottom:1px solid var(--line)}
+.goal-row:last-child{border-bottom:none}
+.goal-title{font-weight:600;font-size:12px}
+.goal-notes{font-size:11px;color:var(--mute);margin-top:2px}
+
+/* skills skeleton */
+.skill-row{display:flex;align-items:center;gap:8px;padding:4px 0}
+.skill-name{flex:1;font-size:12px}
+.skill-bar{width:60px;height:4px;border-radius:2px;background:var(--line)}
+.skill-fill{height:100%;border-radius:2px;background:var(--accent2)}
+.skill-level{font-size:10px;color:var(--mute);white-space:nowrap}
+
+/* image zoom overlay */
+#zoom-overlay{
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;
+  align-items:center;justify-content:center;cursor:zoom-out;
+}
+#zoom-overlay.on{display:flex}
+#zoom-overlay img{max-width:90vw;max-height:90dvh;border-radius:12px;object-fit:contain}
+
+/* scrollbar */
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--line);border-radius:2px}
+
+@media(max-width:700px){
+  #now-panel{display:none}
+  #mind-panel{display:none}
+}
+@media(max-width:900px){
+  #now-panel{width:180px}
+  #mind-panel{width:200px}
+}
+</style>
+</head>
+<body>
+<div id="topbar">
+  <h1>&#9679; VIRTUAL LIFE</h1>
+  <select id="char-select"><option value="">Loading…</option></select>
+  <span class="sp"></span>
+  <button id="think-btn">Think now</button>
+</div>
+
+<div id="panels">
+  <!-- LEFT: NOW -->
+  <div id="now-panel">
+    <div id="now-loading">Loading…</div>
+  </div>
+
+  <!-- CENTRE: FEED -->
+  <div id="feed-panel">
+    <div id="cal-strip">
+      <button class="cal-arrow" id="cal-prev">&#8249;</button>
+      <div id="cal-days" style="display:flex;gap:3px"></div>
+      <button class="cal-arrow" id="cal-next">&#8250;</button>
+    </div>
+    <div id="feed-scroll">
+      <div id="feed-loading">Loading…</div>
+    </div>
+  </div>
+
+  <!-- RIGHT: MIND -->
+  <div id="mind-panel">
+    <div class="mind-section">
+      <div class="mind-h open" data-sec="memories"><span class="arrow">&#9658;</span> Memories</div>
+      <div class="mind-body" id="mind-memories">
+        <div class="mem-tabs">
+          <button class="mem-tab active" data-mcat="all">All</button>
+          <button class="mem-tab" data-mcat="episodic">Activity</button>
+          <button class="mem-tab" data-mcat="wish">Wishes</button>
+          <button class="mem-tab" data-mcat="note">Notes</button>
+        </div>
+        <div id="mem-list"><span style="color:var(--mute);font-size:11px">Loading…</span></div>
+      </div>
+    </div>
+    <div class="mind-section">
+      <div class="mind-h open" data-sec="goals"><span class="arrow">&#9658;</span> Goals</div>
+      <div class="mind-body" id="mind-goals">
+        <div id="goal-list"><span style="color:var(--mute);font-size:11px">Loading…</span></div>
+        <a id="goals-link" href="#" style="font-size:10px;color:var(--accent);display:block;margin-top:6px">Edit goals in character window →</a>
+      </div>
+    </div>
+    <div class="mind-section">
+      <div class="mind-h open" data-sec="skills"><span class="arrow">&#9658;</span> Skills</div>
+      <div class="mind-body" id="mind-skills">
+        <div id="skill-list"><span style="color:var(--mute);font-size:11px">Coming in Phase I</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- zoom overlay -->
+<div id="zoom-overlay" onclick="this.classList.remove('on')">
+  <img id="zoom-img" src="" alt="">
+</div>
+
+<script src="/life.js?v=1"></script>
+</body>
+</html>
