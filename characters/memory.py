@@ -10,7 +10,21 @@ from story import db
 
 HALF_LIFE_DAYS = 7.0
 FADE_THRESHOLD = 0.04   # strength below this → not retrieved (≈40 days at default decay)
-MAX_RETRIEVE   = 6      # how many memories the brain gets per think
+MAX_RETRIEVE   = 7      # how many memories the brain gets per think (7 = episodic×3 + reflection×2 + achievement×1 + discovery×1)
+
+# Phase M — experience taxonomy
+CATEGORIES = {
+    "episodic":     "Recent activity",
+    "observation":  "Observations",
+    "learning":     "Learnings",
+    "achievement":  "Achievements",
+    "discovery":    "Discoveries",
+    "reflection":   "Reflections",
+    "desire":       "Desires",
+    "wish":         "Fashion & wardrobe wishes",
+    "note":         "Notes & reminders",
+    "manual":       "Notes & reminders",
+}
 
 _STOP = {"the", "and", "for", "she", "her", "was", "are", "with", "that", "this",
          "have", "from", "just", "been", "like", "what", "when", "felt", "then"}
@@ -111,6 +125,43 @@ def retrieve(char_id: str, context: str = "", n: int = MAX_RETRIEVE) -> list[dic
     return top
 
 
+def retrieve_by_categories(char_id: str, spec: dict[str, int], context: str = "") -> list[dict]:
+    """Pull memories per category with per-category caps.
+
+    spec example: {"episodic": 3, "reflection": 2, "achievement": 1, "discovery": 1}
+    Returns combined list, deduped by id, in descending strength order.
+    """
+    rows = db.q("SELECT * FROM char_memories WHERE char_id=? ORDER BY formed_at DESC", (char_id,))
+    now = time.time()
+
+    by_cat: dict[str, list] = {cat: [] for cat in spec}
+    for r in rows:
+        m = _load(r)
+        cat = m.get("category", "episodic")
+        if cat not in spec:
+            continue
+        s = strength(m, now)
+        if s < FADE_THRESHOLD:
+            continue
+        relevance = 1.0 + 0.6 * _keyword_overlap(m["content"], context)
+        by_cat[cat].append((s * relevance, m))
+
+    result = []
+    seen = set()
+    for cat, limit in spec.items():
+        bucket = sorted(by_cat.get(cat, []), key=lambda x: x[0], reverse=True)
+        for _, m in bucket[:limit]:
+            if m["id"] not in seen:
+                seen.add(m["id"])
+                result.append(m)
+
+    if result:
+        ids = ",".join("?" * len(result))
+        db.ex(f"UPDATE char_memories SET last_accessed_at=? WHERE id IN ({ids})",
+              (now, *[m["id"] for m in result]))
+    return result
+
+
 def memories_prompt(mems: list[dict], at: float | None = None) -> str:
     """Short block for the brain's user prompt — grouped by category, oldest first within group."""
     if not mems:
@@ -124,28 +175,33 @@ def memories_prompt(mems: list[dict], at: float | None = None) -> str:
         bar  = "█" * round(s * 5) + "░" * (5 - round(s * 5))
         return f"[{bar} {age}] {m['content']}"
 
-    by_cat: dict[str, list] = {"wish": [], "note": [], "other": []}
+    # group by category using CATEGORIES order; unknown → episodic bucket
+    buckets: dict[str, list] = {cat: [] for cat in CATEGORIES}
     for m in sorted(mems, key=lambda x: x["formed_at"]):
         cat = m.get("category", "episodic")
-        by_cat["wish" if cat == "wish" else "note" if cat == "note" else "other"].append(m)
+        bucket = cat if cat in buckets else "episodic"
+        buckets[bucket].append(m)
 
     parts = []
-    if by_cat["other"]:
-        parts.append("Recent activity:\n" + "\n".join(_fmt(m) for m in by_cat["other"]))
-    if by_cat["note"]:
-        parts.append("Notes & insights:\n" + "\n".join(_fmt(m) for m in by_cat["note"]))
-    if by_cat["wish"]:
-        parts.append("Fashion & wardrobe wishes:\n" + "\n".join(_fmt(m) for m in by_cat["wish"]))
+    for cat, label in CATEGORIES.items():
+        if buckets[cat]:
+            parts.append(label + ":\n" + "\n".join(_fmt(m) for m in buckets[cat]))
     return "\n\n".join(parts)
 
 
 # ── list / delete (for UI) ────────────────────────────────────────────────────
 
-def list_memories(char_id: str, limit: int = 40) -> list[dict]:
-    rows = db.q(
-        "SELECT * FROM char_memories WHERE char_id=? ORDER BY formed_at DESC LIMIT ?",
-        (char_id, limit),
-    )
+def list_memories(char_id: str, limit: int = 40, category: str | None = None) -> list[dict]:
+    if category:
+        rows = db.q(
+            "SELECT * FROM char_memories WHERE char_id=? AND category=? ORDER BY formed_at DESC LIMIT ?",
+            (char_id, category, limit),
+        )
+    else:
+        rows = db.q(
+            "SELECT * FROM char_memories WHERE char_id=? ORDER BY formed_at DESC LIMIT ?",
+            (char_id, limit),
+        )
     now = time.time()
     return [{**_load(r), "current_strength": round(strength(_load(r), now), 3)} for r in rows]
 

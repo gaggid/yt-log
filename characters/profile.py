@@ -34,6 +34,7 @@ def default_profile() -> dict:
         "accessories": [],   # [{name, description, ref_image}] recurring props with optional ref photos
         "aspirations": [],   # [{id, text, surfaced_count, first_at, last_at, needs_goal_prompt}]
         "archived_interests": [],  # interests whose intensity hit 0 after long inactivity
+        "skills": [],        # [{name, category, hours, level, started_at, last_practiced_at}]
     }
 
 

@@ -1,7 +1,7 @@
 # Virtual Life — Implementation Plan
 
 **Created:** 2026-11-03
-**Last updated:** 2026-11-04 (session 2)
+**Last updated:** 2026-11-04 (session 3)
 **Status tracking:** update the `Status` column in each phase table as work lands.
 
 ---
@@ -66,8 +66,8 @@ Phases 0–H done and committed. Two bugs fixed 2026-11-04 (commit 1a9b876).
 | O | Standalone Virtual Life UI | done | — |
 | K | Feelings engine | done | — |
 | L | Dynamic interests + aspirations | done | — |
-| I | Skills + mastery | pending | P3 |
-| M | Experience taxonomy (richer RAG) | pending | P3 |
+| I | Skills + mastery | done | P3 |
+| M | Experience taxonomy (richer RAG) | done | P3 |
 | J | Internet suite | parked | — |
 
 ---

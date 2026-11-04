@@ -960,9 +960,9 @@ class MemoryReq(BaseModel):
 
 
 @router.get("/{char_id}/memories")
-async def list_memories(char_id: str, limit: int = 40):
+async def list_memories(char_id: str, limit: int = 40, category: str | None = None):
     _get(char_id)
-    return memory_mod.list_memories(char_id, min(limit, 100))
+    return memory_mod.list_memories(char_id, min(limit, 100), category=category)
 
 
 @router.post("/{char_id}/memories")
@@ -977,6 +977,68 @@ async def add_memory(char_id: str, body: MemoryReq):
 async def delete_memory(char_id: str, memory_id: str):
     _get(char_id)
     memory_mod.delete_memory(char_id, memory_id)
+    return {"ok": True}
+
+
+# ── skills ────────────────────────────────────────────────────────────────────
+
+from . import skills as skills_mod  # noqa: E402
+
+class SkillReq(BaseModel):
+    name: str
+    category: str = ""
+    seed_hours: float = 0.0
+
+
+class SkillPatch(BaseModel):
+    hours: float | None = None
+    category: str | None = None
+
+
+@router.get("/{char_id}/skills")
+async def list_skills(char_id: str):
+    c = _get(char_id)
+    prof = profile_mod.get(c)
+    skills = prof.get("skills") or []
+    from .skills import level_for
+    return [{**s, "level_label": level_for(s.get("hours", 0.0))[1]} for s in skills]
+
+
+@router.post("/{char_id}/skills")
+async def add_skill(char_id: str, body: SkillReq):
+    c = _get(char_id)
+    sk = skills_mod.add_skill(c, body.name, body.category, body.seed_hours)
+    store.save(c)
+    return sk
+
+
+@router.patch("/{char_id}/skills/{skill_name}")
+async def patch_skill(char_id: str, skill_name: str, body: SkillPatch):
+    c = _get(char_id)
+    prof = c.get("profile") or {}
+    skills = prof.get("skills") or []
+    sk = next((s for s in skills if s["name"].lower() == skill_name.lower()), None)
+    if not sk:
+        raise HTTPException(404, "skill not found")
+    if body.hours is not None:
+        sk["hours"] = max(0.0, body.hours)
+        from .skills import level_for
+        sk["level"] = level_for(sk["hours"])[0]
+    if body.category is not None:
+        sk["category"] = body.category
+    prof["skills"] = skills
+    c["profile"] = prof
+    store.save(c)
+    return sk
+
+
+@router.delete("/{char_id}/skills/{skill_name}")
+async def delete_skill(char_id: str, skill_name: str):
+    c = _get(char_id)
+    removed = skills_mod.remove_skill(c, skill_name)
+    if not removed:
+        raise HTTPException(404, "skill not found")
+    store.save(c)
     return {"ok": True}
 
 

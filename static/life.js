@@ -267,14 +267,16 @@ function startStatusPoll() {
 
 async function loadMind() {
   if (!CID) return;
-  const [mems, goals, aspirations] = await Promise.all([
+  const [mems, goals, aspirations, skills] = await Promise.all([
     api(`/${CID}/memories?limit=60`).catch(() => []),
     api(`/${CID}/goals`).catch(() => []),
     api(`/${CID}/aspirations`).catch(() => []),
+    api(`/${CID}/skills`).catch(() => []),
   ]);
   renderMemories(mems);
   renderGoals(goals);
   renderAspirations(aspirations);
+  renderSkills(skills);
   updateGoalsLink();
 }
 
@@ -337,6 +339,31 @@ function renderGoals(goals) {
 function updateGoalsLink() {
   const link = document.getElementById('goals-link');
   if (link && CID) link.href = `/#${CID}`;
+}
+
+function renderSkills(skills) {
+  const list = document.getElementById('skill-list');
+  if (!list) return;
+  if (!skills || !skills.length) {
+    list.innerHTML = '<div style="color:var(--mute);font-size:11px">No skills added yet — add them in the character window.</div>';
+    return;
+  }
+  const LEVEL_MAX_H = [0, 5, 20, 60, 150, 300]; // hours for L1–L5, +headroom
+  list.innerHTML = skills.map(sk => {
+    const hours = sk.hours || 0;
+    const level = sk.level || 'L1';
+    const lnum = parseInt(level.replace('L', '')) || 1;
+    const nextThreshold = LEVEL_MAX_H[Math.min(lnum, 5)];
+    const prevThreshold = LEVEL_MAX_H[lnum - 1] || 0;
+    const pct = nextThreshold > prevThreshold
+      ? Math.min(100, Math.round((hours - prevThreshold) / (nextThreshold - prevThreshold) * 100))
+      : 100;
+    return `<div class="skill-row">
+      <span class="skill-name">${esc(sk.name)}</span>
+      <div class="skill-bar"><div class="skill-fill" style="width:${pct}%"></div></div>
+      <span class="skill-level">${esc(level)} · ${hours.toFixed(0)}h</span>
+    </div>`;
+  }).join('');
 }
 
 // ── collapsible mind sections ─────────────────────────────────────────────────

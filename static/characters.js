@@ -596,6 +596,19 @@ function lifeView(busy) {
       <div id="vl-goals-list">${goalCards}</div>
     </div>
 
+    <div class="card pad mt" id="vl-skills-card">
+      <div class="row"><h3 style="margin:0">Skills</h3><span class="sp"></span></div>
+      <div class="mute small mb-s">Practice hours accumulate automatically from activity. Levels: L1 Beginner → L5 Fluent.</div>
+      <div id="vl-skill-list"></div>
+      <div class="row mt-s" style="gap:6px">
+        <input id="vl-sk-name" style="flex:1" placeholder="Skill name (e.g. Bhangra)" ${dis}>
+        <input id="vl-sk-cat" style="width:100px" placeholder="Category" ${dis}>
+        <input id="vl-sk-hours" type="number" min="0" max="500" value="0" style="width:60px" ${dis}>
+        <span class="mute small" style="align-self:center">h</span>
+        <button class="small" id="vl-sk-add" ${dis}>+ Add</button>
+      </div>
+    </div>
+
     <div class="card pad mt">
       <h3 style="margin-top:0">Memories <span class="mute small">${mems.length} total · fades after ~40 days</span></h3>
       <div id="vl-mem-list">${memCards}</div>
@@ -781,6 +794,48 @@ function wireLife() {
     } catch(e) { toast('Could not think: ' + e.message, {bad: true}); }
     finally { if (btn) { btn.disabled = false; btn.textContent = 'What is she thinking?'; } }
   });
+  // skills
+  (async () => {
+    const skList = $e('vl-skill-list');
+    if (!skList) return;
+    const LEVELS = {L1:'Beginner',L2:'Dabbling',L3:'Consistent',L4:'Practiced',L5:'Fluent'};
+    const THRESHOLDS = [0,5,20,60,150,300];
+    const renderSkills = skills => {
+      skList.innerHTML = !skills.length ? '<div class="mute small">No skills yet.</div>' :
+        skills.map(sk => {
+          const lnum = parseInt((sk.level||'L1').replace('L',''))||1;
+          const prev = THRESHOLDS[lnum-1]||0, next = THRESHOLDS[Math.min(lnum,5)];
+          const h = sk.hours||0;
+          const pct = next>prev ? Math.min(100,Math.round((h-prev)/(next-prev)*100)) : 100;
+          return `<div class="row mt-s" style="gap:6px;align-items:center;font-size:12px">
+            <span style="min-width:90px;font-weight:600">${esc(sk.name)}</span>
+            <span class="mute small" style="min-width:60px">${esc(sk.level||'L1')} ${esc(LEVELS[sk.level]||'')}</span>
+            <div style="flex:1;height:5px;background:var(--line);border-radius:3px"><div style="width:${pct}%;height:100%;border-radius:3px;background:var(--accent2)"></div></div>
+            <span class="mute small" style="min-width:30px;text-align:right">${h.toFixed(0)}h</span>
+            <button class="small bad" data-sk-del="${esc(sk.name)}" style="padding:1px 5px">×</button>
+          </div>`;
+        }).join('');
+      skList.querySelectorAll('[data-sk-del]').forEach(btn => {
+        btn.onclick = async () => {
+          await call('/' + CID + '/skills/' + encodeURIComponent(btn.dataset.skDel), {method:'DELETE'}).catch(()=>{});
+          const updated = await call('/' + CID + '/skills').catch(()=>[]);
+          renderSkills(updated);
+        };
+      });
+    };
+    const skills = await call('/' + CID + '/skills').catch(()=>[]);
+    renderSkills(skills);
+    $e('vl-sk-add') && ($e('vl-sk-add').onclick = async () => {
+      const name = ($e('vl-sk-name')||{}).value?.trim();
+      const cat  = ($e('vl-sk-cat')||{}).value?.trim() || '';
+      const hrs  = parseFloat(($e('vl-sk-hours')||{}).value) || 0;
+      if (!name) return;
+      await call('/' + CID + '/skills', {method:'POST', json:{name, category:cat, seed_hours:hrs}}).catch(()=>{});
+      if ($e('vl-sk-name')) $e('vl-sk-name').value = '';
+      const updated = await call('/' + CID + '/skills').catch(()=>[]);
+      renderSkills(updated);
+    });
+  })();
   // wardrobe generation
   $e('vl-ward-gen') && ($e('vl-ward-gen').onclick = async () => {
     const n = parseInt(($e('vl-ward-n')||{}).value||'8');

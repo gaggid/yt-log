@@ -18,7 +18,7 @@ from story import llm as llm_mod
 from story2.schemas import M
 from story.schemas import Str
 
-from . import feeling as feeling_mod, goals as goals_mod, interests as interests_mod, memory as memory_mod, profile as profile_mod, store, world as world_mod
+from . import feeling as feeling_mod, goals as goals_mod, interests as interests_mod, memory as memory_mod, profile as profile_mod, skills as skills_mod, store, world as world_mod
 
 # ── schemas ───────────────────────────────────────────────────────────────────
 
@@ -41,6 +41,7 @@ class ThoughtOut(M):
     feeling_update:   dict = {}  # Phase K: {primary, intensity, secondary} — brain updates the feeling state
     new_interest:     dict = {}  # Phase L: {name, category} — propose a new interest discovered this cycle
     aspiration:       Str  = ""  # Phase L: a half-formed want or aspiration surfaced this cycle
+    memory_category:  Str  = "episodic"  # Phase M: brain classifies the memory type for this cycle
 
 
 class ThoughtRevised(M):
@@ -98,10 +99,22 @@ async def _assemble_context(char: dict, context_override: str, recent_events: li
     except Exception:
         arc, day_arc_text = {}, ""
 
-    # memories
+    # memories — Phase M: pull by category for richer context
     activity_context = context_override or prof.get("current_context") or ""
     try:
-        mems = memory_mod.retrieve(char["id"], context=activity_context, n=memory_mod.MAX_RETRIEVE)
+        # Stage-1 spec: episodic(3) + reflection(2) + achievement(1) + discovery(1) = 7 max
+        mems = memory_mod.retrieve_by_categories(
+            char["id"],
+            {"episodic": 3, "reflection": 2, "achievement": 1, "discovery": 1},
+            context=activity_context,
+        )
+        # fill remaining slots with any category if under budget
+        if len(mems) < memory_mod.MAX_RETRIEVE:
+            extras = memory_mod.retrieve(char["id"], context=activity_context, n=memory_mod.MAX_RETRIEVE)
+            seen = {m["id"] for m in mems}
+            for m in extras:
+                if m["id"] not in seen and len(mems) < memory_mod.MAX_RETRIEVE:
+                    mems.append(m)
         memories_text = memory_mod.memories_prompt(mems)
     except Exception:
         mems, memories_text = [], ""
@@ -218,6 +231,9 @@ def _first_pass_user(ctx: dict, char: dict, context_override: str) -> str:
     interests_line = interests_mod.inject_line(prof)
     if interests_line:
         sections.append(interests_line)
+    skills_line = skills_mod.inject_line(prof)
+    if skills_line:
+        sections.append(skills_line)
     if context:
         sections.append(f"Your context: {context}")
     if ctx["goals_text"]:
@@ -253,7 +269,8 @@ Return ONLY valid JSON:
   "note":             "if you just realized something worth remembering — a reminder, an insight, a decision — write it in one sentence; else empty string",
   "feeling_update":   {"primary": "@@FEELING_VOCAB@@", "intensity": "1-10 integer", "secondary": "one more feeling word or empty string"},
   "new_interest":     "if you genuinely discovered or became curious about something NEW today that is not in your existing interests, return {\"name\": \"short label\", \"category\": \"one word\"}; else {}",
-  "aspiration":       "if a half-formed want or ambition surfaced naturally in your thinking — something you want to do, try, become, or experience — write it in one plain sentence; else empty string. Not a goal, just a floating desire."
+  "aspiration":       "if a half-formed want or ambition surfaced naturally in your thinking — something you want to do, try, become, or experience — write it in one plain sentence; else empty string. Not a goal, just a floating desire.",
+  "memory_category":  "classify this moment's memory: episodic (activity snapshot), observation (something noticed), learning (fact or skill insight), achievement (milestone reached), discovery (new thing enjoyed), reflection (personal insight), desire (a want or craving), wish (clothing/accessory want) — pick exactly one word"
 }""".replace("@@SHOTS@@", shot_choices).replace(
         '"@@FEELING_VOCAB@@"',
         '"one word from: ' + ', '.join(sorted(feeling_mod.ALL_FEELINGS)[:40]) + ' … (pick what genuinely fits this moment)"'
@@ -343,9 +360,12 @@ async def think(char: dict, backend, s: dict, trigger: str = "manual", context_o
     except Exception:
         pass
 
-    # stage 5 — form memory + log
+    # stage 5 — form memory + log (Phase M: use brain-classified category)
     try:
-        memory_mod.form(char["id"], thought.model_dump())
+        mem_cat = thought.memory_category or "episodic"
+        if mem_cat not in memory_mod.CATEGORIES:
+            mem_cat = "episodic"
+        memory_mod.form(char["id"], thought.model_dump(), category=mem_cat)
     except Exception:
         pass
     try:
@@ -405,6 +425,21 @@ async def think(char: dict, backend, s: dict, trigger: str = "manual", context_o
             fresh4 = store.get(char["id"])
             profile_mod.add_aspiration(fresh4, thought.aspiration)
             store.save(fresh4)
+    except Exception:
+        pass
+
+    # Phase I: skill hours bump + level-up event
+    try:
+        fresh5 = store.get(char["id"])
+        levelled = skills_mod.bump_hours(fresh5, thought.activity)
+        store.save(fresh5)
+        for sk_name in levelled:
+            sk = next((s for s in (fresh5.get("profile") or {}).get("skills", []) if s["name"] == sk_name), {})
+            profile_mod.log_event(
+                char["id"], "skill_levelup", trigger,
+                {"activity": thought.activity},
+                {"skill": sk_name, "new_level": sk.get("level", ""), "hours": sk.get("hours", 0)},
+            )
     except Exception:
         pass
 
