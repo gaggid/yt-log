@@ -895,6 +895,8 @@ function wireLife() {
   });
   document.querySelectorAll('[data-sp-del]').forEach(b => b.onclick = e => e.target.closest('.card').remove());
 
+  const _refresh = async () => { C = await call('/' + CID); render(); };
+
   // space reference image upload
   document.querySelectorAll('[data-sp-ref-upload]').forEach(inp => inp.onchange = async () => {
     const idx = inp.getAttribute('data-sp-ref-upload');
@@ -904,7 +906,7 @@ function wireLife() {
     const fd = new FormData(); fd.append('file', inp.files[0]);
     try {
       await call('/' + CID + `/spaces/${encodeURIComponent(spaceName)}/ref`, {method: 'POST', form: fd});
-      reload();
+      await _refresh();
     } catch(e) { showErr('Space ref upload failed: ' + (e.detail || e.message || e)); }
   });
   document.querySelectorAll('[data-sp-ref-del]').forEach(b => b.onclick = async () => {
@@ -913,7 +915,7 @@ function wireLife() {
     const spaceName = nameEl ? nameEl.value.trim() : '';
     if (!spaceName) return;
     await call('/' + CID + `/spaces/${encodeURIComponent(spaceName)}/ref`, {method: 'DELETE'});
-    reload();
+    await _refresh();
   });
 
   // accessories
@@ -924,13 +926,13 @@ function wireLife() {
     const fd = new FormData(); fd.append('name', name); if (desc) fd.append('description', desc);
     try {
       await call('/' + CID + '/accessories', {method: 'POST', form: fd});
-      reload();
+      await _refresh();
     } catch(e) { showErr('Add accessory failed: ' + (e.detail || e.message || e)); }
   });
   document.querySelectorAll('[data-acc-del]').forEach(b => b.onclick = async () => {
     const name = b.getAttribute('data-acc-del');
     await call('/' + CID + `/accessories/${encodeURIComponent(name)}`, {method: 'DELETE'});
-    reload();
+    await _refresh();
   });
   document.querySelectorAll('[data-acc-ref-upload]').forEach(inp => inp.onchange = async () => {
     const accName = inp.getAttribute('data-acc-ref-upload');
@@ -938,13 +940,13 @@ function wireLife() {
     const fd = new FormData(); fd.append('file', inp.files[0]);
     try {
       await call('/' + CID + `/accessories/${encodeURIComponent(accName)}/ref`, {method: 'POST', form: fd});
-      reload();
+      await _refresh();
     } catch(e) { showErr('Accessory ref upload failed: ' + (e.detail || e.message || e)); }
   });
   document.querySelectorAll('[data-acc-ref-del]').forEach(b => b.onclick = async () => {
     const accName = b.getAttribute('data-acc-ref-del');
     await call('/' + CID + `/accessories/${encodeURIComponent(accName)}/ref`, {method: 'DELETE'});
-    reload();
+    await _refresh();
   });
 }
 
