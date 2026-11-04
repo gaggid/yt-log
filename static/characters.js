@@ -1126,7 +1126,7 @@ function openSpaceStudio(initialSpName) {
       try {
         await call('/'+CID+'/spaces/'+encodeURIComponent(spName)+'/generate', {method:'POST', json:{instruction:instr}});
         setStatus('Working…', true); await pollJob(180);
-        setStatus(''); C = await call('/'+CID); await loadImages(); render();
+        setStatus(''); C = await call('/'+CID); await loadImages();
       } catch(e) { setStatus(''); showErr('Generate failed: '+(e.detail||e.message||e)); }
     });
 
@@ -1136,7 +1136,7 @@ function openSpaceStudio(initialSpName) {
       try {
         await call('/'+CID+'/spaces/'+encodeURIComponent(spName)+'/corners', {method:'POST', json:{instruction:instr}});
         setStatus('Working…', true); await pollJob(300);
-        setStatus(''); C = await call('/'+CID); await loadImages(); render();
+        setStatus(''); C = await call('/'+CID); await loadImages();
       } catch(e) { setStatus(''); showErr('Corners failed: '+(e.detail||e.message||e)); }
     });
 
@@ -1162,11 +1162,12 @@ function openSpaceStudio(initialSpName) {
       const url = it.file ? `/api/characters/file/${CID}/${it.file}` : '';
       const ap = it.approved, fail = it.status==='failed', run = it.status==='running';
       const pr = (it.meta||{}).prompt||'';
+      const err = (it.meta||{}).error||'';
       const thumbH = corner ? '120px' : '160px';
       return `<div data-img-id="${esc(it.id)}" style="border:2px solid ${ap?'#22c55e':'var(--line)'};border-radius:12px;overflow:hidden;background:var(--bg);margin-bottom:12px">
         ${url
           ? `<img src="${esc(url)}" style="width:100%;height:${thumbH};display:block;object-fit:cover;cursor:pointer" onclick="chZoom('${esc(url)}')" title="Click to view full size" onerror="this.style.display='none'">`
-          : `<div style="height:${thumbH};display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--mute)">${fail?'✕ failed':run?'⏳ generating…':'—'}</div>`}
+          : `<div style="height:${thumbH};display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:8px;font-size:13px;color:var(--mute)">${fail?'✕ failed':run?'⏳ generating…':'—'}${fail&&err?`<span style="font-size:11px;color:#dc2626;text-align:center;max-width:90%">${esc(err.slice(0,160))}</span>`:''}  </div>`}
         <div style="padding:8px 10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line);background:var(--panel)">
           ${ap ? '<span style="font-size:11px;background:#dcfce7;color:#15803d;border-radius:6px;padding:2px 7px;font-weight:600">✓ approved</span>' : ''}
           ${url && !ap ? `<button data-ss-approve="${esc(it.id)}" style="padding:5px 12px;border:none;border-radius:7px;background:var(--accent);color:var(--accent-ink);font-size:12px;font-weight:600;cursor:pointer">✓ Approve</button>` : ''}
