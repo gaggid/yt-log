@@ -1,7 +1,7 @@
 # Virtual Life — Implementation Plan
 
 **Created:** 2026-11-03
-**Last updated:** 2026-11-04
+**Last updated:** 2026-11-04 (session 2)
 **Status tracking:** update the `Status` column in each phase table as work lands.
 
 ---
@@ -61,11 +61,11 @@ Phases 0–H done and committed. Two bugs fixed 2026-11-04 (commit 1a9b876).
 | F | Goals | done | — |
 | G | Memory | done | — |
 | H | 24-hour day arc + energy | done | — |
-| Bugs | Sleep/weather/eating/wishes fixes | **next** | P0 |
-| N | Space + accessory reference images | pending | P1 |
-| O | Standalone Virtual Life UI | pending | P1 |
-| K | Feelings engine | pending | P2 |
-| L | Dynamic interests + aspirations | pending | P2 |
+| Bugs | Sleep/weather/eating/wishes fixes | done | — |
+| N | Space + accessory reference images | done | — |
+| O | Standalone Virtual Life UI | done | — |
+| K | Feelings engine | done | — |
+| L | Dynamic interests + aspirations | done | — |
 | I | Skills + mastery | pending | P3 |
 | M | Experience taxonomy (richer RAG) | pending | P3 |
 | J | Internet suite | parked | — |
