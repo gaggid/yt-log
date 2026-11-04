@@ -267,13 +267,38 @@ function startStatusPoll() {
 
 async function loadMind() {
   if (!CID) return;
-  const [mems, goals] = await Promise.all([
+  const [mems, goals, aspirations] = await Promise.all([
     api(`/${CID}/memories?limit=60`).catch(() => []),
     api(`/${CID}/goals`).catch(() => []),
+    api(`/${CID}/aspirations`).catch(() => []),
   ]);
   renderMemories(mems);
   renderGoals(goals);
+  renderAspirations(aspirations);
   updateGoalsLink();
+}
+
+function renderAspirations(asps) {
+  const el = document.getElementById('asp-list');
+  if (!el) return;
+  if (!asps || !asps.length) {
+    el.innerHTML = '<div style="color:var(--mute);font-size:11px">None yet — they surface naturally from thinking.</div>';
+    return;
+  }
+  el.innerHTML = asps.map(a => `
+    <div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:6px;font-size:12px">
+      <div style="flex:1;line-height:1.4">${esc(a.text)}
+        ${a.needs_goal_prompt ? '<span style="margin-left:4px;background:var(--accent);color:#fff;border-radius:3px;padding:0 4px;font-size:10px">→ Make goal?</span>' : ''}
+      </div>
+      <span style="color:var(--mute);white-space:nowrap;font-size:10px">×${a.surfaced_count}</span>
+      <button style="background:none;border:none;color:var(--mute);cursor:pointer;font-size:11px;padding:0 2px" data-del-asp="${esc(a.id)}" title="Dismiss">×</button>
+    </div>`).join('');
+  el.querySelectorAll('[data-del-asp]').forEach(btn => {
+    btn.onclick = async () => {
+      await api(`/${CID}/aspirations/${btn.dataset.delAsp}`, { method: 'DELETE' }).catch(() => {});
+      btn.closest('div[style]').remove();
+    };
+  });
 }
 
 function renderMemories(mems) {

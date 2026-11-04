@@ -18,7 +18,7 @@ from story import llm as llm_mod
 from story2.schemas import M
 from story.schemas import Str
 
-from . import feeling as feeling_mod, goals as goals_mod, memory as memory_mod, profile as profile_mod, store, world as world_mod
+from . import feeling as feeling_mod, goals as goals_mod, interests as interests_mod, memory as memory_mod, profile as profile_mod, store, world as world_mod
 
 # ── schemas ───────────────────────────────────────────────────────────────────
 
@@ -39,6 +39,8 @@ class ThoughtOut(M):
     energy_delta:     int = 0    # energy change this activity causes (negative = draining, positive = restoring)
     note:             Str = ""   # self-reminder or realization worth keeping, if any
     feeling_update:   dict = {}  # Phase K: {primary, intensity, secondary} — brain updates the feeling state
+    new_interest:     dict = {}  # Phase L: {name, category} — propose a new interest discovered this cycle
+    aspiration:       Str  = ""  # Phase L: a half-formed want or aspiration surfaced this cycle
 
 
 class ThoughtRevised(M):
@@ -213,6 +215,9 @@ def _first_pass_user(ctx: dict, char: dict, context_override: str) -> str:
         sections.append(f"World: {ctx['world_line']}")
     if ctx.get("feeling_line"):
         sections.append(ctx["feeling_line"])
+    interests_line = interests_mod.inject_line(prof)
+    if interests_line:
+        sections.append(interests_line)
     if context:
         sections.append(f"Your context: {context}")
     if ctx["goals_text"]:
@@ -246,7 +251,9 @@ Return ONLY valid JSON:
   "goal_progress":    "if this activity made concrete progress on a goal, describe WHAT YOU ACTUALLY DID in 6-10 words (e.g. 'practiced first 10 minutes of Bhangra footwork', 'finished chapter 3 of the book'). Do not write meta-reflections or intentions about the goal. Else empty string.",
   "energy_delta":     "integer: how much energy this activity changes. Draining: intense exercise/dance -15 to -20, focused work/study -10 to -15, errands/commute -8 to -12, socialising -6 to -10, casual browsing/reading -2 to -5. Restoring: full meal +8, short nap +20, full night sleep +65, light rest +5. Return a plain integer like -12 or 8.",
   "note":             "if you just realized something worth remembering — a reminder, an insight, a decision — write it in one sentence; else empty string",
-  "feeling_update":   {"primary": "@@FEELING_VOCAB@@", "intensity": "1-10 integer", "secondary": "one more feeling word or empty string"}
+  "feeling_update":   {"primary": "@@FEELING_VOCAB@@", "intensity": "1-10 integer", "secondary": "one more feeling word or empty string"},
+  "new_interest":     "if you genuinely discovered or became curious about something NEW today that is not in your existing interests, return {\"name\": \"short label\", \"category\": \"one word\"}; else {}",
+  "aspiration":       "if a half-formed want or ambition surfaced naturally in your thinking — something you want to do, try, become, or experience — write it in one plain sentence; else empty string. Not a goal, just a floating desire."
 }""".replace("@@SHOTS@@", shot_choices).replace(
         '"@@FEELING_VOCAB@@"',
         '"one word from: ' + ', '.join(sorted(feeling_mod.ALL_FEELINGS)[:40]) + ' … (pick what genuinely fits this moment)"'
@@ -384,6 +391,34 @@ async def think(char: dict, backend, s: dict, trigger: str = "manual", context_o
     except Exception:
         pass
 
+    # Phase L: interest atrophy/engagement + aspiration logging
+    try:
+        fresh3 = store.get(char["id"])
+        interests_mod.tick(fresh3)
+        interests_mod.bump(fresh3, thought.activity)
+        store.save(fresh3)
+    except Exception:
+        pass
+
+    try:
+        if thought.aspiration:
+            fresh4 = store.get(char["id"])
+            profile_mod.add_aspiration(fresh4, thought.aspiration)
+            store.save(fresh4)
+    except Exception:
+        pass
+
+    # Phase L: log new_interest proposal as a life event (owner approves separately)
+    if thought.new_interest and isinstance(thought.new_interest, dict) and thought.new_interest.get("name"):
+        try:
+            profile_mod.log_event(
+                char["id"], "interest_proposal", trigger,
+                {"activity": thought.activity},
+                thought.new_interest,
+            )
+        except Exception:
+            pass
+
     final = thought.model_dump()
     final["latency_ms"] = round((time.time() - t0) * 1000)
     ev = profile_mod.log_event(char["id"], "think", trigger, pipeline_log, final)
@@ -426,11 +461,33 @@ SHOT_CATEGORIES: dict[str, list[str]] = {
     "pov":          ["pov_first_person"],
 }
 _SHOT_HELP = {
-    "front_selfie":     "front_selfie (arm-length selfie / vlog style, face close-up, phone not visible)",
-    "mirror_selfie":    "mirror_selfie (full or half body reflection in mirror, phone in hand in the reflection)",
-    "propped_timer":    "propped_timer (phone on a surface, person in background, phone not visible)",
-    "candid_side":      "candid_side (third-person lifestyle shot, no phone)",
-    "pov_first_person": "pov_first_person (what she sees - hands, food, book, view, no face)",
+    "front_selfie":     (
+        "front_selfie — arm-length face close-up, phone not visible in final frame. "
+        "PICK WHEN: checking appearance, bored and making faces, expressing a mood or emotion, "
+        "quick mood capture, something funny just happened, feeling cute or confident."
+    ),
+    "mirror_selfie":    (
+        "mirror_selfie — full or half-body reflection in a mirror, phone visible in the reflection. "
+        "PICK WHEN: wearing something new or trying an outfit, checking how you look head-to-toe, "
+        "passed a mirror somewhere interesting, want to show the full look not just the face."
+    ),
+    "propped_timer":    (
+        "propped_timer — phone on a surface acting as a stationary camera, person in mid/background, "
+        "phone not visible in frame. "
+        "PICK WHEN: dancing or doing Bhangra practice, yoga, stretching, cooking in the kitchen, "
+        "doing any full-body or movement activity where both hands are busy."
+    ),
+    "candid_side":      (
+        "candid_side — lifestyle shot from a slight side angle, no phone, no posing. "
+        "PICK WHEN: reading, studying, working at a desk, sitting somewhere scenic, "
+        "having tea/coffee, lost in thought, a quiet and atmospheric moment."
+    ),
+    "pov_first_person": (
+        "pov_first_person — first-person view of what the subject sees: hands, food, book, view, "
+        "craft work, screen. Face not in frame, phone not visible. "
+        "PICK WHEN: the star of the moment is an object (a meal, a drink, a book, an item bought, "
+        "a view out a window, something being made or cooked). Subject is the thing, not the person."
+    ),
 }
 
 
@@ -441,8 +498,17 @@ def allowed_shot_types(prof: dict) -> list[str]:
 
 
 def shot_choices_text(types: list[str]) -> str:
-    return ("choose exactly one: " + " | ".join(_SHOT_HELP[t] for t in types)
-            + ". Pick what fits the activity and space most naturally. Empty string if log_photo is false.")
+    choices = " | ".join(_SHOT_HELP[t] for t in types)
+    return (
+        "choose exactly one — read each option's PICK WHEN and select the type whose "
+        "trigger best matches the current activity and subject. "
+        "If the subject is food/drink/an object: pov_first_person. "
+        "If showing an outfit: mirror_selfie. "
+        "If movement/dance/cooking: propped_timer. "
+        "If a quiet atmospheric moment: candid_side. "
+        "If mood/face/emotion: front_selfie. "
+        "Options: " + choices + ". Empty string if log_photo is false."
+    )
 
 
 def wants_auto_draw(prof: dict, thought: dict) -> bool:

@@ -13,7 +13,7 @@ from story2 import describe, jobs, providers, voices
 from story3 import store as media
 from story3.voice import MediaError
 
-from . import avatar, brain as brain_mod, choices, goals as goals_mod, memory as memory_mod, pack, check, edits, profile as profile_mod, render, requests as R, store, studio, studio_edit, wardrobe
+from . import avatar, brain as brain_mod, choices, goals as goals_mod, interests as interests_mod, memory as memory_mod, pack, check, edits, profile as profile_mod, render, requests as R, store, studio, studio_edit, wardrobe
 
 router = APIRouter(prefix="/api/characters")
 NO_CACHE = {"Cache-Control": "no-cache"}               # the browser asks again every time (cheap: 304 when the file is unchanged)
@@ -836,6 +836,70 @@ async def delete_life_event(char_id: str, event_id: str):
     _get(char_id)
     db.ex("DELETE FROM char_life_events WHERE id=? AND char_id=?", (event_id, char_id))
     return {"deleted": event_id}
+
+
+# ── interest proposals ────────────────────────────────────────────────────────
+
+@router.get("/{char_id}/interests/proposals")
+async def list_interest_proposals(char_id: str):
+    """Pending interest_proposal events not yet approved or dismissed."""
+    _get(char_id)
+    rows = db.q(
+        "SELECT * FROM char_life_events WHERE char_id=? AND event_type='interest_proposal' "
+        "AND (outputs NOT LIKE '%\"dismissed\"%') ORDER BY created_at DESC LIMIT 50",
+        (char_id,),
+    )
+    return [{**r, "inputs": db.jload(r["inputs"], {}), "outputs": db.jload(r["outputs"], {})} for r in rows]
+
+
+@router.post("/{char_id}/interests/proposals/{event_id}/approve")
+async def approve_interest_proposal(char_id: str, event_id: str):
+    """Add the proposed interest to the character's profile."""
+    c = _get(char_id)
+    ev = profile_mod.get_event(event_id)
+    if not ev or ev["char_id"] != char_id or ev["event_type"] != "interest_proposal":
+        raise HTTPException(404, "no such proposal")
+    name = ev["outputs"].get("name", "")
+    category = ev["outputs"].get("category", "")
+    if not name:
+        raise HTTPException(400, "proposal has no name")
+    interests_mod.add_character_interest(c, name, category)
+    store.save(c)
+    # mark dismissed so it won't re-appear
+    db.ex(
+        "UPDATE char_life_events SET outputs=json_set(outputs,'$.approved',1) WHERE id=?",
+        (event_id,),
+    )
+    return {"approved": name}
+
+
+@router.post("/{char_id}/interests/proposals/{event_id}/dismiss")
+async def dismiss_interest_proposal(char_id: str, event_id: str):
+    _get(char_id)
+    db.ex(
+        "UPDATE char_life_events SET outputs=json_set(outputs,'$.dismissed',1) WHERE id=?",
+        (event_id,),
+    )
+    return {"dismissed": event_id}
+
+
+# ── aspirations ───────────────────────────────────────────────────────────────
+
+@router.get("/{char_id}/aspirations")
+async def list_aspirations(char_id: str):
+    c = _get(char_id)
+    prof = profile_mod.get(c)
+    return prof.get("aspirations") or []
+
+
+@router.delete("/{char_id}/aspirations/{aspiration_id}")
+async def delete_aspiration(char_id: str, aspiration_id: str):
+    c = _get(char_id)
+    prof = profile_mod.get(c)
+    aspirations = [a for a in (prof.get("aspirations") or []) if a["id"] != aspiration_id]
+    profile_mod.patch(c, {"aspirations": aspirations})
+    store.save(c)
+    return {"deleted": aspiration_id}
 
 
 # ── goals ─────────────────────────────────────────────────────────────────────

@@ -508,7 +508,21 @@ function lifeView(busy) {
           <option value="night owl" ${prof.chronotype==='night owl'?'selected':''}>night owl — slow mornings, peak energy in the evening</option>
         </select></label>
       <h4 style="margin:12px 0 4px">Interests</h4>
-      ${['books','movies','music','food','hobbies'].map(k => `<label class="ch-slot"><span>${k}</span><input id="vl-int-${k}" value="${esc(interests[k] || '')}" placeholder="" ${dis}></label>`).join('')}
+      <div class="mute small" style="margin-bottom:6px">Intensity bar fills automatically as the character engages with each interest over time.</div>
+      ${['books','movies','music','food','hobbies'].map(k => {
+        const raw = interests[k];
+        const idata = (raw && typeof raw === 'object') ? raw : {text: raw || '', intensity: 5};
+        const textVal = idata.text || '';
+        const intensity = Math.max(1, Math.min(10, idata.intensity || 5));
+        const filled = Math.round(intensity / 2);  // 0-5 blocks
+        const bar = '█'.repeat(filled) + '░'.repeat(5 - filled);
+        return `<div class="row mt-s" style="gap:6px;align-items:center">
+          <span style="min-width:52px;font-size:12px;color:var(--mute)">${k}</span>
+          <input style="flex:1" id="vl-int-${k}" data-int-key="${k}" value="${esc(textVal)}" placeholder="" ${dis}>
+          <span title="Intensity ${intensity}/10" style="font-size:11px;letter-spacing:-1px;color:var(--accent);white-space:nowrap">${bar} ${intensity}</span>
+        </div>`;
+      }).join('')}
+      <div id="vl-interest-proposals" style="margin-top:8px"></div>
       <h4 style="margin:12px 0 4px">Spaces she lives in</h4>
       <div id="vl-spaces">${spacesHtml}</div>
       <button class="small mt-s" id="vl-sp-add" ${dis}>+ Add space</button>
@@ -666,6 +680,31 @@ function wireLife() {
   if (!$e('vl-save')) return; // not on life tab
   // load events/goals/memories async; re-render once they arrive so the UI shows real data
   if (LIFE_EVENTS === null) { loadLifeEvents().then(() => { if (CH_TAB === 'life') render(); }); }
+  // load interest proposals and render into the placeholder div
+  call('/' + CID + '/interests/proposals').then(proposals => {
+    const el = document.getElementById('vl-interest-proposals');
+    if (!el || !proposals || !proposals.length) return;
+    el.innerHTML = `<div style="margin-top:10px"><div class="mute small" style="font-weight:600;margin-bottom:4px">New interests Fifi wants to explore</div>` +
+      proposals.filter(p => !p.outputs.approved && !p.outputs.dismissed).map(p => `
+        <div class="row mt-s" style="gap:6px;align-items:center;font-size:12px">
+          <span style="flex:1"><b>${esc(p.outputs.name||'')}</b><span class="mute"> · ${esc(p.outputs.category||'')}</span></span>
+          <button class="small primary" data-int-approve="${esc(p.id)}">Add</button>
+          <button class="small bad" data-int-dismiss="${esc(p.id)}">×</button>
+        </div>`).join('') + '</div>';
+    el.querySelectorAll('[data-int-approve]').forEach(btn => {
+      btn.onclick = async () => {
+        await call('/' + CID + '/interests/proposals/' + btn.dataset.intApprove + '/approve', {method:'POST'});
+        btn.closest('.row').remove();
+        C = await call('/' + CID); render();
+      };
+    });
+    el.querySelectorAll('[data-int-dismiss]').forEach(btn => {
+      btn.onclick = async () => {
+        await call('/' + CID + '/interests/proposals/' + btn.dataset.intDismiss + '/dismiss', {method:'POST'});
+        btn.closest('.row').remove();
+      };
+    });
+  }).catch(() => {});
   pollWardrobeJob();
   const readSpaces = () => {
     const names = [...document.querySelectorAll('[data-sp-name]')];
@@ -681,7 +720,13 @@ function wireLife() {
       fashion_taste: ($e('vl-fashion') || {}).value || '',
       chronotype: ($e('vl-chrono') || {}).value || '',
       sleep_threshold: parseInt(($e('vl-sleep-thr') || {}).value || '20'),
-      interests: Object.fromEntries(['books','movies','music','food','hobbies'].map(k => [k, ($e('vl-int-'+k)||{}).value||''])),
+      interests: Object.fromEntries(['books','movies','music','food','hobbies'].map(k => {
+        const el = $e('vl-int-'+k);
+        const text = el ? el.value : '';
+        const existing = (C.profile && C.profile.interests && C.profile.interests[k]);
+        const meta = (existing && typeof existing === 'object') ? existing : {intensity: 5, last_engaged_ts: Date.now()/1000, added_by: 'owner'};
+        return [k, {...meta, text}];
+      })),
       spaces: readSpaces(),
       current_context: ($e('vl-ctx') || {}).value || '',
     };

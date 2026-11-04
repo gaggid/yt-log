@@ -2,6 +2,7 @@
 Stored in chars.data['profile']. Life events are logged in char_life_events for audit/tuning."""
 import hashlib
 import time
+import uuid
 
 from story import db
 
@@ -31,6 +32,8 @@ def default_profile() -> dict:
         "auto_draw": False,      # draw automatically when the character thinks the moment is worth a picture
         "shot_styles": ["third_person", "selfie", "pov"],   # parent camera categories the character may use
         "accessories": [],   # [{name, description, ref_image}] recurring props with optional ref photos
+        "aspirations": [],   # [{id, text, surfaced_count, first_at, last_at, needs_goal_prompt}]
+        "archived_interests": [],  # interests whose intensity hit 0 after long inactivity
     }
 
 
@@ -105,6 +108,40 @@ def list_events_range(char_id: str, start: float, end: float) -> list[dict]:
         (char_id, start, end),
     )
     return [{**r, "inputs": db.jload(r["inputs"], {}), "outputs": db.jload(r["outputs"], {})} for r in rows]
+
+
+def add_aspiration(char: dict, text: str) -> dict:
+    """Record or increment a character aspiration. Returns the aspiration dict.
+    Caller must call store.save(char) after.
+    """
+    text = text.strip()
+    if not text:
+        return {}
+    prof = dict(char.get("profile") or {})
+    aspirations = list(prof.get("aspirations") or [])
+    # dedupe: match if 2+ keywords overlap
+    text_words = {w.lower() for w in text.split() if len(w) >= 3}
+    for asp in aspirations:
+        asp_words = {w.lower() for w in asp["text"].split() if len(w) >= 3}
+        if len(text_words & asp_words) >= 2:
+            asp["surfaced_count"] += 1
+            asp["last_at"] = time.time()
+            asp["needs_goal_prompt"] = asp["surfaced_count"] >= 3
+            prof["aspirations"] = aspirations
+            char["profile"] = prof
+            return asp
+    new = {
+        "id": "asp-" + uuid.uuid4().hex[:8],
+        "text": text,
+        "surfaced_count": 1,
+        "first_at": time.time(),
+        "last_at": time.time(),
+        "needs_goal_prompt": False,
+    }
+    aspirations.append(new)
+    prof["aspirations"] = aspirations
+    char["profile"] = prof
+    return new
 
 
 def last_run_time(char_id: str) -> float | None:
