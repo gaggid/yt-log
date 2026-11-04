@@ -227,7 +227,7 @@ Return ONLY valid JSON:
   "goal_progress": "if this activity made concrete progress on a goal, describe WHAT YOU ACTUALLY DID in 6-10 words (e.g. 'practiced first 10 minutes of Bhangra footwork', 'finished chapter 3 of the book'). Do not write meta-reflections or intentions about the goal. Else empty string.",
   "energy_delta":  "integer: how much energy this activity changes. Draining: intense exercise/dance -15 to -20, focused work/study -10 to -15, errands/commute -8 to -12, socialising -6 to -10, casual browsing/reading -2 to -5. Restoring: full meal +8, short nap +20, full night sleep +65, light rest +5. Return a plain integer like -12 or 8.",
   "note":          "if you just realized something worth remembering — a reminder, an insight, a decision — write it in one sentence; else empty string"
-}""")
+}""".replace("@@SHOTS@@", shot_choices))
     return "\n\n".join(sections)
 
 

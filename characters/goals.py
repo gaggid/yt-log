@@ -81,6 +81,14 @@ def neglected_goals(char: dict, recent_thoughts: list[dict]) -> list[dict]:
     return [g for g in active if g["title"].lower().split()[0] not in recent_text]
 
 
+_STOP = {"a", "an", "the", "in", "to", "for", "of", "on", "at", "my", "get", "do",
+         "be", "is", "are", "and", "or", "with", "as", "i", "it", "its"}
+
+def _goal_keywords(title: str) -> list[str]:
+    """Significant words from a goal title (3+ chars, not stop words)."""
+    return [w for w in title.lower().split() if len(w) >= 3 and w not in _STOP]
+
+
 def try_log_progress(char: dict, goal_progress: str, save: bool = True) -> bool:
     """If goal_progress from ThoughtOut matches an active goal title, append a note."""
     if not goal_progress.strip():
@@ -91,7 +99,10 @@ def try_log_progress(char: dict, goal_progress: str, save: bool = True) -> bool:
     gp_lower = goal_progress.lower()
     matched = False
     for g in goals:
-        if g.get("status") == "active" and g["title"].lower().split()[0] in gp_lower:
+        if g.get("status") != "active":
+            continue
+        keywords = _goal_keywords(g["title"])
+        if keywords and any(kw in gp_lower for kw in keywords):
             g["progress_notes"] = g.get("progress_notes", []) + [goal_progress.strip()]
             matched = True
     if matched:
