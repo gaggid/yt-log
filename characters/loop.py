@@ -52,6 +52,10 @@ async def _run_one(char: dict, s: dict, key: str) -> None:
     if any(w in activity for w in ("sleep", "sleeping", "asleep", "napping", "nap")):
         return
 
+    # the person decides whether pictures are auto-made; the character decides if the moment is worth one
+    if not brain_mod.wants_auto_draw(profile_mod.get(char), thought):
+        return
+
     try:
         await brain_mod.draw_thought(char, thought["event_id"], thought, s, key, trigger="auto")
     except jobs.JobBusy:

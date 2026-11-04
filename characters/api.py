@@ -676,6 +676,7 @@ class ProfilePatch(BaseModel):
     life_enabled: bool | None = None
     life_interval_m: int | None = None
     auto_draw: bool | None = None
+    shot_styles: list[str] | None = None
 
 
 @router.get("/{char_id}/profile")
@@ -688,6 +689,11 @@ async def get_profile(char_id: str):
 async def patch_profile(char_id: str, body: ProfilePatch):
     c = _get(char_id)
     updates = body.model_dump(exclude_unset=True)
+    if "shot_styles" in updates:
+        ok = [x for x in brain_mod.SHOT_CATEGORIES if x in (updates["shot_styles"] or [])]
+        if not ok:
+            raise HTTPException(400, "pick at least one picture style")
+        updates["shot_styles"] = ok
     profile_mod.patch(c, updates)
     store.save(c)
     return profile_mod.get(c)

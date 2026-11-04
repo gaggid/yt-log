@@ -28,7 +28,8 @@ def default_profile() -> dict:
         "sleep_threshold": 20,   # energy below this → character sleeps (loop skips think+draw)
         "life_enabled": False,
         "life_interval_m": 60,
-        "auto_draw": False,
+        "auto_draw": False,      # draw automatically when the character thinks the moment is worth a picture
+        "shot_styles": ["third_person", "selfie", "pov"],   # parent camera categories the character may use
     }
 
 

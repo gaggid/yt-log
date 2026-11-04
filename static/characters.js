@@ -18,7 +18,22 @@ css.textContent = `
 .ch-pic img{width:100%;border-radius:6px;display:block;background:var(--bg);cursor:zoom-in}
 .ch-pic .ph{aspect-ratio:3/4;display:grid;place-items:center;color:var(--mute);background:var(--bg);border-radius:6px;text-align:center;padding:4px}
 .ch-lora{display:flex;gap:6px;align-items:center;margin:4px 0;font-size:12px}.ch-lora input[type=number]{width:62px}
-@media (max-width:980px){.ch-studio{grid-template-columns:1fr}.ch-side{position:static;max-height:none}}
+.vl-grid{display:grid;grid-template-columns:340px minmax(0,1fr);gap:18px;align-items:start}
+@media (max-width:980px){.ch-studio,.vl-grid{grid-template-columns:1fr}.ch-side{position:static;max-height:none}}
+@media (max-width:640px){
+.ch-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.ch-views{grid-template-columns:repeat(2,minmax(0,1fr))}
+.ch-studio,.vl-grid{gap:12px}
+.ch-slot{grid-template-columns:76px 1fr}
+.ch-pic button.small,.ch-card button.small{padding:6px 10px}
+#app button.small{padding:6px 11px;min-height:32px}
+#app input:not([type=checkbox]):not([type=radio]),#app select,#app textarea{font-size:16px}
+#app .row>label.f,#app .row>select,#app .row>input[type=text]{flex:1 1 100%;min-width:0!important}
+#app .card.pad{padding:12px}
+#vl-spaces .row input{flex:1 1 100%!important;width:auto!important}
+#life-feed-box img{width:96px!important;height:128px!important}
+.dlg .box{max-height:96vh}
+}
 `;
 document.head.append(css);
 
@@ -451,7 +466,7 @@ function lifeView(busy) {
         <div class="row"><span class="badge b-info">${esc(out.mood||'')}</span>${outfitTag}<span class="mute small">${esc(out.activity||'')} · ${esc(out.space||'')} · ${absTime(ev.created_at)}</span></div>
         ${exprTag ? `<div style="margin:2px 0 4px">${exprTag}</div>` : ''}
         <div style="font-style:italic;margin:6px 0">${esc(out.thought||'')}</div>${gp}${noteHtml}${wishHtml}${drawn}
-        ${!drawEv ? `<button class="small primary mt-s" data-draw-ev="${esc(ev.id)}">Draw this look</button>` : '<span class="mute small mt-s">✓ drawn</span>'}
+        ${!drawEv ? `${out.log_photo === false ? '<div class="mute small mt-s">Not worth a picture, she decided. </div>' : ''}<button class="small ${out.log_photo === false ? '' : 'primary'} mt-s" data-draw-ev="${esc(ev.id)}">${out.log_photo === false ? 'Draw anyway' : 'Draw this look'}</button>` : '<span class="mute small mt-s">✓ drawn</span>'}
         <details class="mt-s"><summary class="mute small" style="cursor:pointer">Pipeline debug</summary>
           <pre style="font-size:10px;white-space:pre-wrap;max-height:200px;overflow:auto">${esc(JSON.stringify({shot_type:out.shot_type,expression:out.expression,face_state:out.face_state,image_idea:out.image_idea,outfit:out.outfit,outfit_id:out.outfit_id,wardrobe_want:out.wardrobe_want,goal_progress:out.goal_progress,note:out.note},null,2))}</pre>
         </details>
@@ -461,7 +476,7 @@ function lifeView(busy) {
     return '';
   };
 
-  return `<div style="display:grid;grid-template-columns:340px minmax(0,1fr);gap:18px;align-items:start">
+  return `<div class="vl-grid">
   <div>
     <div class="card pad">
       <h3 style="margin-top:0">Profile</h3>
@@ -504,10 +519,12 @@ function lifeView(busy) {
         <span class="mute small">min</span>
       </label>
       <label style="display:flex;align-items:center;gap:6px">
-        <input type="checkbox" id="vl-auto-draw" ${prof.auto_draw ? 'checked' : ''} ${dis}> Auto-draw after thinking
-        <span class="mute small">(manual think button also draws)</span>
+        <input type="checkbox" id="vl-auto-draw" ${prof.auto_draw ? 'checked' : ''} ${dis}> Auto-draw when she finds it worth logging
       </label>
-      <div class="mute small mt-s">Auto-run always thinks + draws. Manual button respects the auto-draw toggle above.</div>
+      <div class="mute small mt-s">She decides after each thought if the moment deserves a picture. Off: nothing is drawn by itself, use "Draw this look" on any moment. Applies to auto-run and the think button.</div>
+      <h4 style="margin:16px 0 4px">Picture styles</h4>
+      ${[['third_person','Third person','someone else or a timer takes it'],['selfie','Selfie / vlog','front camera or mirror selfie'],['pov','POV','what she sees, her view']].map(([k,l,d]) => `<label style="display:flex;align-items:center;gap:6px;margin:3px 0"><input type="checkbox" data-shot-style="${k}" ${(prof.shot_styles || ['third_person','selfie','pov']).includes(k) ? 'checked' : ''} ${dis}> ${l} <span class="mute small">${d}</span></label>`).join('')}
+      <div class="mute small mt-s">Every picture follows these. With more than one ticked she picks what suits what she is doing.</div>
       <div id="vl-loop-status" class="mute small mt-s"></div>
     </div>
 
@@ -668,7 +685,7 @@ function wireLife() {
     try {
       const ev = await call('/' + CID + '/think', {method: 'POST', json: {}});
       if (ev.ok) {
-        if (autoDraw) {
+        if (autoDraw && ev.log_photo !== false) {
           btn.textContent = 'Drawing…';
           await call('/' + CID + '/life/' + ev.event_id + '/draw', {method: 'POST', json: {}});
           for (let i = 0; i < 90; i++) {
@@ -677,7 +694,7 @@ function wireLife() {
             if (s) { C = s; if (!s.job || s.job.state !== 'running') break; }
           }
         }
-        LIFE_EVENTS = null; await loadLifeEvents(); render(); toast('Thought recorded');
+        LIFE_EVENTS = null; await loadLifeEvents(); render(); toast(autoDraw && ev.log_photo === false ? 'Thought recorded, not worth a picture' : 'Thought recorded');
       }
     } catch(e) { toast('Could not think: ' + e.message, {bad: true}); }
     finally { if (btn) { btn.disabled = false; btn.textContent = 'What is she thinking?'; } }
@@ -721,6 +738,11 @@ function wireLife() {
   });
   $e('vl-auto-draw') && ($e('vl-auto-draw').onchange = async () => {
     await act(null, async () => { await call('/' + CID + '/profile', {method: 'PATCH', json: {auto_draw: $e('vl-auto-draw').checked}}); return true; }, $e('vl-auto-draw').checked ? 'Auto-draw on' : 'Auto-draw off');
+  });
+  document.querySelectorAll('[data-shot-style]').forEach(cb => cb.onchange = async () => {
+    const styles = [...document.querySelectorAll('[data-shot-style]')].filter(x => x.checked).map(x => x.dataset.shotStyle);
+    if (!styles.length) { cb.checked = true; toast('Keep at least one picture style', {bad: true}); return; }
+    await act(null, async () => { C.profile = await call('/' + CID + '/profile', {method: 'PATCH', json: {shot_styles: styles}}); return true; }, 'Picture styles saved');
   });
   $e('vl-interval') && ($e('vl-interval').onchange = async () => {
     const v = parseInt($e('vl-interval').value) || 60;

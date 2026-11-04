@@ -29,6 +29,7 @@ class ThoughtOut(M):
     mood:           Str = ""   # one word
     expression:     Str = ""   # specific facial expression for this moment
     face_state:     Str = ""   # physical face condition (makeup, tiredness, flush, etc.)
+    log_photo:      bool = True   # does the character think this moment is worth a picture?
     shot_type:      Str = ""   # one of the defined shot types — controls camera and phone visibility
     outfit:         Str = ""   # text description of what she is wearing
     outfit_id:      Str = ""   # wardrobe garment id if wearing an item from wardrobe
@@ -182,6 +183,7 @@ Only one thing happens at a time; pick the most realistic activity for this time
 
 def _first_pass_user(ctx: dict, char: dict, context_override: str) -> str:
     prof    = profile_mod.get(char)
+    shot_choices = shot_choices_text(allowed_shot_types(prof))
     context = (context_override or prof.get("current_context") or "").strip()
     _now    = datetime.now()
     today   = _now.strftime("%A, %d %B %Y")
@@ -219,7 +221,8 @@ Return ONLY valid JSON:
   "outfit":        "text description of what you are wearing right now — for display only; the actual clothes in the photo come from your wardrobe or your approved body picture",
   "outfit_id":     "the id of the wardrobe item you want to wear (exactly as listed above); set this to change your outfit in the photo. If empty, your default approved outfit is shown.",
   "wardrobe_want": "if you spot or imagine a piece of clothing you want to own — describe it in one line (e.g. 'dark green silk kurti with mirror work'); else empty string",
-  "shot_type":     "choose exactly one: front_selfie (arm-length selfie, face close-up, phone not visible) | mirror_selfie (full or half body reflection in mirror, phone in hand in the reflection) | propped_timer (phone on a surface, person in background, phone not visible) | pov_first_person (what she sees — hands, food, book, no face) | candid_side (lifestyle shot, no phone). Pick what fits the activity and space most naturally.",
+  "log_photo":     "true or false (a JSON boolean). Would you really take a picture of this moment and keep it? Be selective like a real person: true only for something worth remembering or sharing (a meal, a view, an outfit, progress on a goal, a good mood, something new). Routine or private moments (resting, scrolling, being tired, plain chores) are usually false. If false, leave shot_type and image_idea as empty strings.",
+  "shot_type":     "@@SHOTS@@",
   "image_idea":    "2-3 sentences: what fills the frame, the light, the setting, visible props. Describe ONLY the scene content — do NOT mention the camera, the phone, or how the picture was taken. No pronouns.",
   "goal_progress": "if this activity made concrete progress on a goal, describe WHAT YOU ACTUALLY DID in 6-10 words (e.g. 'practiced first 10 minutes of Bhangra footwork', 'finished chapter 3 of the book'). Do not write meta-reflections or intentions about the goal. Else empty string.",
   "energy_delta":  "integer: how much energy this activity changes. Draining: intense exercise/dance -15 to -20, focused work/study -10 to -15, errands/commute -8 to -12, socialising -6 to -10, casual browsing/reading -2 to -5. Restoring: full meal +8, short nap +20, full night sleep +65, light rest +5. Return a plain integer like -12 or 8.",
@@ -371,6 +374,41 @@ SHOT_DIRECTIONS: dict[str, str] = {
 }
 _DEFAULT_SHOT = "front_selfie"
 
+# parent category chosen by the person -> shot types the character may use
+SHOT_CATEGORIES: dict[str, list[str]] = {
+    "third_person": ["propped_timer", "candid_side"],
+    "selfie":       ["front_selfie", "mirror_selfie"],
+    "pov":          ["pov_first_person"],
+}
+_SHOT_HELP = {
+    "front_selfie":     "front_selfie (arm-length selfie / vlog style, face close-up, phone not visible)",
+    "mirror_selfie":    "mirror_selfie (full or half body reflection in mirror, phone in hand in the reflection)",
+    "propped_timer":    "propped_timer (phone on a surface, person in background, phone not visible)",
+    "candid_side":      "candid_side (third-person lifestyle shot, no phone)",
+    "pov_first_person": "pov_first_person (what she sees - hands, food, book, view, no face)",
+}
+
+
+def allowed_shot_types(prof: dict) -> list[str]:
+    """Shot types allowed by the profile's shot_styles (all when unset or empty)."""
+    cats = [c for c in (prof.get("shot_styles") or []) if c in SHOT_CATEGORIES] or list(SHOT_CATEGORIES)
+    return [t for c in SHOT_CATEGORIES if c in cats for t in SHOT_CATEGORIES[c]]
+
+
+def shot_choices_text(types: list[str]) -> str:
+    return ("choose exactly one: " + " | ".join(_SHOT_HELP[t] for t in types)
+            + ". Pick what fits the activity and space most naturally. Empty string if log_photo is false.")
+
+
+def wants_auto_draw(prof: dict, thought: dict) -> bool:
+    """Auto-draw only when the person turned it on AND the character judged the moment worth logging."""
+    if not prof.get("auto_draw"):
+        return False
+    lp = thought.get("log_photo", True)
+    if isinstance(lp, str):
+        lp = lp.strip().lower() not in ("false", "no", "0", "")
+    return bool(lp)
+
 # ── draw ──────────────────────────────────────────────────────────────────────
 
 async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: str,
@@ -379,13 +417,16 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
     from story3 import store as media
     from . import studio
 
-    image_idea  = thought.get("image_idea", "")
+    image_idea  = thought.get("image_idea", "") or thought.get("activity", "") or thought.get("thought", "")   # skipped moments drawn by hand have no idea written
     outfit      = thought.get("outfit", "")
     outfit_id   = thought.get("outfit_id", "").strip()
     expression  = thought.get("expression", "")
     face_state  = thought.get("face_state", "")
-    shot_type   = thought.get("shot_type", "") or _DEFAULT_SHOT
-    shot_dir    = SHOT_DIRECTIONS.get(shot_type, SHOT_DIRECTIONS[_DEFAULT_SHOT])
+    allowed     = allowed_shot_types(profile_mod.get(char))
+    shot_type   = thought.get("shot_type", "")
+    if shot_type not in allowed:   # the person's shot styles decide; pick the nearest allowed type
+        shot_type = allowed[0]
+    shot_dir    = SHOT_DIRECTIONS[shot_type]
 
     canon     = store.canon_items(char)
     has_refs  = "portrait" in canon
