@@ -152,7 +152,7 @@ function render() {
     ${tabBar()}
     ${studioHtml}`;
   document.getElementById('tab-gallery').onclick = () => { CH_TAB = 'gallery'; render(); };
-  document.getElementById('tab-life').onclick    = () => { CH_TAB = 'life'; LIFE_EVENTS = null; LIFE_GOALS = null; LIFE_MEMORIES = null; render(); };
+  document.getElementById('tab-life').onclick    = () => { CH_TAB = 'life'; LIFE_EVENTS = null; LIFE_GOALS = null; LIFE_MEMORIES = null; LIFE_ASPIRATIONS = null; render(); };
   wire();
 }
 function refreshCenter() {
@@ -406,7 +406,7 @@ function inPlaceCard(busy) {
     </div></div>`;
 }
 
-let LIFE_GOALS = null, LIFE_MEMORIES = null;
+let LIFE_GOALS = null, LIFE_MEMORIES = null, LIFE_ASPIRATIONS = null;
 
 function lifeView(busy) {
   const dis = busy ? 'disabled' : '';
@@ -425,7 +425,6 @@ function lifeView(busy) {
         <input style="width:110px" data-sp-name="${i}" value="${esc(sp.name || '')}" placeholder="e.g. Bedroom" ${dis}>
         <input style="flex:1;width:calc(100% - 120px);margin-left:6px" data-sp-desc="${i}" value="${esc(sp.description || '')}" placeholder="cosy room with fairy lights and books" ${dis}>
       </div>
-      <button class="small primary" data-sp-open="${esc(sp.name || '')}" ${dis}>Open Studio</button>
       <button class="small bad" data-sp-del="${i}" ${dis}>×</button>
     </div>`;
   }).join('');
@@ -531,9 +530,9 @@ function lifeView(busy) {
         </div>`;
       }).join('')}
       <div id="vl-interest-proposals" style="margin-top:8px"></div>
-      <h4 style="margin:12px 0 4px">Spaces she lives in</h4>
+      <div class="row" style="align-items:center;margin:12px 0 4px"><h4 style="margin:0">Spaces she lives in</h4><span class="sp"></span>${spaces.length ? `<button class="small primary" id="vl-sp-studio" ${dis}>Space Studio →</button>` : ''}</div>
       <div id="vl-spaces">${spacesHtml}</div>
-      <button class="small mt-s" id="vl-sp-add" ${dis}>+ Add space</button>
+      <div class="row mt-s" style="gap:6px"><button class="small" id="vl-sp-add" ${dis}>+ Add space</button>${spaces.length ? `<button class="small primary" id="vl-sp-studio2" ${dis}>Space Studio →</button>` : ''}</div>
       <h4 style="margin:16px 0 4px">Recurring accessories &amp; props</h4>
       <div class="mute small" style="margin-bottom:6px">Phone, laptop, bag, mug — upload a ref photo so they look the same in every picture.</div>
       <div id="vl-accessories">${(prof.accessories || []).map(a => {
@@ -559,17 +558,46 @@ function lifeView(busy) {
       </div>
       <label class="f mt-s">Current context<input id="vl-ctx" value="${esc(prof.current_context || '')}" placeholder="just moved to a new city for a job" ${dis}></label>
       <div class="row mt-s" style="gap:8px"><button class="primary" id="vl-save" ${dis}>Save profile</button></div>
-      <h4 style="margin:16px 0 4px">Energy</h4>
-      ${(() => { const e = prof.energy ?? 80; const col = e > 60 ? 'var(--ok)' : e > 30 ? 'var(--warn)' : 'var(--bad,#c0392b)';
+      <h4 style="margin:16px 0 4px">Energy &amp; Feeling</h4>
+      ${(() => {
+        const e = prof.energy ?? 80;
+        const col = e > 60 ? 'var(--ok)' : e > 30 ? 'var(--warn)' : 'var(--bad,#c0392b)';
+        const feel = prof.current_feeling || {};
+        const fPrimary = feel.primary || '';
+        const fInt = feel.intensity || '';
+        const feelHtml = fPrimary
+          ? `<span class="badge" style="background:var(--panel);border:1px solid var(--line);font-size:11px">${esc(fPrimary)}${fInt ? ' · '+fInt+'/10' : ''}</span>`
+          : `<span class="mute small">no feeling set yet</span>`;
+        const feelingOpts = ['','peaceful','content','grateful','settled','cosy','satisfied','excited','hopeful','proud','inspired','playful','flirtatious','amorous','euphoric','radiant','giddy','elated','ambitious','determined','energised','focused','driven','motivated','purposeful','anxious','irritable','bored','frustrated','disappointed','guilty','embarrassed','overwhelmed','deflated','insecure','resentful','drained','nostalgic','conflicted','restless','melancholy','wistful','curious','unsettled','numb','pensive','bittersweet','yearning','detached','tired-but-happy','drained-and-blank','wound-up','buzzing','restless-energy','heavy','light','desirous','longing','aroused','craving','infatuated','possessive','hungry','tempted','warm','affectionate','tender','connected','lonely','left-out','jealous','seen','invisible','needy'].map(f => `<option value="${f}" ${f===fPrimary?'selected':''}>${f||'— pick feeling —'}</option>`).join('');
         return `<div class="row" style="align-items:center;gap:8px">
           <div style="flex:1;height:8px;background:var(--line);border-radius:4px">
             <div style="width:${e}%;height:100%;border-radius:4px;background:${col};transition:width .4s"></div>
           </div>
           <span class="mute small" style="white-space:nowrap">${e}/100</span>
         </div>
+        <div class="row mt-s" style="gap:6px;align-items:center">
+          <span class="mute small" style="min-width:50px">feeling</span>${feelHtml}
+        </div>
+        <details class="mt-s" style="font-size:12px">
+          <summary class="mute small" style="cursor:pointer">Override energy &amp; feeling</summary>
+          <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
+            <div class="row" style="gap:6px;align-items:center">
+              <span class="mute small" style="min-width:50px">energy</span>
+              <input type="range" id="vl-energy-ov" min="0" max="100" value="${e}" style="flex:1" ${dis}>
+              <span id="vl-energy-ov-val" style="font-size:12px;min-width:28px">${e}</span>
+            </div>
+            <div class="row" style="gap:6px;align-items:center">
+              <span class="mute small" style="min-width:50px">feeling</span>
+              <select id="vl-feeling-ov" style="flex:1;font-size:12px" ${dis}>${feelingOpts}</select>
+              <input type="number" id="vl-feeling-int" min="1" max="10" value="${fInt||7}" style="width:44px;font-size:12px" placeholder="1-10" ${dis}>
+            </div>
+            <button class="small primary" id="vl-override-apply" ${dis}>Apply override</button>
+          </div>
+        </details>
         <div class="mute small mt-s" style="display:flex;align-items:center;gap:8px">
           Sleep below <input type="number" id="vl-sleep-thr" min="5" max="40" value="${prof.sleep_threshold ?? 20}" style="width:48px" ${dis}> energy — restores ~12/hour while asleep.
-        </div>`; })()}
+        </div>`;
+      })()}
       <h4 style="margin:16px 0 4px">Auto life</h4>
       <label style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
         <input type="checkbox" id="vl-enabled" ${prof.life_enabled ? 'checked' : ''} ${dis}> Auto-run when idle
@@ -602,6 +630,12 @@ function lifeView(busy) {
       <div class="row"><h3 style="margin:0">Goals</h3><span class="sp"></span><button class="small primary" id="vl-goal-add" ${dis}>+ Add goal</button></div>
       <div class="mute small">Things she is working toward — the brain plans thoughts around active goals.</div>
       <div id="vl-goals-list">${goalCards}</div>
+    </div>
+
+    <div class="card pad mt" id="vl-aspirations-card">
+      <div class="row"><h3 style="margin:0">Aspirations</h3></div>
+      <div class="mute small mb-s">Things she wishes for or wants to become — emerge naturally from thoughts, can be dismissed once achieved.</div>
+      <div id="vl-asp-list"><div class="mute small">Loading…</div></div>
     </div>
 
     <div class="card pad mt" id="vl-skills-card">
@@ -686,14 +720,16 @@ function pollWardrobeJob() {
 }
 
 async function loadLifeEvents() {
-  const [evs, goals, mems] = await Promise.allSettled([
+  const [evs, goals, mems, asps] = await Promise.allSettled([
     call('/' + CID + '/life'),
     call('/' + CID + '/goals'),
     call('/' + CID + '/memories'),
+    call('/' + CID + '/aspirations'),
   ]);
-  LIFE_EVENTS   = evs.status   === 'fulfilled' ? evs.value   : [];
-  LIFE_GOALS    = goals.status === 'fulfilled' ? goals.value : [];
-  LIFE_MEMORIES = mems.status  === 'fulfilled' ? mems.value  : [];
+  LIFE_EVENTS      = evs.status    === 'fulfilled' ? evs.value    : [];
+  LIFE_GOALS       = goals.status  === 'fulfilled' ? goals.value  : [];
+  LIFE_MEMORIES    = mems.status   === 'fulfilled' ? mems.value   : [];
+  LIFE_ASPIRATIONS = asps.status   === 'fulfilled' ? asps.value   : [];
 }
 
 function wireLife() {
@@ -906,211 +942,65 @@ function wireLife() {
   const _refresh = async () => { C = await call('/' + CID); render(); };
 
   // ── Space Studio modal ──────────────────────────────────────────────────
-  const openSpaceStudio = (spName) => {
-    const existing = document.getElementById('sp-studio-overlay');
-    if (existing) existing.remove();
-
-    const ov = document.createElement('div');
-    ov.id = 'sp-studio-overlay';
-    ov.className = 'sp-studio-overlay';
-    ov.innerHTML = `
-      <div class="sp-studio" id="sp-studio-box">
-        <div class="sp-studio-head">
-          <b style="font-size:16px">Space Studio</b>
-          <span class="badge b-info">${esc(spName)}</span>
-          <span class="sp"></span>
-          <button class="small" id="ss-close">× Close</button>
-        </div>
-        <div class="sp-studio-body">
-          <div class="sp-studio-ctrl">
-            <div>
-              <label class="f" style="font-size:12px">Space name<input id="ss-name" value="${esc(spName)}"></label>
-            </div>
-            <div>
-              <label class="f" style="font-size:12px">Description<textarea id="ss-desc" style="min-height:56px" placeholder="cosy room with fairy lights and books"></textarea></label>
-            </div>
-            <button class="small" id="ss-save-details">Save name &amp; description</button>
-            <hr style="border:none;border-top:1px solid var(--line);margin:4px 0">
-            <div>
-              <label class="f" style="font-size:12px">Instruction <span class="mute" style="font-size:10px">optional — describe what to change or add</span>
-                <textarea id="ss-instr" style="min-height:52px" placeholder="add a large bookshelf on the left wall, warmer lighting, more plants near the window…"></textarea>
-              </label>
-            </div>
-            <button class="small primary" id="ss-gen">⚡ Generate main view</button>
-            <button class="small" id="ss-corners">▣ Generate 4 corners</button>
-            <div class="sp-status" id="ss-status"></div>
-            <hr style="border:none;border-top:1px solid var(--line);margin:4px 0">
-            <div>
-              <div style="font-size:12px;margin-bottom:4px">Upload reference image</div>
-              <input type="file" id="ss-upload" accept="image/*" style="font-size:11px;width:100%">
-            </div>
-          </div>
-          <div class="sp-studio-imgs" id="ss-images">
-            <div class="mute small">Loading…</div>
-          </div>
-        </div>
-      </div>`;
-    document.body.appendChild(ov);
-
-    // close on overlay click outside box
-    ov.onclick = e => { if (e.target === ov) ov.remove(); };
-    document.getElementById('ss-close').onclick = () => ov.remove();
-
-    // load current space details into fields
-    const spaceData = (C.profile?.spaces || []).find(s => s.name?.toLowerCase() === spName.toLowerCase()) || {};
-    document.getElementById('ss-desc').value = spaceData.description || '';
-
-    let jobRunning = false;
-
-    const setStatus = (msg, running=false) => {
-      document.getElementById('ss-status').textContent = msg;
-      jobRunning = running;
-      const genBtn = document.getElementById('ss-gen');
-      const cornBtn = document.getElementById('ss-corners');
-      if (genBtn) { genBtn.disabled = running; genBtn.textContent = running ? '…generating…' : '⚡ Generate main view'; }
-      if (cornBtn) { cornBtn.disabled = running; }
-    };
-
-    const pollJob = async (maxS=180) => {
-      for (let t = 0; t < maxS/3; t++) {
-        await new Promise(r => setTimeout(r, 3000));
-        const st = await call('/' + CID).catch(() => null);
-        if (st && (!st.job || st.job.state !== 'running')) break;
-      }
-    };
-
-    const loadImages = async () => {
-      const imgs = await call('/' + CID + '/spaces/' + encodeURIComponent(spName) + '/images').catch(() => ({main:[], corners:[]}));
-      const box = document.getElementById('ss-images');
-      if (!box) return;
-
-      const hasApprovedMain = (imgs.main || []).some(r => r.approved && r.status === 'done');
-      const cornBtn = document.getElementById('ss-corners');
-      if (cornBtn) cornBtn.disabled = !hasApprovedMain || jobRunning;
-
-      const makeImgCard = (it, isCorner=false) => {
-        const url = it.file ? `/api/characters/file/${CID}/${it.file}` : '';
-        const isApproved = it.approved;
-        const isFailed = it.status === 'failed';
-        const isRunning = it.status === 'running';
-        const prompt = it.meta?.prompt || '';
-        return `<div class="sp-img-card ${isApproved ? 'approved' : ''}" data-img-id="${esc(it.id)}">
-          ${url ? `<img src="${esc(url)}" onclick="chZoom('${esc(url)}')" onerror="this.style.display='none'">` :
-            `<div style="height:${isCorner?'140px':'200px'};background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--mute)">${isFailed ? '✕ failed' : isRunning ? '⏳ generating…' : '—'}</div>`}
-          <div class="sp-img-actions">
-            ${isApproved ? '<span class="badge b-ok" style="font-size:10px">✓ approved</span>' : ''}
-            ${url && !isApproved ? `<button class="small primary" data-ss-approve="${esc(it.id)}">✓ Approve</button>` : ''}
-            ${isApproved ? `<button class="small" data-ss-unapprove="${esc(it.id)}">↩ Unapprove</button>` : ''}
-            <button class="small bad" data-ss-delete="${esc(it.id)}">✕ Reject</button>
-            <span class="sp"></span>
-            ${prompt ? `<details style="font-size:10px;width:100%"><summary class="mute" style="cursor:pointer">prompt</summary><div style="white-space:pre-wrap;padding:4px;color:var(--mute)">${esc(prompt)}</div></details>` : ''}
-          </div>
-        </div>`;
-      };
-
-      let html = '';
-      const main = imgs.main || [];
-      const corners = imgs.corners || [];
-      if (!main.length && !corners.length) {
-        html = '<div class="mute small">No images yet — click Generate main view to start.</div>';
-      } else {
-        if (main.length) {
-          html += `<div class="sp-section-label">Main views (${main.length})</div>`;
-          html += main.slice().reverse().map(it => makeImgCard(it)).join('');
-        }
-        if (corners.length) {
-          html += `<div class="sp-section-label">Corner views (${corners.length})</div>`;
-          html += `<div class="sp-corner-grid">` + corners.slice().reverse().map(it => makeImgCard(it, true)).join('') + `</div>`;
-        }
-      }
-      box.innerHTML = html;
-
-      box.querySelectorAll('[data-ss-approve]').forEach(btn => {
-        btn.onclick = async () => {
-          await call('/' + CID + '/spaces/' + encodeURIComponent(spName) + '/images/' + btn.dataset.ssApprove + '/approve', {method:'POST'}).catch(()=>{});
-          C = await call('/' + CID);
-          await loadImages();
-          render();
-        };
-      });
-      box.querySelectorAll('[data-ss-unapprove]').forEach(btn => {
-        btn.onclick = async () => {
-          // un-approve = approve false via the same endpoint toggled; we don't have a dedicated route,
-          // so just delete and re-draw — simpler: tell user to reject+redo
-          toast('To unapprove: use Reject to remove it, then Generate a new one.');
-        };
-      });
-      box.querySelectorAll('[data-ss-delete]').forEach(btn => {
-        btn.onclick = async () => {
-          await call('/' + CID + '/spaces/' + encodeURIComponent(spName) + '/images/' + btn.dataset.ssDelete, {method:'DELETE'}).catch(()=>{});
-          C = await call('/' + CID);
-          await loadImages();
-          render();
-        };
-      });
-    };
-
-    loadImages();
-
-    document.getElementById('ss-save-details').onclick = async () => {
-      const newName = (document.getElementById('ss-name').value || '').trim();
-      const newDesc = (document.getElementById('ss-desc').value || '').trim();
-      if (!newName) return;
-      // update the in-memory spaces array and save via profile patch
-      const spaces = (C.profile?.spaces || []).map(s =>
-        s.name?.toLowerCase() === spName.toLowerCase() ? {...s, name: newName, description: newDesc} : s
-      );
-      await call('/' + CID + '/profile', {method:'PATCH', json:{spaces}}).catch(e => showErr(e.detail||e.message));
-      C = await call('/' + CID);
-      render();
-      toast('Space details saved.');
-    };
-
-    document.getElementById('ss-gen').onclick = async () => {
-      const instr = (document.getElementById('ss-instr').value || '').trim();
-      setStatus('Generating main view…', true);
-      try {
-        await call('/' + CID + '/spaces/' + encodeURIComponent(spName) + '/generate', {method:'POST', json:{instruction:instr}});
-        setStatus('Waiting for job…', true);
-        await pollJob(180);
-        setStatus('');
-        C = await call('/' + CID);
-        await loadImages();
-        render();
-      } catch(e) { setStatus(''); showErr('Generate failed: ' + (e.detail||e.message||e)); }
-    };
-
-    document.getElementById('ss-corners').onclick = async () => {
-      const instr = (document.getElementById('ss-instr').value || '').trim();
-      setStatus('Generating 4 corner views…', true);
-      try {
-        await call('/' + CID + '/spaces/' + encodeURIComponent(spName) + '/corners', {method:'POST', json:{instruction:instr}});
-        setStatus('Waiting for corners job…', true);
-        await pollJob(300);
-        setStatus('');
-        C = await call('/' + CID);
-        await loadImages();
-        render();
-      } catch(e) { setStatus(''); showErr('Corners failed: ' + (e.detail||e.message||e)); }
-    };
-
-    document.getElementById('ss-upload').onchange = async () => {
-      const inp = document.getElementById('ss-upload');
-      if (!inp.files[0]) return;
-      const fd = new FormData(); fd.append('file', inp.files[0]);
-      try {
-        await call('/' + CID + '/spaces/' + encodeURIComponent(spName) + '/ref', {method:'POST', form:fd});
-        C = await call('/' + CID);
-        render();
-        toast('Reference image uploaded.');
-      } catch(e) { showErr('Upload failed: ' + (e.detail||e.message||e)); }
-    };
-  };
-
-  // wire Open Studio buttons
+  // wire buttons (function defined at module level below)
   document.querySelectorAll('[data-sp-open]').forEach(btn => {
     btn.onclick = () => openSpaceStudio(btn.dataset.spOpen);
   });
+  const spStudioBtns = ['vl-sp-studio','vl-sp-studio2'].map(id => document.getElementById(id)).filter(Boolean);
+  spStudioBtns.forEach(btn => {
+    btn.onclick = () => {
+      const spaces = C.profile?.spaces || [];
+      openSpaceStudio(spaces[0]?.name || '');
+    };
+  });
+  // energy range display
+  $e('vl-energy-ov') && ($e('vl-energy-ov').oninput = () => {
+    $e('vl-energy-ov-val').textContent = $e('vl-energy-ov').value;
+  });
+
+  // override apply
+  $e('vl-override-apply') && ($e('vl-override-apply').onclick = async () => {
+    const energy = parseInt($e('vl-energy-ov').value);
+    const fPrimary = ($e('vl-feeling-ov').value || '').trim();
+    const fInt = parseInt($e('vl-feeling-int').value) || 7;
+    const body = {};
+    if (!isNaN(energy)) body.energy = energy;
+    if (fPrimary) body.feeling = {primary: fPrimary, intensity: fInt};
+    if (!Object.keys(body).length) return;
+    try {
+      await call('/' + CID + '/override', {method:'PATCH', json: body});
+      C = await call('/' + CID);
+      render();
+      toast('Energy & feeling updated.');
+    } catch(e) { showErr('Override failed: ' + (e.detail||e.message||e)); }
+  });
+
+  // aspirations
+  (async () => {
+    const asps = LIFE_ASPIRATIONS || await call('/' + CID + '/aspirations').catch(() => []);
+    LIFE_ASPIRATIONS = asps;
+    const box = document.getElementById('vl-asp-list');
+    if (!box) return;
+    if (!asps.length) { box.innerHTML = '<div class="mute small">None yet — they emerge naturally from her thoughts.</div>'; return; }
+    box.innerHTML = asps.map(a => `
+      <div class="row mt-s" style="gap:8px;align-items:flex-start;font-size:13px">
+        <div style="flex:1">
+          <b>${esc(a.title || a.text || '')}</b>
+          ${a.category ? `<span class="badge b-info" style="font-size:10px;margin-left:4px">${esc(a.category)}</span>` : ''}
+          ${a.reason ? `<div class="mute small" style="margin-top:2px">${esc(a.reason)}</div>` : ''}
+        </div>
+        <button class="small bad" data-asp-dismiss="${esc(a.id)}" title="Dismiss aspiration">× Dismiss</button>
+      </div>`).join('');
+    box.querySelectorAll('[data-asp-dismiss]').forEach(btn => {
+      btn.onclick = async () => {
+        await call('/' + CID + '/aspirations/' + btn.dataset.aspDismiss, {method:'DELETE'}).catch(()=>{});
+        LIFE_ASPIRATIONS = (LIFE_ASPIRATIONS||[]).filter(a => a.id !== btn.dataset.aspDismiss);
+        btn.closest('.row').remove();
+        if (!box.querySelectorAll('[data-asp-dismiss]').length)
+          box.innerHTML = '<div class="mute small">None yet — they emerge naturally from her thoughts.</div>';
+      };
+    });
+  })();
 
   // accessories
   $e('vl-acc-add') && ($e('vl-acc-add').onclick = async () => {
@@ -1142,6 +1032,168 @@ function wireLife() {
     await call('/' + CID + `/accessories/${encodeURIComponent(accName)}/ref`, {method: 'DELETE'});
     await _refresh();
   });
+}
+
+function openSpaceStudio(initialSpName) {
+  const existing = document.getElementById('sp-studio-overlay');
+  if (existing) existing.remove();
+
+  const allSpaces = (C.profile && C.profile.spaces) || [];
+  if (!allSpaces.length) { toast('Add at least one space and save the profile first.', {bad: true}); return; }
+
+  let spName = initialSpName || allSpaces[0].name || '';
+
+  const buildCtrl = () => {
+    const spaceData = allSpaces.find(s => (s.name||'').toLowerCase() === spName.toLowerCase()) || {};
+    const spacePicker = allSpaces.length > 1
+      ? `<select id="ss-space-pick" style="width:100%;font-size:13px;margin-bottom:8px">${allSpaces.map(s => `<option value="${esc(s.name||'')}" ${s.name===spName?'selected':''}>${esc(s.name||'')}</option>`).join('')}</select>`
+      : `<div style="font-weight:600;font-size:14px;margin-bottom:8px">${esc(spName)}</div>`;
+    return `${spacePicker}
+      <label class="f" style="font-size:12px">Name<input id="ss-name" value="${esc(spName)}"></label>
+      <label class="f mt-s" style="font-size:12px">Description<textarea id="ss-desc" style="min-height:52px" placeholder="cosy room with fairy lights and books">${esc(spaceData.description||'')}</textarea></label>
+      <button class="small mt-s" id="ss-save-details">Save details</button>
+      <hr style="border:none;border-top:1px solid var(--line);margin:8px 0">
+      <label class="f" style="font-size:12px">Instruction <span class="mute" style="font-size:10px">optional — what to change</span>
+        <textarea id="ss-instr" style="min-height:48px" placeholder="add a bookshelf, warmer light, more plants…"></textarea>
+      </label>
+      <button class="small primary mt-s" id="ss-gen">⚡ Generate main view</button>
+      <button class="small mt-s" id="ss-corners">▣ Generate 4 corners</button>
+      <div class="sp-status" id="ss-status"></div>
+      <hr style="border:none;border-top:1px solid var(--line);margin:8px 0">
+      <div style="font-size:12px;margin-bottom:4px">Upload reference</div>
+      <input type="file" id="ss-upload" accept="image/*" style="font-size:11px;width:100%">`;
+  };
+
+  const ov = document.createElement('div');
+  ov.id = 'sp-studio-overlay';
+  ov.className = 'sp-studio-overlay';
+  ov.innerHTML = `
+    <div class="sp-studio" id="sp-studio-box">
+      <div class="sp-studio-head">
+        <b style="font-size:16px">Space Studio</b>
+        <span class="sp"></span>
+        <button class="small" id="ss-close">× Close</button>
+      </div>
+      <div class="sp-studio-body">
+        <div class="sp-studio-ctrl" id="ss-ctrl">${buildCtrl()}</div>
+        <div class="sp-studio-imgs" id="ss-images"><div class="mute small">Loading…</div></div>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  document.getElementById('ss-close').onclick = () => ov.remove();
+
+  const wireCtrl = () => {
+    const $s = id => document.getElementById(id);
+
+    const picker = $s('ss-space-pick');
+    if (picker) picker.onchange = () => {
+      spName = picker.value;
+      document.getElementById('ss-ctrl').innerHTML = buildCtrl();
+      wireCtrl();
+      loadImages();
+    };
+
+    let jobRunning = false;
+    const setStatus = (msg, running=false) => {
+      const el = $s('ss-status'); if (el) el.textContent = msg;
+      jobRunning = running;
+      const g = $s('ss-gen'); if (g) { g.disabled = running; g.textContent = running ? '…generating…' : '⚡ Generate main view'; }
+      const co = $s('ss-corners'); if (co) co.disabled = running;
+    };
+    const pollJob = async (maxS=180) => {
+      for (let t = 0; t < maxS/3; t++) {
+        await new Promise(r => setTimeout(r, 3000));
+        const st = await call('/' + CID).catch(() => null);
+        if (st && (!st.job || st.job.state !== 'running')) break;
+      }
+    };
+
+    $s('ss-save-details') && ($s('ss-save-details').onclick = async () => {
+      const newName = ($s('ss-name').value||'').trim();
+      const newDesc = ($s('ss-desc').value||'').trim();
+      if (!newName) return;
+      const spaces = (C.profile?.spaces||[]).map(s => s.name?.toLowerCase()===spName.toLowerCase() ? {...s,name:newName,description:newDesc} : s);
+      await call('/'+CID+'/profile', {method:'PATCH', json:{spaces}}).catch(e=>showErr(e.detail||e.message));
+      spName = newName;
+      C = await call('/'+CID);
+      render(); toast('Space details saved.');
+    });
+
+    $s('ss-gen') && ($s('ss-gen').onclick = async () => {
+      const instr = ($s('ss-instr').value||'').trim();
+      setStatus('Generating main view…', true);
+      try {
+        await call('/'+CID+'/spaces/'+encodeURIComponent(spName)+'/generate', {method:'POST', json:{instruction:instr}});
+        setStatus('Waiting for job…', true);
+        await pollJob(180);
+        setStatus(''); C = await call('/'+CID); await loadImages(); render();
+      } catch(e) { setStatus(''); showErr('Generate failed: '+(e.detail||e.message||e)); }
+    });
+
+    $s('ss-corners') && ($s('ss-corners').onclick = async () => {
+      const instr = ($s('ss-instr').value||'').trim();
+      setStatus('Generating 4 corners…', true);
+      try {
+        await call('/'+CID+'/spaces/'+encodeURIComponent(spName)+'/corners', {method:'POST', json:{instruction:instr}});
+        setStatus('Waiting for corners job…', true);
+        await pollJob(300);
+        setStatus(''); C = await call('/'+CID); await loadImages(); render();
+      } catch(e) { setStatus(''); showErr('Corners failed: '+(e.detail||e.message||e)); }
+    });
+
+    $s('ss-upload') && ($s('ss-upload').onchange = async () => {
+      const f = $s('ss-upload').files[0]; if (!f) return;
+      const fd = new FormData(); fd.append('file', f);
+      try {
+        await call('/'+CID+'/spaces/'+encodeURIComponent(spName)+'/ref', {method:'POST', form:fd});
+        C = await call('/'+CID); render(); toast('Reference image uploaded.');
+      } catch(e) { showErr('Upload failed: '+(e.detail||e.message||e)); }
+    });
+  };
+
+  const loadImages = async () => {
+    const imgs = await call('/'+CID+'/spaces/'+encodeURIComponent(spName)+'/images').catch(()=>({main:[],corners:[]}));
+    const box = document.getElementById('ss-images');
+    if (!box) return;
+    const hasApprovedMain = (imgs.main||[]).some(r => r.approved && r.status==='done');
+    const co = document.getElementById('ss-corners'); if (co) co.disabled = !hasApprovedMain;
+    const mkCard = (it, corner=false) => {
+      const url = it.file ? `/api/characters/file/${CID}/${it.file}` : '';
+      const ap = it.approved, fail = it.status==='failed', run = it.status==='running';
+      const pr = (it.meta||{}).prompt||'';
+      return `<div class="sp-img-card ${ap?'approved':''}" data-img-id="${esc(it.id)}">
+        ${url ? `<img src="${esc(url)}" onclick="chZoom('${esc(url)}')" onerror="this.style.display='none'">` :
+          `<div style="height:${corner?'140px':'200px'};background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--mute)">${fail?'✕ failed':run?'⏳ generating…':'—'}</div>`}
+        <div class="sp-img-actions">
+          ${ap ? '<span class="badge b-ok" style="font-size:10px">✓ approved</span>' : ''}
+          ${url && !ap ? `<button class="small primary" data-ss-approve="${esc(it.id)}">✓ Approve</button>` : ''}
+          <button class="small bad" data-ss-delete="${esc(it.id)}">✕ Reject</button>
+          ${pr ? `<details style="font-size:10px;width:100%"><summary class="mute" style="cursor:pointer">prompt</summary><div style="white-space:pre-wrap;padding:4px;color:var(--mute)">${esc(pr)}</div></details>` : ''}
+        </div>
+      </div>`;
+    };
+    let html = '';
+    if (!imgs.main.length && !imgs.corners.length) {
+      html = '<div class="mute small">No images yet — click Generate main view to start.</div>';
+    } else {
+      if (imgs.main.length) html += `<div class="sp-section-label">Main views (${imgs.main.length})</div>` + imgs.main.slice().reverse().map(it=>mkCard(it)).join('');
+      if (imgs.corners.length) html += `<div class="sp-section-label">Corner views (${imgs.corners.length})</div><div class="sp-corner-grid">` + imgs.corners.slice().reverse().map(it=>mkCard(it,true)).join('') + '</div>';
+    }
+    box.innerHTML = html;
+    box.querySelectorAll('[data-ss-approve]').forEach(btn => btn.onclick = async () => {
+      await call('/'+CID+'/spaces/'+encodeURIComponent(spName)+'/images/'+btn.dataset.ssApprove+'/approve', {method:'POST'}).catch(()=>{});
+      C = await call('/'+CID); await loadImages(); render();
+    });
+    box.querySelectorAll('[data-ss-delete]').forEach(btn => btn.onclick = async () => {
+      await call('/'+CID+'/spaces/'+encodeURIComponent(spName)+'/images/'+btn.dataset.ssDelete, {method:'DELETE'}).catch(()=>{});
+      C = await call('/'+CID); await loadImages(); render();
+    });
+  };
+
+  wireCtrl();
+  loadImages();
 }
 
 function wireEdit() {
