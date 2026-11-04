@@ -403,22 +403,25 @@ function lifeView(busy) {
   // ── profile panel ──
   const spacesHtml = spaces.map((sp, i) => {
     const hasRef = sp.ref_image;
-    const refUrl = hasRef ? `/api/characters/file/${CH}/spaces/${sp.ref_image.split('/').pop()}` : '';
+    const refUrl = hasRef ? `/api/characters/file/${CH}/${sp.ref_image}` : '';
+    const spSlug = encodeURIComponent(sp.name || '');
     return `
-    <div class="card pad mt-s" style="padding:8px;background:var(--bg2,#f8f8f8)">
+    <div class="card pad mt-s" style="padding:8px;background:var(--bg2,#f8f8f8)" data-sp-card="${i}">
       <div class="row" style="gap:6px;align-items:center">
         <input style="width:110px" data-sp-name="${i}" value="${esc(sp.name || '')}" placeholder="e.g. Bedroom" ${dis}>
         <input style="flex:1" data-sp-desc="${i}" value="${esc(sp.description || '')}" placeholder="cosy room with fairy lights and books" ${dis}>
         <button class="small bad" data-sp-del="${i}" ${dis}>×</button>
       </div>
-      <div class="row mt-s" style="gap:8px;align-items:center">
-        ${hasRef ? `<img src="${esc(refUrl)}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--line)">` : '<div style="width:48px;height:48px;border-radius:6px;border:2px dashed var(--line);display:flex;align-items:center;justify-content:center;color:var(--mute);font-size:18px">+</div>'}
-        <div style="flex:1">
-          <div class="mute small" style="margin-bottom:3px">Room reference photo</div>
-          <input type="file" data-sp-ref-upload="${i}" accept="image/*" style="font-size:11px;width:100%" ${dis}>
-        </div>
-        ${hasRef ? `<button class="small bad" data-sp-ref-del="${i}" title="Remove room photo" ${dis}>✕ ref</button>` : ''}
+      <div class="row mt-s" style="gap:6px;align-items:center;flex-wrap:wrap">
+        ${hasRef ? `<img src="${esc(refUrl)}" style="width:56px;height:40px;object-fit:cover;border-radius:4px;border:1px solid var(--line)">` : ''}
+        <button class="small primary" data-sp-gen="${esc(sp.name || '')}" ${dis}>&#9889; Generate</button>
+        <button class="small" data-sp-corners="${esc(sp.name || '')}" ${dis || !hasRef ? 'disabled' : ''} title="Generate 4 corner views (needs approved main first)">&#9633; 4 Corners</button>
+        <label style="font-size:11px;color:var(--mute);display:flex;align-items:center;gap:4px;cursor:pointer">
+          upload <input type="file" data-sp-ref-upload="${i}" accept="image/*" style="display:none" ${dis}>
+        </label>
+        ${hasRef ? `<button class="small bad" data-sp-ref-del="${i}" title="Remove ref" ${dis}>✕</button>` : ''}
       </div>
+      <div id="sp-imgs-${i}" class="mt-s" style="min-height:4px"></div>
     </div>`;
   }).join('');
 
@@ -896,6 +899,81 @@ function wireLife() {
   document.querySelectorAll('[data-sp-del]').forEach(b => b.onclick = e => e.target.closest('.card').remove());
 
   const _refresh = async () => { C = await call('/' + CID); render(); };
+
+  // space image generation
+  (async () => {
+    const prof = C.profile || {};
+    const spaces = prof.spaces || [];
+    for (let i = 0; i < spaces.length; i++) {
+      const sp = spaces[i];
+      if (!sp.name) continue;
+      const el = document.getElementById('sp-imgs-' + i);
+      if (!el) continue;
+      const imgs = await call('/' + CID + '/spaces/' + encodeURIComponent(sp.name) + '/images').catch(() => ({main:[], corners:[]}));
+      const renderImgs = (imgs) => {
+        const allMain = imgs.main || [];
+        const allCorners = imgs.corners || [];
+        if (!allMain.length && !allCorners.length) { el.innerHTML = ''; return; }
+        const imgCard = (it) => {
+          const url = it.file ? `/api/characters/file/${CID}/${it.file}` : '';
+          const isApproved = it.approved;
+          const isFailed = it.status === 'failed';
+          return `<div style="display:inline-block;vertical-align:top;margin:3px;position:relative">
+            ${url ? `<img src="${esc(url)}" style="width:90px;height:64px;object-fit:cover;border-radius:4px;border:2px solid ${isApproved ? 'var(--ok)' : 'var(--line)'}">` :
+              `<div style="width:90px;height:64px;border-radius:4px;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--mute)">${isFailed ? '✕ failed' : '…'}</div>`}
+            ${url && !isApproved ? `<button class="small primary" data-sp-approve="${esc(it.id)}" data-sp-name="${esc(sp.name)}" style="position:absolute;bottom:3px;left:3px;font-size:9px;padding:1px 4px">✓</button>` : ''}
+            ${isApproved ? '<div style="position:absolute;top:3px;right:3px;background:var(--ok);border-radius:3px;width:14px;height:14px;display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff">✓</div>' : ''}
+          </div>`;
+        };
+        let html = '';
+        if (allMain.length) html += `<div style="font-size:10px;color:var(--mute);margin-bottom:2px">Main view</div>` + allMain.map(imgCard).join('');
+        if (allCorners.length) html += `<div style="font-size:10px;color:var(--mute);margin:4px 0 2px">Corner views</div>` + allCorners.map(imgCard).join('');
+        el.innerHTML = html;
+        el.querySelectorAll('[data-sp-approve]').forEach(btn => {
+          btn.onclick = async () => {
+            await call('/' + CID + '/spaces/' + encodeURIComponent(btn.dataset.spName) + '/images/' + btn.dataset.spApprove + '/approve', {method:'POST'}).catch(()=>{});
+            const updated = await call('/' + CID + '/spaces/' + encodeURIComponent(btn.dataset.spName) + '/images').catch(() => ({main:[], corners:[]}));
+            renderImgs(updated);
+            C = await call('/' + CID); render();
+          };
+        });
+      };
+      renderImgs(imgs);
+    }
+    // wire generate / corners buttons
+    document.querySelectorAll('[data-sp-gen]').forEach(btn => {
+      btn.onclick = async () => {
+        const spName = btn.dataset.spGen;
+        btn.disabled = true; btn.textContent = '…';
+        try {
+          await call('/' + CID + '/spaces/' + encodeURIComponent(spName) + '/generate', {method:'POST'});
+          // poll until job done
+          for (let t = 0; t < 120; t++) {
+            await new Promise(r => setTimeout(r, 3000));
+            const s = await call('/' + CID).catch(() => null);
+            if (s && (!s.job || s.job.state !== 'running')) break;
+          }
+          await _refresh();
+        } catch(e) { showErr('Generate failed: ' + (e.detail || e.message || e)); btn.disabled = false; btn.textContent = '⚡ Generate'; }
+      };
+    });
+    document.querySelectorAll('[data-sp-corners]').forEach(btn => {
+      if (btn.disabled) return;
+      btn.onclick = async () => {
+        const spName = btn.dataset.spCorners;
+        btn.disabled = true; btn.textContent = '…';
+        try {
+          await call('/' + CID + '/spaces/' + encodeURIComponent(spName) + '/corners', {method:'POST'});
+          for (let t = 0; t < 240; t++) {
+            await new Promise(r => setTimeout(r, 4000));
+            const s = await call('/' + CID).catch(() => null);
+            if (s && (!s.job || s.job.state !== 'running')) break;
+          }
+          await _refresh();
+        } catch(e) { showErr('Corners failed: ' + (e.detail || e.message || e)); btn.disabled = false; btn.textContent = '□ 4 Corners'; }
+      };
+    });
+  })();
 
   // space reference image upload
   document.querySelectorAll('[data-sp-ref-upload]').forEach(inp => inp.onchange = async () => {
