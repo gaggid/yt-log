@@ -622,7 +622,7 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
             prompt  = (f"Picture 1 is an identity reference only (face shape, skin tone, hair colour and length, build). "
                        f"Picture 2 shows the garment/outfit to wear. "
                        + (f"Picture 3 is the room/setting reference — match its layout and decor exactly. " if space_ref_path else "")
-                       + f"Create a new vertical 9:16 photograph: {scene}"
+                       + f"Create a new vertical 4:5 photograph: {scene}"
                        + (f" Wear the outfit from Picture 2." if outfit else "")
                        + expr_line + space_line
                        + " Match the person's face identity from Picture 1 exactly.")
@@ -636,7 +636,7 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
                 prompt  = (f"Picture 1 is an identity reference only (face shape, skin tone, hair colour and length, build). "
                            f"Picture 2 shows their body and outfit — keep the outfit exactly as in Picture 2. "
                            + (f"Picture 3 is the room/setting reference — match its layout and decor exactly. " if space_ref_path else "")
-                           + f"Create a new vertical 9:16 photograph: {scene}"
+                           + f"Create a new vertical 4:5 photograph: {scene}"
                            + expr_line + space_line
                            + " Match the person's face identity from Picture 1 exactly.")
             else:
@@ -645,14 +645,14 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
                     refs.append(space_ref_path); ref_ids.append("space-ref")
                 prompt  = (f"Picture 1 is an identity reference only (face shape, skin tone, hair colour and length, build). "
                            + (f"Picture 2 is the room/setting reference — match its layout and decor exactly. " if space_ref_path else "")
-                           + f"Create a new vertical 9:16 photograph: {scene}"
+                           + f"Create a new vertical 4:5 photograph: {scene}"
                            + (f" Wearing: {outfit}." if outfit else "")
                            + expr_line + space_line
                            + " Match the person's face identity from Picture 1 exactly.")
         how = "edit"
     else:
         char_desc = (char.get("identity") or "").strip()
-        prompt = f"Vertical 9:16 photograph. {shot_dir} {image_idea}" + (f" Wearing: {outfit}." if outfit else "") + (f" {char_desc}" if char_desc else "")
+        prompt = f"Vertical 4:5 photograph. {shot_dir} {image_idea}" + (f" Wearing: {outfit}." if outfit else "") + (f" {char_desc}" if char_desc else "")
         refs, ref_ids = [], []
         how = "draw"
 
@@ -669,7 +669,7 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
     if triggers:
         prompt = f"{triggers} {prompt}"
 
-    body_req = {"model": render_cfg.get("model", ""), "size": "720x1280", "n": 1,
+    body_req = {"model": render_cfg.get("model", ""), "size": "864x1080", "n": 1,
                 "response_format": "b64_json", "prompt": prompt[:3900]}
     if all_loras:
         body_req["lora"] = all_loras
