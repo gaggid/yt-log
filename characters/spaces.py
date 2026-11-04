@@ -57,12 +57,15 @@ def _build_prompt(space: dict, char: dict) -> str:
     )
 
 
-def _corner_prompt(space: dict, corner_desc: str) -> str:
-    name = space.get("name", "room")
+def _corner_prompt(space: dict, char: dict, corner_desc: str) -> str:
+    name  = space.get("name", "room")
+    desc  = (space.get("description") or "").strip()
+    city  = (profile_mod.get(char).get("city") or "Delhi").strip()
+    desc_part = f" {desc}." if desc else "."
     return (
-        f"The same {name}. Camera placed at the {corner_desc}. "
-        f"Keep all furniture, decor, colours and lighting identical to the reference picture. "
-        f"Empty of people. {NO_TEXT}"
+        f"Interior photography of a {name} in a {city} apartment.{desc_part} "
+        f"Camera placed at the {corner_desc}. Wide angle, whole room visible. "
+        f"Empty of people. {STYLE} {NO_TEXT}"
     )
 
 
@@ -141,7 +144,7 @@ async def generate_corners(char_id: str, space_name: str, s: dict, key: str, pro
     total = len(_CORNERS)
     for i, (tag, corner_desc) in enumerate(_CORNERS):
         ck = _corner_key(space_name, tag)
-        prompt = _corner_prompt(space, corner_desc)
+        prompt = _corner_prompt(space, char, corner_desc)
         if instruction:
             prompt = prompt.rstrip(". ") + f". {instruction.strip()}."
         body   = {"model": model, "prompt": prompt, "size": SIZE_CORNER, "n": 1}
@@ -152,7 +155,7 @@ async def generate_corners(char_id: str, space_name: str, s: dict, key: str, pro
         try:
             if progress:
                 progress(i, total, f"Corner {i + 1}/4…")
-            data = await studio_mod._post_image("edit", body, [main_path], base, api_key)
+            data = await studio_mod._post_image("draw", body, [], base, api_key)
             rel  = f"space_gen/{ck}-a{it['attempt']}.png"
             (store.media_dir(char_id, "space_gen") / f"{ck}-a{it['attempt']}.png").write_bytes(data)
             media.update(it["id"], status="done", file=rel,

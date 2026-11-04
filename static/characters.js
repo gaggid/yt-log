@@ -147,7 +147,7 @@ function render() {
     : `<div class="ch-studio"><div class="ch-side card pad">${sideView(busy)}</div><div id="ch-center">${galleryView(busy)}</div></div>`;
   $('#app').innerHTML = `
     <div class="row"><a href="#/characters">← Characters</a><h2 style="margin:0 0 0 8px">${esc(C.name)}</h2>${badge(C.status === 'ready' ? 'done' : 'queued', C.status)}<span class="mute small">v${C.version} · ${esc(C.kind)}</span><span class="sp"></span>
-      <button class="small" onclick="chRename()">Rename</button><a class="small" href="/api/characters/${C.id}/pack" download><button class="small">Export pack</button></a><button class="small" onclick="chDup(this)">Duplicate</button><button class="small bad" onclick="chDelete()">Delete</button></div>
+      ${C.kind === 'person' ? `<button class="small primary" onclick="openChat()">Chat</button>` : ''}<button class="small" onclick="chRename()">Rename</button><a class="small" href="/api/characters/${C.id}/pack" download><button class="small">Export pack</button></a><button class="small" onclick="chDup(this)">Duplicate</button><button class="small bad" onclick="chDelete()">Delete</button></div>
     <div id="ch-job">${jobBox()}</div>
     ${tabBar()}
     ${studioHtml}`;
@@ -1032,6 +1032,80 @@ function wireLife() {
     await call('/' + CID + `/accessories/${encodeURIComponent(accName)}/ref`, {method: 'DELETE'});
     await _refresh();
   });
+}
+
+function openChat() {
+  const existing = document.getElementById('ch-chat-overlay');
+  if (existing) { existing.remove(); return; }
+
+  const name = C.name || 'her';
+  const history = []; // [{role, content}]
+
+  const ov = document.createElement('div');
+  ov.id = 'ch-chat-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:900;display:flex;align-items:flex-end;justify-content:flex-end;padding:16px';
+
+  const panel = document.createElement('div');
+  panel.style.cssText = `width:380px;max-width:calc(100vw - 32px);height:600px;max-height:calc(100vh - 32px);background:var(--panel);border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;overflow:hidden`;
+
+  panel.innerHTML = `
+    <div style="padding:12px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px">
+      <span style="font-weight:600;flex:1">Chat with ${esc(name)}</span>
+      <button id="ch-chat-close" style="background:none;border:none;color:var(--mute);cursor:pointer;font-size:18px;line-height:1;padding:0 4px">×</button>
+    </div>
+    <div id="ch-chat-msgs" style="flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px"></div>
+    <div style="padding:10px;border-top:1px solid var(--line);display:flex;gap:8px">
+      <input id="ch-chat-input" type="text" placeholder="Say something…" style="flex:1;padding:8px 10px;background:var(--bg);border:1px solid var(--line);border-radius:8px;color:var(--ink);font-size:14px" />
+      <button id="ch-chat-send" class="primary" style="padding:8px 14px;border-radius:8px;font-size:14px">Send</button>
+    </div>`;
+
+  ov.appendChild(panel);
+  document.body.appendChild(ov);
+
+  const msgsEl = document.getElementById('ch-chat-msgs');
+  const inputEl = document.getElementById('ch-chat-input');
+  const sendBtn = document.getElementById('ch-chat-send');
+
+  document.getElementById('ch-chat-close').onclick = () => ov.remove();
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+
+  function addBubble(role, text) {
+    const isUser = role === 'user';
+    const div = document.createElement('div');
+    div.style.cssText = `display:flex;justify-content:${isUser ? 'flex-end' : 'flex-start'}`;
+    const bubble = document.createElement('div');
+    bubble.style.cssText = `max-width:80%;padding:8px 12px;border-radius:${isUser ? '14px 14px 4px 14px' : '14px 14px 14px 4px'};font-size:14px;line-height:1.5;background:${isUser ? 'var(--accent)' : 'var(--bg)'};color:${isUser ? 'var(--accent-ink)' : 'var(--ink)'};border:${isUser ? 'none' : '1px solid var(--line)'}`;
+    bubble.textContent = text;
+    div.appendChild(bubble);
+    msgsEl.appendChild(div);
+    msgsEl.scrollTop = msgsEl.scrollHeight;
+    return bubble;
+  }
+
+  async function send() {
+    const msg = inputEl.value.trim();
+    if (!msg) return;
+    inputEl.value = '';
+    sendBtn.disabled = true;
+    addBubble('user', msg);
+    const thinking = addBubble('assistant', '…');
+    try {
+      const res = await call('/' + CID + '/chat', {method: 'POST', json: {message: msg, history}});
+      thinking.textContent = res.reply;
+      history.push({role: 'user', content: msg});
+      history.push({role: 'assistant', content: res.reply});
+    } catch(e) {
+      thinking.textContent = '(error — try again)';
+      thinking.style.color = '#dc2626';
+    } finally {
+      sendBtn.disabled = false;
+      inputEl.focus();
+    }
+  }
+
+  sendBtn.onclick = send;
+  inputEl.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
+  inputEl.focus();
 }
 
 function openSpaceStudio(initialSpName) {

@@ -1038,6 +1038,55 @@ async def delete_memory(char_id: str, memory_id: str):
     return {"ok": True}
 
 
+# ── chat ──────────────────────────────────────────────────────────────────────
+
+class ChatMsg(BaseModel):
+    role: str
+    content: str
+
+class ChatIn(BaseModel):
+    message: str
+    history: list[ChatMsg] = []
+
+@router.post("/{char_id}/chat")
+async def chat_with_character(char_id: str, body: ChatIn):
+    from . import feeling as feeling_mod
+    char = _get(char_id)
+    s, backend = _backend()
+
+    base_sys = brain_mod._system_prompt(char)
+    sys_prompt = (
+        base_sys
+        + "\n\nYou are now in a direct conversation with your creator. "
+        "Respond naturally as yourself — warm, honest, grounded. "
+        "2–4 sentences unless the topic genuinely needs more. "
+        "Never produce JSON or structured output."
+    )
+
+    mems = memory_mod.retrieve(char_id, context=body.message, n=8)
+    mem_text = memory_mod.memories_prompt(mems) if mems else ""
+
+    prof = profile_mod.get(char)
+    feeling_line = feeling_mod.format_for_prompt(prof.get("feeling"))
+
+    context_parts = []
+    if feeling_line:
+        context_parts.append(feeling_line)
+    if mem_text:
+        context_parts.append("Your recent memories:\n" + mem_text)
+
+    messages = [{"role": "system", "content": sys_prompt}]
+    if context_parts:
+        messages.append({"role": "system", "content": "\n\n".join(context_parts)})
+
+    for h in body.history:
+        messages.append({"role": h.role, "content": h.content})
+    messages.append({"role": "user", "content": body.message})
+
+    result = await backend.complete(messages, max_tokens=400)
+    return {"reply": result.text.strip()}
+
+
 # ── skills ────────────────────────────────────────────────────────────────────
 
 from . import skills as skills_mod  # noqa: E402
