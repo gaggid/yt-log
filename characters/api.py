@@ -1090,7 +1090,7 @@ async def chat_with_character(char_id: str, body: ChatIn):
     import re as _re
     _THINK = _re.compile(r"<think>.*?</think>\s*", _re.DOTALL | _re.IGNORECASE)
     try:
-        result = await backend.complete(messages, max_tokens=400)
+        result = await backend.complete(messages, max_tokens=1500)
         reply = _THINK.sub("", result.text).strip() or result.text.strip()
     except Exception as e:
         raise HTTPException(500, f"model error: {str(e)[:300]}")
