@@ -333,7 +333,17 @@ async def think(char: dict, backend, s: dict, trigger: str = "manual", context_o
     try:
         fresh = store.get(char["id"])
         prof  = profile_mod.get(fresh)
-        new_energy = max(0, min(100, int(prof.get("energy") or 80) + int(thought.energy_delta or 0)))
+        delta = int(thought.energy_delta or 0)
+        # code-enforced floor: meals always restore energy regardless of model output
+        act_lower = (thought.activity or "").lower()
+        if any(w in act_lower for w in ("eat", "meal", "food", "snack", "chai", "coffee",
+                                         "lunch", "dinner", "breakfast", "poha", "dosa",
+                                         "rice", "roti", "makhana", "fruit")):
+            delta = max(delta, 5)   # snack floor
+        if any(w in act_lower for w in ("lunch", "dinner", "breakfast", "meal", "biryani",
+                                         "thali", "dal", "sabzi")):
+            delta = max(delta, 8)   # full meal floor
+        new_energy = max(0, min(100, int(prof.get("energy") or 80) + delta))
         profile_mod.patch(fresh, {"energy": new_energy})
         store.save(fresh)
     except Exception:

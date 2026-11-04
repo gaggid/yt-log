@@ -22,10 +22,10 @@ _INTEREST_NEWS_TERMS = {
 }
 
 _SEASONS = {
-    (3, 5):   "spring (March–May), warm and dry",
-    (6, 9):   "monsoon season, humid and rainy",
-    (10, 11): "post-monsoon, pleasant weather",
-    (12, 2):  "winter (December–February), cool nights",
+    (3, 5):   "spring",
+    (6, 9):   "monsoon season",
+    (10, 11): "post-monsoon season",
+    (12, 2):  "winter",
 }
 
 
@@ -133,7 +133,8 @@ def format_for_prompt(b: dict) -> str:
     parts = []
     if b.get("weather"):
         parts.append(b["weather"])
-    if b.get("season"):
+    elif b.get("season"):
+        # only fall back to season name when real weather unavailable
         parts.append(b["season"])
     if b.get("news"):
         parts.append("Trending: " + " · ".join(b["news"][:3]))

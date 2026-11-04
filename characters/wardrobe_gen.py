@@ -109,4 +109,15 @@ async def generate(char_id: str, n: int, s: dict, key: str) -> list[dict]:
             print(f"[wardrobe-gen] failed {g['name']}: {e}", flush=True)
 
     print(f"[wardrobe-gen] done — {len(saved)}/{len(garments)} saved", flush=True)
+
+    # expire wish memories for this character that match any newly added garment
+    if saved:
+        from . import memory as memory_mod
+        total_expired = 0
+        for item in saved:
+            expired = memory_mod.expire_wishes(char_id, item["name"] + " " + item.get("description", ""))
+            total_expired += expired
+        if total_expired:
+            print(f"[wardrobe-gen] expired {total_expired} wish memory/memories", flush=True)
+
     return saved

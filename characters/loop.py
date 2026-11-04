@@ -99,20 +99,23 @@ async def run_forever(s: dict, key: str) -> None:
             if last_run and (time.time() - last_run) < interval_s:
                 continue
 
-            # energy guard: if below sleep_threshold, restore passively instead of thinking
+            # hard sleep block 0–5:59 am — always restore, never think
+            hour = time.localtime().tm_hour
             energy          = int(prof.get("energy") or 80)
             sleep_threshold = int(prof.get("sleep_threshold") or 20)
-            if energy <= sleep_threshold:
+            is_night = (hour < 6)
+            if is_night or energy <= sleep_threshold:
                 restore = min(round(RESTORE_PER_HOUR * interval_s / 3600), 100 - energy)
                 if restore > 0:
                     try:
                         fresh = store.get(char["id"])
                         profile_mod.patch(fresh, {"energy": energy + restore})
                         store.save(fresh)
+                        reason = "pre-dawn" if is_night else "low-energy"
                         profile_mod.log_event(char["id"], "sleep", "auto",
-                                              {"energy_before": energy},
+                                              {"energy_before": energy, "reason": reason},
                                               {"energy_after": energy + restore, "restored": restore})
-                        print(f"[virtual-life] {char['name']} sleeping — energy {energy} → {energy + restore}", flush=True)
+                        print(f"[virtual-life] {char['name']} sleeping ({reason}) — energy {energy} → {energy + restore}", flush=True)
                     except Exception:
                         pass
                 continue   # skip think + draw while asleep

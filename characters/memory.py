@@ -154,6 +154,28 @@ def delete_memory(char_id: str, memory_id: str) -> None:
     db.ex("DELETE FROM char_memories WHERE id=? AND char_id=?", (memory_id, char_id))
 
 
+def expire_wishes(char_id: str, garment_description: str) -> int:
+    """Soft-expire wish memories whose content overlaps a newly added garment.
+
+    Scores overlap by shared significant words (3+ chars). Any wish with
+    score >= 2 matching words gets base_strength set to 0 (faded, not deleted).
+    Returns count of expired wishes.
+    """
+    stop = {"a", "an", "the", "in", "for", "of", "with", "and", "or", "to", "my"}
+    keywords = {w for w in garment_description.lower().split() if len(w) >= 3 and w not in stop}
+    if not keywords:
+        return 0
+    rows = db.all("SELECT id, content FROM char_memories WHERE char_id=? AND category='wish'",
+                  (char_id,))
+    expired = 0
+    for row in rows:
+        content_words = {w for w in row["content"].lower().split() if len(w) >= 3 and w not in stop}
+        if len(keywords & content_words) >= 2:
+            db.ex("UPDATE char_memories SET base_strength=0 WHERE id=?", (row["id"],))
+            expired += 1
+    return expired
+
+
 def add_manual(char_id: str, content: str, tags: list[str] | None = None,
                category: str = "manual", dedup: bool = False) -> dict:
     """Let the owner inject a memory manually. dedup=True skips if identical content already exists."""
