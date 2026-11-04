@@ -1071,11 +1071,13 @@ async def chat_with_character(char_id: str, body: ChatIn):
     prof = profile_mod.get(char)
     feeling_line = feeling_mod.format_for_prompt(prof.get("feeling"))
 
+    # inject memories + feeling only on the first turn so context stays bounded
     context_parts = []
-    if feeling_line:
-        context_parts.append(feeling_line)
-    if mem_text:
-        context_parts.append("Your recent memories:\n" + mem_text)
+    if not body.history:
+        if feeling_line:
+            context_parts.append(feeling_line)
+        if mem_text:
+            context_parts.append("Your recent memories:\n" + mem_text)
 
     messages = [{"role": "system", "content": sys_prompt}]
     if context_parts:
@@ -1087,8 +1089,11 @@ async def chat_with_character(char_id: str, body: ChatIn):
 
     import re as _re
     _THINK = _re.compile(r"<think>.*?</think>\s*", _re.DOTALL | _re.IGNORECASE)
-    result = await backend.complete(messages, max_tokens=400)
-    reply = _THINK.sub("", result.text).strip() or result.text.strip()
+    try:
+        result = await backend.complete(messages, max_tokens=400)
+        reply = _THINK.sub("", result.text).strip() or result.text.strip()
+    except Exception as e:
+        raise HTTPException(500, f"model error: {str(e)[:300]}")
     return {"reply": reply}
 
 
