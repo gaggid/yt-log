@@ -3,7 +3,7 @@ the other steps (story2/jobs.py), keyed by the character's id."""
 import asyncio
 import os
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
@@ -757,28 +757,34 @@ async def list_space_images(char_id: str, space_name: str):
     return spaces_mod.list_images(char_id, space_name)
 
 
+class _SpaceGenReq(BaseModel):
+    instruction: str = ""
+
+
 @router.post("/{char_id}/spaces/{space_name}/generate")
-async def generate_space_main(char_id: str, space_name: str):
+async def generate_space_main(char_id: str, space_name: str, body: _SpaceGenReq = Body(default=None)):
     """Start a job to draw the main view of a space."""
-    c = _get(char_id)
-    s, backend = _backend()
-    key = settings_mod.api_key()
+    _get(char_id)
+    s, _ = _backend()
+    key  = settings_mod.api_key()
+    instr = (body.instruction if body else "")
 
     async def work(progress):
-        return await spaces_mod.generate_main(char_id, space_name, s, key, progress)
+        return await spaces_mod.generate_main(char_id, space_name, s, key, progress, instruction=instr)
 
     return _start(char_id, f"space-{space_name}-main", work)
 
 
 @router.post("/{char_id}/spaces/{space_name}/corners")
-async def generate_space_corners(char_id: str, space_name: str):
+async def generate_space_corners(char_id: str, space_name: str, body: _SpaceGenReq = Body(default=None)):
     """Start a job to draw 4 corner views. Requires an approved main view."""
     _get(char_id)
     s, _ = _backend()
     key  = settings_mod.api_key()
+    instr = (body.instruction if body else "")
 
     async def work(progress):
-        return await spaces_mod.generate_corners(char_id, space_name, s, key, progress)
+        return await spaces_mod.generate_corners(char_id, space_name, s, key, progress, instruction=instr)
 
     return _start(char_id, f"space-{space_name}-corners", work)
 
@@ -787,6 +793,17 @@ async def generate_space_corners(char_id: str, space_name: str):
 async def approve_space_image(char_id: str, space_name: str, item_id: str):
     _get(char_id)
     return _guard(spaces_mod.approve_image, char_id, space_name, item_id)
+
+
+@router.delete("/{char_id}/spaces/{space_name}/images/{item_id}")
+async def delete_space_image(char_id: str, space_name: str, item_id: str):
+    _get(char_id)
+    from story3 import store as media_store
+    it = media_store.get(item_id)
+    if not it or it["plan_id"] != char_id:
+        raise HTTPException(404, "image not found")
+    media_store.delete(item_id)
+    return {"deleted": item_id}
 
 
 @router.get("/{char_id}/accessories")

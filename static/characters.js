@@ -31,6 +31,20 @@ css.textContent = `
 #app .row>label.f,#app .row>select,#app .row>input[type=text]{flex:1 1 100%;min-width:0!important}
 #app .card.pad{padding:12px}
 #vl-spaces .row input{flex:1 1 100%!important;width:auto!important}
+.sp-studio-overlay{position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center}
+.sp-studio{background:var(--bg);width:960px;max-width:96vw;max-height:92vh;border-radius:14px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 64px rgba(0,0,0,.5)}
+.sp-studio-head{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-shrink:0}
+.sp-studio-body{display:flex;flex:1;overflow:hidden;min-height:0}
+.sp-studio-ctrl{width:250px;min-width:220px;padding:16px;border-right:1px solid var(--line);overflow-y:auto;flex-shrink:0;display:flex;flex-direction:column;gap:10px}
+.sp-studio-imgs{flex:1;padding:16px;overflow-y:auto}
+.sp-img-card{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--panel);margin-bottom:10px}
+.sp-img-card.approved{border:2px solid var(--ok,#2a9d5c)}
+.sp-img-card img{width:100%;display:block;cursor:zoom-in;max-height:280px;object-fit:cover}
+.sp-img-actions{display:flex;gap:6px;padding:8px;flex-wrap:wrap;align-items:center}
+.sp-corner-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px}
+.sp-corner-grid .sp-img-card img{max-height:160px}
+.sp-section-label{font-size:11px;font-weight:600;color:var(--mute);text-transform:uppercase;letter-spacing:.5px;margin:12px 0 6px}
+.sp-status{font-size:11px;color:var(--mute);min-height:16px}
 #life-feed-box img{width:96px!important;height:128px!important}
 .dlg .box{max-height:96vh}
 }
@@ -404,24 +418,15 @@ function lifeView(busy) {
   const spacesHtml = spaces.map((sp, i) => {
     const hasRef = sp.ref_image;
     const refUrl = hasRef ? `/api/characters/file/${CID}/${sp.ref_image}` : '';
-    const spSlug = encodeURIComponent(sp.name || '');
     return `
-    <div class="card pad mt-s" style="padding:8px;background:var(--bg2,#f8f8f8)" data-sp-card="${i}">
-      <div class="row" style="gap:6px;align-items:center">
+    <div class="card pad mt-s" style="padding:8px;background:var(--bg2,#f8f8f8);display:flex;align-items:center;gap:10px" data-sp-card="${i}">
+      ${hasRef ? `<img src="${esc(refUrl)}" style="width:56px;height:40px;object-fit:cover;border-radius:6px;border:2px solid var(--ok);flex-shrink:0">` : '<div style="width:56px;height:40px;border-radius:6px;border:2px dashed var(--line);display:flex;align-items:center;justify-content:center;color:var(--mute);font-size:10px;flex-shrink:0">no ref</div>'}
+      <div style="flex:1;min-width:0">
         <input style="width:110px" data-sp-name="${i}" value="${esc(sp.name || '')}" placeholder="e.g. Bedroom" ${dis}>
-        <input style="flex:1" data-sp-desc="${i}" value="${esc(sp.description || '')}" placeholder="cosy room with fairy lights and books" ${dis}>
-        <button class="small bad" data-sp-del="${i}" ${dis}>×</button>
+        <input style="flex:1;width:calc(100% - 120px);margin-left:6px" data-sp-desc="${i}" value="${esc(sp.description || '')}" placeholder="cosy room with fairy lights and books" ${dis}>
       </div>
-      <div class="row mt-s" style="gap:6px;align-items:center;flex-wrap:wrap">
-        ${hasRef ? `<img src="${esc(refUrl)}" style="width:56px;height:40px;object-fit:cover;border-radius:4px;border:1px solid var(--line)">` : ''}
-        <button class="small primary" data-sp-gen="${esc(sp.name || '')}" ${dis}>&#9889; Generate</button>
-        <button class="small" data-sp-corners="${esc(sp.name || '')}" ${dis || !hasRef ? 'disabled' : ''} title="Generate 4 corner views (needs approved main first)">&#9633; 4 Corners</button>
-        <label style="font-size:11px;color:var(--mute);display:flex;align-items:center;gap:4px;cursor:pointer">
-          upload <input type="file" data-sp-ref-upload="${i}" accept="image/*" style="display:none" ${dis}>
-        </label>
-        ${hasRef ? `<button class="small bad" data-sp-ref-del="${i}" title="Remove ref" ${dis}>✕</button>` : ''}
-      </div>
-      <div id="sp-imgs-${i}" class="mt-s" style="min-height:4px"></div>
+      <button class="small primary" data-sp-open="${esc(sp.name || '')}" ${dis}>Open Studio</button>
+      <button class="small bad" data-sp-del="${i}" ${dis}>×</button>
     </div>`;
   }).join('');
 
@@ -485,7 +490,7 @@ function lifeView(busy) {
         <div style="font-style:italic;margin:6px 0">${esc(out.thought||'')}</div>${gp}${noteHtml}${wishHtml}${drawn}
         ${!drawEv ? `${out.log_photo === false ? '<div class="mute small mt-s">Not worth a picture, she decided. </div>' : ''}<button class="small ${out.log_photo === false ? '' : 'primary'} mt-s" data-draw-ev="${esc(ev.id)}">${out.log_photo === false ? 'Draw anyway' : 'Draw this look'}</button>` : '<span class="mute small mt-s">✓ drawn</span>'}
         <details class="mt-s"><summary class="mute small" style="cursor:pointer">Pipeline debug</summary>
-          <pre style="font-size:10px;white-space:pre-wrap;max-height:200px;overflow:auto">${esc(JSON.stringify({shot_type:out.shot_type,expression:out.expression,face_state:out.face_state,image_idea:out.image_idea,outfit:out.outfit,outfit_id:out.outfit_id,wardrobe_want:out.wardrobe_want,goal_progress:out.goal_progress,note:out.note},null,2))}</pre>
+          <pre style="font-size:10px;white-space:pre-wrap;max-height:200px;overflow:auto">${esc(JSON.stringify(out,null,2))}</pre>
         </details>
       </div>`;
     }
@@ -891,8 +896,8 @@ function wireLife() {
   $e('vl-sp-add') && ($e('vl-sp-add').onclick = () => {
     const box = document.getElementById('vl-spaces');
     const i = box.querySelectorAll('[data-sp-name]').length;
-    const card = document.createElement('div'); card.className = 'card pad mt-s'; card.style.cssText = 'padding:8px;background:var(--bg2,#f8f8f8)';
-    card.innerHTML = `<div class="row" style="gap:6px;align-items:center"><input style="width:110px" data-sp-name="${i}" placeholder="e.g. Balcony"><input style="flex:1" data-sp-desc="${i}" placeholder="morning sun, cane chair, street below"><button class="small bad" data-sp-del="${i}">×</button></div>`;
+    const card = document.createElement('div'); card.className = 'card pad mt-s'; card.style.cssText = 'padding:8px;background:var(--bg2,#f8f8f8);display:flex;align-items:center;gap:10px';
+    card.innerHTML = `<div style="width:56px;height:40px;border-radius:6px;border:2px dashed var(--line);display:flex;align-items:center;justify-content:center;color:var(--mute);font-size:10px;flex-shrink:0">new</div><div style="flex:1;min-width:0"><input style="width:110px" data-sp-name="${i}" placeholder="e.g. Balcony"><input style="flex:1;width:calc(100% - 120px);margin-left:6px" data-sp-desc="${i}" placeholder="morning sun, cane chair, street below"></div><button class="small bad" data-sp-del="${i}">×</button>`;
     card.querySelector('[data-sp-del]').onclick = e => { e.target.closest('.card').remove(); };
     box.appendChild(card);
   });
@@ -900,100 +905,211 @@ function wireLife() {
 
   const _refresh = async () => { C = await call('/' + CID); render(); };
 
-  // space image generation
-  (async () => {
-    const prof = C.profile || {};
-    const spaces = prof.spaces || [];
-    for (let i = 0; i < spaces.length; i++) {
-      const sp = spaces[i];
-      if (!sp.name) continue;
-      const el = document.getElementById('sp-imgs-' + i);
-      if (!el) continue;
-      const imgs = await call('/' + CID + '/spaces/' + encodeURIComponent(sp.name) + '/images').catch(() => ({main:[], corners:[]}));
-      const renderImgs = (imgs) => {
-        const allMain = imgs.main || [];
-        const allCorners = imgs.corners || [];
-        if (!allMain.length && !allCorners.length) { el.innerHTML = ''; return; }
-        const imgCard = (it) => {
-          const url = it.file ? `/api/characters/file/${CID}/${it.file}` : '';
-          const isApproved = it.approved;
-          const isFailed = it.status === 'failed';
-          return `<div style="display:inline-block;vertical-align:top;margin:3px;position:relative">
-            ${url ? `<img src="${esc(url)}" style="width:90px;height:64px;object-fit:cover;border-radius:4px;border:2px solid ${isApproved ? 'var(--ok)' : 'var(--line)'}">` :
-              `<div style="width:90px;height:64px;border-radius:4px;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--mute)">${isFailed ? '✕ failed' : '…'}</div>`}
-            ${url && !isApproved ? `<button class="small primary" data-sp-approve="${esc(it.id)}" data-sp-name="${esc(sp.name)}" style="position:absolute;bottom:3px;left:3px;font-size:9px;padding:1px 4px">✓</button>` : ''}
-            ${isApproved ? '<div style="position:absolute;top:3px;right:3px;background:var(--ok);border-radius:3px;width:14px;height:14px;display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff">✓</div>' : ''}
-          </div>`;
-        };
-        let html = '';
-        if (allMain.length) html += `<div style="font-size:10px;color:var(--mute);margin-bottom:2px">Main view</div>` + allMain.map(imgCard).join('');
-        if (allCorners.length) html += `<div style="font-size:10px;color:var(--mute);margin:4px 0 2px">Corner views</div>` + allCorners.map(imgCard).join('');
-        el.innerHTML = html;
-        el.querySelectorAll('[data-sp-approve]').forEach(btn => {
-          btn.onclick = async () => {
-            await call('/' + CID + '/spaces/' + encodeURIComponent(btn.dataset.spName) + '/images/' + btn.dataset.spApprove + '/approve', {method:'POST'}).catch(()=>{});
-            const updated = await call('/' + CID + '/spaces/' + encodeURIComponent(btn.dataset.spName) + '/images').catch(() => ({main:[], corners:[]}));
-            renderImgs(updated);
-            C = await call('/' + CID); render();
-          };
-        });
-      };
-      renderImgs(imgs);
-    }
-    // wire generate / corners buttons
-    document.querySelectorAll('[data-sp-gen]').forEach(btn => {
-      btn.onclick = async () => {
-        const spName = btn.dataset.spGen;
-        btn.disabled = true; btn.textContent = '…';
-        try {
-          await call('/' + CID + '/spaces/' + encodeURIComponent(spName) + '/generate', {method:'POST'});
-          // poll until job done
-          for (let t = 0; t < 120; t++) {
-            await new Promise(r => setTimeout(r, 3000));
-            const s = await call('/' + CID).catch(() => null);
-            if (s && (!s.job || s.job.state !== 'running')) break;
-          }
-          await _refresh();
-        } catch(e) { showErr('Generate failed: ' + (e.detail || e.message || e)); btn.disabled = false; btn.textContent = '⚡ Generate'; }
-      };
-    });
-    document.querySelectorAll('[data-sp-corners]').forEach(btn => {
-      if (btn.disabled) return;
-      btn.onclick = async () => {
-        const spName = btn.dataset.spCorners;
-        btn.disabled = true; btn.textContent = '…';
-        try {
-          await call('/' + CID + '/spaces/' + encodeURIComponent(spName) + '/corners', {method:'POST'});
-          for (let t = 0; t < 240; t++) {
-            await new Promise(r => setTimeout(r, 4000));
-            const s = await call('/' + CID).catch(() => null);
-            if (s && (!s.job || s.job.state !== 'running')) break;
-          }
-          await _refresh();
-        } catch(e) { showErr('Corners failed: ' + (e.detail || e.message || e)); btn.disabled = false; btn.textContent = '□ 4 Corners'; }
-      };
-    });
-  })();
+  // ── Space Studio modal ──────────────────────────────────────────────────
+  const openSpaceStudio = (spName) => {
+    const existing = document.getElementById('sp-studio-overlay');
+    if (existing) existing.remove();
 
-  // space reference image upload
-  document.querySelectorAll('[data-sp-ref-upload]').forEach(inp => inp.onchange = async () => {
-    const idx = inp.getAttribute('data-sp-ref-upload');
-    const nameEl = document.querySelector(`[data-sp-name="${idx}"]`);
-    const spaceName = nameEl ? nameEl.value.trim() : '';
-    if (!spaceName || !inp.files[0]) return;
-    const fd = new FormData(); fd.append('file', inp.files[0]);
-    try {
-      await call('/' + CID + `/spaces/${encodeURIComponent(spaceName)}/ref`, {method: 'POST', form: fd});
-      await _refresh();
-    } catch(e) { showErr('Space ref upload failed: ' + (e.detail || e.message || e)); }
-  });
-  document.querySelectorAll('[data-sp-ref-del]').forEach(b => b.onclick = async () => {
-    const idx = b.getAttribute('data-sp-ref-del');
-    const nameEl = document.querySelector(`[data-sp-name="${idx}"]`);
-    const spaceName = nameEl ? nameEl.value.trim() : '';
-    if (!spaceName) return;
-    await call('/' + CID + `/spaces/${encodeURIComponent(spaceName)}/ref`, {method: 'DELETE'});
-    await _refresh();
+    const ov = document.createElement('div');
+    ov.id = 'sp-studio-overlay';
+    ov.className = 'sp-studio-overlay';
+    ov.innerHTML = `
+      <div class="sp-studio" id="sp-studio-box">
+        <div class="sp-studio-head">
+          <b style="font-size:16px">Space Studio</b>
+          <span class="badge b-info">${esc(spName)}</span>
+          <span class="sp"></span>
+          <button class="small" id="ss-close">× Close</button>
+        </div>
+        <div class="sp-studio-body">
+          <div class="sp-studio-ctrl">
+            <div>
+              <label class="f" style="font-size:12px">Space name<input id="ss-name" value="${esc(spName)}"></label>
+            </div>
+            <div>
+              <label class="f" style="font-size:12px">Description<textarea id="ss-desc" style="min-height:56px" placeholder="cosy room with fairy lights and books"></textarea></label>
+            </div>
+            <button class="small" id="ss-save-details">Save name &amp; description</button>
+            <hr style="border:none;border-top:1px solid var(--line);margin:4px 0">
+            <div>
+              <label class="f" style="font-size:12px">Instruction <span class="mute" style="font-size:10px">optional — describe what to change or add</span>
+                <textarea id="ss-instr" style="min-height:52px" placeholder="add a large bookshelf on the left wall, warmer lighting, more plants near the window…"></textarea>
+              </label>
+            </div>
+            <button class="small primary" id="ss-gen">⚡ Generate main view</button>
+            <button class="small" id="ss-corners">▣ Generate 4 corners</button>
+            <div class="sp-status" id="ss-status"></div>
+            <hr style="border:none;border-top:1px solid var(--line);margin:4px 0">
+            <div>
+              <div style="font-size:12px;margin-bottom:4px">Upload reference image</div>
+              <input type="file" id="ss-upload" accept="image/*" style="font-size:11px;width:100%">
+            </div>
+          </div>
+          <div class="sp-studio-imgs" id="ss-images">
+            <div class="mute small">Loading…</div>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+
+    // close on overlay click outside box
+    ov.onclick = e => { if (e.target === ov) ov.remove(); };
+    document.getElementById('ss-close').onclick = () => ov.remove();
+
+    // load current space details into fields
+    const spaceData = (C.profile?.spaces || []).find(s => s.name?.toLowerCase() === spName.toLowerCase()) || {};
+    document.getElementById('ss-desc').value = spaceData.description || '';
+
+    let jobRunning = false;
+
+    const setStatus = (msg, running=false) => {
+      document.getElementById('ss-status').textContent = msg;
+      jobRunning = running;
+      const genBtn = document.getElementById('ss-gen');
+      const cornBtn = document.getElementById('ss-corners');
+      if (genBtn) { genBtn.disabled = running; genBtn.textContent = running ? '…generating…' : '⚡ Generate main view'; }
+      if (cornBtn) { cornBtn.disabled = running; }
+    };
+
+    const pollJob = async (maxS=180) => {
+      for (let t = 0; t < maxS/3; t++) {
+        await new Promise(r => setTimeout(r, 3000));
+        const st = await call('/' + CID).catch(() => null);
+        if (st && (!st.job || st.job.state !== 'running')) break;
+      }
+    };
+
+    const loadImages = async () => {
+      const imgs = await call('/' + CID + '/spaces/' + encodeURIComponent(spName) + '/images').catch(() => ({main:[], corners:[]}));
+      const box = document.getElementById('ss-images');
+      if (!box) return;
+
+      const hasApprovedMain = (imgs.main || []).some(r => r.approved && r.status === 'done');
+      const cornBtn = document.getElementById('ss-corners');
+      if (cornBtn) cornBtn.disabled = !hasApprovedMain || jobRunning;
+
+      const makeImgCard = (it, isCorner=false) => {
+        const url = it.file ? `/api/characters/file/${CID}/${it.file}` : '';
+        const isApproved = it.approved;
+        const isFailed = it.status === 'failed';
+        const isRunning = it.status === 'running';
+        const prompt = it.meta?.prompt || '';
+        return `<div class="sp-img-card ${isApproved ? 'approved' : ''}" data-img-id="${esc(it.id)}">
+          ${url ? `<img src="${esc(url)}" onclick="chZoom('${esc(url)}')" onerror="this.style.display='none'">` :
+            `<div style="height:${isCorner?'140px':'200px'};background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--mute)">${isFailed ? '✕ failed' : isRunning ? '⏳ generating…' : '—'}</div>`}
+          <div class="sp-img-actions">
+            ${isApproved ? '<span class="badge b-ok" style="font-size:10px">✓ approved</span>' : ''}
+            ${url && !isApproved ? `<button class="small primary" data-ss-approve="${esc(it.id)}">✓ Approve</button>` : ''}
+            ${isApproved ? `<button class="small" data-ss-unapprove="${esc(it.id)}">↩ Unapprove</button>` : ''}
+            <button class="small bad" data-ss-delete="${esc(it.id)}">✕ Reject</button>
+            <span class="sp"></span>
+            ${prompt ? `<details style="font-size:10px;width:100%"><summary class="mute" style="cursor:pointer">prompt</summary><div style="white-space:pre-wrap;padding:4px;color:var(--mute)">${esc(prompt)}</div></details>` : ''}
+          </div>
+        </div>`;
+      };
+
+      let html = '';
+      const main = imgs.main || [];
+      const corners = imgs.corners || [];
+      if (!main.length && !corners.length) {
+        html = '<div class="mute small">No images yet — click Generate main view to start.</div>';
+      } else {
+        if (main.length) {
+          html += `<div class="sp-section-label">Main views (${main.length})</div>`;
+          html += main.slice().reverse().map(it => makeImgCard(it)).join('');
+        }
+        if (corners.length) {
+          html += `<div class="sp-section-label">Corner views (${corners.length})</div>`;
+          html += `<div class="sp-corner-grid">` + corners.slice().reverse().map(it => makeImgCard(it, true)).join('') + `</div>`;
+        }
+      }
+      box.innerHTML = html;
+
+      box.querySelectorAll('[data-ss-approve]').forEach(btn => {
+        btn.onclick = async () => {
+          await call('/' + CID + '/spaces/' + encodeURIComponent(spName) + '/images/' + btn.dataset.ssApprove + '/approve', {method:'POST'}).catch(()=>{});
+          C = await call('/' + CID);
+          await loadImages();
+          render();
+        };
+      });
+      box.querySelectorAll('[data-ss-unapprove]').forEach(btn => {
+        btn.onclick = async () => {
+          // un-approve = approve false via the same endpoint toggled; we don't have a dedicated route,
+          // so just delete and re-draw — simpler: tell user to reject+redo
+          toast('To unapprove: use Reject to remove it, then Generate a new one.');
+        };
+      });
+      box.querySelectorAll('[data-ss-delete]').forEach(btn => {
+        btn.onclick = async () => {
+          await call('/' + CID + '/spaces/' + encodeURIComponent(spName) + '/images/' + btn.dataset.ssDelete, {method:'DELETE'}).catch(()=>{});
+          C = await call('/' + CID);
+          await loadImages();
+          render();
+        };
+      });
+    };
+
+    loadImages();
+
+    document.getElementById('ss-save-details').onclick = async () => {
+      const newName = (document.getElementById('ss-name').value || '').trim();
+      const newDesc = (document.getElementById('ss-desc').value || '').trim();
+      if (!newName) return;
+      // update the in-memory spaces array and save via profile patch
+      const spaces = (C.profile?.spaces || []).map(s =>
+        s.name?.toLowerCase() === spName.toLowerCase() ? {...s, name: newName, description: newDesc} : s
+      );
+      await call('/' + CID + '/profile', {method:'PATCH', json:{spaces}}).catch(e => showErr(e.detail||e.message));
+      C = await call('/' + CID);
+      render();
+      toast('Space details saved.');
+    };
+
+    document.getElementById('ss-gen').onclick = async () => {
+      const instr = (document.getElementById('ss-instr').value || '').trim();
+      setStatus('Generating main view…', true);
+      try {
+        await call('/' + CID + '/spaces/' + encodeURIComponent(spName) + '/generate', {method:'POST', json:{instruction:instr}});
+        setStatus('Waiting for job…', true);
+        await pollJob(180);
+        setStatus('');
+        C = await call('/' + CID);
+        await loadImages();
+        render();
+      } catch(e) { setStatus(''); showErr('Generate failed: ' + (e.detail||e.message||e)); }
+    };
+
+    document.getElementById('ss-corners').onclick = async () => {
+      const instr = (document.getElementById('ss-instr').value || '').trim();
+      setStatus('Generating 4 corner views…', true);
+      try {
+        await call('/' + CID + '/spaces/' + encodeURIComponent(spName) + '/corners', {method:'POST', json:{instruction:instr}});
+        setStatus('Waiting for corners job…', true);
+        await pollJob(300);
+        setStatus('');
+        C = await call('/' + CID);
+        await loadImages();
+        render();
+      } catch(e) { setStatus(''); showErr('Corners failed: ' + (e.detail||e.message||e)); }
+    };
+
+    document.getElementById('ss-upload').onchange = async () => {
+      const inp = document.getElementById('ss-upload');
+      if (!inp.files[0]) return;
+      const fd = new FormData(); fd.append('file', inp.files[0]);
+      try {
+        await call('/' + CID + '/spaces/' + encodeURIComponent(spName) + '/ref', {method:'POST', form:fd});
+        C = await call('/' + CID);
+        render();
+        toast('Reference image uploaded.');
+      } catch(e) { showErr('Upload failed: ' + (e.detail||e.message||e)); }
+    };
+  };
+
+  // wire Open Studio buttons
+  document.querySelectorAll('[data-sp-open]').forEach(btn => {
+    btn.onclick = () => openSpaceStudio(btn.dataset.spOpen);
   });
 
   // accessories

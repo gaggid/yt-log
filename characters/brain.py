@@ -481,8 +481,10 @@ SHOT_DIRECTIONS: dict[str, str] = {
         "Eye-level or slight angle, person looks relaxed, not posing directly at the lens."
     ),
     "pov_first_person": (
-        "First-person point-of-view shot. Shows what the person sees: hands, a book, food, "
-        "a view outside, a screen. Person's face not in frame. Phone not visible."
+        "First-person point-of-view shot. Camera IS the person — eye-level looking down or forward. "
+        "Shows what the person sees: her own hands, a plate, a book, a view, a screen. "
+        "No other people anywhere in the frame. Person's body and face completely absent. "
+        "Phone not visible. Only the subject (the food, object, scene) and optionally her own hands at the bottom of frame."
     ),
     "candid_side": (
         "Candid lifestyle shot from a slight side angle. Person unaware of camera. "
@@ -520,10 +522,12 @@ _SHOT_HELP = {
         "having tea/coffee, lost in thought, a quiet and atmospheric moment."
     ),
     "pov_first_person": (
-        "pov_first_person — first-person view of what the subject sees: hands, food, book, view, "
-        "craft work, screen. Face not in frame, phone not visible. "
-        "PICK WHEN: the star of the moment is an object (a meal, a drink, a book, an item bought, "
-        "a view out a window, something being made or cooked). Subject is the thing, not the person."
+        "pov_first_person — camera IS the person; she is invisible. Shows only what she is looking at: "
+        "her plate below her, an open book, a view out a window, a screen. "
+        "NO other people visible anywhere. NOT a shot of her from outside. "
+        "PICK WHEN: the star is a thing in front of her (her own meal, her book, a view she is enjoying) "
+        "and she is simply the unseen eyes. DO NOT pick if another person is involved or if 'being served' — "
+        "use candid_side or propped_timer for social eating scenes."
     ),
 }
 
@@ -539,7 +543,7 @@ def shot_choices_text(types: list[str]) -> str:
     return (
         "choose exactly one — read each option's PICK WHEN and select the type whose "
         "trigger best matches the current activity and subject. "
-        "If the subject is food/drink/an object: pov_first_person. "
+        "If eating/drinking alone and the food is the star (no other people, just her plate): pov_first_person. "
         "If showing an outfit: mirror_selfie. "
         "If movement/dance/cooking: propped_timer. "
         "If a quiet atmospheric moment: candid_side. "

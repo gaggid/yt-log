@@ -80,9 +80,9 @@ def _approved_main(char_id: str, space_name: str) -> dict | None:
     return rows[-1] if rows else None
 
 
-async def generate_main(char_id: str, space_name: str, s: dict, key: str, progress=None) -> dict:
+async def generate_main(char_id: str, space_name: str, s: dict, key: str, progress=None,
+                        instruction: str = "") -> dict:
     """Draw one new main-view candidate. Returns the media row."""
-    from story3 import scenes
     from characters import studio as studio_mod
 
     char  = store.get(char_id)
@@ -92,6 +92,8 @@ async def generate_main(char_id: str, space_name: str, s: dict, key: str, progre
     base, api_key = studio_mod._ctx(s, key)
 
     prompt = _build_prompt(space, char)
+    if instruction:
+        prompt = prompt.rstrip(". ") + f". {instruction.strip()}."
     body   = {"model": model, "prompt": prompt, "size": SIZE_MAIN, "n": 1}
 
     it = media.add(char_id, "space_gen", mk, status="running", meta={"prompt": prompt, "model": model})
@@ -116,9 +118,9 @@ async def generate_main(char_id: str, space_name: str, s: dict, key: str, progre
     return it
 
 
-async def generate_corners(char_id: str, space_name: str, s: dict, key: str, progress=None) -> dict:
+async def generate_corners(char_id: str, space_name: str, s: dict, key: str, progress=None,
+                           instruction: str = "") -> dict:
     """Draw 4 corner views from the approved main image. Requires an approved main."""
-    from story3 import scenes
     from characters import studio as studio_mod
 
     char  = store.get(char_id)
@@ -140,6 +142,8 @@ async def generate_corners(char_id: str, space_name: str, s: dict, key: str, pro
     for i, (tag, corner_desc) in enumerate(_CORNERS):
         ck = _corner_key(space_name, tag)
         prompt = _corner_prompt(space, corner_desc)
+        if instruction:
+            prompt = prompt.rstrip(". ") + f". {instruction.strip()}."
         body   = {"model": model, "prompt": prompt, "size": SIZE_CORNER, "n": 1}
 
         it = media.add(char_id, "space_gen", ck, status="running",
