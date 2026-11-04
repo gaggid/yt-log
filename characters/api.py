@@ -1107,6 +1107,36 @@ async def life_status(char_id: str):
     }
 
 
+class OverrideReq(BaseModel):
+    energy:  int | None = None          # 0-100
+    feeling: dict | None = None         # {primary, intensity, secondary?}
+
+
+@router.patch("/{char_id}/override")
+async def override_state(char_id: str, body: OverrideReq):
+    """Directly set energy and/or feeling — bypasses the brain, effective immediately."""
+    from . import feeling as feeling_mod
+    c = _get(char_id)
+    updates: dict = {}
+    if body.energy is not None:
+        updates["energy"] = max(0, min(100, body.energy))
+    if body.feeling:
+        primary = body.feeling.get("primary", "")
+        if primary not in feeling_mod.ALL_FEELINGS:
+            raise HTTPException(400, f"unknown feeling: {primary}")
+        updates["feeling"] = {
+            "primary":   primary,
+            "intensity": max(1, min(10, int(body.feeling.get("intensity", 5)))),
+            "secondary": body.feeling.get("secondary", ""),
+            "since_ts":  __import__("time").time(),
+        }
+    if not updates:
+        raise HTTPException(400, "nothing to override")
+    profile_mod.patch(c, updates)
+    store.save(c)
+    return updates
+
+
 class ThinkReq(BaseModel):
     context_override: str = ""
 

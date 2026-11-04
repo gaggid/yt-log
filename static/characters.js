@@ -403,7 +403,7 @@ function lifeView(busy) {
   // ── profile panel ──
   const spacesHtml = spaces.map((sp, i) => {
     const hasRef = sp.ref_image;
-    const refUrl = hasRef ? `/api/characters/file/${CH}/${sp.ref_image}` : '';
+    const refUrl = hasRef ? `/api/characters/file/${CID}/${sp.ref_image}` : '';
     const spSlug = encodeURIComponent(sp.name || '');
     return `
     <div class="card pad mt-s" style="padding:8px;background:var(--bg2,#f8f8f8)" data-sp-card="${i}">
@@ -493,7 +493,7 @@ function lifeView(busy) {
     return '';
   };
 
-  return `<div class="vl-grid">
+  return `<div class="vl-grid ch-studio">
   <div>
     <div class="card pad">
       <h3 style="margin-top:0">Profile</h3>
@@ -533,7 +533,7 @@ function lifeView(busy) {
       <div class="mute small" style="margin-bottom:6px">Phone, laptop, bag, mug — upload a ref photo so they look the same in every picture.</div>
       <div id="vl-accessories">${(prof.accessories || []).map(a => {
         const hasRef = a.ref_image;
-        const refUrl = hasRef ? `/api/characters/file/${CH}/accessories/${a.ref_image.split('/').pop()}` : '';
+        const refUrl = hasRef ? `/api/characters/file/${CID}/accessories/${a.ref_image.split('/').pop()}` : '';
         return `<div class="card pad mt-s" style="padding:8px;background:var(--bg2,#f8f8f8)">
           <div class="row" style="gap:6px;align-items:center">
             <b style="min-width:80px">${esc(a.name)}</b>
