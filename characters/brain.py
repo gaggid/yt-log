@@ -18,26 +18,27 @@ from story import llm as llm_mod
 from story2.schemas import M
 from story.schemas import Str
 
-from . import goals as goals_mod, memory as memory_mod, profile as profile_mod, store, world as world_mod
+from . import feeling as feeling_mod, goals as goals_mod, memory as memory_mod, profile as profile_mod, store, world as world_mod
 
 # ── schemas ───────────────────────────────────────────────────────────────────
 
 class ThoughtOut(M):
-    thought:        Str = ""   # first-person inner monologue, 1-2 sentences
-    activity:       Str = ""   # plain description of what she is doing
-    space:          Str = ""   # which declared space, or "outside" / a place name
-    mood:           Str = ""   # one word
-    expression:     Str = ""   # specific facial expression for this moment
-    face_state:     Str = ""   # physical face condition (makeup, tiredness, flush, etc.)
-    log_photo:      bool = True   # does the character think this moment is worth a picture?
-    shot_type:      Str = ""   # one of the defined shot types — controls camera and phone visibility
-    outfit:         Str = ""   # text description of what she is wearing
-    outfit_id:      Str = ""   # wardrobe garment id if wearing an item from wardrobe
-    wardrobe_want:  Str = ""   # garment she wants to add to wardrobe, described in one line
-    image_idea:     Str = ""   # scene content, light and setting only — no camera or phone
-    goal_progress:  Str = ""   # if non-empty, progress on an active goal
-    energy_delta:   int = 0    # energy change this activity causes (negative = draining, positive = restoring)
-    note:           Str = ""   # self-reminder or realization worth keeping, if any
+    thought:          Str = ""   # first-person inner monologue, 1-2 sentences
+    activity:         Str = ""   # plain description of what she is doing
+    space:            Str = ""   # which declared space, or "outside" / a place name
+    mood:             Str = ""   # one word
+    expression:       Str = ""   # specific facial expression for this moment
+    face_state:       Str = ""   # physical face condition (makeup, tiredness, flush, etc.)
+    log_photo:        bool = True   # does the character think this moment is worth a picture?
+    shot_type:        Str = ""   # one of the defined shot types — controls camera and phone visibility
+    outfit:           Str = ""   # text description of what she is wearing
+    outfit_id:        Str = ""   # wardrobe garment id if wearing an item from wardrobe
+    wardrobe_want:    Str = ""   # garment she wants to add to wardrobe, described in one line
+    image_idea:       Str = ""   # scene content, light and setting only — no camera or phone
+    goal_progress:    Str = ""   # if non-empty, progress on an active goal
+    energy_delta:     int = 0    # energy change this activity causes (negative = draining, positive = restoring)
+    note:             Str = ""   # self-reminder or realization worth keeping, if any
+    feeling_update:   dict = {}  # Phase K: {primary, intensity, secondary} — brain updates the feeling state
 
 
 class ThoughtRevised(M):
@@ -58,6 +59,21 @@ def _time_of_day() -> str:
     if h < 19:  return "early evening"
     if h < 22:  return "evening"
     return "late night"
+
+
+# ── feeling helpers ───────────────────────────────────────────────────────────
+
+def _age_of(char: dict) -> int:
+    """Parse age from declared fields; default 25."""
+    try:
+        return int(char.get("declared", {}).get("age") or 25)
+    except (TypeError, ValueError):
+        return 25
+
+
+def _feeling_line(prof: dict) -> str:
+    """Format current feeling for Stage-1 context injection."""
+    return feeling_mod.format_for_prompt(prof.get("feeling"))
 
 
 # ── stage 1: context assembly ─────────────────────────────────────────────────
@@ -123,6 +139,7 @@ async def _assemble_context(char: dict, context_override: str, recent_events: li
         "goals_text":     goals_text,
         "neglect_nudge":  neglect_nudge,
         "wardrobe_text":  wardrobe_text,
+        "feeling_line":   _feeling_line(prof),
     }
 
 
@@ -194,6 +211,8 @@ def _first_pass_user(ctx: dict, char: dict, context_override: str) -> str:
         sections.append(ctx["day_arc_text"])
     if ctx["world_line"]:
         sections.append(f"World: {ctx['world_line']}")
+    if ctx.get("feeling_line"):
+        sections.append(ctx["feeling_line"])
     if context:
         sections.append(f"Your context: {context}")
     if ctx["goals_text"]:
@@ -224,10 +243,14 @@ Return ONLY valid JSON:
   "log_photo":     "true or false (a JSON boolean). Would you really take a picture of this moment and keep it? Be selective like a real person: true only for something worth remembering or sharing (a meal, a view, an outfit, progress on a goal, a good mood, something new). Routine or private moments (resting, scrolling, being tired, plain chores) are usually false. If false, leave shot_type and image_idea as empty strings.",
   "shot_type":     "@@SHOTS@@",
   "image_idea":    "2-3 sentences: what fills the frame, the light, the setting, visible props. Describe ONLY the scene content — do NOT mention the camera, the phone, or how the picture was taken. No pronouns.",
-  "goal_progress": "if this activity made concrete progress on a goal, describe WHAT YOU ACTUALLY DID in 6-10 words (e.g. 'practiced first 10 minutes of Bhangra footwork', 'finished chapter 3 of the book'). Do not write meta-reflections or intentions about the goal. Else empty string.",
-  "energy_delta":  "integer: how much energy this activity changes. Draining: intense exercise/dance -15 to -20, focused work/study -10 to -15, errands/commute -8 to -12, socialising -6 to -10, casual browsing/reading -2 to -5. Restoring: full meal +8, short nap +20, full night sleep +65, light rest +5. Return a plain integer like -12 or 8.",
-  "note":          "if you just realized something worth remembering — a reminder, an insight, a decision — write it in one sentence; else empty string"
-}""".replace("@@SHOTS@@", shot_choices))
+  "goal_progress":    "if this activity made concrete progress on a goal, describe WHAT YOU ACTUALLY DID in 6-10 words (e.g. 'practiced first 10 minutes of Bhangra footwork', 'finished chapter 3 of the book'). Do not write meta-reflections or intentions about the goal. Else empty string.",
+  "energy_delta":     "integer: how much energy this activity changes. Draining: intense exercise/dance -15 to -20, focused work/study -10 to -15, errands/commute -8 to -12, socialising -6 to -10, casual browsing/reading -2 to -5. Restoring: full meal +8, short nap +20, full night sleep +65, light rest +5. Return a plain integer like -12 or 8.",
+  "note":             "if you just realized something worth remembering — a reminder, an insight, a decision — write it in one sentence; else empty string",
+  "feeling_update":   {"primary": "@@FEELING_VOCAB@@", "intensity": "1-10 integer", "secondary": "one more feeling word or empty string"}
+}""".replace("@@SHOTS@@", shot_choices).replace(
+        '"@@FEELING_VOCAB@@"',
+        '"one word from: ' + ', '.join(sorted(feeling_mod.ALL_FEELINGS)[:40]) + ' … (pick what genuinely fits this moment)"'
+    ))
     return "\n\n".join(sections)
 
 
@@ -346,6 +369,18 @@ async def think(char: dict, backend, s: dict, trigger: str = "manual", context_o
         new_energy = max(0, min(100, int(prof.get("energy") or 80) + delta))
         profile_mod.patch(fresh, {"energy": new_energy})
         store.save(fresh)
+    except Exception:
+        pass
+
+    # apply feeling update — always run; falls back to natural drift on bad model output
+    try:
+        fresh2 = store.get(char["id"])
+        prof2  = profile_mod.get(fresh2)
+        age    = _age_of(char)
+        current_feeling = prof2.get("feeling") or feeling_mod.default_feeling(age)
+        new_feeling = feeling_mod.apply_update(current_feeling, thought.feeling_update or {}, age)
+        profile_mod.patch(fresh2, {"feeling": new_feeling})
+        store.save(fresh2)
     except Exception:
         pass
 

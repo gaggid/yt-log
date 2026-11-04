@@ -149,7 +149,10 @@ function buildFeedCard(ev, allEvents) {
   const drawEv = allEvents.find(e => e.event_type === 'draw' && (e.inputs || {}).event_id === ev.id);
   const imgUrl = drawEv ? (drawEv.outputs || {}).url || '' : '';
   const mood = out.mood || '';
-  const feeling = out.feeling || '';  // Phase K — may be empty now
+  // feeling_update holds the feeling the brain produced this cycle
+  const fuObj = out.feeling_update || {};
+  const feeling = fuObj.primary || '';
+  const feelingInt = fuObj.intensity || 0;
   const space = out.space || '';
   const thought = out.thought || '';
   const activity = out.activity || '';
@@ -161,7 +164,7 @@ function buildFeedCard(ev, allEvents) {
       <span class="feed-time">${absTime(ev.created_at)}</span>
       ${space ? `<span class="space-tag">${esc(space)}</span>` : ''}
       ${mood ? `<span class="mood-tag">${esc(mood)}</span>` : ''}
-      ${feeling ? `<span class="feeling-tag">feeling ${esc(feeling)}</span>` : ''}
+      ${feeling ? `<span class="feeling-tag">feeling ${esc(feeling)}${feelingInt ? ' ' + feelingInt + '/10' : ''}</span>` : ''}
     </div>
     ${activity ? `<div class="feed-activity">${esc(activity)}</div>` : ''}
     ${thought ? `<div class="feed-thought">"${esc(thought)}"</div>` : ''}
@@ -211,8 +214,9 @@ async function loadNow() {
     const energy = status.energy ?? 80;
     const sleepThr = status.sleep_threshold ?? 20;
     const energyColor = energy > 60 ? 'var(--ok)' : energy > 30 ? 'var(--warn)' : 'var(--bad)';
-    const feeling = out.feeling || '';  // Phase K
-    const feelingIntensity = out.feeling_intensity || 0;
+    const feelingObj = status.feeling || {};
+    const feeling = feelingObj.primary || '';
+    const feelingIntensity = feelingObj.intensity || 0;
 
     const goalsMini = (goals || []).filter(g => g.status === 'active').slice(0, 3).map(g =>
       `<div class="goal-mini"><b>${esc(g.title)}</b><span class="mute small" style="font-size:10px"> ${g.progress_notes?.length || 0} notes</span></div>`

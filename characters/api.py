@@ -927,11 +927,16 @@ async def life_status(char_id: str):
     next_at = (last + interval_s) if last else None
     loop_running = loop_mod._task is not None and not loop_mod._task.done()
     return {
-        "life_enabled": prof.get("life_enabled", False),
-        "last_run_at": last,
-        "next_run_at": next_at,
-        "interval_m": prof.get("life_interval_m") or 60,
-        "loop_running": loop_running,
+        "life_enabled":    prof.get("life_enabled", False),
+        "last_run":        last,         # keep both names; life.js uses last_run
+        "last_run_at":     last,
+        "next_run":        next_at,
+        "next_run_at":     next_at,
+        "interval_m":      prof.get("life_interval_m") or 60,
+        "loop_running":    loop_running,
+        "energy":          prof.get("energy", 80),
+        "sleep_threshold": prof.get("sleep_threshold", 20),
+        "feeling":         prof.get("feeling") or {},
     }
 
 
