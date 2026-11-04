@@ -767,7 +767,13 @@ function wireLife() {
   const readSpaces = () => {
     const names = [...document.querySelectorAll('[data-sp-name]')];
     const descs = [...document.querySelectorAll('[data-sp-desc]')];
-    return names.map((n, i) => ({name: n.value.trim(), description: descs[i] ? descs[i].value.trim() : ''})).filter(s => s.name);
+    const existing = (C.profile && C.profile.spaces) || [];
+    return names.map((n, i) => {
+      const name = n.value.trim();
+      const desc = descs[i] ? descs[i].value.trim() : '';
+      const prev = existing.find(s => s.name === name) || {};
+      return {...prev, name, description: desc};
+    }).filter(s => s.name);
   };
   $e('vl-save').onclick = async () => {
     const body = {

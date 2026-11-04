@@ -1085,8 +1085,11 @@ async def chat_with_character(char_id: str, body: ChatIn):
         messages.append({"role": h.role, "content": h.content})
     messages.append({"role": "user", "content": body.message})
 
+    import re as _re
+    _THINK = _re.compile(r"<think>.*?</think>\s*", _re.DOTALL | _re.IGNORECASE)
     result = await backend.complete(messages, max_tokens=400)
-    return {"reply": result.text.strip()}
+    reply = _THINK.sub("", result.text).strip() or result.text.strip()
+    return {"reply": reply}
 
 
 # ── skills ────────────────────────────────────────────────────────────────────
