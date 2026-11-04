@@ -1052,7 +1052,9 @@ class ChatIn(BaseModel):
 async def chat_with_character(char_id: str, body: ChatIn):
     from . import feeling as feeling_mod
     char = _get(char_id)
-    s, backend = _backend()
+    s, _ = _backend()
+    s_chat = {**s, "json_mode": ""}          # plain text response — not JSON schema
+    backend = llm.ChatBackend(s_chat, settings_mod.api_key())
 
     base_sys = brain_mod._system_prompt(char)
     sys_prompt = (
