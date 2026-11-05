@@ -11,10 +11,12 @@ draw_thought() turns the final thought into an image via studio._post_image
 and saves a char_moment media row.
 """
 import asyncio
+import hashlib
 import time
 from datetime import datetime
 from pathlib import Path
 
+from story import db as db_mod
 from story import llm as llm_mod
 from story2.schemas import M
 from story.schemas import Str
@@ -82,6 +84,44 @@ def _age_of(char: dict) -> int:
 def _feeling_line(prof: dict) -> str:
     """Format current feeling for Stage-1 context injection."""
     return feeling_mod.format_for_prompt(prof.get("feeling"))
+
+
+def _write_daily_snapshot(char: dict) -> None:
+    """Write one profile snapshot per calendar day (idempotent — skips if today exists)."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    existing = db_mod.one(
+        "SELECT id FROM char_profile_snapshots WHERE char_id=? AND snapshot_date=?",
+        (char["id"], today),
+    )
+    if existing:
+        return
+    prof = profile_mod.get(char)
+
+    # memory counts by category
+    rows = db_mod.q(
+        "SELECT category, COUNT(*) as cnt FROM char_memories WHERE char_id=? GROUP BY category",
+        (char["id"],),
+    )
+    mem_counts = {r["category"]: r["cnt"] for r in rows}
+
+    feeling = prof.get("feeling") or {}
+    sid = "snap-" + hashlib.sha1(f"{char['id']}{today}".encode()).hexdigest()[:8]
+    db_mod.ex(
+        "INSERT OR IGNORE INTO char_profile_snapshots"
+        "(id,char_id,snapshot_date,interests_json,curiosities_json,energy,"
+        "feeling_primary,feeling_intensity,memory_counts_json,web_surfs_today,created_at)"
+        " VALUES(?,?,?,?,?,?,?,?,?,0,?)",
+        (
+            sid, char["id"], today,
+            db_mod.jdump(prof.get("interests") or {}),
+            db_mod.jdump(prof.get("curiosities") or []),
+            int(prof.get("energy") or 80),
+            feeling.get("primary") or "",
+            int(feeling.get("intensity") or 5),
+            db_mod.jdump(mem_counts),
+            time.time(),
+        ),
+    )
 
 
 # ── stage 1: context assembly ─────────────────────────────────────────────────
@@ -338,6 +378,12 @@ Only revise if there is a real reason. Small word choice differences are not wor
 async def think(char: dict, backend, s: dict, trigger: str = "manual", context_override: str = "") -> dict:
     """Full 5-stage think pipeline. Returns ThoughtOut dict with event_id."""
     t0 = time.time()
+
+    # daily snapshot — write once per calendar day before anything changes
+    try:
+        _write_daily_snapshot(char)
+    except Exception:
+        pass
 
     # stage 1 — context
     recent = profile_mod.list_events(char["id"], 6)
