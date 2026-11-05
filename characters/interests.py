@@ -132,3 +132,116 @@ def add_character_interest(char: dict, name: str, category: str) -> None:
             "added_by": "character",
         }
         profile_mod.patch(char, {"interests": raw})
+
+
+# ── curiosity pool ─────────────────────────────────────────────────────────────
+# Self-discovered sparks of interest. No manual gate — they form, grow, and
+# either promote into real interests or fade away on their own.
+
+_CURIOSITY_DECAY_PER_DAY = 0.5   # spark lost per idle day
+_CURIOSITY_MATCH_BUMP    = 2.0   # spark gained when activity touches this curiosity
+_CURIOSITY_NEW_BUMP      = 1.0   # spark gained on a fresh encounter
+_CURIOSITY_PROMOTE_AT    = 5.0   # auto-promote to confirmed interest at this threshold
+
+
+def _curiosity_key(name: str) -> str:
+    return name.lower().strip()[:40]
+
+
+def _promote_ready(char: dict) -> None:
+    """Promote any curiosity that hit the threshold into a confirmed interest (in-place)."""
+    prof = char.get("profile") or {}
+    curiosities = list(prof.get("curiosities") or [])
+    raw_interests = dict(prof.get("interests") or {})
+    remaining = []
+    for c in curiosities:
+        if c["spark"] >= _CURIOSITY_PROMOTE_AT:
+            cat = c["category"]
+            if cat not in raw_interests:
+                raw_interests[cat] = {
+                    "text": c["name"],
+                    "intensity": 3,
+                    "last_engaged_ts": _now(),
+                    "added_by": "character",
+                }
+        else:
+            remaining.append(c)
+    prof["curiosities"] = remaining
+    prof["interests"]   = raw_interests
+    char["profile"]     = prof
+
+
+def curiosity_encounter(char: dict, name: str, category: str) -> None:
+    """Record a self-discovered curiosity or bump its spark. No approval needed.
+    Caller must store.save(char) after.
+    """
+    name = name.strip()
+    if not name:
+        return
+    prof = char.get("profile") or {}
+    curiosities = list(prof.get("curiosities") or [])
+    key = _curiosity_key(name)
+    for c in curiosities:
+        if _curiosity_key(c["name"]) == key:
+            c["spark"] = min(10.0, c["spark"] + _CURIOSITY_NEW_BUMP)
+            c["last_bumped_ts"] = _now()
+            break
+    else:
+        curiosities.append({
+            "name":           name,
+            "category":       category.lower().strip() or "general",
+            "spark":          _CURIOSITY_NEW_BUMP,
+            "first_seen_ts":  _now(),
+            "last_bumped_ts": _now(),
+        })
+    prof["curiosities"] = curiosities
+    char["profile"]     = prof
+    _promote_ready(char)
+
+
+def curiosity_bump_from_activity(char: dict, activity_text: str) -> None:
+    """Bump curiosities whose name keywords match the activity. Caller must store.save(char)."""
+    prof = char.get("profile") or {}
+    curiosities = list(prof.get("curiosities") or [])
+    if not curiosities:
+        return
+    act_kw = _keywords(activity_text)
+    if not act_kw:
+        return
+    changed = False
+    for c in curiosities:
+        if _keywords(c["name"]) & act_kw:
+            c["spark"] = min(10.0, c["spark"] + _CURIOSITY_MATCH_BUMP)
+            c["last_bumped_ts"] = _now()
+            changed = True
+    if changed:
+        prof["curiosities"] = curiosities
+        char["profile"]     = prof
+        _promote_ready(char)
+
+
+def curiosity_tick(char: dict) -> None:
+    """Decay all curiosities; silently drop dead ones. Caller must store.save(char)."""
+    prof = char.get("profile") or {}
+    curiosities = list(prof.get("curiosities") or [])
+    if not curiosities:
+        return
+    now = _now()
+    alive = []
+    for c in curiosities:
+        days_idle = (now - c["last_bumped_ts"]) / 86400
+        c["spark"] = max(0.0, c["spark"] - days_idle * _CURIOSITY_DECAY_PER_DAY)
+        if c["spark"] > 0:
+            alive.append(c)
+    prof["curiosities"] = alive
+    char["profile"]     = prof
+
+
+def curiosity_inject_line(prof: dict) -> str:
+    """Prompt line listing active curiosities so they can shape behaviour."""
+    curiosities = [c for c in (prof.get("curiosities") or []) if c.get("spark", 0) > 0]
+    if not curiosities:
+        return ""
+    names = [c["name"] for c in sorted(curiosities, key=lambda x: -x["spark"])]
+    return ("Things you've recently noticed or become curious about (not full interests yet, "
+            "but on your mind): " + ", ".join(names) + ".")

@@ -34,7 +34,11 @@ def default_profile() -> dict:
         "accessories": [],   # [{name, description, ref_image}] recurring props with optional ref photos
         "aspirations": [],   # [{id, text, surfaced_count, first_at, last_at, needs_goal_prompt}]
         "archived_interests": [],  # interests whose intensity hit 0 after long inactivity
+        "curiosities": [],   # [{name, category, spark, first_seen_ts, last_bumped_ts}] — auto-managed, no approval gate
         "skills": [],        # [{name, category, hours, level, started_at, last_practiced_at}]
+        "current_outfit_id":    "",   # last wardrobe item the character chose to wear
+        "current_outfit":       "",   # text description of current outfit (for prompt continuity)
+        "last_consolidated_at": 0,    # epoch of last sleep consolidation run
     }
 
 

@@ -23,7 +23,28 @@ CREATE TABLE IF NOT EXISTS char_life_events(
 CREATE TABLE IF NOT EXISTS char_memories(
   id TEXT PRIMARY KEY, char_id TEXT NOT NULL, content TEXT NOT NULL,
   tags TEXT DEFAULT '[]', category TEXT DEFAULT 'episodic',
-  base_strength REAL DEFAULT 1.0, formed_at REAL, last_accessed_at REAL
+  base_strength REAL DEFAULT 1.0, formed_at REAL, last_accessed_at REAL,
+  source TEXT DEFAULT 'think', stable INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS char_memory_bonds(
+  id TEXT PRIMARY KEY, char_id TEXT NOT NULL,
+  mem_a TEXT NOT NULL, mem_b TEXT NOT NULL,
+  co_recalls INTEGER DEFAULT 1,
+  bond_strength REAL DEFAULT 0.1,
+  last_corecall_at REAL,
+  formed_at REAL,
+  UNIQUE(mem_a, mem_b)
+);
+CREATE INDEX IF NOT EXISTS cmb_char ON char_memory_bonds(char_id);
+CREATE INDEX IF NOT EXISTS cmb_a ON char_memory_bonds(mem_a);
+CREATE INDEX IF NOT EXISTS cmb_b ON char_memory_bonds(mem_b);
+CREATE TABLE IF NOT EXISTS char_profile_snapshots(
+  id TEXT PRIMARY KEY, char_id TEXT NOT NULL, snapshot_date TEXT NOT NULL,
+  interests_json TEXT DEFAULT '{}', curiosities_json TEXT DEFAULT '[]',
+  energy INTEGER DEFAULT 80, feeling_primary TEXT DEFAULT '', feeling_intensity INTEGER DEFAULT 5,
+  memory_counts_json TEXT DEFAULT '{}', web_surfs_today INTEGER DEFAULT 0,
+  created_at REAL,
+  UNIQUE(char_id, snapshot_date)
 );
 """
 COLUMNS = ("id", "name", "kind", "status", "created_at", "updated_at")
@@ -43,6 +64,12 @@ class CharError(Exception):
 def ensure() -> None:
     with db.tx() as c:
         c.executescript(SCHEMA)
+        # migrate existing char_memories rows — add columns if absent
+        have = {r[1] for r in c.execute("PRAGMA table_info(char_memories)")}
+        if "source" not in have:
+            c.execute("ALTER TABLE char_memories ADD COLUMN source TEXT DEFAULT 'think'")
+        if "stable" not in have:
+            c.execute("ALTER TABLE char_memories ADD COLUMN stable INTEGER DEFAULT 0")
     media.ensure()
 
 

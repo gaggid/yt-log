@@ -128,6 +128,26 @@ async def run_forever(s: dict, key: str) -> None:
                         print(f"[virtual-life] {char['name']} sleeping ({reason}) — energy {energy} → {energy + restore}", flush=True)
                     except Exception:
                         pass
+
+                # consolidate memories once per night (not every sleep cycle)
+                try:
+                    prof_now = profile_mod.get(char)
+                    last_consolidated = prof_now.get("last_consolidated_at") or 0
+                    if (time.time() - last_consolidated) > 20 * 3600:
+                        from . import memory as memory_mod
+                        from story import llm
+                        backend = llm.ChatBackend(s, key)
+                        result = await memory_mod.consolidate(char["id"], backend)
+                        fresh_c = store.get(char["id"])
+                        profile_mod.patch(fresh_c, {"last_consolidated_at": time.time()})
+                        store.save(fresh_c)
+                        if result["clusters_found"]:
+                            print(f"[virtual-life] {char['name']} consolidation: "
+                                  f"{result['traits_formed']} traits formed, "
+                                  f"{result['stable_promoted']} promoted stable", flush=True)
+                except Exception as e:
+                    print(f"[virtual-life] consolidation skipped for {char['name']}: {e}", flush=True)
+
                 continue   # skip think + draw while asleep
 
             if jobs.busy() or manager.busy():

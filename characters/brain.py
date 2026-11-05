@@ -208,11 +208,32 @@ def _system_prompt(char: dict) -> str:
 
     def _int(v): return v.get("text", "") if isinstance(v, dict) else str(v or "")
 
+    current_outfit    = prof.get("current_outfit") or ""
+    current_outfit_id = prof.get("current_outfit_id") or ""
+    outfit_line = (f"Currently wearing: {current_outfit}."
+                   + (f" (outfit id: {current_outfit_id})" if current_outfit_id else "")
+                   + " Keep this outfit unless you have a reason to change.\n") if current_outfit else ""
+
+    # trait injection — consolidated experiences that now shape who she is
+    try:
+        from . import memory as memory_mod
+        traits = memory_mod.active_traits(char["id"])
+        stable   = [t["content"] for t in traits if t.get("stable")]
+        emerging = [t["content"] for t in traits if not t.get("stable")]
+        trait_parts = []
+        if stable:
+            trait_parts.append("Stable traits (deeply yours now): " + "; ".join(stable))
+        if emerging:
+            trait_parts.append("Emerging tendencies (forming, not yet fixed): " + "; ".join(emerging))
+        trait_line = ("\n".join(trait_parts) + "\n") if trait_parts else ""
+    except Exception:
+        trait_line = ""
+
     return f"""{core_block}You are {name}, a {age}-year-old {gender} ({ethnicity}) living in India.
 Personality: {personality}.
 Interests — books: {_int(interests.get('books',''))}, movies: {_int(interests.get('movies',''))}, \
 music: {_int(interests.get('music',''))}, food: {_int(interests.get('food',''))}, hobbies: {_int(interests.get('hobbies',''))}.
-{fashion_block}{chrono_line}Your spaces: {spaces_text}.{(' Phone: ' + phone + '.') if phone else ''}
+{fashion_block}{chrono_line}{trait_line}{outfit_line}Your spaces: {spaces_text}.{(' Phone: ' + phone + '.') if phone else ''}
 Current energy: {energy}/100 — {energy_desc}. Let this shape what you choose to do right now.
 
 You think and speak in the first person, in English. Be specific, human, and grounded.
@@ -238,6 +259,9 @@ def _first_pass_user(ctx: dict, char: dict, context_override: str) -> str:
     interests_line = interests_mod.inject_line(prof)
     if interests_line:
         sections.append(interests_line)
+    curiosity_line = interests_mod.curiosity_inject_line(prof)
+    if curiosity_line:
+        sections.append(curiosity_line)
     skills_line = skills_mod.inject_line(prof)
     if skills_line:
         sections.append(skills_line)
@@ -268,7 +292,7 @@ Return ONLY valid JSON:
   "expression":    "the specific facial expression for this moment — be precise, not generic (e.g. 'tired half-smile, eyes slightly heavy', 'wide genuine laugh, teeth showing', 'focused frown, lips pressed', 'soft contemplative gaze', 'surprised and delighted'). It must match the mood and activity.",
   "face_state":    "physical condition of the face right now based on time of day and what you have been doing (e.g. 'no makeup, natural skin', 'light day makeup', 'post-workout flush, dewy skin', 'makeup worn off, bare face with slight shine', 'evening makeup, defined eyes'). Be honest about the time of day.",
   "outfit":        "text description of what you are wearing right now — for display only; the actual clothes in the photo come from your wardrobe or your approved body picture",
-  "outfit_id":     "the id of the wardrobe item you want to wear (exactly as listed above); set this to change your outfit in the photo. If empty, your default approved outfit is shown.",
+  "outfit_id":     "the id of the wardrobe item you want to wear (exactly as listed above). Only change this when there is an actual reason — felt too hot or cold, getting ready to go out, wanted to look good for something, changed after exercise. Do NOT change just because the activity changed. Keep the same outfit from earlier in the day unless something caused you to change. If staying in the same outfit, leave this empty.",
   "wardrobe_want": "if you spot or imagine a piece of clothing you want to own — describe it in one line (e.g. 'dark green silk kurti with mirror work'); else empty string",
   "log_photo":     "true or false (a JSON boolean). Would you really take a picture of this moment and keep it? Be selective like a real person: true only for something worth remembering or sharing (a meal, a view, an outfit, progress on a goal, a good mood, something new). Routine or private moments (resting, scrolling, being tired, plain chores) are usually false. If false, leave shot_type and image_idea as empty strings.",
   "shot_type":     "@@SHOTS@@",
@@ -420,11 +444,13 @@ async def think(char: dict, backend, s: dict, trigger: str = "manual", context_o
     except Exception:
         pass
 
-    # Phase L: interest atrophy/engagement + aspiration logging
+    # Phase L: interest atrophy/engagement + curiosity tick/bump
     try:
         fresh3 = store.get(char["id"])
         interests_mod.tick(fresh3)
         interests_mod.bump(fresh3, thought.activity)
+        interests_mod.curiosity_tick(fresh3)
+        interests_mod.curiosity_bump_from_activity(fresh3, thought.activity)
         store.save(fresh3)
     except Exception:
         pass
@@ -452,16 +478,48 @@ async def think(char: dict, backend, s: dict, trigger: str = "manual", context_o
     except Exception:
         pass
 
-    # Phase L: log new_interest proposal as a life event (owner approves separately)
+    # Curiosity pool: auto-record self-discovered interests (no approval gate)
     if thought.new_interest and isinstance(thought.new_interest, dict) and thought.new_interest.get("name"):
         try:
-            profile_mod.log_event(
-                char["id"], "interest_proposal", trigger,
-                {"activity": thought.activity},
-                thought.new_interest,
+            fresh_ci = store.get(char["id"])
+            interests_mod.curiosity_encounter(
+                fresh_ci,
+                thought.new_interest["name"],
+                thought.new_interest.get("category", "general"),
             )
+            store.save(fresh_ci)
         except Exception:
             pass
+
+    # Persist current outfit for continuity across thoughts
+    try:
+        if thought.outfit or thought.outfit_id:
+            fresh_out = store.get(char["id"])
+            updates: dict = {}
+            if thought.outfit:
+                updates["current_outfit"] = thought.outfit
+            if thought.outfit_id:
+                updates["current_outfit_id"] = thought.outfit_id
+            profile_mod.patch(fresh_out, updates)
+            store.save(fresh_out)
+    except Exception:
+        pass
+
+    # Track space visit frequency
+    try:
+        space_name = (thought.space or "").strip()
+        if space_name:
+            fresh_sp = store.get(char["id"])
+            prof_sp  = profile_mod.get(fresh_sp)
+            spaces   = list(prof_sp.get("spaces") or [])
+            for sp in spaces:
+                if sp.get("name", "").lower() == space_name.lower():
+                    sp["visits"] = int(sp.get("visits") or 0) + 1
+                    break
+            profile_mod.patch(fresh_sp, {"spaces": spaces})
+            store.save(fresh_sp)
+    except Exception:
+        pass
 
     final = thought.model_dump()
     final["latency_ms"] = round((time.time() - t0) * 1000)
@@ -483,9 +541,11 @@ SHOT_DIRECTIONS: dict[str, str] = {
         "Slight side-angle so person and reflection are both in frame."
     ),
     "propped_timer": (
-        "Phone placed on a surface (shelf, desk, windowsill) acting as a stationary camera. "
-        "Person visible in the mid or full background. Phone NOT in frame. "
-        "Eye-level or slight angle, person looks relaxed, not posing directly at the lens."
+        "Phone propped on a surface (shelf, desk, windowsill, stool) at mid-height, acting as a stationary camera. "
+        "Camera roughly at waist-to-chest level, slightly angled up. "
+        "Person fills roughly two-thirds of the frame — 3/4 body shot (head to roughly mid-thigh). "
+        "Not too far (full room shot) and not close-up (chest-up). Phone NOT in frame. "
+        "Person is mid-action or glancing away — not posing stiffly at the lens."
     ),
     "pov_first_person": (
         "First-person point-of-view shot. Camera IS the person — eye-level looking down or forward. "
@@ -635,6 +695,8 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
             expr_line = " Expression: " + (expression or "") + ("." if expression else "") + (" Face: " + face_state + "." if face_state else "") + " Apply this expression — do not copy the neutral look from the reference picture."
 
         scene = f"{shot_dir} {image_idea}".strip()
+        if shot_type == "pov_first_person":
+            scene += " No other person in frame. At most one of her own hands visible at the bottom edge — not two hands, no one presenting or serving."
         space_line = (" Match the room/setting layout, furniture, colours and props from the last picture exactly." if space_ref_path else "")
         if garment_ref:
             refs    = [portrait_path, garment_ref["path"]]
@@ -655,10 +717,17 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
                 ref_ids = [portrait_id, body_in_canon["id"]]
                 if space_ref_path:
                     refs.append(space_ref_path); ref_ids.append("space-ref")
+                # outfit text wins over body-canon outfit; body used for shape only when outfit is specified
+                body_ref_note = (
+                    f"Picture 2 shows their body shape and proportions only — ignore the outfit in Picture 2."
+                    if outfit else
+                    f"Picture 2 shows their body and outfit — keep the outfit exactly as in Picture 2."
+                )
                 prompt  = (f"Picture 1 is an identity reference only (face shape, skin tone, hair colour and length, build). "
-                           f"Picture 2 shows their body and outfit — keep the outfit exactly as in Picture 2. "
+                           f"{body_ref_note} "
                            + (f"Picture 3 is the room/setting reference — match its layout and decor exactly. " if space_ref_path else "")
                            + f"Create a new vertical 4:5 photograph: {scene}"
+                           + (f" Wearing: {outfit}." if outfit else "")
                            + expr_line + space_line
                            + " Match the person's face identity from Picture 1 exactly.")
             else:
