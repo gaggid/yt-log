@@ -734,7 +734,13 @@ function lifeView(busy) {
   <div>
     <div class="card pad">
       <div class="row"><h3 style="margin:0">Life feed</h3><span class="mute small">${new Date().toLocaleString('en-IN', {weekday:'short', hour:'2-digit', minute:'2-digit', hour12:true})}</span><span class="sp"></span>
+        <button class="small" id="vl-surf" ${dis} title="She searches the web based on her top curiosity or interest">Surf web</button>
         <button class="primary" id="vl-think" ${dis}>What is she thinking?</button>
+      </div>
+      <div id="vl-surf-row" style="display:none;margin-top:8px" class="row" style="gap:6px">
+        <input id="vl-surf-topic" style="flex:1" placeholder="Topic to search (leave blank for auto-pick)" ${dis}>
+        <button class="small primary" id="vl-surf-go" ${dis}>Go</button>
+        <button class="small" id="vl-surf-cancel">✕</button>
       </div>
       <div class="mute small mt-s">2-stage pipeline: first-pass thought → self-review → memory formed → image ready to draw.</div>
       <div id="life-feed-box" style="margin-top:10px">${events.length ? events.map(eventCard).join('') : '<div class="mute small" style="padding:12px 0">No moments yet.</div>'}</div>
@@ -957,6 +963,27 @@ function wireLife() {
       await call('/' + CID + '/books/' + b.dataset.bookWishlist, {method:'PATCH', json:{status:'wishlist'}});
       await loadLifeEvents(); render(); return true;
     }, 'Moved back to wishlist');
+  });
+
+  // surf
+  $e('vl-surf') && ($e('vl-surf').onclick = () => {
+    $e('vl-surf-row').style.display = '';
+    ($e('vl-surf-topic') || {}).focus && $e('vl-surf-topic').focus();
+  });
+  $e('vl-surf-cancel') && ($e('vl-surf-cancel').onclick = () => { $e('vl-surf-row').style.display = 'none'; });
+  $e('vl-surf-go') && ($e('vl-surf-go').onclick = async () => {
+    const topic = ($e('vl-surf-topic') || {}).value || '';
+    const btn = $e('vl-surf-go');
+    btn.disabled = true; btn.textContent = 'Surfing…';
+    try {
+      await call('/' + CID + '/surf', {method:'POST', json:{topic: topic.trim(), category:'general'}});
+      $e('vl-surf-row').style.display = 'none';
+      await loadLifeEvents(); render();
+      toast('Web surf done — check the Memory tab for new learning memories');
+    } catch(e) {
+      btn.disabled = false; btn.textContent = 'Go';
+      toast('Surf failed: ' + e.message, true);
+    }
   });
 
   $e('vl-think') && ($e('vl-think').onclick = async () => {

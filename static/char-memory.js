@@ -238,13 +238,17 @@
   }
 
   // ── 5f: Nudges ───────────────────────────────────────────────────────────────
-  function renderNudges(nudges) {
+  function renderNudges(nudges, charId) {
     if (!nudges.length) return '<div class="mute small">No nudges right now — keep the character active.</div>';
     const icon = { aspiration_goal: '🎯', curiosity_promote: '✨', memory_theme: '🔍' };
-    return nudges.map(n => `
-      <div class="card pad mt-s" style="border-left:3px solid var(--warn);padding:8px 10px">
-        <span>${icon[n.type]||'💡'} ${esc(n.message)}</span>
-      </div>`).join('');
+    return nudges.map((n, i) => {
+      const makeGoalBtn = n.type === 'aspiration_goal' && n.data && n.data.id
+        ? `<button class="small primary" style="margin-top:6px" data-make-goal="${esc(n.data.id)}">Make this a goal</button>`
+        : '';
+      return `<div class="card pad mt-s" style="border-left:3px solid var(--warn);padding:8px 10px">
+        <span>${icon[n.type]||'💡'} ${esc(n.message)}</span>${makeGoalBtn}
+      </div>`;
+    }).join('');
   }
 
   // ── mount ─────────────────────────────────────────────────────────────────────
@@ -277,12 +281,32 @@
           section('Traits &amp; Consolidations', 'mem-traits', renderTraits(traits)),
           section('Trajectory', 'mem-trajectory', renderTrajectory(trajectory)),
           section('Building / Fading', 'mem-building', renderBuilding({...landscape, _all_mems: bonds.nodes})),
-          section('Nudges', 'mem-nudges', renderNudges(nudges)),
+          section('Nudges', 'mem-nudges', renderNudges(nudges, charId)),
         ].join('');
 
         // source filter buttons
         root.querySelectorAll('[data-src-filter]').forEach(btn => {
           btn.onclick = () => { sourceFilter = btn.dataset.srcFilter; load(); };
+        });
+
+        // aspiration → goal buttons
+        root.querySelectorAll('[data-make-goal]').forEach(btn => {
+          btn.onclick = async () => {
+            const aspId = btn.dataset.makeGoal;
+            const cat = prompt('Goal category: ' + ['career','personal','creative','health','social','learning','financial'].join(' / '), 'personal') || 'personal';
+            btn.disabled = true; btn.textContent = 'Creating…';
+            try {
+              await fetch(`/api/characters/${charId}/aspirations/${aspId}/goal`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({category: cat}),
+              });
+              btn.textContent = '✓ Goal created';
+              setTimeout(() => load(), 800);
+            } catch (e) {
+              btn.disabled = false; btn.textContent = 'Make this a goal';
+            }
+          };
         });
 
         // bond graph node hover detail

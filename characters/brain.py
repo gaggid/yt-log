@@ -567,6 +567,16 @@ async def think(char: dict, backend, s: dict, trigger: str = "manual", context_o
     except Exception:
         pass
 
+    # autonomous web surf — once per eligible think cycle, rate-limited to 2/day
+    try:
+        from . import surf as surf_mod
+        fresh_surf = store.get(char["id"])
+        prof_surf  = profile_mod.get(fresh_surf)
+        if surf_mod.should_surf(char["id"], prof_surf):
+            await surf_mod.surf_session(fresh_surf, backend)
+    except Exception:
+        pass
+
     # book reading — absorb one chapter if character is in a reading mood and has books
     try:
         from . import books as books_mod

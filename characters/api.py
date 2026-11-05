@@ -1259,6 +1259,44 @@ async def manual_read_session(char_id: str, book_id: str):
                   lambda progress: books_mod.read_session(char, backend))
 
 
+# ── web surfing ───────────────────────────────────────────────────────────────
+
+from . import surf as surf_mod
+
+class SurfReq(BaseModel):
+    topic:    str = ""
+    category: str = "general"
+
+@router.post("/{char_id}/surf")
+async def manual_surf(char_id: str, body: SurfReq):
+    """Manually trigger a web surf session. topic is optional — auto-picked if empty."""
+    char = _get(char_id)
+    s, key = settings_mod.get(), settings_mod.api_key()
+    backend = llm.ChatBackend(s, key)
+    topic    = body.topic.strip() or None
+    category = body.category.strip() or "general"
+    return _start(char_id, "web_surf",
+                  lambda progress: surf_mod.surf_session(char, backend, topic=topic, category=category))
+
+
+# ── aspirations → goals ───────────────────────────────────────────────────────
+
+class AspGoalReq(BaseModel):
+    category: str = "personal"
+
+@router.post("/{char_id}/aspirations/{asp_id}/goal")
+async def aspiration_to_goal(char_id: str, asp_id: str, body: AspGoalReq):
+    """Promote an aspiration into an active goal."""
+    char = _get(char_id)
+    prof = profile_mod.get(char)
+    asp  = next((a for a in (prof.get("aspirations") or []) if a["id"] == asp_id), None)
+    if not asp:
+        raise HTTPException(404, "aspiration not found")
+    category = body.category if body.category in goals_mod.CATEGORIES else "personal"
+    goal = goals_mod.add_goal(char, asp["text"], category)
+    return {"goal": goal, "aspiration": asp}
+
+
 # ── chat ──────────────────────────────────────────────────────────────────────
 
 class ChatMsg(BaseModel):
