@@ -267,21 +267,25 @@
       root.innerHTML = `<div class="mute small" style="padding:24px">Loading…</div>`;
       try {
         const srcParam = sourceFilter !== 'all' ? `?source=${sourceFilter}` : '';
+        const safe = url => api(url).catch(e => ({ _err: String(e) }));
         const [landscape, bonds, traits, trajectory, nudges] = await Promise.all([
-          api(`/api/characters/${charId}/memory/landscape${srcParam}`),
-          api(`/api/characters/${charId}/memory/bonds`),
-          api(`/api/characters/${charId}/memory/traits`),
-          api(`/api/characters/${charId}/memory/trajectory`),
-          api(`/api/characters/${charId}/memory/nudges`),
+          safe(`/api/characters/${charId}/memory/landscape${srcParam}`),
+          safe(`/api/characters/${charId}/memory/bonds`),
+          safe(`/api/characters/${charId}/memory/traits`),
+          safe(`/api/characters/${charId}/memory/trajectory`),
+          safe(`/api/characters/${charId}/memory/nudges`),
         ]);
 
+        const errBox = (name, e) => `<div class="mute small" style="color:var(--warn)">${name} unavailable: ${esc(e)}</div>`;
+        const landOk = !landscape._err, bondsOk = !bonds._err;
+
         root.innerHTML = [
-          section('Memory Landscape', 'mem-landscape', renderLandscape(landscape, sourceFilter)),
-          section('Bond Graph', 'mem-bonds', renderBondGraph(bonds)),
-          section('Traits &amp; Consolidations', 'mem-traits', renderTraits(traits)),
-          section('Trajectory', 'mem-trajectory', renderTrajectory(trajectory)),
-          section('Building / Fading', 'mem-building', renderBuilding({...landscape, _all_mems: bonds.nodes})),
-          section('Nudges', 'mem-nudges', renderNudges(nudges, charId)),
+          section('Memory Landscape', 'mem-landscape', landOk ? renderLandscape(landscape, sourceFilter) : errBox('Landscape', landscape._err)),
+          section('Bond Graph', 'mem-bonds', bondsOk ? renderBondGraph(bonds) : errBox('Bond graph', bonds._err)),
+          section('Traits &amp; Consolidations', 'mem-traits', traits._err ? errBox('Traits', traits._err) : renderTraits(traits)),
+          section('Trajectory', 'mem-trajectory', trajectory._err ? errBox('Trajectory', trajectory._err) : renderTrajectory(trajectory)),
+          section('Building / Fading', 'mem-building', renderBuilding({...(landOk ? landscape : {}), _all_mems: bondsOk ? bonds.nodes : []})),
+          section('Nudges', 'mem-nudges', nudges._err ? errBox('Nudges', nudges._err) : renderNudges(nudges, charId)),
         ].join('');
 
         // source filter buttons

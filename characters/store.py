@@ -87,6 +87,10 @@ def ensure() -> None:
             c.execute("ALTER TABLE char_memories ADD COLUMN source TEXT DEFAULT 'think'")
         if "stable" not in have:
             c.execute("ALTER TABLE char_memories ADD COLUMN stable INTEGER DEFAULT 0")
+        # migrate char_profile_snapshots — web_surfs_today added after initial deploy
+        snap_have = {r[1] for r in c.execute("PRAGMA table_info(char_profile_snapshots)")}
+        if "web_surfs_today" not in snap_have:
+            c.execute("ALTER TABLE char_profile_snapshots ADD COLUMN web_surfs_today INTEGER DEFAULT 0")
     media.ensure()
 
 

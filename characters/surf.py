@@ -57,33 +57,42 @@ def pick_topic(prof: dict) -> tuple[str, str] | None:
     return best  # may be None
 
 
-# ── DuckDuckGo Lite search ────────────────────────────────────────────────────
+# ── DuckDuckGo HTML search ────────────────────────────────────────────────────
 
 async def _ddg_urls(query: str) -> list[str]:
-    """Scrape DuckDuckGo Lite for top real result URLs (no API key needed)."""
+    """Scrape DuckDuckGo HTML endpoint for top result URLs (no API key needed)."""
+    import urllib.parse
     encoded = query.replace(" ", "+")
     try:
-        async with httpx.AsyncClient(timeout=DDG_TIMEOUT, follow_redirects=True,
-                                     headers={"User-Agent": "Mozilla/5.0 (compatible; research-bot/1.0)"}) as client:
-            r = await client.get(f"https://lite.duckduckgo.com/lite/?q={encoded}")
+        async with httpx.AsyncClient(
+            timeout=DDG_TIMEOUT,
+            follow_redirects=False,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+            },
+        ) as client:
+            r = await client.get(f"https://html.duckduckgo.com/html/?q={encoded}")
         html = r.text
     except Exception:
         return []
 
-    # DDG Lite: result links are in <a class="result-link" href="...">
-    urls = re.findall(r'<a[^>]+class=["\']result-link["\'][^>]+href=["\']([^"\']+)["\']', html)
-    if not urls:
-        # fallback: grab any uddg.com redirect links and extract the real URL
-        raw = re.findall(r'href=["\']([^"\']+)["\']', html)
-        urls = [u for u in raw if u.startswith("http") and "duckduckgo.com" not in u
-                and "javascript" not in u]
-
-    # filter to plausible article URLs
-    seen, clean = set(), []
-    for u in urls:
-        u = u.strip()
+    # DDG HTML: result links are redirect URLs containing uddg=ENCODED_REAL_URL
+    uddg = re.findall(r'uddg=([^&"\'<\s]+)', html)
+    urls = []
+    for raw in uddg:
+        try:
+            u = urllib.parse.unquote(raw)
+        except Exception:
+            continue
         if not u.startswith("http"):
             continue
+        urls.append(u)
+
+    # deduplicate by domain
+    seen, clean = set(), []
+    for u in urls:
         domain = re.sub(r'^https?://(www\.)?', '', u).split('/')[0]
         if domain in seen:
             continue
