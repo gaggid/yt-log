@@ -101,6 +101,11 @@ async def characters_js():
     return FileResponse(STATIC / "characters.js", media_type="application/javascript", headers=NO_STORE)
 
 
+@app.get("/char-memory.js")
+async def char_memory_js():
+    return FileResponse(STATIC / "char-memory.js", media_type="application/javascript", headers=NO_STORE)
+
+
 @app.get("/life")
 async def life_page():
     html = (STATIC / "life.html").read_text(encoding="utf-8").replace(
