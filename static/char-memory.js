@@ -8,7 +8,7 @@
     desire:      '#D69B56', wish:        '#E088B4', note:        '#999',
     manual:      '#999',   trait:        '#E84393',
   };
-  const SOURCE_LABEL = { think: 'Daily life', book: 'Reading', web: 'Web', consolidation: 'Consolidated' };
+  const SOURCE_LABEL = { think: 'Daily life', book: 'Reading', web: 'Web', consolidation: 'Consolidated', daydream: 'Daydream' };
   const esc = s => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
   // ── helpers ──────────────────────────────────────────────────────────────────

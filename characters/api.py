@@ -1149,9 +1149,11 @@ async def memory_nudges(char_id: str):
     prof = profile_mod.get(char)
     nudges = []
 
-    # aspirations surfaced ≥3 times with no matching goal
+    # achievement-type aspirations surfaced ≥3 times — suggest making a goal
+    # (experience aspirations like travel/food get daydream sessions instead)
+    from .daydream import classify as _classify_asp
     for asp in (prof.get("aspirations") or []):
-        if asp.get("surfaced_count", 0) >= 3:
+        if asp.get("surfaced_count", 0) >= 3 and _classify_asp(asp.get("text", "")) == "achievement":
             nudges.append({"type": "aspiration_goal",
                            "message": f"Aspiration '{asp['text'][:60]}' surfaced {asp['surfaced_count']}× — consider making it a goal",
                            "data": asp})

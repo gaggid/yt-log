@@ -589,6 +589,16 @@ async def think(char: dict, backend, s: dict, trigger: str = "manual", context_o
     except Exception:
         pass
 
+    # daydream — imagine an experience aspiration when mood is dreamy/relaxed
+    try:
+        from . import daydream as daydream_mod
+        fresh_dd = store.get(char["id"])
+        prof_dd  = profile_mod.get(fresh_dd)
+        if daydream_mod.should_daydream(prof_dd):
+            await daydream_mod.daydream_session(fresh_dd, backend)
+    except Exception:
+        pass
+
     final = thought.model_dump()
     final["latency_ms"] = round((time.time() - t0) * 1000)
     ev = profile_mod.log_event(char["id"], "think", trigger, pipeline_log, final)
