@@ -26,7 +26,6 @@ IMPRESSION_N        = 3      # impressions to extract per page
 SPARK_THRESHOLD     = 3.0    # curiosity spark needed to trigger auto-surf
 DDG_TIMEOUT         = 8      # seconds for the DuckDuckGo search request
 FETCH_CHAR_LIMIT    = 3000   # characters of page text sent to LLM
-TOPIC_COOLDOWN_S    = 4 * 3600  # don't re-pick the same curiosity within 4 hours
 
 _STOP = {"the","and","for","she","her","was","are","with","that","this","have",
          "from","just","been","like","what","when","felt","then","they","were",
@@ -36,17 +35,15 @@ _STOP = {"the","and","for","she","her","was","are","with","that","this","have",
 # ── topic selection ───────────────────────────────────────────────────────────
 
 def pick_topic(prof: dict) -> tuple[str, str] | None:
-    """Return (topic_text, category) or None. Prefers highest-spark curiosity
-    not surfed in the last TOPIC_COOLDOWN_S seconds, falls back to interests."""
-    now = time.time()
-    curiosities = sorted(
-        [c for c in (prof.get("curiosities") or [])
-         if c.get("spark", 0) >= SPARK_THRESHOLD
-         and (now - c.get("last_surfed_at", 0)) >= TOPIC_COOLDOWN_S],
-        key=lambda x: -x["spark"],
-    )
-    if curiosities:
-        c = curiosities[0]
+    """Return (topic_text, category) or None.
+    Weighted-random among eligible curiosities (spark as weight) so the character
+    gravitates toward her strongest interests but isn't locked to the same one.
+    Falls back to the most-active confirmed interest when no curiosity qualifies."""
+    import random
+    candidates = [c for c in (prof.get("curiosities") or []) if c.get("spark", 0) >= SPARK_THRESHOLD]
+    if candidates:
+        weights = [c["spark"] for c in candidates]
+        c = random.choices(candidates, weights=weights, k=1)[0]
         return c["name"], c.get("category", "general")
 
     # fallback: highest-intensity confirmed interest
@@ -247,13 +244,12 @@ async def surf_session(char: dict, backend, topic: str | None = None,
     fresh = store.get(char["id"])
     interests_mod.curiosity_bump_from_activity(fresh, topic + " " + " ".join(all_impressions))
 
-    # check if the topic itself is a curiosity and bump + mark surfed
+    # bump the matched curiosity's spark
     curiosities = list((fresh.get("profile") or {}).get("curiosities") or [])
     for c in curiosities:
         if c["name"].lower() == topic.lower():
             c["spark"] = min(10.0, c["spark"] + 1.5)
             c["last_bumped_ts"] = now
-            c["last_surfed_at"] = now   # cooldown: won't be auto-picked for TOPIC_COOLDOWN_S
     from . import profile as pm
     pm.patch(fresh, {"curiosities": curiosities})
 
