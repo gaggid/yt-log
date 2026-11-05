@@ -3,12 +3,32 @@ __pycache__/
 .venv/
 venv/
 jobs/
+# video
 *.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+# audio
 *.mp3
 *.wav
+*.aac
+*.flac
+# images
 *.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.bmp
+*.tiff
+# archives
+*.zip
+*.tar.gz
+*.rar
 .env
 logs/
 data/
 .pytest_cache/
 data_dev/
+.claude/
