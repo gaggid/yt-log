@@ -562,7 +562,7 @@ function lifeView(busy) {
         <div class="row"><span class="badge b-info">${esc(out.mood||'')}</span>${outfitTag}<span class="mute small">${esc(out.activity||'')} · ${esc(out.space||'')} · ${absTime(ev.created_at)}</span></div>
         ${exprTag ? `<div style="margin:2px 0 4px">${exprTag}</div>` : ''}
         <div style="font-style:italic;margin:6px 0">${esc(out.thought||'')}</div>${sayHtml}${gp}${noteHtml}${wishHtml}${drawn}
-        ${!drawEv ? `${out.log_photo === false ? '<div class="mute small mt-s">Not worth a picture, she decided. </div>' : ''}<button class="small ${out.log_photo === false ? '' : 'primary'} mt-s" data-draw-ev="${esc(ev.id)}">${out.log_photo === false ? 'Draw anyway' : 'Draw this look'}</button>` : '<span class="mute small mt-s">✓ drawn</span>'}
+        ${!drawEv ? `${out.log_photo === false ? '<div class="mute small mt-s">Not worth a picture, she decided. </div>' : ''}<button class="small ${out.log_photo === false ? '' : 'primary'} mt-s" data-draw-ev="${esc(ev.id)}"${out.log_photo === false ? ' data-draw-force="true"' : ''}>${out.log_photo === false ? 'Draw anyway' : 'Draw this look'}</button>` : '<span class="mute small mt-s">✓ drawn</span>'}
         <details class="mt-s"><summary class="mute small" style="cursor:pointer">Pipeline debug</summary>
           <pre style="font-size:10px;white-space:pre-wrap;max-height:200px;overflow:auto">${esc(JSON.stringify(out,null,2))}</pre>
         </details>
@@ -1072,7 +1072,8 @@ function wireLife() {
   document.querySelectorAll('[data-draw-ev]').forEach(b => b.onclick = async () => {
     b.disabled = true; b.textContent = 'Drawing…';
     try {
-      await call('/' + CID + '/life/' + b.dataset.drawEv + '/draw', {method: 'POST', json: {}});
+      const forceQs = b.dataset.drawForce ? '?force=true' : '';
+      await call('/' + CID + '/life/' + b.dataset.drawEv + '/draw' + forceQs, {method: 'POST', json: {}});
       // draw runs as a background job — poll until done
       for (let i = 0; i < 400; i++) {                  // a draw may wait minutes for a model that is down
         await new Promise(r => setTimeout(r, 3000));

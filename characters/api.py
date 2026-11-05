@@ -1499,7 +1499,7 @@ class DrawThoughtReq(BaseModel):
 
 
 @router.post("/{char_id}/life/{event_id}/draw")
-async def draw_thought(char_id: str, event_id: str):
+async def draw_thought(char_id: str, event_id: str, force: bool = False):
     """Generate a picture from a logged thought. Starts a background job."""
     c = _get(char_id)
     ev = profile_mod.get_event(event_id)
@@ -1508,11 +1508,12 @@ async def draw_thought(char_id: str, event_id: str):
     if ev["event_type"] != "think":
         raise HTTPException(400, "can only draw from a 'think' event")
     thought = ev["outputs"]
-    lp = thought.get("log_photo", True)
-    if isinstance(lp, str):
-        lp = lp.strip().lower() not in ("false", "no", "0", "")
-    if not lp:
-        raise HTTPException(400, "log_photo is false for this moment — nothing to draw")
+    if not force:
+        lp = thought.get("log_photo", True)
+        if isinstance(lp, str):
+            lp = lp.strip().lower() not in ("false", "no", "0", "")
+        if not lp:
+            raise HTTPException(400, "log_photo is false for this moment — nothing to draw")
     s, key = settings_mod.get(), settings_mod.api_key()
     return _start(char_id, "char_moment",
                   lambda progress: brain_mod.draw_thought(c, event_id, thought, s, key, progress=progress))
