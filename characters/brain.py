@@ -772,10 +772,18 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
         if expression or face_state:
             expr_line = " Expression: " + (expression or "") + ("." if expression else "") + (" Face: " + face_state + "." if face_state else "") + " Apply this expression — do not copy the neutral look from the reference picture."
 
+        is_pov = shot_type == "pov_first_person"
         scene = f"{shot_dir} {image_idea}".strip()
-        if shot_type == "pov_first_person":
-            scene += " No other person in frame. At most one of her own hands visible at the bottom edge — not two hands, no one presenting or serving."
+        if is_pov:
+            scene += " No other person in frame. At most one of her own hands visible at the bottom edge — not two hands, no one presenting or serving. Character's face is NOT visible."
         space_line = (" Match the room/setting layout, furniture, colours and props from the last picture exactly." if space_ref_path else "")
+        # POV shots: face is absent → expr_line is irrelevant; identity anchor becomes skin-tone only
+        active_expr_line = "" if is_pov else expr_line
+        face_anchor = (
+            "Use Picture 1 for skin tone on hands only. No face in this shot."
+            if is_pov else
+            "Match the person's face identity from Picture 1 exactly."
+        )
         if garment_ref:
             refs    = [portrait_path, garment_ref["path"]]
             ref_ids = [portrait_id, garment_ref["id"]]
@@ -786,8 +794,8 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
                        + (f"Picture 3 is the room/setting reference — match its layout and decor exactly. " if space_ref_path else "")
                        + f"Create a new vertical 4:5 photograph: {scene}"
                        + (f" Wear the outfit from Picture 2." if outfit else "")
-                       + expr_line + space_line
-                       + " Match the person's face identity from Picture 1 exactly.")
+                       + active_expr_line + space_line
+                       + f" {face_anchor}")
         else:
             body_in_canon = canon.get("body")
             if body_in_canon:
@@ -806,8 +814,8 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
                            + (f"Picture 3 is the room/setting reference — match its layout and decor exactly. " if space_ref_path else "")
                            + f"Create a new vertical 4:5 photograph: {scene}"
                            + (f" Wearing: {outfit}." if outfit else "")
-                           + expr_line + space_line
-                           + " Match the person's face identity from Picture 1 exactly.")
+                           + active_expr_line + space_line
+                           + f" {face_anchor}")
             else:
                 refs, ref_ids = [portrait_path], [portrait_id]
                 if space_ref_path:
@@ -816,8 +824,8 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
                            + (f"Picture 2 is the room/setting reference — match its layout and decor exactly. " if space_ref_path else "")
                            + f"Create a new vertical 4:5 photograph: {scene}"
                            + (f" Wearing: {outfit}." if outfit else "")
-                           + expr_line + space_line
-                           + " Match the person's face identity from Picture 1 exactly.")
+                           + active_expr_line + space_line
+                           + f" {face_anchor}")
         how = "edit"
     else:
         char_desc = (char.get("identity") or "").strip()
