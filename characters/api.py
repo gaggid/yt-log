@@ -1038,6 +1038,165 @@ async def delete_memory(char_id: str, memory_id: str):
     return {"ok": True}
 
 
+# ── memory analytics ──────────────────────────────────────────────────────────
+
+@router.get("/{char_id}/memory/landscape")
+async def memory_landscape(char_id: str, source: str | None = None):
+    """Category breakdown, active/fading counts, top 5 strongest memories."""
+    _get(char_id)
+    import time as _time
+    from story import db as _db
+    now = _time.time()
+
+    q = "SELECT * FROM char_memories WHERE char_id=?"
+    args: list = [char_id]
+    if source:
+        q += " AND source LIKE ?"
+        args.append(f"{source}%")
+    rows = _db.q(q, args)
+
+    active = fading = archived = 0
+    by_cat: dict = {}
+    for r in rows:
+        m = {**r, "tags": _db.jload(r["tags"], [])}
+        s = memory_mod.strength(m, now)
+        cat = m["category"]
+        entry = by_cat.setdefault(cat, {"category": cat, "label": memory_mod.CATEGORIES.get(cat, cat), "count": 0, "strength_sum": 0.0})
+        entry["count"] += 1
+        entry["strength_sum"] += s
+        if s >= 0.4:
+            active += 1
+        elif s >= memory_mod.FADE_THRESHOLD:
+            fading += 1
+        else:
+            archived += 1
+
+    categories = sorted(
+        [{"category": k, "label": v["label"], "count": v["count"],
+          "avg_strength": round(v["strength_sum"] / v["count"], 3) if v["count"] else 0}
+         for k, v in by_cat.items()],
+        key=lambda x: -x["count"],
+    )
+
+    all_mems = [
+        {**{k: r[k] for k in ("id","char_id","content","category","base_strength","formed_at","last_accessed_at","source","stable")},
+         "tags": _db.jload(r["tags"], []),
+         "current_strength": round(memory_mod.strength({**r,"tags":[]}, now), 3)}
+        for r in rows
+    ]
+    top5 = sorted([m for m in all_mems if m["current_strength"] >= memory_mod.FADE_THRESHOLD],
+                  key=lambda x: -x["current_strength"])[:5]
+
+    return {"by_category": categories, "active": active, "fading": fading,
+            "archived": archived, "total": len(rows), "top_memories": top5}
+
+
+@router.get("/{char_id}/memory/bonds")
+async def memory_bonds(char_id: str):
+    """Nodes + edges for the bond graph (top 60 memories by strength)."""
+    _get(char_id)
+    import time as _time
+    from story import db as _db
+    now = _time.time()
+
+    rows = _db.q("SELECT * FROM char_memories WHERE char_id=? ORDER BY base_strength DESC", (char_id,))
+    all_mems = [
+        {**{k: r[k] for k in ("id","content","category","source","stable","base_strength","formed_at")},
+         "current_strength": round(memory_mod.strength({**r,"tags":[]}, now), 3)}
+        for r in rows if memory_mod.strength({**r,"tags":[]}, now) >= memory_mod.FADE_THRESHOLD
+    ]
+    top = all_mems[:60]
+    top_ids = {m["id"] for m in top}
+
+    bonds = memory_mod.list_bonds(char_id, min_strength=0.1)
+    edges = [{"a": b["mem_a"], "b": b["mem_b"], "strength": round(b["bond_strength"], 3)}
+             for b in bonds if b["mem_a"] in top_ids and b["mem_b"] in top_ids]
+
+    return {"nodes": top, "edges": edges}
+
+
+@router.get("/{char_id}/memory/traits")
+async def memory_traits(char_id: str):
+    """Active consolidated trait memories."""
+    _get(char_id)
+    return memory_mod.active_traits(char_id)
+
+
+@router.get("/{char_id}/memory/trajectory")
+async def memory_trajectory(char_id: str, days: int = 30):
+    """Daily snapshot history for trajectory charts."""
+    _get(char_id)
+    from story import db as _db
+    rows = _db.q(
+        "SELECT * FROM char_profile_snapshots WHERE char_id=? ORDER BY snapshot_date DESC LIMIT ?",
+        (char_id, min(days, 90)),
+    )
+    return [
+        {**{k: r[k] for k in ("snapshot_date","energy","feeling_primary","feeling_intensity","web_surfs_today")},
+         "interests":      _db.jload(r["interests_json"],   {}),
+         "curiosities":    _db.jload(r["curiosities_json"], []),
+         "memory_counts":  _db.jload(r["memory_counts_json"], {})}
+        for r in reversed(rows)
+    ]
+
+
+@router.get("/{char_id}/memory/nudges")
+async def memory_nudges(char_id: str):
+    """Rule-based nudges: aspirations ready to become goals, curiosities about to promote, etc."""
+    _get(char_id)
+    from . import profile as profile_mod, store
+    char = store.get(char_id)
+    prof = profile_mod.get(char)
+    nudges = []
+
+    # aspirations surfaced ≥3 times with no matching goal
+    for asp in (prof.get("aspirations") or []):
+        if asp.get("surfaced_count", 0) >= 3:
+            nudges.append({"type": "aspiration_goal",
+                           "message": f"Aspiration '{asp['text'][:60]}' surfaced {asp['surfaced_count']}× — consider making it a goal",
+                           "data": asp})
+
+    # curiosities close to promoting
+    for c in (prof.get("curiosities") or []):
+        spark = c.get("spark", 0)
+        if spark >= 4.0:
+            nudges.append({"type": "curiosity_promote",
+                           "message": f"Curiosity '{c['name']}' has spark {spark:.1f}/10 — one more encounter promotes it to a real interest",
+                           "data": c})
+
+    # strong memory cluster with no matching interest/goal (use top tags)
+    from story import db as _db
+    import time as _time
+    now = _time.time()
+    top_tags = _db.q(
+        "SELECT tags FROM char_memories WHERE char_id=? AND base_strength>0.5",
+        (char_id,),
+    )
+    tag_freq: dict = {}
+    for r in top_tags:
+        for t in _db.jload(r["tags"], []):
+            tag_freq[t] = tag_freq.get(t, 0) + 1
+    hot_tags = sorted(tag_freq.items(), key=lambda x: -x[1])[:5]
+    interest_words = {w.lower() for v in (prof.get("interests") or {}).values()
+                      for w in (v.get("text","") if isinstance(v,dict) else str(v)).split()}
+    for tag, freq in hot_tags:
+        if freq >= 3 and tag not in interest_words and len(tag) > 3:
+            nudges.append({"type": "memory_theme",
+                           "message": f"'{tag}' appears in {freq} strong memories but isn't an interest yet — emerging theme",
+                           "data": {"tag": tag, "frequency": freq}})
+            break  # one at most
+
+    return nudges
+
+
+@router.post("/{char_id}/memory/seed_bonds")
+async def seed_memory_bonds(char_id: str):
+    """Retroactive bond seeding pass. Idempotent."""
+    _get(char_id)
+    n = memory_mod.seed_bonds(char_id)
+    return {"bonds_seeded": n}
+
+
 # ── chat ──────────────────────────────────────────────────────────────────────
 
 class ChatMsg(BaseModel):

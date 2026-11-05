@@ -143,9 +143,11 @@ window.openChat = openChat;
 
 function render() {
   const busy = C.job && C.job.state === 'running';
-  const studioHtml = CH_TAB === 'life'
-    ? lifeView(busy)
-    : `<div class="ch-studio"><div class="ch-side card pad">${sideView(busy)}</div><div id="ch-center">${galleryView(busy)}</div></div>`;
+  const studioHtml = CH_TAB === 'memory'
+    ? `<div id="ch-memory-root"></div>`
+    : CH_TAB === 'life'
+      ? lifeView(busy)
+      : `<div class="ch-studio"><div class="ch-side card pad">${sideView(busy)}</div><div id="ch-center">${galleryView(busy)}</div></div>`;
   $('#app').innerHTML = `
     <div class="row"><a href="#/characters">← Characters</a><h2 style="margin:0 0 0 8px">${esc(C.name)}</h2>${badge(C.status === 'ready' ? 'done' : 'queued', C.status)}<span class="mute small">v${C.version} · ${esc(C.kind)}</span><span class="sp"></span>
       ${C.kind === 'person' ? `<button class="small primary" onclick="openChat()">Chat</button>` : ''}<button class="small" onclick="chRename()">Rename</button><a class="small" href="/api/characters/${C.id}/pack" download><button class="small">Export pack</button></a><button class="small" onclick="chDup(this)">Duplicate</button><button class="small bad" onclick="chDelete()">Delete</button></div>
@@ -154,7 +156,9 @@ function render() {
     ${studioHtml}`;
   document.getElementById('tab-gallery').onclick = () => { CH_TAB = 'gallery'; render(); };
   document.getElementById('tab-life').onclick    = () => { CH_TAB = 'life'; LIFE_EVENTS = null; LIFE_GOALS = null; LIFE_MEMORIES = null; LIFE_ASPIRATIONS = null; render(); };
+  document.getElementById('tab-memory').onclick  = () => { CH_TAB = 'memory'; render(); };
   wire();
+  if (CH_TAB === 'memory' && window.chMemoryMount) window.chMemoryMount(CID);
 }
 function refreshCenter() {
   $('#ch-job').innerHTML = jobBox();
@@ -219,6 +223,7 @@ function tabBar() {
   return `<div class="row" style="gap:6px;margin-bottom:14px;border-bottom:1px solid var(--line);padding-bottom:10px">
     <button id="tab-gallery" class="${CH_TAB==='gallery'?'primary':'small'}">Gallery &amp; Edits</button>
     <button id="tab-life" class="${CH_TAB==='life'?'primary':'small'}">Virtual Life</button>
+    <button id="tab-memory" class="${CH_TAB==='memory'?'primary':'small'}">Memory</button>
   </div>`;
 }
 
