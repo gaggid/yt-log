@@ -567,6 +567,18 @@ async def think(char: dict, backend, s: dict, trigger: str = "manual", context_o
     except Exception:
         pass
 
+    # book reading — absorb one chapter if character is in a reading mood and has books
+    try:
+        from . import books as books_mod
+        act_lower = (thought.activity or "").lower()
+        mood_ok   = (thought.mood or "").lower() in ("focused","curious","calm","content","relaxed","reflective","settled","nostalgic","pensive","inspired")
+        is_reading = any(w in act_lower for w in ("read","book","novel","chapter","page","story"))
+        energy_ok  = int(profile_mod.get(store.get(char["id"])).get("energy") or 0) > 30
+        if energy_ok and (is_reading or mood_ok):
+            await books_mod.read_session(char, backend)
+    except Exception:
+        pass
+
     final = thought.model_dump()
     final["latency_ms"] = round((time.time() - t0) * 1000)
     ev = profile_mod.log_event(char["id"], "think", trigger, pipeline_log, final)

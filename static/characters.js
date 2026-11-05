@@ -106,7 +106,7 @@ async function newCharacter() {
 
 /* ───────── studio ───────── */
 window.viewCharacter = async function (id) {
-  CID = id; clearTimeout(pollT); LIFE_EVENTS = null; LIFE_GOALS = null; LIFE_MEMORIES = null; CH_TAB = 'gallery';
+  CID = id; clearTimeout(pollT); LIFE_EVENTS = null; LIFE_GOALS = null; LIFE_MEMORIES = null; LIFE_BOOKS = null; CH_TAB = 'gallery';
   OPT = OPT || await call('/options').catch(() => null);
   const my = route_id;
   const load = async (force) => {
@@ -155,7 +155,7 @@ function render() {
     ${tabBar()}
     ${studioHtml}`;
   document.getElementById('tab-gallery').onclick = () => { CH_TAB = 'gallery'; render(); };
-  document.getElementById('tab-life').onclick    = () => { CH_TAB = 'life'; LIFE_EVENTS = null; LIFE_GOALS = null; LIFE_MEMORIES = null; LIFE_ASPIRATIONS = null; render(); };
+  document.getElementById('tab-life').onclick    = () => { CH_TAB = 'life'; LIFE_EVENTS = null; LIFE_GOALS = null; LIFE_MEMORIES = null; LIFE_ASPIRATIONS = null; LIFE_BOOKS = null; render(); };
   document.getElementById('tab-memory').onclick  = () => { CH_TAB = 'memory'; render(); };
   wire();
   if (CH_TAB === 'memory' && window.chMemoryMount) window.chMemoryMount(CID);
@@ -412,7 +412,65 @@ function inPlaceCard(busy) {
     </div></div>`;
 }
 
-let LIFE_GOALS = null, LIFE_MEMORIES = null, LIFE_ASPIRATIONS = null;
+let LIFE_GOALS = null, LIFE_MEMORIES = null, LIFE_ASPIRATIONS = null, LIFE_BOOKS = null;
+
+function bookShelfCard(dis) {
+  const books = LIFE_BOOKS || [];
+  const STATUS_LABEL = { wishlist:'📚 Wishlist', reading:'📖 Reading', finished:'✓ Finished', skipped:'⏭ Skipped', ignored:'✗ Ignored' };
+  const STATUS_COLOR = { wishlist:'var(--mute)', reading:'var(--accent)', finished:'var(--ok)', skipped:'var(--mute)', ignored:'var(--mute)' };
+
+  const reading  = books.filter(b => b.status === 'reading');
+  const wishlist = books.filter(b => b.status === 'wishlist');
+  const others   = books.filter(b => !['reading','wishlist'].includes(b.status));
+
+  const bookRow = b => {
+    const prog = b.total_chapters > 0 ? Math.round(b.current_chapter / b.total_chapters * 100) : 0;
+    const progBar = b.status === 'reading' ? `<div style="background:var(--line);border-radius:3px;height:4px;margin:3px 0"><div style="background:var(--accent);width:${prog}%;height:100%;border-radius:3px;transition:width .3s"></div></div>` : '';
+    const seriesTag = b.series_name ? `<span class="badge" style="font-size:10px;background:var(--panel);border:1px solid var(--line)">${esc(b.series_name)} #${b.series_order}</span>` : '';
+    return `<div class="card pad mt-s" style="padding:8px 10px;border-left:3px solid ${STATUS_COLOR[b.status]||'var(--line)'}">
+      <div class="row" style="gap:6px;align-items:flex-start">
+        <div style="flex:1;min-width:0">
+          <div class="row" style="gap:4px;flex-wrap:wrap"><b style="font-size:13px">${esc(b.title)}</b>${seriesTag}</div>
+          ${b.author ? `<div class="mute small">${esc(b.author)}</div>` : ''}
+          ${progBar}
+          ${b.status==='reading' ? `<div class="mute small">Chapter ${b.current_chapter} / ${b.total_chapters} · ${prog}%</div>` : ''}
+          ${b.skip_reason ? `<div class="mute small" style="font-size:11px">Skipped: ${esc(b.skip_reason)}</div>` : ''}
+        </div>
+        <div class="col" style="gap:3px;flex-shrink:0">
+          ${b.status==='reading' ? `<button class="small primary" data-book-read="${esc(b.id)}" ${dis}>Read now</button>` : ''}
+          ${b.status==='wishlist' ? `<button class="small primary" data-book-read="${esc(b.id)}" ${dis}>Start</button>` : ''}
+          ${b.status!=='ignored' ? `<button class="small" data-book-skip="${esc(b.id)}" ${dis}>Skip</button>` : ''}
+          ${b.status==='ignored' ? `<button class="small" data-book-wishlist="${esc(b.id)}" ${dis}>Re-add</button>` : `<button class="small bad" data-book-ignore="${esc(b.id)}" ${dis}>Ignore</button>`}
+        </div>
+      </div>
+    </div>`;
+  };
+
+  return `<div class="card pad mt">
+    <div class="row"><h3 style="margin-top:0">Book Shelf</h3><span class="mute small">${books.length} book${books.length!==1?'s':''}</span><span class="sp"></span>
+      <label class="small" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="file" id="vl-book-file" accept="application/pdf" style="display:none" ${dis}>
+        <button class="small primary" id="vl-book-upload-btn" ${dis}>+ Add PDF</button>
+      </label>
+    </div>
+    <div id="vl-book-form" style="display:none" class="mt-s">
+      <div class="row" style="gap:6px;flex-wrap:wrap">
+        <input id="vl-book-title"  style="flex:2;min-width:140px" placeholder="Title" ${dis}>
+        <input id="vl-book-author" style="flex:1;min-width:100px" placeholder="Author" ${dis}>
+      </div>
+      <div class="row mt-s" style="gap:6px;flex-wrap:wrap">
+        <input id="vl-book-series" style="flex:2;min-width:140px" placeholder="Series name (optional)" ${dis}>
+        <input id="vl-book-order" type="number" min="0" value="1" style="width:56px" title="Book number in series" ${dis}>
+      </div>
+      <textarea id="vl-book-synopsis" style="min-height:40px;margin-top:6px" placeholder="Short synopsis (optional)" ${dis}></textarea>
+      <div class="row mt-s" style="gap:6px"><button class="small primary" id="vl-book-submit" ${dis}>Upload &amp; Process</button><button class="small" id="vl-book-cancel">Cancel</button></div>
+    </div>
+    ${reading.length  ? `<div class="mute small" style="margin-top:10px;margin-bottom:2px;font-weight:600">Currently reading</div>${reading.map(bookRow).join('')}` : ''}
+    ${wishlist.length ? `<div class="mute small" style="margin-top:10px;margin-bottom:2px;font-weight:600">Wishlist</div>${wishlist.map(bookRow).join('')}` : ''}
+    ${others.length   ? `<details class="mt-s"><summary class="mute small" style="cursor:pointer">Finished / skipped / ignored (${others.length})</summary>${others.map(bookRow).join('')}</details>` : ''}
+    ${!books.length   ? '<div class="mute small mt-s">No books yet. Upload a PDF to add one to her shelf.</div>' : ''}
+  </div>`;
+}
 
 function lifeView(busy) {
   const dis = busy ? 'disabled' : '';
@@ -669,6 +727,8 @@ function lifeView(busy) {
         <button class="small" id="vl-mem-save" ${dis}>Add</button>
       </div>
     </div>
+
+    ${bookShelfCard(dis)}
   </div>
 
   <div>
@@ -730,16 +790,18 @@ function pollWardrobeJob() {
 }
 
 async function loadLifeEvents() {
-  const [evs, goals, mems, asps] = await Promise.allSettled([
+  const [evs, goals, mems, asps, bks] = await Promise.allSettled([
     call('/' + CID + '/life'),
     call('/' + CID + '/goals'),
     call('/' + CID + '/memories'),
     call('/' + CID + '/aspirations'),
+    call('/' + CID + '/books'),
   ]);
   LIFE_EVENTS      = evs.status    === 'fulfilled' ? evs.value    : [];
   LIFE_GOALS       = goals.status  === 'fulfilled' ? goals.value  : [];
   LIFE_MEMORIES    = mems.status   === 'fulfilled' ? mems.value   : [];
   LIFE_ASPIRATIONS = asps.status   === 'fulfilled' ? asps.value   : [];
+  LIFE_BOOKS       = bks.status    === 'fulfilled' ? bks.value    : [];
 }
 
 function wireLife() {
@@ -833,6 +895,70 @@ function wireLife() {
   document.querySelectorAll('[data-mem-del]').forEach(b => b.onclick = async () => {
     await act(null, async () => { await call('/' + CID + '/memories/' + b.dataset.memDel, {method:'DELETE'}); await loadLifeEvents(); render(); return true; });
   });
+
+  // ── book shelf ──
+  $e('vl-book-upload-btn') && ($e('vl-book-upload-btn').onclick = () => {
+    $e('vl-book-file').click();
+  });
+  $e('vl-book-file') && ($e('vl-book-file').onchange = e => {
+    if (!e.target.files.length) return;
+    $e('vl-book-form').style.display = '';
+    $e('vl-book-title').focus();
+  });
+  $e('vl-book-cancel') && ($e('vl-book-cancel').onclick = () => {
+    $e('vl-book-form').style.display = 'none';
+    $e('vl-book-file').value = '';
+  });
+  $e('vl-book-submit') && ($e('vl-book-submit').onclick = async () => {
+    const file = ($e('vl-book-file').files || [])[0];
+    if (!file) return;
+    const title = ($e('vl-book-title').value || '').trim() || file.name.replace('.pdf','');
+    const fd = new FormData();
+    fd.append('file',         file);
+    fd.append('title',        title);
+    fd.append('author',       ($e('vl-book-author').value  || '').trim());
+    fd.append('synopsis',     ($e('vl-book-synopsis').value|| '').trim());
+    fd.append('series_name',  ($e('vl-book-series').value  || '').trim());
+    fd.append('series_order', ($e('vl-book-order').value   || '1'));
+    const btn = $e('vl-book-submit');
+    btn.disabled = true; btn.textContent = 'Processing…';
+    try {
+      await fetch(`/api/characters/${CID}/books`, {method:'POST', body: fd});
+      $e('vl-book-form').style.display = 'none';
+      await loadLifeEvents(); render();
+      toast('Book uploaded — processing chapters in background');
+    } catch (e) {
+      btn.disabled = false; btn.textContent = 'Upload & Process';
+      toast('Upload failed: ' + e.message, true);
+    }
+  });
+  document.querySelectorAll('[data-book-read]').forEach(b => b.onclick = async () => {
+    await act(b, async () => {
+      await call('/' + CID + '/books/' + b.dataset.bookRead + '/read', {method:'POST'});
+      await loadLifeEvents(); render(); return true;
+    }, 'Reading session started');
+  });
+  document.querySelectorAll('[data-book-skip]').forEach(b => b.onclick = async () => {
+    const reason = prompt('Why skip this book? (optional)') || '';
+    await act(null, async () => {
+      await call('/' + CID + '/books/' + b.dataset.bookSkip, {method:'PATCH', json:{status:'skipped',skip_reason:reason}});
+      await loadLifeEvents(); render(); return true;
+    });
+  });
+  document.querySelectorAll('[data-book-ignore]').forEach(b => b.onclick = async () => {
+    if (!await confirmDlg('Ignore book', 'She will never be suggested this book again.', 'Ignore', true)) return;
+    await act(null, async () => {
+      await call('/' + CID + '/books/' + b.dataset.bookIgnore, {method:'PATCH', json:{status:'ignored'}});
+      await loadLifeEvents(); render(); return true;
+    });
+  });
+  document.querySelectorAll('[data-book-wishlist]').forEach(b => b.onclick = async () => {
+    await act(null, async () => {
+      await call('/' + CID + '/books/' + b.dataset.bookWishlist, {method:'PATCH', json:{status:'wishlist'}});
+      await loadLifeEvents(); render(); return true;
+    }, 'Moved back to wishlist');
+  });
+
   $e('vl-think') && ($e('vl-think').onclick = async () => {
     const btn = $e('vl-think');
     const autoDraw = ($e('vl-auto-draw') || {}).checked;

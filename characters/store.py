@@ -46,6 +46,23 @@ CREATE TABLE IF NOT EXISTS char_profile_snapshots(
   created_at REAL,
   UNIQUE(char_id, snapshot_date)
 );
+CREATE TABLE IF NOT EXISTS char_books(
+  id TEXT PRIMARY KEY, char_id TEXT NOT NULL,
+  title TEXT NOT NULL, author TEXT DEFAULT '', synopsis TEXT DEFAULT '',
+  series_name TEXT DEFAULT '', series_order INTEGER DEFAULT 0,
+  status TEXT DEFAULT 'wishlist',
+  current_chapter INTEGER DEFAULT 0, total_chapters INTEGER DEFAULT 0,
+  added_at REAL, started_at REAL, finished_at REAL,
+  skip_reason TEXT DEFAULT '', resurfaced_at REAL
+);
+CREATE INDEX IF NOT EXISTS cb_char ON char_books(char_id, status);
+CREATE TABLE IF NOT EXISTS char_book_chapters(
+  id TEXT PRIMARY KEY, book_id TEXT NOT NULL,
+  chapter_index INTEGER NOT NULL,
+  impressions_json TEXT DEFAULT '[]',
+  processed_at REAL,
+  UNIQUE(book_id, chapter_index)
+);
 """
 COLUMNS = ("id", "name", "kind", "status", "created_at", "updated_at")
 GEN, SHEET, EDIT = "char_gen", "char_sheet", "char_edit"

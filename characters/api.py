@@ -1197,6 +1197,68 @@ async def seed_memory_bonds(char_id: str):
     return {"bonds_seeded": n}
 
 
+# ── books ──────────────────────────────────────────────────────────────────────
+
+from . import books as books_mod
+
+class BookStatusReq(BaseModel):
+    status:      str
+    skip_reason: str = ""
+
+@router.get("/{char_id}/books")
+async def list_books(char_id: str, status: str | None = None):
+    _get(char_id)
+    return books_mod.list_books(char_id, status=status)
+
+@router.post("/{char_id}/books")
+async def upload_book(
+    char_id: str,
+    file:         UploadFile = File(...),
+    title:        str        = Form(...),
+    author:       str        = Form(""),
+    synopsis:     str        = Form(""),
+    series_name:  str        = Form(""),
+    series_order: int        = Form(0),
+):
+    """Upload a PDF. Extracts text, chunks it and summarises each chunk into impressions."""
+    _get(char_id)
+    data = await file.read()
+    if len(data) > 30 * 1024 * 1024:
+        raise HTTPException(400, "PDF too large (30 MB max)")
+    s, key = settings_mod.get(), settings_mod.api_key()
+    backend = llm.ChatBackend(s, key)
+    return _start(char_id, "book_ingest",
+                  lambda progress: books_mod.ingest_pdf(char_id, data, title, author, synopsis,
+                                                        series_name, series_order, backend))
+
+@router.patch("/{char_id}/books/{book_id}")
+async def update_book_status(char_id: str, book_id: str, body: BookStatusReq):
+    _get(char_id)
+    try:
+        return books_mod.set_status(book_id, body.status, body.skip_reason)
+    except (KeyError, ValueError) as e:
+        raise HTTPException(400, str(e))
+
+@router.delete("/{char_id}/books/{book_id}")
+async def delete_book(char_id: str, book_id: str):
+    _get(char_id)
+    books_mod.delete_book(char_id, book_id)
+    return {"ok": True}
+
+@router.post("/{char_id}/books/{book_id}/read")
+async def manual_read_session(char_id: str, book_id: str):
+    """Manually trigger one reading session for the given book."""
+    char = _get(char_id)
+    try:
+        books_mod.set_status(book_id, "reading")
+    except KeyError:
+        raise HTTPException(404, "book not found")
+    s, key = settings_mod.get(), settings_mod.api_key()
+    backend = llm.ChatBackend(s, key)
+    return _start(char_id, "book_read",
+                  lambda progress: books_mod.read_session(char, backend))
+
+
 # ── chat ──────────────────────────────────────────────────────────────────────
 
 class ChatMsg(BaseModel):
