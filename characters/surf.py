@@ -187,8 +187,8 @@ def should_surf(char_id: str, prof: dict) -> bool:
 # ── main surf session ─────────────────────────────────────────────────────────
 
 async def surf_session(char: dict, backend, topic: str | None = None,
-                       category: str = "general") -> dict | None:
-    """Full surf pipeline. Returns summary or None on failure.
+                       category: str = "general") -> str:
+    """Full surf pipeline. Returns a one-line string note (shown in job note).
     Pass topic/category for a manual surf; leave None for auto-pick.
     """
     from . import memory as memory_mod, interests as interests_mod, profile as profile_mod, store
@@ -198,12 +198,12 @@ async def surf_session(char: dict, backend, topic: str | None = None,
     if topic is None:
         result = pick_topic(prof)
         if not result:
-            return None
+            return "No topic to surf — add an interest or curiosity first, or type a topic manually"
         topic, category = result
 
     urls = await _ddg_urls(topic)
     if not urls:
-        return None
+        return f"Search for '{topic}' returned no results (search engine unavailable)"
 
     all_impressions: list[str] = []
     sourced_urls: list[str] = []
@@ -222,7 +222,7 @@ async def surf_session(char: dict, backend, topic: str | None = None,
             continue  # failed fetch → skip silently
 
     if not all_impressions:
-        return None
+        return f"Found pages for '{topic}' but could not extract any content"
 
     # form memories
     url_hash  = hashlib.sha1(sourced_urls[0].encode()).hexdigest()[:8] if sourced_urls else "web"
@@ -272,10 +272,4 @@ async def surf_session(char: dict, backend, topic: str | None = None,
     # increment daily surf counter
     _inc_surfs(char["id"])
 
-    return {
-        "topic":       topic,
-        "category":    category,
-        "urls":        sourced_urls,
-        "impressions": all_impressions,
-        "memories_formed": len(all_impressions),
-    }
+    return f"Surfed '{topic}': {len(all_impressions)} memories formed from {len(sourced_urls)} page(s)"

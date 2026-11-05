@@ -111,8 +111,15 @@ window.viewCharacter = async function (id) {
   const my = route_id;
   const load = async (force) => {
     if (my !== route_id) return;
+    const prevJob = C && C.job ? {state: C.job.state, kind: C.job.kind} : null;
     try { C = await call('/' + id); } catch (e) { $('#app').innerHTML = `<div class="errbox">${esc(e.message)}</div><a href="#/characters">Back</a>`; return; }
     if (my !== route_id) return;
+    // show job result note when a background job just finished
+    if (prevJob && prevJob.state === 'running' && C.job && C.job.state !== 'running') {
+      if (C.job.note) toast(C.job.note);
+      else if (C.job.state === 'done' && prevJob.kind === 'web_surf') toast('Surf done — check the Memory tab');
+      else if (C.job.state === 'error') toast('Job failed: ' + (C.job.error || 'unknown error'), {bad: true});
+    }
     if (force || !document.querySelector('.ch-studio') || !editing()) render();
     else refreshCenter();
     if (C.job && C.job.state === 'running') pollT = setTimeout(() => load(false), 3000);
@@ -978,8 +985,8 @@ function wireLife() {
     try {
       await call('/' + CID + '/surf', {method:'POST', json:{topic: topic.trim(), category:'general'}});
       $e('vl-surf-row').style.display = 'none';
-      await loadLifeEvents(); render();
-      toast('Web surf done — check the Memory tab for new learning memories');
+      // job is running in background — reload character (shows spinner) and poll until done
+      await window._chLoad(true);
     } catch(e) {
       btn.disabled = false; btn.textContent = 'Go';
       toast('Surf failed: ' + e.message, true);
