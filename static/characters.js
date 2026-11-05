@@ -479,6 +479,10 @@ function lifeView(busy) {
       const drawEv = events.find(e => e.event_type === 'draw' && (e.inputs||{}).event_id === ev.id);
       const drawnUrl = drawEv ? esc((drawEv.outputs||{}).url||'') : '';
       const drawn = drawnUrl ? `<img src="${drawnUrl}" style="width:120px;height:160px;object-fit:cover;border-radius:8px;margin-top:6px;cursor:zoom-in" onclick="chZoom('${drawnUrl}')" onerror="this.style.display='none'">` : '';
+      const spokeEv = events.find(e => e.event_type === 'speak' && (e.inputs||{}).event_id === ev.id);
+      const spokeUrl = spokeEv ? esc((spokeEv.outputs||{}).url||'') : '';
+      const sayHtml = out.say ? `<div style="margin:4px 0;padding:4px 8px;background:var(--panel);border-radius:6px;border-left:2px solid var(--accent)">🗣 “${esc(out.say)}” <span class="mute small">${esc(out.say_tag && out.say_tag !== 'neutral' ? '[' + out.say_tag + ']' : '')}</span>
+        ${spokeUrl ? `<audio controls preload="none" src="${spokeUrl}" style="display:block;margin-top:4px;height:32px"></audio>` : `<button class="small mt-s" data-speak-ev="${esc(ev.id)}">Speak this</button>`}</div>` : '';
       const gp = out.goal_progress ? `<div class="mute small" style="margin-top:4px">↳ goal: ${esc(out.goal_progress)}</div>` : '';
       const noteHtml = out.note ? `<div style="margin-top:6px;font-size:12px;padding:4px 8px;background:var(--panel);border-radius:6px;border-left:2px solid var(--warn)">note: ${esc(out.note)}</div>` : '';
       const wishHtml = out.wardrobe_want ? `<div style="margin-top:6px;font-size:12px;padding:4px 8px;background:var(--panel);border-radius:6px;border-left:2px solid var(--ok)">wants: ${esc(out.wardrobe_want)}</div>` : '';
@@ -487,7 +491,7 @@ function lifeView(busy) {
       return `<div class="card pad mt-s" style="border-left:3px solid var(--accent)">
         <div class="row"><span class="badge b-info">${esc(out.mood||'')}</span>${outfitTag}<span class="mute small">${esc(out.activity||'')} · ${esc(out.space||'')} · ${absTime(ev.created_at)}</span></div>
         ${exprTag ? `<div style="margin:2px 0 4px">${exprTag}</div>` : ''}
-        <div style="font-style:italic;margin:6px 0">${esc(out.thought||'')}</div>${gp}${noteHtml}${wishHtml}${drawn}
+        <div style="font-style:italic;margin:6px 0">${esc(out.thought||'')}</div>${sayHtml}${gp}${noteHtml}${wishHtml}${drawn}
         ${!drawEv ? `${out.log_photo === false ? '<div class="mute small mt-s">Not worth a picture, she decided. </div>' : ''}<button class="small ${out.log_photo === false ? '' : 'primary'} mt-s" data-draw-ev="${esc(ev.id)}">${out.log_photo === false ? 'Draw anyway' : 'Draw this look'}</button>` : '<span class="mute small mt-s">✓ drawn</span>'}
         <details class="mt-s"><summary class="mute small" style="cursor:pointer">Pipeline debug</summary>
           <pre style="font-size:10px;white-space:pre-wrap;max-height:200px;overflow:auto">${esc(JSON.stringify(out,null,2))}</pre>
@@ -905,13 +909,25 @@ function wireLife() {
     try {
       await call('/' + CID + '/life/' + b.dataset.drawEv + '/draw', {method: 'POST', json: {}});
       // draw runs as a background job — poll until done
-      for (let i = 0; i < 90; i++) {
+      for (let i = 0; i < 400; i++) {                  // a draw may wait minutes for a model that is down
         await new Promise(r => setTimeout(r, 3000));
         const s = await call('/' + CID).catch(() => null);
         if (s) { C = s; if (!s.job || s.job.state !== 'running') break; }
       }
       LIFE_EVENTS = null; await loadLifeEvents(); render();
     } catch(e) { toast(e.message, {bad: true}); b.disabled = false; b.textContent = 'Draw this look'; }
+  });
+  document.querySelectorAll('[data-speak-ev]').forEach(b => b.onclick = async () => {
+    b.disabled = true; b.textContent = 'Speaking…';
+    try {
+      await call('/' + CID + '/life/' + b.dataset.speakEv + '/speak', {method: 'POST', json: {}});
+      for (let i = 0; i < 400; i++) {                  // a draw may wait minutes for a model that is down
+        await new Promise(r => setTimeout(r, 3000));
+        const s = await call('/' + CID).catch(() => null);
+        if (s) { C = s; if (!s.job || s.job.state !== 'running') break; }
+      }
+      LIFE_EVENTS = null; await loadLifeEvents(); render();
+    } catch(e) { toast(e.message, {bad: true}); b.disabled = false; b.textContent = 'Speak this'; }
   });
   // show loop status
   call('/' + CID + '/life/status').then(st => {

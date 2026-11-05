@@ -18,6 +18,7 @@ from pathlib import Path
 from story import llm as llm_mod
 from story2.schemas import M
 from story.schemas import Str
+from story2 import maya
 from story3.voice import MediaError
 
 from . import feeling as feeling_mod, goals as goals_mod, interests as interests_mod, memory as memory_mod, profile as profile_mod, skills as skills_mod, store, world as world_mod
@@ -26,8 +27,10 @@ from . import feeling as feeling_mod, goals as goals_mod, interests as interests
 
 class ThoughtOut(M):
     thought:          Str = ""   # first-person inner monologue, 1-2 sentences
+    say:              Str = ""   # what she says out loud right now (spoken with Maya), empty = stays silent
+    say_tag:          Str = ""   # one Maya style/sound tag for the line, or neutral
     activity:         Str = ""   # plain description of what she is doing
-    space:            Str = ""   # which declared space, or "outside" / a place name
+    space:           Str = ""   # which declared space, or "outside" / a place name
     mood:             Str = ""   # one word
     expression:       Str = ""   # specific facial expression for this moment
     face_state:       Str = ""   # physical face condition (makeup, tiredness, flush, etc.)
@@ -257,8 +260,10 @@ What are you doing right now? What does the moment look like?
 Return ONLY valid JSON:
 {
   "thought":       "inner monologue, 1-2 sentences, first person",
+  "say":           "what you say OUT LOUD right now, to yourself, a friend or your phone: one or two short spoken sentences, under 30 words, first person, the way you really talk (Hinglish in Latin letters is fine). No brackets, no stage directions. Empty string when you would stay silent (resting, asleep, alone and quiet).",
+  "say_tag":       "how the line sounds, exactly one word from: @@SAY_TAGS@@ (neutral if plain)",
   "activity":      "plain description of the activity, 5-10 words",
-  "space":         "one of your spaces by name, or a specific outside location",
+  "space":        "one of your spaces by name, or a specific outside location",
   "mood":          "one word",
   "expression":    "the specific facial expression for this moment — be precise, not generic (e.g. 'tired half-smile, eyes slightly heavy', 'wide genuine laugh, teeth showing', 'focused frown, lips pressed', 'soft contemplative gaze', 'surprised and delighted'). It must match the mood and activity.",
   "face_state":    "physical condition of the face right now based on time of day and what you have been doing (e.g. 'no makeup, natural skin', 'light day makeup', 'post-workout flush, dewy skin', 'makeup worn off, bare face with slight shine', 'evening makeup, defined eyes'). Be honest about the time of day.",
@@ -275,7 +280,7 @@ Return ONLY valid JSON:
   "new_interest":     "if you genuinely discovered or became curious about something NEW today that is not in your existing interests, return {\"name\": \"short label\", \"category\": \"one word\"}; else {}",
   "aspiration":       "if a half-formed want or ambition surfaced naturally in your thinking — something you want to do, try, become, or experience — write it in one plain sentence; else empty string. Not a goal, just a floating desire.",
   "memory_category":  "classify this moment's memory: episodic (activity snapshot), observation (something noticed), learning (fact or skill insight), achievement (milestone reached), discovery (new thing enjoyed), reflection (personal insight), desire (a want or craving), wish (clothing/accessory want) — pick exactly one word"
-}""".replace("@@SHOTS@@", shot_choices).replace(
+}""".replace("@@SHOTS@@", shot_choices).replace("@@SAY_TAGS@@", ", ".join((*maya.STYLE_TAGS, *maya.SOUND_TAGS, maya.NEUTRAL))).replace(
         '"@@FEELING_VOCAB@@"',
         '"one word from: ' + ', '.join(sorted(feeling_mod.ALL_FEELINGS)[:40]) + ' … (pick what genuinely fits this moment)"'
     ))
@@ -576,7 +581,7 @@ def wants_auto_draw(prof: dict, thought: dict) -> bool:
 # ── draw ──────────────────────────────────────────────────────────────────────
 
 async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: str,
-                       trigger: str = "manual") -> dict:
+                       trigger: str = "manual", progress=None) -> dict:
     """Generate a picture from a thought and save it as a char_moment media row."""
     from story3 import store as media
     from . import studio
@@ -703,7 +708,11 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
                 if wait is None or not _model_unavailable(str(e)):
                     raise
                 profile_mod.log_event(char["id"], "retry", trigger, inputs_draw, {"reason": str(e)[:200], "retry_after_s": wait})
+                if progress:
+                    progress(0, 0, f"the model server could not draw ({str(e)[:80]}); trying again in {wait} s")
                 await asyncio.sleep(wait)
+                if progress:
+                    progress(0, 0, "drawing")
 
         store.media_dir(char["id"], "char_moment").mkdir(parents=True, exist_ok=True)
         it = media.add(char["id"], "char_moment", "moment", 0, "done",

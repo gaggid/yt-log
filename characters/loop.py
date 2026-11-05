@@ -52,6 +52,16 @@ async def _run_one(char: dict, s: dict, key: str) -> None:
     if any(w in activity for w in ("sleep", "sleeping", "asleep", "napping", "nap")):
         return
 
+    if (thought.get("say") or "").strip() and profile_mod.get(char).get("auto_speak", True):
+        from . import speech
+        try:
+            await speech.speak(char, thought["event_id"], thought, s, key, trigger="auto")
+        except jobs.JobBusy:
+            profile_mod.log_event(cid, "retry", "auto", {"reason": "key busy during speech"}, {"retry_after_s": RETRY_DELAY_S})
+            raise
+        except Exception as e:
+            print(f"[virtual-life] speech failed for {cid}: {e}", flush=True)
+
     # the person decides whether pictures are auto-made; the character decides if the moment is worth one
     if not brain_mod.wants_auto_draw(profile_mod.get(char), thought):
         return

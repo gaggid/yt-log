@@ -13,7 +13,7 @@ from story2 import describe, jobs, providers, voices
 from story3 import store as media
 from story3.voice import MediaError
 
-from . import avatar, brain as brain_mod, choices, goals as goals_mod, interests as interests_mod, memory as memory_mod, pack, check, edits, profile as profile_mod, render, requests as R, store, studio, studio_edit, wardrobe
+from . import avatar, brain as brain_mod, choices, goals as goals_mod, interests as interests_mod, memory as memory_mod, pack, check, edits, profile as profile_mod, render, requests as R, speech as speech_mod, store, studio, studio_edit, wardrobe
 
 router = APIRouter(prefix="/api/characters")
 NO_CACHE = {"Cache-Control": "no-cache"}               # the browser asks again every time (cheap: 304 when the file is unchanged)
@@ -1249,7 +1249,24 @@ async def draw_thought(char_id: str, event_id: str):
     thought = ev["outputs"]
     s, key = settings_mod.get(), settings_mod.api_key()
     return _start(char_id, "char_moment",
-                  lambda progress: brain_mod.draw_thought(c, event_id, thought, s, key))
+                  lambda progress: brain_mod.draw_thought(c, event_id, thought, s, key, progress=progress))
+
+
+@router.post("/{char_id}/life/{event_id}/speak")
+async def speak_thought(char_id: str, event_id: str):
+    """Say a logged thought aloud with Maya. Starts a background job."""
+    c = _get(char_id)
+    ev = profile_mod.get_event(event_id)
+    if not ev or ev["char_id"] != char_id:
+        raise HTTPException(404, "no such event for this character")
+    if ev["event_type"] != "think":
+        raise HTTPException(400, "can only speak a 'think' event")
+    thought = ev["outputs"]
+    if not (thought.get("say") or "").strip():
+        raise HTTPException(400, "she had nothing to say in this moment")
+    s, key = settings_mod.get(), settings_mod.api_key()
+    return _start(char_id, "char_voice",
+                  lambda progress: speech_mod.speak(c, event_id, thought, s, key, progress=progress))
 
 
 @router.post("/item/{item_id}/check")
