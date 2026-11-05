@@ -164,10 +164,11 @@ async def _post(client: httpx.AsyncClient, url: str, key: str, **kw) -> dict:
             if isinstance(e, httpx.ConnectError):
                 raise MediaError(f"the model server is not reachable ({last})") from e
         else:
-            if r.status_code == 200:
-                return r.json()["data"][0]
+            body = r.json() if r.status_code == 200 else {}
+            if body.get("data"):
+                return body["data"][0]
             last = f"{r.status_code} {r.text[:160]}"
-            if r.status_code not in (429, 500, 502, 503, 504) or "image_quota_exceeded" in r.text:   # a daily quota will not clear in seconds
+            if r.status_code != 200 and (r.status_code not in (429, 500, 502, 503, 504) or "image_quota_exceeded" in r.text):   # a daily quota will not clear in seconds
                 break
         await asyncio.sleep(4 * (n + 1))
     raise MediaError(last or "no answer from the model server")

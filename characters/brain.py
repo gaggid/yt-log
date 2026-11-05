@@ -10,6 +10,7 @@ Five stages per think cycle:
 draw_thought() turns the final thought into an image via studio._post_image
 and saves a char_moment media row.
 """
+import asyncio
 import time
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +18,7 @@ from pathlib import Path
 from story import llm as llm_mod
 from story2.schemas import M
 from story.schemas import Str
+from story3.voice import MediaError
 
 from . import feeling as feeling_mod, goals as goals_mod, interests as interests_mod, memory as memory_mod, profile as profile_mod, skills as skills_mod, store, world as world_mod
 
@@ -491,6 +493,15 @@ SHOT_DIRECTIONS: dict[str, str] = {
         "No phone in frame. Natural moment."
     ),
 }
+DRAW_RETRY_WAITS_S = (60, 180, 420)          # after scenes._post's own short retries; a model that failed to load needs minutes
+
+
+def _model_unavailable(msg: str) -> bool:
+    """The gateway could not serve the picture now (busy key, model loading or crashed, no data): worth trying again later."""
+    m = msg.lower()
+    return any(w in m for w in ("failed to load", "503", "429", "502", "504", "500 ", "busy", "no answer", "not reachable", "sent no picture", "200 "))
+
+
 _DEFAULT_SHOT = "front_selfie"
 
 # parent category chosen by the person -> shot types the character may use
@@ -683,7 +694,16 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
     inputs_draw = {"prompt": prompt[:500], "refs": ref_ids, "how": how, "event_id": event_id}
     try:
         base_url, api_key = studio._ctx(s, key)
-        raw = await studio._post_image(how, body_req, refs, base_url, api_key)
+        raw = None
+        for wait in (*DRAW_RETRY_WAITS_S, None):        # the key has one slot and the model may be loading or down: wait, then try again
+            try:
+                raw = await studio._post_image(how, body_req, refs, base_url, api_key)
+                break
+            except MediaError as e:
+                if wait is None or not _model_unavailable(str(e)):
+                    raise
+                profile_mod.log_event(char["id"], "retry", trigger, inputs_draw, {"reason": str(e)[:200], "retry_after_s": wait})
+                await asyncio.sleep(wait)
 
         store.media_dir(char["id"], "char_moment").mkdir(parents=True, exist_ok=True)
         it = media.add(char["id"], "char_moment", "moment", 0, "done",
