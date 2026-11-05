@@ -607,7 +607,7 @@ async def draw_thought(char: dict, event_id: str, thought: dict, s: dict, key: s
             if sp.get("name", "").lower() == space_name.lower() and sp.get("ref_image"):
                 candidate = store.media_dir(char["id"]) / sp["ref_image"]
                 if candidate.exists():
-                    space_ref_path = str(candidate)
+                    space_ref_path = candidate
                 break
 
     if has_refs:
