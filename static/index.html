@@ -108,6 +108,7 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:8px;
 <div id="toasts"></div>
 <script src="/plan.js"></script>
 <script src="/shorts.js"></script>
+<script src="/ideas.js"></script>
 <script src="/characters.js"></script>
 <script src="/char-memory.js"></script>
 <script src="/storage.js"></script>
@@ -189,6 +190,7 @@ function route() {
   const h = (location.hash.slice(1) || '/').split('?')[0]; let m;
   if (h === '/settings') return viewSettings();
   if (h === '/shorts') return viewShorts();
+  if (h === '/ideas') return viewIdeas();
   if (h === '/characters') return viewCharacters();
   if ((m = h.match(/^\/character\/([\w-]+)$/))) return viewCharacter(m[1]);
   if ((m = h.match(/^\/short\/([\w-]+)$/))) return viewShort(m[1]);

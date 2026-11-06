@@ -224,7 +224,7 @@ def expire_wishes(char_id: str, garment_description: str) -> int:
     keywords = {w for w in garment_description.lower().split() if len(w) >= 3 and w not in stop}
     if not keywords:
         return 0
-    rows = db.all("SELECT id, content FROM char_memories WHERE char_id=? AND category='wish'",
+    rows = db.q("SELECT id, content FROM char_memories WHERE char_id=? AND category='wish'",
                   (char_id,))
     expired = 0
     for row in rows:

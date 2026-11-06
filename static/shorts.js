@@ -38,7 +38,7 @@ let S = null, SID = null, ADEC = null, pollT = null, myRoute = 0;
 /* ───────── list ───────── */
 window.viewShorts = async function () {
   const my = route_id;
-  $('#app').innerHTML = `<div class="row"><h2 style="margin:0">Shorts</h2><span class="mute">Vertical videos made with Wan 2.2</span><span class="sp"></span><button class="primary" id="sh-new">+ New short</button></div>
+  $('#app').innerHTML = `<div class="row"><h2 style="margin:0">Shorts</h2><span class="mute">Vertical videos made with Wan 2.2</span><span class="sp"></span><button onclick="location.hash='#/ideas'">Ideas</button><button class="primary" id="sh-new">+ New short</button></div>
     <div class="card mt" id="sh-list"><div class="pad"><div class="skel"></div><div class="skel"></div></div></div>`;
   $('#sh-new').onclick = newShort;
   const rows = await call('').catch(e => { toast(e.message, {bad: true}); return []; });

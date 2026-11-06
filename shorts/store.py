@@ -53,6 +53,8 @@ def ensure() -> None:
     with db.tx() as c:
         c.executescript(SCHEMA)
     media.ensure()
+    from . import ideas as ideas_mod
+    ideas_mod.ensure()
 
 
 def _load(r: dict | None) -> dict | None:

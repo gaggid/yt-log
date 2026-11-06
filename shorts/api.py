@@ -19,7 +19,7 @@ from characters import store as cstore, studio_edit
 from story.agent_store import for_plan as agent_decisions_for_plan
 
 from story3 import music
-from . import agent, auto, cast, checks, clips, formats, frames, languages, looks, tones, models, motion, pipelines as P, planner, remix, stitch, store, subjects as subj, timeline, upscale, voice as svoice, wan
+from . import agent, auto, cast, checks, clips, formats, frames, ideas as ideas_mod, languages, looks, tones, models, motion, pipelines as P, planner, remix, stitch, store, subjects as subj, timeline, upscale, voice as svoice, wan
 
 router = APIRouter(prefix="/api/shorts")
 MAX_UPLOAD = 12 * 1024 * 1024
@@ -979,3 +979,124 @@ async def anchor_from_character(short_id: str, body: AnchorFromChar):
         short["settings"]["image_mode"] = "anchor"
     store.save(short)
     return await state(short_id)
+
+
+# ── Short Ideas parking lot ──────────────────────────────────────────────────
+
+class _GenerateReq(BaseModel):
+    n: int = 7
+
+
+class _RateReq(BaseModel):
+    ids: list[str] = []
+
+
+class _QueueReq(BaseModel):
+    pipeline: str = "quick"
+    settings: dict | None = None
+
+
+@router.get("/ideas")
+async def ideas_list():
+    return ideas_mod.listing()
+
+
+@router.post("/ideas/generate")
+async def ideas_generate(body: _GenerateReq):
+    n = max(1, min(15, body.n))
+    s, key = settings_mod.get(), settings_mod.api_key()
+    try:
+        return await ideas_mod.generate(n, s, key)
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.post("/ideas/rate")
+async def ideas_rate(body: _RateReq):
+    s, key = settings_mod.get(), settings_mod.api_key()
+    try:
+        return await ideas_mod.rate(body.ids, s, key)
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.post("/ideas/{idea_id}/approve")
+async def ideas_approve(idea_id: str):
+    try:
+        return ideas_mod.set_status(idea_id, "approved")
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@router.post("/ideas/{idea_id}/condition")
+async def ideas_condition(idea_id: str):
+    s, key = settings_mod.get(), settings_mod.api_key()
+    try:
+        return await ideas_mod.condition(idea_id, s, key)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.post("/ideas/{idea_id}/queue")
+async def ideas_queue(idea_id: str, body: _QueueReq):
+    try:
+        idea = ideas_mod.get(idea_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    if idea["status"] != "conditioned":
+        raise HTTPException(400, "condition the idea before queuing")
+    if body.pipeline not in P.PIPELINES:
+        raise HTTPException(400, f"pipeline is one of: {', '.join(P.PIPELINES)}")
+
+    c = idea["conditioning"]
+    arc_text   = "\n".join(c.get("narrative_arc", []))
+    facts_text = "\n".join(f"• {f}" for f in c.get("key_facts", []))
+    source_text = (
+        f"{c.get('refined_hook') or idea['hook']}\n\n"
+        f"{idea['premise']}\n\n"
+        f"Narrative arc:\n{arc_text}\n\n"
+        f"Key facts:\n{facts_text}"
+    ).strip()
+
+    tone_id = c.get("suggested_tone", "").strip()
+    if tone_id not in tones.TONES:
+        tone_id = tones.DEFAULT
+
+    vd = (c.get("visual_direction") or "").lower()
+    style = ""
+    for pid in looks.presets():
+        if pid in vd:
+            style = pid
+            break
+
+    settings_override = {
+        "tone_id": tone_id,
+        **({"visual_style": style} if style else {}),
+        **(body.settings or {}),
+    }
+
+    title = idea["title"] or (c.get("refined_hook") or "")[:60]
+    src   = {"kind": "idea", "text": source_text, "candidate_id": "", "facts": ""}
+    short = store.create(title, body.pipeline, src, settings_override)
+    ideas_mod.set_status(idea_id, "queued", short["id"])
+    return {"short_id": short["id"], "idea": ideas_mod.get(idea_id)}
+
+
+@router.post("/ideas/{idea_id}/reject")
+async def ideas_reject(idea_id: str):
+    try:
+        return ideas_mod.set_status(idea_id, "rejected")
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@router.delete("/ideas/{idea_id}")
+async def ideas_delete(idea_id: str):
+    try:
+        ideas_mod.get(idea_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    ideas_mod.delete_idea(idea_id)
+    return {"ok": True}
