@@ -45,6 +45,13 @@ css.textContent = `
 .id-tabs button{border:0;border-bottom:2px solid transparent;border-radius:0;background:none;padding:7px 14px;color:var(--mute);font:inherit;cursor:pointer;white-space:nowrap}
 .id-tabs button.on{color:var(--ink);border-color:var(--accent);font-weight:600}
 .id-empty{text-align:center;padding:40px 20px;color:var(--mute)}
+.id-prog{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-bottom:14px}
+.id-prog-top{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600}
+.id-prog-bar{height:6px;border-radius:99px;background:var(--line);margin-top:8px;overflow:hidden}
+.id-prog-bar i{display:block;height:100%;background:var(--accent);transition:width .4s}
+.id-prog.bad{border-color:var(--bad)}
+.id-card.id-new{animation:idnew 1.6s ease-out}
+@keyframes idnew{from{background:var(--accent-soft)}to{background:var(--panel)}}
 `;
 document.head.append(css);
 
@@ -54,12 +61,32 @@ let _diverse  = false;
 let _autoRun  = false;
 let _options  = null;
 let _cfg      = {};
+let _n        = 7;
+let _minScore = 7;
+let _job      = null, _seen = new Set(), _pollGen = 0;
 const _CFG_DEFAULTS = {pipeline:'keyframe', voice:'taksh_hn', language:'hi', target_s:29, tone_id:'bigbro', edge:'clean', upscale:'2k'};
 
-function _loadState() {
-  _diverse = LS.get('ideas:diverse', false);
-  _autoRun = LS.get('ideas:autorun', false);
-  _cfg     = {..._CFG_DEFAULTS, ...LS.get('ideas:config', {})};
+function _loadState() {                     // the browser's copy: shown at once; the server's copy (saved config) replaces it when it arrives
+  _diverse  = LS.get('ideas:diverse', false);
+  _autoRun  = LS.get('ideas:autorun', false);
+  _cfg      = {..._CFG_DEFAULTS, ...LS.get('ideas:config', {})};
+  _n        = LS.get('ideas:n', 7);
+  _minScore = LS.get('ideas:minscore', 7);
+}
+
+function _applyServerCfg(c) {
+  if (!c) return;
+  _diverse = !!c.diverse; _autoRun = !!c.autorun; _n = c.n || 7; _minScore = c.min_score ?? 7;
+  _cfg = {..._CFG_DEFAULTS, ...(c.run || {})};
+  LS.set('ideas:diverse', _diverse); LS.set('ideas:autorun', _autoRun); LS.set('ideas:config', _cfg); LS.set('ideas:n', _n); LS.set('ideas:minscore', _minScore);
+}
+
+let _saveT = null;
+function _persist() {                       // every change is saved on the server (debounced), so any browser and the unattended auto-queue see it
+  LS.set('ideas:diverse', _diverse); LS.set('ideas:autorun', _autoRun); LS.set('ideas:config', _cfg); LS.set('ideas:n', _n); LS.set('ideas:minscore', _minScore);
+  clearTimeout(_saveT);
+  _saveT = setTimeout(() => call('/config', {method:'PUT', json:{autorun:_autoRun, diverse:_diverse, n:_n, min_score:_minScore, run:_cfg}})
+    .catch(e => toast('Settings not saved: ' + e.message, {bad:true})), 300);
 }
 
 const call = (path, opts) => api('/shorts/ideas' + path, opts);
@@ -89,7 +116,7 @@ function groupByDay(ideas) {
 
 // ── config panel helpers ───────────────────────────────────────────────────────
 
-function _saveCfg() { LS.set('ideas:config', _cfg); }
+function _saveCfg() { _persist(); }
 
 function _syncCfgLock() {
   const panel = document.getElementById('id-cfg');
@@ -171,7 +198,8 @@ function _cfgHtml() {
         <input type="checkbox" id="id-autorun" ${_autoRun ? 'checked' : ''}>
         <span>Auto-run after queue</span>
       </label>
-      <span class="small mute">${_autoRun ? 'Settings locked — turn off Auto-run to change them' : 'When ON, settings lock and pipeline runs automatically after queuing'}</span>
+      <label class="small" title="Only conditioned ideas scored at least this are queued by Auto-run">Min score <input type="number" id="id-minscore" min="0" max="10" step="0.5" value="${_minScore}" style="width:64px;font:inherit;font-size:13px;padding:2px 6px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--ink)"></label>
+      <span class="small mute">${_autoRun ? 'Auto-run is ON (saved on the server): every minute, when the machine is free, the best conditioned idea scoring at least the minimum is queued and run. Settings locked.' : 'When ON, conditioned ideas are queued and run by themselves, one at a time. Settings lock.'}</span>
     </div>`;
 }
 
@@ -256,7 +284,8 @@ function renderCard(idea) {
   const statusKey = idea.status==='queued'?'queued':idea.status==='conditioned'?'info':idea.status==='approved'?'done':idea.status==='rejected'?'error':'';
   const expandPanel = exp === 'score' ? scorePanel(idea) : exp === 'cond' ? condPanel(idea) : '';
 
-  return `<div class="id-card id-${idea.status}" id="card-${idea.id}">
+  const fresh = _job && _job.new_ids && _job.new_ids.includes(idea.id) && _job.state === 'running';
+  return `<div class="id-card id-${idea.status}${fresh ? ' id-new' : ''}" id="card-${idea.id}">
     <div class="id-hook" onclick="idToggle('${idea.id}','${defaultExp}')">${esc(idea.hook)}</div>
     <div class="id-mech">${mechBadges(idea.mechanisms)}</div>
     <div class="row" style="gap:8px;flex-wrap:wrap">
@@ -390,11 +419,13 @@ function _wireCfg() {
   bind('cfg-tone',     'tone_id');
   bind('cfg-edge',     'edge');
   bind('cfg-upscale',  'upscale');
+  const ms = document.getElementById('id-minscore');
+  if (ms) ms.onchange = () => { _minScore = Math.max(0, Math.min(10, parseFloat(ms.value) || 0)); ms.value = _minScore; _persist(); };
 
   const ar = document.getElementById('id-autorun');
   if (ar) ar.onchange = e => {
     _autoRun = e.target.checked;
-    LS.set('ideas:autorun', _autoRun);
+    _persist();
     // re-render config panel to update hint text and lock state
     const cfgEl = document.getElementById('id-cfg');
     if (cfgEl) cfgEl.innerHTML = _cfgHtml();
@@ -415,9 +446,9 @@ window.viewIdeas = async function() {
       <span class="mute small">Park · Rate · Approve · Condition · Queue</span>
       <span class="sp"></span>
       <select id="id-n" style="width:90px">
-        <option value="5">5 ideas</option>
-        <option value="7" selected>7 ideas</option>
-        <option value="10">10 ideas</option>
+        <option value="5"${_n===5?' selected':''}>5 ideas</option>
+        <option value="7"${_n===7?' selected':''}>7 ideas</option>
+        <option value="10"${_n===10?' selected':''}>10 ideas</option>
       </select>
       <label style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none" title="Diverse: splits ideas across 5 domain lenses (military, science, economics, Indian history, engineering) for variety, then auto-rates">
         <input type="checkbox" id="id-diverse" ${_diverse ? 'checked' : ''}>
@@ -427,66 +458,95 @@ window.viewIdeas = async function() {
       <button id="id-rate">Rate all</button>
       <button onclick="location.hash='#/shorts'">← Shorts</button>
     </div>
+    <div id="id-prog"></div>
     <div class="id-cfg" id="id-cfg">${_cfgHtml()}</div>
     <div class="id-tabs" id="id-tabs"></div>
     <div id="id-list"><div class="pad"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div></div>`;
 
   _wireCfg();
 
-  document.getElementById('id-diverse').onchange = e => {
-    _diverse = e.target.checked;
-    LS.set('ideas:diverse', _diverse);
-  };
+  document.getElementById('id-diverse').onchange = e => { _diverse = e.target.checked; _persist(); };
+  document.getElementById('id-n').onchange = e => { _n = parseInt(e.target.value) || 7; _persist(); };
 
   document.getElementById('id-gen').onclick = async () => {
     const n = parseInt(document.getElementById('id-n').value) || 7;
     const diverse = document.getElementById('id-diverse').checked;
-    const btn = document.getElementById('id-gen');
-    const label = diverse ? `Generating ${n} ideas across 5 lenses…` : `Generating ${n} ideas…`;
-    btn.disabled = true; btn.innerHTML = `<span class="spin"></span> ${label}`;
     try {
-      const fresh = await call('/generate', {method:'POST', json:{n, diverse}});
-      _ideas = [...fresh, ..._ideas];
+      _job = await call('/generate', {method:'POST', json:{n, diverse}});
       _tab = 'pending';
-      _render();
-      toast(`${fresh.length} ideas generated${diverse ? ' (diverse mode)' : ''}`);
-
-      if (diverse && fresh.length) {
-        const rateBtn = document.getElementById('id-rate');
-        if (rateBtn) { rateBtn.disabled = true; rateBtn.innerHTML = '<span class="spin"></span> Rating…'; }
-        try {
-          const rated = await call('/rate', {method:'POST', json:{ids:[]}});
-          const byId = Object.fromEntries(rated.map(r => [r.id, r]));
-          _ideas = _ideas.map(i => byId[i.id] || i);
-          _ideas.sort((a, b) => (b.engagement_score || 0) - (a.engagement_score || 0));
-          _render();
-          toast(`${rated.length} ideas scored and ranked`);
-        } catch(e) { toast('Rating failed: ' + e.message, {bad:true}); }
-        if (rateBtn) { rateBtn.disabled = false; rateBtn.innerHTML = 'Rate all'; }
-      }
+      _poll();
     } catch(e) { toast(e.message, {bad:true}); }
-    btn.disabled = false; btn.innerHTML = 'Generate';
   };
 
   document.getElementById('id-rate').onclick = async () => {
-    const btn = document.getElementById('id-rate');
-    await act(btn, async () => {
-      const rated = await call('/rate', {method:'POST', json:{ids:[]}});
-      const byId = Object.fromEntries(rated.map(r => [r.id, r]));
-      _ideas = _ideas.map(i => byId[i.id] || i);
-      _ideas.sort((a, b) => (b.engagement_score || 0) - (a.engagement_score || 0));
-      _render();
-      return rated.length;
-    }, n => `${n} ideas scored and ranked`);
+    try { _job = await call('/rate', {method:'POST', json:{ids:[]}}); _poll(); }
+    catch(e) { toast(e.message, {bad:true}); }
   };
 
-  [_ideas, _options] = await Promise.all([
+  let cfg;
+  [_ideas, _options, cfg, _job] = await Promise.all([
     call('').catch(() => []),
     api('/shorts/options').catch(() => null),
+    call('/config').catch(() => null),
+    call('/run').catch(() => null),
   ]);
+  _applyServerCfg(cfg);
+  document.getElementById('id-n').value = String(_n);
+  document.getElementById('id-diverse').checked = _diverse;
   // Re-render config panel now that we have live voices/languages
   const cfgEl = document.getElementById('id-cfg');
   if (cfgEl) { cfgEl.innerHTML = _cfgHtml(); _wireCfg(); }
+  _seen = new Set(_ideas.map(i => i.id));
   _render();
+  _renderProg();
+  if (_job && _job.state === 'running') _poll();      // a run that was started before you left is still going: pick it up
 };
+
+// ── background run: progress and ideas as they are written ───────────────────
+
+function _renderProg() {
+  const el = document.getElementById('id-prog');
+  const gen = document.getElementById('id-gen'), rate = document.getElementById('id-rate');
+  if (!el) return;
+  const j = _job, running = !!(j && j.state === 'running');
+  if (gen) { gen.disabled = running; gen.innerHTML = running && j.kind === 'generate' ? '<span class="spin"></span> Generating…' : 'Generate'; }
+  if (rate) { rate.disabled = running; rate.innerHTML = running && j.kind === 'rate' ? '<span class="spin"></span> Rating…' : 'Rate all'; }
+  if (!j || j.state === 'idle' || (j.state === 'done' && !_showDone)) { el.innerHTML = ''; return; }
+  const pct = j.total ? Math.min(100, Math.round(100 * j.done / j.total)) : 0;
+  const made = (j.new_ids || []).length;
+  const eta = running && j.eta_s ? ` · about ${hd(j.eta_s)} left` : '';
+  if (running) {
+    el.innerHTML = `<div class="id-prog"><div class="id-prog-top"><span class="spin"></span><span>${esc(j.label || 'working')}</span><span class="sp"></span><span class="mute small">${made ? made + ' ideas so far' : ''}${eta} · ${hd(j.elapsed_s || 0)}</span></div><div class="id-prog-bar"><i style="width:${Math.max(4, pct)}%"></i></div><div class="mute small" style="margin-top:6px">You can leave this screen: the run keeps going on the server.</div></div>`;
+  } else if (j.state === 'error') {
+    el.innerHTML = `<div class="id-prog bad"><div class="id-prog-top"><span>Run failed: ${esc(j.error)}</span></div></div>`;
+  } else {
+    el.innerHTML = `<div class="id-prog"><div class="id-prog-top"><span>${esc(j.note || 'Finished')}</span>${j.error ? `<span class="bad small">${esc(j.error)}</span>` : ''}</div></div>`;
+  }
+}
+let _showDone = false;
+
+async function _poll() {
+  const gen = ++_pollGen, my = route_id;
+  _showDone = true;
+  while (gen === _pollGen && my === route_id && document.getElementById('id-prog')) {
+    try {
+      const [j, list] = await Promise.all([call('/run'), call('')]);
+      if (gen !== _pollGen || my !== route_id) return;
+      const was = _job && _job.state;
+      _job = j;
+      const byId = new Map(list.map(i => [i.id, i]));
+      _ideas = list.sort((a, b) => (b.engagement_score || 0) - (a.engagement_score || 0) || b.created_at - a.created_at);
+      const fresh = list.filter(i => !_seen.has(i.id));
+      fresh.forEach(i => _seen.add(i.id));
+      _render(); _renderProg();
+      if (j.state !== 'running') {
+        if (j.state === 'done') toast(j.note || 'Finished');
+        else if (j.state === 'error') toast(j.error, {bad:true});
+        return;
+      }
+    } catch(e) { /* a hiccup: try again */ }
+    await new Promise(r => setTimeout(r, 2000));
+  }
+}
+
 })();

@@ -18,7 +18,7 @@ TONES: dict[str, dict] = {
                     "writing": "Plain facts in a neutral, authoritative voice. Numbers as words. No slang, no hype, no jokes."},
     "bigbro": {"group": "Tones", "label": "Friendly big brother / didi (default)", "energy": 3, "speed": 1.0, "tags": ["happy", "curious", "cheerful"],
                "sound": "Casual, warm, chatty", "best": "Advice, everyday tips, life hacks, almost anything",
-               "writing": "Talk like a relatable friend: direct 'tu/aap', everyday words, small jokes, never preachy."},
+               "writing": "Talk like a relatable friend: warm, direct, always respectful 'aap', everyday words, small jokes, never preachy."},
     "explorer": {"group": "Tones", "label": "Curious explorer", "energy": 3, "speed": 1.08, "tags": ["curious", "excited", "amazed", "surprised"],
                  "sound": "Rising pitch, wonder", "best": "Facts, 'did you know', tech",
                  "writing": "Ask real questions the viewer would ask. 'But here is the twist.' Wonder, not hype."},

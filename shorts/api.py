@@ -1003,23 +1003,73 @@ async def ideas_list():
     return ideas_mod.listing()
 
 
+_IDEAS_JOB = "ideas"                       # the job key (jobs.py keys jobs by plan id; ideas belong to no plan)
+_idea_run: dict = {"kind": "", "new_ids": [], "rated": 0, "error": ""}
+
+
+@router.get("/ideas/run")
+async def ideas_job():
+    """Where the running (or last) generate/rate job is. The screen polls this, and the ideas list, so ideas appear as they are written and a run survives leaving the screen."""
+    return {**jobs.status(_IDEAS_JOB), **_idea_run}
+
+
+@router.get("/ideas/config")
+async def ideas_config():
+    return ideas_mod.get_config()
+
+
+@router.put("/ideas/config")
+async def ideas_config_save(body: dict):
+    return ideas_mod.save_config(body)
+
+
+def _start_idea_job(kind: str, work) -> dict:
+    _idea_run.update(kind=kind, new_ids=[], rated=0, error="")
+    try:
+        return jobs.start(_IDEAS_JOB, kind, work)
+    except jobs.JobBusy as e:
+        raise HTTPException(409, str(e))
+
+
 @router.post("/ideas/generate")
 async def ideas_generate(body: _GenerateReq):
+    """Starts a background job and answers at once. Diverse runs score the new ideas when they are all written."""
     n = max(1, min(15, body.n))
     s, key = settings_mod.get(), settings_mod.api_key()
-    try:
-        return await ideas_mod.generate(n, s, key, diverse=body.diverse)
-    except Exception as e:
-        raise HTTPException(500, str(e))
+    lenses = min(len(ideas_mod._LENSES), n)
+
+    async def work(progress):
+        sink: list = []
+
+        def on_progress(done, total, label):
+            _idea_run["new_ids"] = [i["id"] for i in sink]
+            progress(done, total + (1 if body.diverse else 0), label)
+
+        try:
+            await ideas_mod.generate(n, s, key, diverse=body.diverse, progress=on_progress, sink=sink)
+        finally:
+            _idea_run["new_ids"] = [i["id"] for i in sink]
+        if body.diverse and sink:
+            progress(lenses, lenses + 1, "scoring the new ideas")
+            try:
+                _idea_run["rated"] = len(await ideas_mod.rate([i["id"] for i in sink], s, key))
+            except Exception as e:  # noqa: BLE001 - the ideas stay; rating can be run again
+                _idea_run["error"] = f"scoring failed: {e}"[:300]
+        return f"{len(sink)} ideas written"
+
+    return _start_idea_job("generate", work)
 
 
 @router.post("/ideas/rate")
 async def ideas_rate(body: _RateReq):
     s, key = settings_mod.get(), settings_mod.api_key()
-    try:
-        return await ideas_mod.rate(body.ids, s, key)
-    except Exception as e:
-        raise HTTPException(500, str(e))
+
+    async def work(progress):
+        progress(0, 1, "scoring ideas")
+        _idea_run["rated"] = len(await ideas_mod.rate(body.ids, s, key))
+        return f"{_idea_run['rated']} ideas scored"
+
+    return _start_idea_job("rate", work)
 
 
 @router.post("/ideas/{idea_id}/approve")
@@ -1041,16 +1091,13 @@ async def ideas_condition(idea_id: str):
         raise HTTPException(500, str(e))
 
 
-@router.post("/ideas/{idea_id}/queue")
-async def ideas_queue(idea_id: str, body: _QueueReq):
-    try:
-        idea = ideas_mod.get(idea_id)
-    except ValueError as e:
-        raise HTTPException(404, str(e))
+def _queue_idea(idea_id: str, pipeline: str, settings: dict | None, auto_run: bool) -> dict:
+    """Make the short for a conditioned idea and, when asked and the machine is free, start its whole pipeline. Used by the Queue button and by the unattended auto-queue."""
+    idea = ideas_mod.get(idea_id)
     if idea["status"] != "conditioned":
-        raise HTTPException(400, "condition the idea before queuing")
-    if body.pipeline not in P.PIPELINES:
-        raise HTTPException(400, f"pipeline is one of: {', '.join(P.PIPELINES)}")
+        raise ValueError("condition the idea before queuing")
+    if pipeline not in P.PIPELINES:
+        raise ValueError(f"pipeline is one of: {', '.join(P.PIPELINES)}")
 
     c = idea["conditioning"]
     arc_text   = "\n".join(c.get("narrative_arc", []))
@@ -1076,16 +1123,16 @@ async def ideas_queue(idea_id: str, body: _QueueReq):
     settings_override = {
         "tone_id": tone_id,
         **({"visual_style": style} if style else {}),
-        **(body.settings or {}),
+        **(settings or {}),
     }
 
     title = idea["title"] or (c.get("refined_hook") or "")[:60]
     src   = {"kind": "idea", "text": source_text, "candidate_id": "", "facts": ""}
-    short = store.create(title, body.pipeline, src, settings_override)
+    short = store.create(title, pipeline, src, settings_override)
     ideas_mod.set_status(idea_id, "queued", short["id"])
 
     auto_started = False
-    if body.auto_run and not manager.busy():
+    if auto_run and not manager.busy():
         s_cfg, backend = _backend()
         key = settings_mod.api_key()
         sid = short["id"]
@@ -1094,8 +1141,48 @@ async def ideas_queue(idea_id: str, body: _QueueReq):
             auto_started = True
         except jobs.JobBusy:
             pass
-
     return {"short_id": short["id"], "idea": ideas_mod.get(idea_id), "auto_started": auto_started}
+
+
+def _run_settings(run: dict) -> dict:
+    """The short's settings from the saved Ideas config (the same shape the screen sends)."""
+    return {"voice": {"engine": "maya-tts", "voice": run.get("voice")}, "language": run.get("language"), "target_s": int(run.get("target_s") or 29),
+            "tone_id": run.get("tone_id"), "edge": run.get("edge"), "upscale": run.get("upscale"), "image_mode": "qwen", "review_keyframes": False}
+
+
+@router.post("/ideas/{idea_id}/queue")
+async def ideas_queue(idea_id: str, body: _QueueReq):
+    try:
+        ideas_mod.get(idea_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    try:
+        return _queue_idea(idea_id, body.pipeline, body.settings, body.auto_run)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+AUTOQUEUE_EVERY_S = 60
+
+
+async def autoqueue_forever() -> None:
+    """With Auto-run ON in the saved config, queue the best good-enough conditioned idea whenever the machine is free, one short at a time, and start its pipeline. It retries every minute
+    while something else runs, so a busy machine never drops an idea; with Auto-run OFF it does nothing."""
+    while True:
+        await asyncio.sleep(AUTOQUEUE_EVERY_S)
+        try:
+            cfg = ideas_mod.get_config()
+            if not cfg["autorun"] or jobs.busy() or manager.busy():
+                continue
+            nxt = ideas_mod.next_for_autoqueue(float(cfg["min_score"]))
+            if not nxt:
+                continue
+            print(f"[ideas] auto-queue: {nxt['id']} (score {nxt['engagement_score']:.1f})", flush=True)
+            _queue_idea(nxt["id"], cfg["run"].get("pipeline") or "keyframe", _run_settings(cfg["run"]), True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 - never stop the loop
+            print(f"[ideas] auto-queue failed: {e}", flush=True)
 
 
 @router.post("/ideas/{idea_id}/reject")

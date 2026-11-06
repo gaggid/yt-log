@@ -34,8 +34,8 @@ THE NARRATION
 
 THE LOOK (used to write every shot, so make it concrete)
 - "character": the one main person, described slot by slot with concrete values: age, build, face and hair, clothes with colours. Empty string if no person is needed, and ALWAYS empty unless the format is "story": do not invent a person for a documentary, an explainer or a comparison.
-- "place": the one main place, with concrete values: what it is, its colours, materials, time of day.
-- "look": one line of picture style, for example "cinematic, shallow depth of field, warm evening light, handheld". The same for every shot.
+- "place": the one main place, with concrete values: what it is, its colours, materials, time of day. A real, bright place by default (daylight, open, light colours); no dark void, cosmic space or night unless the story is set there.
+- "look": one line of picture style, for example "cinematic, shallow depth of field, soft daylight, handheld". The same for every shot. Light and bright by default; dark, moody or night lighting only when the story itself is dark.
 - People are Indian unless the facts say otherwise. Nothing graphic: no gore, no weapons aimed at anyone.
 """
 

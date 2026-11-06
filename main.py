@@ -54,7 +54,11 @@ async def lifespan(app: FastAPI):
     from story import settings as _settings
     _s = _settings.get()
     _vl_loop.start(_s, _settings.api_key())
+    import asyncio
+    from shorts import api as _shorts_api
+    _aq = asyncio.create_task(_shorts_api.autoqueue_forever())
     yield
+    _aq.cancel()
     _vl_loop.stop()
 
 

@@ -24,7 +24,17 @@ CREATE TABLE IF NOT EXISTS short_ideas(
   created_at REAL,
   updated_at REAL
 );
+CREATE TABLE IF NOT EXISTS idea_config(
+  id INTEGER PRIMARY KEY CHECK(id=1),
+  data TEXT DEFAULT '{}'
+);
 """
+
+# What the Ideas screen keeps between visits and what the unattended auto-queue uses. Saved in the database, so any browser and the server see the same.
+CONFIG_DEFAULTS = {
+    "autorun": False, "diverse": False, "n": 7, "min_score": 7.0,
+    "run": {"pipeline": "keyframe", "voice": "taksh_hn", "language": "hi", "target_s": 29, "tone_id": "bigbro", "edge": "clean", "upscale": "2k"},
+}
 
 MECHANISMS = [
     "curiosity_gap", "threat_detection", "novelty", "prediction_error",
@@ -430,6 +440,37 @@ def _load(r: dict | None) -> dict | None:
     return r
 
 
+def get_config() -> dict:
+    ensure()
+    saved = db.jload((db.one("SELECT data FROM idea_config WHERE id=1") or {}).get("data"), {})
+    return {**CONFIG_DEFAULTS, **saved, "run": {**CONFIG_DEFAULTS["run"], **(saved.get("run") or {})}}
+
+
+def save_config(patch: dict) -> dict:
+    """Merge `patch` into the saved config; unknown keys are ignored and values are coerced to their type."""
+    cur = get_config()
+    if "autorun" in patch:
+        cur["autorun"] = bool(patch["autorun"])
+    if "diverse" in patch:
+        cur["diverse"] = bool(patch["diverse"])
+    if "n" in patch:
+        cur["n"] = max(1, min(15, int(patch["n"] or 7)))
+    if "min_score" in patch:
+        cur["min_score"] = max(0.0, min(10.0, float(patch["min_score"] or 0)))
+    for k, v in (patch.get("run") or {}).items():
+        if k in CONFIG_DEFAULTS["run"]:
+            cur["run"][k] = max(5, min(180, int(v or 29))) if k == "target_s" else ("" if v is None else str(v))
+    with db.tx() as c:
+        c.execute("INSERT INTO idea_config(id,data) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data", (db.jdump(cur),))
+    return cur
+
+
+def next_for_autoqueue(min_score: float) -> dict | None:
+    """The best conditioned idea that is good enough and not queued yet (highest score first)."""
+    ready = [i for i in listing("conditioned") if (i.get("engagement_score") or 0) >= min_score]
+    return max(ready, key=lambda i: i["engagement_score"], default=None)
+
+
 def add(title: str, hook: str, mechanisms: list, premise: str, why_works: str) -> dict:
     ensure()
     iid = f"idea-{hashlib.sha1(f'{hook}{db.now()}'.encode()).hexdigest()[:8]}"
@@ -602,33 +643,42 @@ def _standard_user_prompt(n: int) -> str:
 
 # ── LLM operations ────────────────────────────────────────────────────────────
 
-async def generate(n: int, s: dict, key: str, diverse: bool = False) -> list[dict]:
-    """Generate n ideas. diverse=True splits across domain lenses for variety."""
+async def generate(n: int, s: dict, key: str, diverse: bool = False, progress=None, sink: list | None = None) -> list[dict]:
+    """Generate n ideas. diverse=True splits across domain lenses for variety. Each idea is saved as soon as it is written; `sink` gets it at once and `progress(done, total, label)` says where the run is."""
+    sink = sink if sink is not None else []
     if not diverse:
         backend = llm_mod.ChatBackend(s, key)
         caller  = llm_mod.JsonCaller(backend, s)
         caller.last_attempt = True
+        if progress:
+            progress(0, 1, f"writing {n} ideas")
         result = await caller.call(_GENERATE_SYSTEM, _standard_user_prompt(n), _IdeasBatch)
         specs  = (result.value.ideas or [])[:n]
-        return [add(sp.title, sp.hook, sp.mechanisms, sp.premise, sp.why_works) for sp in specs]
+        for sp in specs:
+            sink.append(add(sp.title, sp.hook, sp.mechanisms, sp.premise, sp.why_works))
+        return list(sink)
 
     # Diverse mode: distribute n across lenses, one sequential call per lens
     lens_count = min(len(_LENSES), n)
     # distribute n as evenly as possible — first (n % lens_count) lenses get one extra
     counts = [n // lens_count + (1 if i < n % lens_count else 0) for i in range(lens_count)]
 
-    saved = []
-    for lens, count in zip(_LENSES[:lens_count], counts):
+    for k, (lens, count) in enumerate(zip(_LENSES[:lens_count], counts)):
+        if progress:
+            progress(k, lens_count, f"lens {k + 1} of {lens_count}: {lens['perspective']}")
         backend = llm_mod.ChatBackend(s, key)
         caller  = llm_mod.JsonCaller(backend, s)
         caller.last_attempt = True
         try:
             result = await caller.call(_GENERATE_SYSTEM, _lens_user_prompt(count, lens), _IdeasBatch)
             specs  = (result.value.ideas or [])[:count]
-            saved.extend(add(sp.title, sp.hook, sp.mechanisms, sp.premise, sp.why_works) for sp in specs)
+            for sp in specs:
+                sink.append(add(sp.title, sp.hook, sp.mechanisms, sp.premise, sp.why_works))
         except Exception as e:
             print(f"[ideas] lens '{lens['perspective']}' failed: {e}", flush=True)
-    return saved
+    if progress:
+        progress(lens_count, lens_count, "ideas written")
+    return list(sink)
 
 
 async def rate(idea_ids: list[str], s: dict, key: str) -> list[dict]:

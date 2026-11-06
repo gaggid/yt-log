@@ -48,6 +48,7 @@ HOW TO WRITE A "still" (25 to 55 words, plain present-tense sentences, English):
 8. DO NOT REPEAT what code adds: the looks of the people and the named subjects (their faces, hair, clothes, markings), the place's colours, the style, the lighting mood and the "no text" rule. A CAST member is drawn from reference pictures: call them by their cast name and say only what they do, where they stand and which way they face; never describe their face, hair, skin or clothes, and with two cast members say who is on the left and who on the right. Refer to a subject by its short name ("the man", "the Ghostly Woman", "the J-20") and say only what it DOES and WHERE. A person who is not a listed subject is described by role and age only.
 9. NO text, signs, screens with words or numbers to read; show a screen only as a glow or a shape.
 10. Each shot differs from the shots next to it in subject, place or framing.
+11. LIGHT BY DEFAULT: set every shot in bright daylight or a bright, well-lit room with a real, recognisable background. Go dark (night, dim room, deep shadow) only when the beat's feeling is fear, dread, threat or grief, or its narration says night or darkness. Never a black void, empty dark space or cosmic background.
 
 TEST every prompt before you answer: read it as the image model would, one word at a time. Could a different picture also fit the words (a count left open, a part with no place, a left-right left open)? Then fix the prompt. Also check it against the narration: does a viewer hearing the line see its proof?
 "must_show": 2 to 4 short facts the finished picture must satisfy, each checkable at a glance ("exactly 3 jets", "missiles under the wings", "exhaust at the back of the car"). Written positively."""
@@ -85,6 +86,7 @@ def _context(short: dict, beat: dict, shots: list[dict], only: set[str] | None) 
         lines.append("SUBJECTS (their looks are added by code, so you do not repeat them; they tell you what each one is and has):\n" + "\n".join(f"- {x['name']} ({x['kind'] or 'subject'}): {subj.plain_visual(x['visual'])}" for x in subj.of(short) if subj.drawable(x)))
     if i:
         lines.append("THE BEAT BEFORE: " + " ".join(x["text"] for x in beats[i - 1]["sentences"]))
+    lines.append(f"FEELING OF THIS BEAT: {beat.get('feeling') or 'neutral'}")
     lines.append(f"THIS BEAT (the picture proves it; the viewer hears it while the shots play): " + " ".join(x["text"] for x in beat["sentences"]))
     if i + 1 < len(beats):
         lines.append("THE BEAT AFTER: " + " ".join(x["text"] for x in beats[i + 1]["sentences"]))

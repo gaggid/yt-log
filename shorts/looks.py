@@ -1,5 +1,7 @@
 """Picture style of a short (setting `visual_style`). The four painted looks are the long-form presets (story2/styles.py); `realism` is only for shorts. Empty = the planner writes the look
 (the old behaviour). A chosen style replaces the plan's look in every start-picture prompt and every Wan prompt, so the whole short is drawn one way."""
+import re
+
 from story2 import styles
 
 REALISM = {
@@ -119,10 +121,24 @@ def style_id(short: dict) -> str:
     return sid if sid in presets() else NONE
 
 
+DARK_STYLES = ("noir", "cyberpunk")            # dark by design: they keep their own light
+LIGHT = "Lit bright and clear in high-key daylight with a light, airy colour palette, unless the scene is set at night."
+
+
+def brighten(look: str) -> str:
+    """A light-theme look: the style's own words with the dark lighting words swapped for bright ones, and the daylight default said once."""
+    look = re.sub(r"moody cinematic lighting", "soft bright cinematic lighting", look, flags=re.I)
+    look = re.sub(r"moody", "bright", look, flags=re.I)
+    return look if LIGHT in look else f"{look} {LIGHT}"
+
+
 def of(short: dict, fallback: str = "") -> str:
-    """The look sentence for prompts: the chosen style, else `fallback` (the plan's own look)."""
+    """The look sentence for prompts: the chosen style, else `fallback` (the plan's own look). Every style but the dark ones is lit bright by default."""
     sid = style_id(short)
-    return presets()[sid]["look"] if sid else fallback
+    if not sid:
+        return fallback
+    look = presets()[sid]["look"]
+    return look if sid in DARK_STYLES else brighten(look)
 
 
 def painted(short: dict) -> bool:

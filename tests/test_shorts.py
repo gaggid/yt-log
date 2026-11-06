@@ -1031,3 +1031,77 @@ def test_a_trending_style_leads_the_picture_prompt_and_the_other_styles_do_not()
     assert all(v["lead"].startswith(tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZ")) and "every subject" in v["lead"] for v in looks.TRENDING.values())
     plain = planned("keyframe", visual_style="realism")
     assert looks.lead(plain) == "" and not stills.prompt(plain, plain["shots"][0]).startswith("Clay")
+
+
+def test_narration_addresses_the_viewer_as_aap_and_questions_are_thinned():
+    from shorts import languages, script
+    assert languages.address_hits("Tu soch raha hoga") == ["tu"]
+    assert languages.address_hits("तेरा brain और Tumhara dimaag") == ["तेरा", "tumhara"]
+    assert languages.address_hits("आप सोच रहे होंगे, ट्यूब और tuned") == []
+    assert "aap" in languages.rule({"language": "hinglish"}) and "aap" not in languages.rule({"language": "en"})
+    assert "aap" not in languages.rule({"language": "hinglish", "address": "tu"})
+    sents = [{"text": "Tu dekh।", "tag": ""}]
+    assert any("aap" in p for p in script.draft_problems(sents, 1, 9, "hinglish", ""))
+    assert not any("aap" in p for p in script.draft_problems(sents, 1, 9, "hinglish", "", "tu"))
+    assert any("question" in p for p in script.draft_problems([{"text": "Kya?", "tag": ""}], 1, 9, "en", "Par kaise?"))
+    beats = [script.MapBeat(name=f"b{i}", job="escalate", seconds=5, cliff="kya hoga?") for i in range(8)]
+    kept = [x["cliff"] for x in script.fit_map(beats, 40)]
+    assert kept[-1] == "" and sum(bool(c) for c in kept) <= 3 and not any(kept[i] and kept[i + 1] for i in range(7))
+    short = {"settings": {"language": "hinglish"}}
+    assert script.hard_problems(short, [{"text": "तेरा brain।", "tag": ""}]) and not script.hard_problems(short, [{"text": "आपका brain।", "tag": ""}])
+
+
+def test_styles_are_lit_bright_unless_dark_by_design():
+    from shorts import looks
+    c = looks.of({"settings": {"visual_style": "concept"}})
+    assert "moody" not in c.lower() and looks.LIGHT in c
+    assert looks.of({"settings": {"visual_style": "concept"}}).count(looks.LIGHT) == 1
+    assert looks.of({"settings": {"visual_style": "cyberpunk"}}) == looks.presets()["cyberpunk"]["look"]
+    assert looks.of({"settings": {"visual_style": "noir"}}) == looks.presets()["noir"]["look"]
+    assert looks.of({"settings": {}}, "plan look") == "plan look"
+
+
+def test_ideas_config_is_saved_on_the_server_and_the_job_reports_ideas_as_they_are_written(client, monkeypatch):
+    from shorts import api as shorts_api, ideas as ideas_mod
+    assert client.get("/api/shorts/ideas/config").json()["autorun"] is False
+    saved = client.put("/api/shorts/ideas/config", json={"autorun": True, "n": 99, "min_score": 6.5, "run": {"voice": "x_voice", "target_s": 400, "bogus": 1}}).json()
+    assert saved["autorun"] and saved["n"] == 15 and saved["min_score"] == 6.5 and saved["run"]["voice"] == "x_voice" and saved["run"]["target_s"] == 180 and "bogus" not in saved["run"]
+    assert client.get("/api/shorts/ideas/config").json() == saved
+
+    async def fake_generate(n, s, key, diverse=False, progress=None, sink=None):
+        for k in range(2):
+            progress(k, 2, f"lens {k + 1} of 2")
+            sink.append(ideas_mod.add(f"t{k}", f"hook {k}?", ["novelty"], "p", "w"))
+            await asyncio.sleep(0.05)
+        return list(sink)
+
+    async def fake_rate(ids, s, key):
+        return [ideas_mod.get(i) for i in ids]
+    monkeypatch.setattr(ideas_mod, "generate", fake_generate)
+    monkeypatch.setattr(ideas_mod, "rate", fake_rate)
+    r = client.post("/api/shorts/ideas/generate", json={"n": 2, "diverse": True})
+    assert r.status_code == 200 and r.json()["state"] == "running"
+    assert client.post("/api/shorts/ideas/generate", json={"n": 2}).status_code == 409, "one run at a time"
+    t0 = time.time()
+    while time.time() - t0 < 10:
+        j = client.get("/api/shorts/ideas/run").json()
+        if j["state"] != "running":
+            break
+        time.sleep(0.05)
+    assert j["state"] == "done" and len(j["new_ids"]) == 2 and j["rated"] == 2 and j["kind"] == "generate"
+
+
+def test_auto_queue_picks_the_best_good_enough_conditioned_idea(client):
+    from shorts import api as shorts_api, ideas as ideas_mod
+    low = ideas_mod.add("low", "low?", [], "p", "w")
+    best = ideas_mod.add("best", "best?", [], "p", "w")
+    for i, sc in ((low, 5.0), (best, 8.5)):
+        ideas_mod.save_score(i["id"], sc, {})
+        ideas_mod.save_conditioning(i["id"], {"refined_hook": "h", "narrative_arc": ["0-5s: a"], "key_facts": ["f"], "visual_direction": "bright realism", "suggested_tone": "bigbro"})
+    assert ideas_mod.next_for_autoqueue(9.0) is None
+    assert ideas_mod.next_for_autoqueue(7.0)["id"] == best["id"]
+    out = shorts_api._queue_idea(best["id"], "keyframe", shorts_api._run_settings(ideas_mod.get_config()["run"]), False)
+    assert out["idea"]["status"] == "queued" and out["short_id"] and not out["auto_started"]
+    assert ideas_mod.next_for_autoqueue(0.0)["id"] == low["id"]
+    short = store.get(out["short_id"])
+    assert short["settings"]["voice"]["engine"] == "maya-tts" and short["settings"]["review_keyframes"] is False

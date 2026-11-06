@@ -1,5 +1,7 @@
 """Narration language of a short (setting `language`). Maya, the voice engine that speaks them, reads 12 languages (`GET /v1/audio/voices?model=maya-tts`); Veena and Svara only do
 Hinglish, so any other language needs Maya. `hinglish` is the old behaviour: Hindi in Devanagari mixed with English words in Latin letters, voiced as Hindi."""
+import re
+
 DEFAULT = "hinglish"
 NEEDS_ENGINE = "maya-tts"
 
@@ -37,8 +39,30 @@ def code(settings: dict | None) -> str:
     return LANGUAGES[of(settings)]["code"]
 
 
+ADDRESS_AAP = ("Address the viewer respectfully as 'aap' (आप), always: aap, aapka, aapko, aapke, 'soch rahe honge', 'sochiye', 'dekhiye'. Never use tu, tum, tera, teri, tere, tujhe, tumhara, तू, तुम, तेरा, तुझे or तुम्हारा, "
+               "and never switch between forms inside one script.")
+HINDI_LIKE = ("hinglish", "hi")
+
+_TU = (r"tu|tum|tera|teri|tere|tujhe|tujhko|tujhse|tumhara|tumhari|tumhare|tumhe|tumko|tumse|tuhara|tuhari|tuhare|"
+       r"तू|तुम|तेरा|तेरी|तेरे|तुझे|तुझको|तुझसे|तुम्हारा|तुम्हारी|तुम्हारे|तुम्हें|तुमको|तुमसे|तुमने|तूने|तुहारा|तुहारी|तुहारे")
+_TU_RE = re.compile(rf"(?<![\wऀ-ॿ])(?:{_TU})(?![\wऀ-ॿ])", re.I)
+
+
+def address(settings: dict | None) -> str:
+    """How the narrator addresses the viewer: `aap` (default, respectful) or `tu` (the producer's choice, no check)."""
+    return "tu" if (settings or {}).get("address") == "tu" else "aap"
+
+
+def address_hits(text: str) -> list[str]:
+    """The familiar 'tu' forms found in a Hindi line (the narration must say 'aap')."""
+    return list(dict.fromkeys(m.group(0).lower() for m in _TU_RE.finditer(text)))
+
+
 def rule(settings: dict | None) -> str:
-    return LANGUAGES[of(settings)]["rule"]
+    base = LANGUAGES[of(settings)]["rule"]
+    if of(settings) in HINDI_LIKE and address(settings) == "aap":
+        return base + " " + ADDRESS_AAP
+    return base
 
 
 def problem(language: str, engine: str) -> str:

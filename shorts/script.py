@@ -44,18 +44,18 @@ Step 1 of 4: the story bible. Decide what the story IS before any line is writte
  "question": "the question the viewer leaves with", "voice": "who the narrator is and how they speak (their attitude, one verbal habit)", "pov": "first | third | you: who tells it (see the rules)",
  "cast": [{"name": "the name the narration will use", "role": "who they are to the story, 4 to 8 words", "habit": "one way they speak or act that is theirs alone"}], "motifs": ["1 to 3 images or phrases that return, so the end rhymes with the start"],
  "avoid": ["the 3 clichés this story would fall into, and so must not"]}
-Rules: {people} Point of view ("pov"): "first" = the narrator is a person in the story and says "I" (they are in the cast, with a name); "third" = the narrator watches named people; "you" = the narrator talks to the viewer as the one it happens to (only when the producer's tone asks for it or the brief is a direct address). {pov_rule} The hero is always in the cast. Keep every plot point of the brief; if the brief ends on a question, keep that question. Invent concrete detail the brief leaves out (objects, times, places, sounds) and keep it consistent. Never describe pictures. Do not solve a mystery the brief leaves open and do not add a new theory that explains it: add atmosphere, objects, names and habits, not lore."""
+Rules: {people} Point of view ("pov"): "first" = the narrator is a person in the story and says "I" (they are in the cast, with a name); "third" = the narrator watches named people; "you" = the narrator talks to the viewer as the one it happens to (only when the producer's tone asks for it or the brief is a direct address). {pov_rule} The hero is in the cast, except with point of view "you", where the viewer is the hero: then list a cast member only if the narration will name them. Keep every plot point of the brief; if the brief ends on a question, keep that question. Invent concrete detail the brief leaves out (objects, times, places, sounds) and keep it consistent. Never describe pictures. Do not solve a mystery the brief leaves open and do not add a new theory that explains it: add atmosphere, objects, names and habits, not lore."""
 
 MAP = """[TASK:p4_map]
 {base}
 
 Step 2 of 4: the retention map. Split the story into beats. A beat is one stretch of narration in one steady emotion. Every beat has a job:
 {jobs}
-Return ONLY a JSON object: {"beats": [{"name": "short title", "job": "one of the jobs above", "feeling": "one word: the emotion of the voice", "seconds": 6, "carries": "what this beat must tell or make the viewer feel, 1 or 2 sentences, concrete", "cliff": "the open question or threat that makes the viewer stay for the next beat; empty in the last beat"}]}
+Return ONLY a JSON object: {"beats": [{"name": "short title", "job": "one of the jobs above", "feeling": "one word: the emotion of the voice", "seconds": 6, "carries": "what this beat must tell or make the viewer feel, 1 or 2 sentences, concrete, in plain English (notes for the writer, never narration)", "cliff": "OPTIONAL: a hanging question or threat that makes the viewer stay for the next beat; leave it empty unless the beat truly needs one"}]}
 Rules:
 - {beats} beats; the seconds add up to {seconds} (the first beat is 3 to 5 seconds).
 - The first beat's job is hook, the last beat's job is sting (or payoff when a sting does not fit).
-- An open loop in every beat but the last. Something changes in every beat: a new fact, a worse danger, a turned belief.
+- One open loop runs through the script (the bible's question); do not close a beat on a fresh question each time. Most beats hand over with a statement, a fact or a turn; give a cliff to at most one beat in three, never to two beats in a row. Something changes in every beat: a new fact, a worse danger, a turned belief.
 - {pace}
 - Put the bible's wow moments where they hit hardest, and make the twist land on a beat of its own, after it has been set up.
 - Never two beats in a row with the same job and feeling."""
@@ -70,7 +70,7 @@ Craft:
 - Show, do not report. Never write "he discovers", "she reveals", "a voice warns me". Write the discovery: the object, the sound, the exact words said, in the line itself. Put people's words in direct speech.
 - The viewer lives it: sensory detail (one sound, one smell, one texture), the narrator's body and thoughts, a number or a name instead of "a lot" or "someone".
 - Rhythm: vary the length. A long line that rolls, then a blunt short one. A fragment is fine. A line of two words can be a whole beat. Never three sentences of the same length in a row.
-- Open loops: do not explain what the viewer is about to wonder about. End the beat on its cliff.
+- Flow: this beat continues the line before it. Pick up its thought, keep the same voice and the same way of addressing the viewer, never restart or re-introduce. End on a statement or a turn; end on a question only when the map gives this beat a cliff, and then one real question the viewer would ask, never a cut-in question after every beat. At most one question in a beat.
 - Speak to the ear: no brackets, no stage directions, no digits (write numbers as words). Do not start with the same word as the line before.
 - {tags}
 - {words}
@@ -80,7 +80,7 @@ PUNCH = """[TASK:p4_punch]
 {base}
 
 Step 4 of 4: the punch-up. You get the whole script, beat by beat. Judge it as a skeptical viewer who scrolls at the first dull line, then rewrite what is weak.
-Score the INPUT script from 1 to 10 against: (1) the first line stops the scroll in two seconds, (2) a new hook or open loop at least every ten seconds, (3) no line that only reports what the pictures will show, (4) real lines of dialogue or concrete detail, not summary verbs, (5) the twist is set up before it fires, (6) varied rhythm with blunt lines, (7) the last line lands and the bible's question stays open, (8) the people are named and distinct, the point of view never switches, and it is always clear who speaks and whose things they are.
+Score the INPUT script from 1 to 10 against: (1) the first line stops the scroll in two seconds, (2) a new hook or open loop at least every ten seconds, (3) no line that only reports what the pictures will show, (4) real lines of dialogue or concrete detail, not summary verbs, (5) the twist is set up before it fires, (6) varied rhythm with blunt lines, (7) the last line lands and the bible's question stays open, (8) the people are named and distinct, the point of view never switches, and it is always clear who speaks and whose things they are, (9) each beat continues the one before it, in one steady voice and one form of address, and (10) no more than one beat in three ends on a question, never two in a row.
 Return ONLY a JSON object: {"score": 6, "problems": ["the 3 worst problems, each naming the beat"], "beats": [{"id": "b1", "sentences": [{"text": "..."}, {"text": "..."}]}]}
 Each {"text": "..."} object holds exactly one spoken sentence ending in । or ? or !. Never put two sentences inside one "text" value.
 Rules for "beats": return EVERY beat with its id, in order. Rewrite the weak lines, keep the strong ones word for word. Keep each beat's job, order of events and facts. Keep the whole script between {lo} and {hi} words, and each beat within 20% of its words now. {tags}"""
@@ -216,6 +216,14 @@ def fit_map(beats: list[MapBeat], t_s: float) -> list[dict]:
     total = sum(x["seconds"] for x in items)
     for x in items:
         x["seconds"] = round(x["seconds"] * t_s / total, 2)
+    gap = 3
+    for x in items[:-1]:                              # a cliff only now and then: a question at the end of every beat reads as forced
+        gap += 1
+        if x["cliff"] and gap >= 3:
+            gap = 0
+        else:
+            x["cliff"] = ""
+    items[-1]["cliff"] = ""
     return items
 
 
@@ -237,7 +245,7 @@ def words_of(sents: list[dict]) -> int:
     return sum(len(s["text"].split()) for s in sents)
 
 
-def draft_problems(sents: list[dict], lo: int, hi: int, language: str, prev_last: str = "") -> list[str]:
+def draft_problems(sents: list[dict], lo: int, hi: int, language: str, prev_last: str = "", address: str = "aap") -> list[str]:
     from . import planner
     out: list[str] = []
     n = words_of(sents)
@@ -250,6 +258,14 @@ def draft_problems(sents: list[dict], lo: int, hi: int, language: str, prev_last
         out.append("digits found: write numbers as words")
     if language in ("hinglish", "hi") and any(svara.romanised_hindi(t) for t in texts):
         out.append("Hindi written in Latin letters: Hindi words must be in Devanagari, only English words in Latin letters")
+    if language in languages.HINDI_LIKE and address == "aap":
+        tu = [h for t in texts for h in languages.address_hits(t)]
+        if tu:
+            out.append("familiar address found (" + ", ".join(dict.fromkeys(tu)) + "): speak to the viewer as aap, never tu or tum")
+    if sum(t.rstrip().endswith("?") for t in texts) > 1:
+        out.append("more than one question in this beat; keep one at most")
+    if prev_last.rstrip().endswith("?") and texts[-1].rstrip().endswith("?"):
+        out.append("the beat before ended on a question; end this one on a statement")
     stock = [h for t in texts for h in lexicon.hits(t)]
     if stock:
         out.append("stock phrases: " + ", ".join(dict.fromkeys(stock)) + " (say it another way)")
@@ -312,7 +328,7 @@ async def draft_beat(short: dict, bible: BibleOut, plan: list[dict], done: list[
         if caller.last_attempt:
             return
         sents = clean_sentences(out.sentences, engine)
-        probs = draft_problems(sents, lo, hi, language, prev_last)
+        probs = draft_problems(sents, lo, hi, language, prev_last, languages.address(short["settings"]))
         if i == 1:
             probs += cast_problems(bible, [x for b in done for x in b["sentences"]] + sents)
         if probs:
@@ -329,7 +345,7 @@ async def draft_beat(short: dict, bible: BibleOut, plan: list[dict], done: list[
         lines.append("THE CURRENT TEXT OF THIS BEAT (the producer wants it written again):\n" + " ".join(y["text"] for y in current))
     if note:
         lines.append(f"THE PRODUCER'S INSTRUCTION (follow it exactly; it wins over the map when they disagree): {note}")
-    lines.append(f"NOW WRITE BEAT {i + 1} of {len(plan)}: {b['name']}\nJob: {b['job']} - {JOBS[b['job']]}\nFeeling: {b['feeling'] or 'neutral'}\nIt must carry: {b['carries']}\n" + (f"It must end on this open question or threat: {b['cliff']}" if b["cliff"] else "It is the last beat: end on the sting."))
+    lines.append(f"NOW WRITE BEAT {i + 1} of {len(plan)}: {b['name']}\nJob: {b['job']} - {JOBS[b['job']]}\nFeeling: {b['feeling'] or 'neutral'}\nIt must carry: {b['carries']}\n" + (f"It may end on this open question or threat if it fits (otherwise end on a statement): {b['cliff']}" if b["cliff"] else ("It is the last beat: end on the sting." if i == len(plan) - 1 else "End on a statement or a turn that leads into the next beat, not on a question.")))
     res = await caller.call(system, "\n\n".join(lines), DraftOut, validate=check)
     return clean_sentences(res.value.sentences, engine)
 
@@ -383,6 +399,9 @@ async def punch_up(short: dict, bible: BibleOut, beats: list[dict], t_s: float, 
             floor = _floor(lo, hi, before)
             if not floor <= total <= hi:
                 raise ValueError(f"the script is {total} words; it must be between {floor} and {hi} (do not cut it shorter; sharpen the lines)")
+            tu = [h for v in sent.values() for x in v for h in languages.address_hits(x["text"])] if languages.of(short["settings"]) in languages.HINDI_LIKE and languages.address(short["settings"]) == "aap" else []
+            if tu:
+                raise ValueError("familiar address found (" + ", ".join(dict.fromkeys(tu)) + "): speak to the viewer as aap, never tu or tum")
             for k, v in sent.items():
                 if not v:
                     raise ValueError(f"beat {k} has no sentences")
@@ -406,6 +425,43 @@ async def punch_up(short: dict, bible: BibleOut, beats: list[dict], t_s: float, 
         if out.score >= PASS_SCORE:
             break
     return beats, report
+
+
+def hard_problems(short: dict, sents: list[dict]) -> list[str]:
+    """What must never reach the voice, whatever the last attempt of a model call accepted: Hindi in Latin letters and the familiar 'tu' address."""
+    language = languages.of(short["settings"])
+    if language not in languages.HINDI_LIKE:
+        return []
+    out: list[str] = []
+    texts = [x["text"] for x in sents]
+    if any(svara.romanised_hindi(t) for t in texts):
+        out.append("Hindi written in Latin letters: Hindi words must be in Devanagari, only English words in Latin letters")
+    if languages.address(short["settings"]) == "aap":
+        tu = [h for t in texts for h in languages.address_hits(t)]
+        if tu:
+            out.append("familiar address found (" + ", ".join(dict.fromkeys(tu)) + "): speak to the viewer as aap, never tu or tum")
+    return out
+
+
+async def repair(short: dict, bible: BibleOut, plan: list[dict], beats: list[dict], t_s: float, engine: str, speed: float, backend, s: dict) -> list[str]:
+    """After the punch-up: every beat that still breaks a hard rule is written again once with the problem named. A rewrite is kept only when it has fewer problems.
+    Returns the problems that are left (for the checks screen)."""
+    left: list[str] = []
+    for i, b in enumerate(beats):
+        probs = hard_problems(short, b["sentences"])
+        if not probs:
+            continue
+        w = words_of(b["sentences"])
+        try:
+            new = await draft_beat(short, bible, plan, beats[:i], i, t_s, engine, speed, backend, s, budget=(max(3, round(0.8 * w)), round(1.25 * w) + 2),
+                                   note="Same events, same facts, same order, written again. Fix this: " + "; ".join(probs), current=b["sentences"], after=beats[i + 1:])
+        except llm.LLMError:
+            new = []
+        if new and len(hard_problems(short, new)) < len(probs):
+            b["sentences"] = new
+            probs = hard_problems(short, new)
+        left += [f"{b['id']}: {p}" for p in probs]
+    return left
 
 
 async def write_beat_for_gap(short: dict, after_beat_id: str, topic: str, backend, s: dict) -> list[dict]:
@@ -436,7 +492,7 @@ async def write_beat_for_gap(short: dict, after_beat_id: str, topic: str, backen
         if caller.last_attempt:
             return
         sents = clean_sentences(out.sentences, engine)
-        probs = draft_problems(sents, lo, hi, language, prev_last)
+        probs = draft_problems(sents, lo, hi, language, prev_last, languages.address(short.get("settings", {})))
         if probs:
             raise ValueError("; ".join(probs[:3]))
 
@@ -489,6 +545,7 @@ async def write(short: dict, backend, s: dict | None = None, progress=None) -> d
     if progress:
         progress(0, steps, "punch-up")
     beats, report = await punch_up(short, bible, beats, t_s, engine, speed, backend, s)
+    report["left"] = await repair(short, bible, plan, beats, t_s, engine, speed, backend, s)
     report["words"] = sum(words_of(b["sentences"]) for b in beats)
     return {"bible": bible.model_dump(), "map": plan, "beats": beats, "report": report}
 
@@ -535,5 +592,6 @@ async def rewrite_all(short: dict, instruction: str, backend, s: dict | None = N
     if progress:
         progress(len(short["beats"]), len(short["beats"]) + 1, "punch-up")
     new, report = await punch_up(short, bible, new, t_s, engine, speed, backend, s)
+    report["left"] = await repair(short, bible, plan, new, t_s, engine, speed, backend, s)
     report["words"] = sum(words_of(b["sentences"]) for b in new)
     return {"beats": {b["id"]: b["sentences"] for b in new}, "report": report}
