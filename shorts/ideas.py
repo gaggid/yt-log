@@ -3,6 +3,7 @@
 Flow: pending → approved → conditioned → queued (short created) | rejected
 """
 import hashlib
+from datetime import datetime
 
 from story import db, llm as llm_mod, settings as settings_mod
 from story.schemas import M, Str
@@ -488,16 +489,102 @@ def delete_idea(idea_id: str) -> None:
     db.ex("DELETE FROM short_ideas WHERE id=?", (idea_id,))
 
 
-# ── LLM operations ────────────────────────────────────────────────────────────
+# ── Diverse mode: 5 domain lenses rotated across sub-calls ───────────────────
 
-async def generate(n: int, s: dict, key: str) -> list[dict]:
-    """Generate n ideas using the Human Attention Engine framework."""
-    backend = llm_mod.ChatBackend(s, key)
-    caller  = llm_mod.JsonCaller(backend, s)
-    caller.last_attempt = True
+_LENSES = [
+    {
+        "perspective": "strategic military and geopolitics analyst",
+        "domains": (
+            "military technology, national security strategy, geopolitical power shifts, "
+            "historical battles and their hidden causes, border conflicts, weapons systems, "
+            "intelligence failures, nuclear deterrence, proxy wars"
+        ),
+        "emphasis": "threat_detection, prediction_error, social_comparison",
+    },
+    {
+        "perspective": "behavioural scientist and science communicator",
+        "domains": (
+            "human biology, neuroscience, evolutionary psychology, cognitive biases, "
+            "medical mysteries, animal behaviour, the hidden science of everyday phenomena, "
+            "how the human body defies expectation"
+        ),
+        "emphasis": "novelty, curiosity_gap, emotional_arousal",
+    },
+    {
+        "perspective": "investigative economic journalist",
+        "domains": (
+            "economics, wealth concentration, financial system design, corporate power and abuse, "
+            "market manipulation, poverty paradoxes, how money actually moves, "
+            "economic policies with counterintuitive outcomes"
+        ),
+        "emphasis": "social_comparison, prediction_error, incomplete_loops",
+    },
+    {
+        "perspective": "Indian history and cultural researcher",
+        "domains": (
+            "Indian history suppressed or overlooked, forgotten heroes and betrayals, "
+            "cultural myths tested against reality, ancient Indian science and engineering, "
+            "partition and independence era secrets, regional stories the mainstream ignores"
+        ),
+        "emphasis": "pattern_interruption, emotional_arousal, novelty",
+    },
+    {
+        "perspective": "extreme engineering and space science explainer",
+        "domains": (
+            "extreme engineering feats and their hidden failures, space exploration and its paradoxes, "
+            "physics at impossible scales, climate and ocean systems, deep infrastructure, "
+            "the mathematics and engineering that keep civilisation alive"
+        ),
+        "emphasis": "novelty, curiosity_gap, pattern_interruption",
+    },
+]
 
-    user = (
+
+def _date_context() -> str:
+    now = datetime.now()
+    return (
+        f"TODAY'S DATE: {now.strftime('%B %d, %Y')} ({now.strftime('%A')})\n"
+        "TEMPORAL RELEVANCE INSTRUCTIONS:\n"
+        "  — Consider what subjects are naturally top-of-mind for Indian audiences THIS month.\n"
+        "  — Think about seasonal relevance: festivals, cricket season, budget cycles, exam season,\n"
+        "    monsoon/summer/winter impacts, harvest periods, school calendars.\n"
+        "  — Consider global events, geopolitical developments, economic news cycles that\n"
+        "    an Indian viewer would be discussing or searching right now.\n"
+        "  — Evergreen ideas that work any time of year are acceptable, but ideas with\n"
+        "    heightened relevance to THIS specific month have an advantage.\n"
+        "  — Do NOT invent or fabricate news events. Use your knowledge of recurring\n"
+        "    seasonal patterns and the general state of the world as of your training."
+    )
+
+
+def _lens_user_prompt(n: int, lens: dict) -> str:
+    return (
         f"Generate exactly {n} short video ideas following the Human Attention Engine framework.\n\n"
+        f"{_date_context()}\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"YOUR PERSPECTIVE FOR THIS BATCH: {lens['perspective'].upper()}\n"
+        f"FOCUS EXCLUSIVELY ON: {lens['domains']}\n"
+        f"PRIORITISE THESE MECHANISMS: {lens['emphasis']}\n"
+        "Find the angle in this domain that the average viewer would NEVER expect.\n"
+        "The ideas must be unmistakably rooted in this domain — do not drift.\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "HARD REQUIREMENTS:\n"
+        f"  — Return exactly {n} ideas.\n"
+        "  — Every hook is a question (?) or a shock statement. Never a topic.\n"
+        "  — Every idea triggers at least 2 mechanisms. Aim for 3.\n"
+        "  — All facts must be real and verifiable.\n\n"
+        "FINAL SELF-CHECK — apply this to each idea before including it:\n"
+        "  1. Is the hook a question or shock statement (NOT a topic title)? → If not, rewrite.\n"
+        "  2. Would a mid-scroll viewer feel a psychological NEED to watch? → If not, rewrite.\n"
+        "  3. Does it genuinely fit the domain perspective above? → If not, rewrite.\n\n"
+        f'Return JSON exactly: {{"ideas": [{{...}}]}}'
+    )
+
+
+def _standard_user_prompt(n: int) -> str:
+    return (
+        f"Generate exactly {n} short video ideas following the Human Attention Engine framework.\n\n"
+        f"{_date_context()}\n\n"
         "HARD REQUIREMENTS:\n"
         f"  — Return exactly {n} ideas, numbered internally for your own verification.\n"
         "  — Every hook is a question (ending in ?) or a shock statement. Never a topic.\n"
@@ -512,9 +599,36 @@ async def generate(n: int, s: dict, key: str) -> list[dict]:
         f'Return JSON exactly: {{"ideas": [{{...}}]}}'
     )
 
-    result = await caller.call(_GENERATE_SYSTEM, user, _IdeasBatch)
-    specs  = (result.value.ideas or [])[:n]
-    return [add(sp.title, sp.hook, sp.mechanisms, sp.premise, sp.why_works) for sp in specs]
+
+# ── LLM operations ────────────────────────────────────────────────────────────
+
+async def generate(n: int, s: dict, key: str, diverse: bool = False) -> list[dict]:
+    """Generate n ideas. diverse=True splits across domain lenses for variety."""
+    if not diverse:
+        backend = llm_mod.ChatBackend(s, key)
+        caller  = llm_mod.JsonCaller(backend, s)
+        caller.last_attempt = True
+        result = await caller.call(_GENERATE_SYSTEM, _standard_user_prompt(n), _IdeasBatch)
+        specs  = (result.value.ideas or [])[:n]
+        return [add(sp.title, sp.hook, sp.mechanisms, sp.premise, sp.why_works) for sp in specs]
+
+    # Diverse mode: distribute n across lenses, one sequential call per lens
+    lens_count = min(len(_LENSES), n)
+    # distribute n as evenly as possible — first (n % lens_count) lenses get one extra
+    counts = [n // lens_count + (1 if i < n % lens_count else 0) for i in range(lens_count)]
+
+    saved = []
+    for lens, count in zip(_LENSES[:lens_count], counts):
+        backend = llm_mod.ChatBackend(s, key)
+        caller  = llm_mod.JsonCaller(backend, s)
+        caller.last_attempt = True
+        try:
+            result = await caller.call(_GENERATE_SYSTEM, _lens_user_prompt(count, lens), _IdeasBatch)
+            specs  = (result.value.ideas or [])[:count]
+            saved.extend(add(sp.title, sp.hook, sp.mechanisms, sp.premise, sp.why_works) for sp in specs)
+        except Exception as e:
+            print(f"[ideas] lens '{lens['perspective']}' failed: {e}", flush=True)
+    return saved
 
 
 async def rate(idea_ids: list[str], s: dict, key: str) -> list[dict]:

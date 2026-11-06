@@ -1,10 +1,18 @@
 /* Short Ideas — parking lot for video ideas before production.
    Flow: pending → approved → conditioned → queued (short created) | rejected
-   Helpers from index.html: api, esc, toast, confirmDlg, fmtDate, badge */
+   Helpers from index.html: api, esc, toast, confirmDlg, fmtDate, badge, LS */
 (() => {
 const css = document.createElement('style');
 css.textContent = `
-.id-header{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.id-header{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.id-cfg{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin-bottom:16px}
+.id-cfg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px 16px;margin-bottom:12px}
+.id-cfg-cell label{display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--mute);margin-bottom:3px}
+.id-cfg-cell select,.id-cfg-cell input[type=number]{width:100%;font:inherit;font-size:13px;padding:4px 8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+.id-cfg-foot{display:flex;align-items:center;gap:10px;padding-top:10px;border-top:1px solid var(--line)}
+.id-cfg.id-cfg-locked .id-cfg-grid{opacity:.55;pointer-events:none}
+.id-autorun-label{display:flex;align-items:center;gap:7px;cursor:pointer;user-select:none;font-weight:600}
+.id-autorun-label input{width:16px;height:16px}
 .id-day{font-size:11px;font-weight:600;color:var(--mute);text-transform:uppercase;letter-spacing:.06em;padding:14px 0 6px;border-bottom:1px solid var(--line);margin-bottom:10px}
 .id-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:10px;transition:border-color .15s}
 .id-card:hover{border-color:color-mix(in srgb,var(--accent) 50%,var(--line))}
@@ -42,6 +50,19 @@ document.head.append(css);
 
 // ── state ─────────────────────────────────────────────────────────────────────
 let _tab = 'all', _ideas = [], _busy = new Set(), _exp = {};
+let _diverse  = LS.get('ideas:diverse', false);
+let _autoRun  = LS.get('ideas:autorun', false);
+let _options  = null;   // loaded from /api/shorts/options
+let _cfg = {
+  pipeline: 'keyframe',
+  voice:    'taksh_hn',
+  language: 'hi',
+  target_s: 29,
+  tone_id:  'bigbro',
+  edge:     'clean',
+  upscale:  '2k',
+  ...LS.get('ideas:config', {}),
+};
 
 const call = (path, opts) => api('/shorts/ideas' + path, opts);
 const STATUS_TABS = ['all','pending','approved','conditioned','queued','rejected'];
@@ -53,15 +74,12 @@ const MECH_LABELS = {
 };
 
 function scoreClass(s) { return !s ? '' : s >= 7 ? '' : s >= 5 ? 'low' : 'bad'; }
-
 function mechBadges(mechs) {
   return (mechs || []).map(m => `<span>${esc(MECH_LABELS[m] || m)}</span>`).join('');
 }
-
 function fmtDay(ts) {
   return new Date(ts * 1000).toLocaleDateString([], {weekday:'long',year:'numeric',month:'long',day:'numeric'});
 }
-
 function groupByDay(ideas) {
   const days = {};
   for (const i of ideas) {
@@ -69,6 +87,94 @@ function groupByDay(ideas) {
     (days[key] = days[key] || {label: fmtDay(i.created_at), items: []}).items.push(i);
   }
   return Object.values(days);
+}
+
+// ── config panel helpers ───────────────────────────────────────────────────────
+
+function _saveCfg() { LS.set('ideas:config', _cfg); }
+
+function _syncCfgLock() {
+  const panel = document.getElementById('id-cfg');
+  if (!panel) return;
+  panel.classList.toggle('id-cfg-locked', _autoRun);
+  document.querySelectorAll('.id-cfg-cell select, .id-cfg-cell input').forEach(el => {
+    el.disabled = _autoRun;
+  });
+}
+
+function _cfgHtml() {
+  // Voices: from API if loaded, else minimal fallback
+  let voiceOpts;
+  if (_options && _options.voices && _options.voices['maya-tts']) {
+    const vmap = _options.voices['maya-tts'].voices; // {id: gender}
+    const male = [], female = [], other = [];
+    Object.entries(vmap).forEach(([id, gender]) => {
+      const opt = `<option value="${id}"${_cfg.voice===id?' selected':''}>${id}</option>`;
+      if (gender === 'male') male.push(opt);
+      else if (gender === 'female') female.push(opt);
+      else other.push(opt);
+    });
+    voiceOpts = (male.length ? `<optgroup label="Male">${male.join('')}</optgroup>` : '')
+              + (female.length ? `<optgroup label="Female">${female.join('')}</optgroup>` : '')
+              + (other.length ? `<optgroup label="Other">${other.join('')}</optgroup>` : '');
+  } else {
+    voiceOpts = `<option value="${_cfg.voice}">${_cfg.voice}</option>`;
+  }
+
+  // Languages: from API if loaded
+  let langOpts;
+  if (_options && _options.languages) {
+    langOpts = _options.languages.map(l =>
+      `<option value="${l.id}"${_cfg.language===l.id?' selected':''}>${l.label}</option>`
+    ).join('');
+  } else {
+    langOpts = `<option value="hi"${_cfg.language==='hi'?' selected':''}>Hindi (Devanagari)</option>`
+             + `<option value="hinglish"${_cfg.language==='hinglish'?' selected':''}>Hinglish</option>`
+             + `<option value="en"${_cfg.language==='en'?' selected':''}>English</option>`;
+  }
+
+  const tones = [
+    ['bigbro','Friendly big brother (default)'], ['storyteller','Calm storyteller'],
+    ['soothing','Soothing explainer'], ['documentary','Documentary narrator'],
+    ['explorer','Curious explorer'], ['thriller','Dramatic thriller'],
+    ['roaster','Sarcastic roaster'], ['motivator','Hype motivator'],
+    ['viral','Fast viral hook'], ['intense','Intense / aggressive'],
+    ['survivor','Survivor (first person)'], ['campfire','Campfire storyteller'],
+    ['investigator','Cold investigator'], ['memoir','Memoir voice'],
+    ['founder_first','First-principles founder'], ['ceo_empathy','Empathetic CEO'],
+    ['orator_rally','Rally orator'], ['teacher_energy','High-energy teacher'],
+  ];
+  const toneOpts = tones.map(([v,l]) => `<option value="${v}"${_cfg.tone_id===v?' selected':''}>${l}</option>`).join('');
+
+  const cell = (id, label, inner) => `<div class="id-cfg-cell"><label for="${id}">${label}</label>${inner}</div>`;
+
+  return `
+    <div class="id-cfg-grid">
+      ${cell('cfg-pipeline','Pipeline',`<select id="cfg-pipeline">
+        <option value="keyframe"${_cfg.pipeline==='keyframe'?' selected':''}>Keyframe (14B, full quality)</option>
+        <option value="quick"${_cfg.pipeline==='quick'?' selected':''}>Quick (5B, faster)</option>
+      </select>`)}
+      ${cell('cfg-voice','Voice',`<select id="cfg-voice">${voiceOpts}</select>`)}
+      ${cell('cfg-language','Language',`<select id="cfg-language">${langOpts}</select>`)}
+      ${cell('cfg-target-s','Length (seconds)',`<input type="number" id="cfg-target-s" min="5" max="180" value="${_cfg.target_s}">`)}
+      ${cell('cfg-tone','Tone',`<select id="cfg-tone">${toneOpts}</select>`)}
+      ${cell('cfg-edge','Edge',`<select id="cfg-edge">
+        <option value="clean"${_cfg.edge==='clean'?' selected':''}>Clean</option>
+        <option value="spicy"${_cfg.edge==='spicy'?' selected':''}>Spicy</option>
+        <option value="savage"${_cfg.edge==='savage'?' selected':''}>Savage</option>
+      </select>`)}
+      ${cell('cfg-upscale','Upscale',`<select id="cfg-upscale">
+        <option value="2k"${_cfg.upscale==='2k'?' selected':''}>2K (1440×2560)</option>
+        <option value=""${_cfg.upscale===''?' selected':''}>1080p (1080×1920)</option>
+      </select>`)}
+    </div>
+    <div class="id-cfg-foot">
+      <label class="id-autorun-label" title="When ON: queueing a conditioned idea will also auto-run the full pipeline (plan → voice → pictures → clips → 2K → final). Settings above are locked until you turn Auto-run OFF.">
+        <input type="checkbox" id="id-autorun" ${_autoRun ? 'checked' : ''}>
+        <span>Auto-run after queue</span>
+      </label>
+      <span class="small mute">${_autoRun ? 'Settings locked — turn off Auto-run to change them' : 'When ON, settings lock and pipeline runs automatically after queuing'}</span>
+    </div>`;
 }
 
 // ── panel renderers ───────────────────────────────────────────────────────────
@@ -106,7 +212,7 @@ function condPanel(idea) {
   }).join('');
   const facts = (c.key_facts || []).map(f => `<li>${esc(f)}</li>`).join('');
   const queueBtn = idea.status === 'conditioned'
-    ? `<button class="primary small" onclick="idQueue('${idea.id}')">→ Send to Queue</button>` : '';
+    ? `<button class="primary small" onclick="idQueue('${idea.id}')">→ ${_autoRun ? 'Queue + Auto-run' : 'Send to Queue'}</button>` : '';
   return `<div class="id-expand">
     <div class="id-section"><h5>Refined hook</h5>
       <div style="font-size:15px;font-weight:650;line-height:1.4">${esc(c.refined_hook)}</div>
@@ -140,6 +246,8 @@ function renderCard(idea) {
     actions.push(`<button class="primary small" ${busy?'disabled':''} onclick="idCondition('${idea.id}')">${busy?'<span class="spin"></span> Conditioning…':'Condition'}</button>`);
   if (idea.status === 'conditioned')
     actions.push(`<button class="small" ${busy?'disabled':''} onclick="idCondition('${idea.id}')">${busy?'<span class="spin"></span>':''}Re-condition</button>`);
+  if (idea.status === 'conditioned')
+    actions.push(`<button class="primary small" ${busy?'disabled':''} onclick="idQueue('${idea.id}')">${busy?'<span class="spin"></span> Queuing…': (_autoRun ? '→ Queue + Auto-run' : '→ Queue')}</button>`);
   if (idea.status === 'queued' && idea.short_id)
     actions.push(`<a class="btn small" href="#/short/${idea.short_id}">Open short →</a>`);
   if (idea.status !== 'queued')
@@ -167,7 +275,7 @@ function renderCard(idea) {
 // ── render ────────────────────────────────────────────────────────────────────
 
 function _render() {
-  if (!document.getElementById('id-tabs')) return; // navigated away
+  if (!document.getElementById('id-tabs')) return;
   const filtered = _tab === 'all' ? _ideas : _ideas.filter(i => i.status === _tab);
   const tabs = STATUS_TABS.map(t => {
     const n = t === 'all' ? _ideas.length : _ideas.filter(i => i.status === t).length;
@@ -225,10 +333,32 @@ window.idCondition = async id => {
 window.idQueue = async id => {
   _busy.add(id); _render();
   try {
-    const r = await call(`/${id}/queue`, {method:'POST', json:{pipeline:'quick'}});
+    const settings = {
+      voice:      {engine: 'maya-tts', voice: _cfg.voice},
+      language:   _cfg.language,
+      target_s:   Number(_cfg.target_s) || 29,
+      tone_id:    _cfg.tone_id,
+      edge:       _cfg.edge,
+      upscale:    _cfg.upscale,
+      image_mode: 'qwen',
+      review_keyframes: false,
+    };
+    const r = await call(`/${id}/queue`, {method:'POST', json:{
+      pipeline: _cfg.pipeline,
+      settings,
+      auto_run: _autoRun,
+    }});
     _ideas = _ideas.map(i => i.id === id ? r.idea : i);
-    toast('Short created — opening…');
-    setTimeout(() => { location.hash = `#/short/${r.short_id}`; }, 600);
+    if (_autoRun) {
+      toast(r.auto_started
+        ? `Short queued + pipeline started — open it to track progress`
+        : `Short queued (pipeline busy — open it to run manually)`
+      );
+      _exp[id] = null;
+    } else {
+      toast('Short created — opening…');
+      setTimeout(() => { location.hash = `#/short/${r.short_id}`; }, 600);
+    }
   } catch(e) { toast(e.message, {bad:true}); }
   _busy.delete(id); _render();
 };
@@ -244,6 +374,39 @@ window.idDelete = async id => {
   } catch(e) { toast(e.message, {bad:true}); }
 };
 
+// ── config panel events ───────────────────────────────────────────────────────
+
+function _wireCfg() {
+  const bind = (id, field, transform) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.onchange = () => {
+      _cfg[field] = transform ? transform(el.value) : el.value;
+      _saveCfg();
+    };
+  };
+  bind('cfg-pipeline', 'pipeline');
+  bind('cfg-voice',    'voice');
+  bind('cfg-language', 'language');
+  bind('cfg-target-s', 'target_s', v => Math.max(5, Math.min(180, parseInt(v) || 29)));
+  bind('cfg-tone',     'tone_id');
+  bind('cfg-edge',     'edge');
+  bind('cfg-upscale',  'upscale');
+
+  const ar = document.getElementById('id-autorun');
+  if (ar) ar.onchange = e => {
+    _autoRun = e.target.checked;
+    LS.set('ideas:autorun', _autoRun);
+    // re-render config panel to update hint text and lock state
+    const cfgEl = document.getElementById('id-cfg');
+    if (cfgEl) cfgEl.innerHTML = _cfgHtml();
+    _wireCfg();
+    _syncCfgLock();
+    _render(); // update queue button labels
+  };
+  _syncCfgLock();
+}
+
 // ── main view ─────────────────────────────────────────────────────────────────
 
 window.viewIdeas = async function() {
@@ -257,23 +420,53 @@ window.viewIdeas = async function() {
         <option value="7" selected>7 ideas</option>
         <option value="10">10 ideas</option>
       </select>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none" title="Diverse: splits ideas across 5 domain lenses (military, science, economics, Indian history, engineering) for variety, then auto-rates">
+        <input type="checkbox" id="id-diverse" ${_diverse ? 'checked' : ''}>
+        <span class="small">Diverse</span>
+      </label>
       <button class="primary" id="id-gen">Generate</button>
       <button id="id-rate">Rate all</button>
       <button onclick="location.hash='#/shorts'">← Shorts</button>
     </div>
+    <div class="id-cfg" id="id-cfg">${_cfgHtml()}</div>
     <div class="id-tabs" id="id-tabs"></div>
     <div id="id-list"><div class="pad"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div></div>`;
 
+  _wireCfg();
+
+  document.getElementById('id-diverse').onchange = e => {
+    _diverse = e.target.checked;
+    LS.set('ideas:diverse', _diverse);
+  };
+
   document.getElementById('id-gen').onclick = async () => {
     const n = parseInt(document.getElementById('id-n').value) || 7;
+    const diverse = document.getElementById('id-diverse').checked;
     const btn = document.getElementById('id-gen');
-    await act(btn, async () => {
-      const fresh = await call('/generate', {method:'POST', json:{n}});
+    const label = diverse ? `Generating ${n} ideas across 5 lenses…` : `Generating ${n} ideas…`;
+    btn.disabled = true; btn.innerHTML = `<span class="spin"></span> ${label}`;
+    try {
+      const fresh = await call('/generate', {method:'POST', json:{n, diverse}});
       _ideas = [...fresh, ..._ideas];
       _tab = 'pending';
       _render();
-      return fresh.length;
-    }, n => `${n} ideas generated`);
+      toast(`${fresh.length} ideas generated${diverse ? ' (diverse mode)' : ''}`);
+
+      if (diverse && fresh.length) {
+        const rateBtn = document.getElementById('id-rate');
+        if (rateBtn) { rateBtn.disabled = true; rateBtn.innerHTML = '<span class="spin"></span> Rating…'; }
+        try {
+          const rated = await call('/rate', {method:'POST', json:{ids:[]}});
+          const byId = Object.fromEntries(rated.map(r => [r.id, r]));
+          _ideas = _ideas.map(i => byId[i.id] || i);
+          _ideas.sort((a, b) => (b.engagement_score || 0) - (a.engagement_score || 0));
+          _render();
+          toast(`${rated.length} ideas scored and ranked`);
+        } catch(e) { toast('Rating failed: ' + e.message, {bad:true}); }
+        if (rateBtn) { rateBtn.disabled = false; rateBtn.innerHTML = 'Rate all'; }
+      }
+    } catch(e) { toast(e.message, {bad:true}); }
+    btn.disabled = false; btn.innerHTML = 'Generate';
   };
 
   document.getElementById('id-rate').onclick = async () => {
@@ -288,7 +481,13 @@ window.viewIdeas = async function() {
     }, n => `${n} ideas scored and ranked`);
   };
 
-  _ideas = await call('').catch(() => []);
+  [_ideas, _options] = await Promise.all([
+    call('').catch(() => []),
+    api('/shorts/options').catch(() => null),
+  ]);
+  // Re-render config panel now that we have live voices/languages
+  const cfgEl = document.getElementById('id-cfg');
+  if (cfgEl) { cfgEl.innerHTML = _cfgHtml(); _wireCfg(); }
   _render();
 };
 })();

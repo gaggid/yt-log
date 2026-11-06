@@ -985,6 +985,7 @@ async def anchor_from_character(short_id: str, body: AnchorFromChar):
 
 class _GenerateReq(BaseModel):
     n: int = 7
+    diverse: bool = False
 
 
 class _RateReq(BaseModel):
@@ -992,8 +993,9 @@ class _RateReq(BaseModel):
 
 
 class _QueueReq(BaseModel):
-    pipeline: str = "quick"
+    pipeline: str = "keyframe"
     settings: dict | None = None
+    auto_run: bool = False
 
 
 @router.get("/ideas")
@@ -1006,7 +1008,7 @@ async def ideas_generate(body: _GenerateReq):
     n = max(1, min(15, body.n))
     s, key = settings_mod.get(), settings_mod.api_key()
     try:
-        return await ideas_mod.generate(n, s, key)
+        return await ideas_mod.generate(n, s, key, diverse=body.diverse)
     except Exception as e:
         raise HTTPException(500, str(e))
 
@@ -1081,7 +1083,19 @@ async def ideas_queue(idea_id: str, body: _QueueReq):
     src   = {"kind": "idea", "text": source_text, "candidate_id": "", "facts": ""}
     short = store.create(title, body.pipeline, src, settings_override)
     ideas_mod.set_status(idea_id, "queued", short["id"])
-    return {"short_id": short["id"], "idea": ideas_mod.get(idea_id)}
+
+    auto_started = False
+    if body.auto_run and not manager.busy():
+        s_cfg, backend = _backend()
+        key = settings_mod.api_key()
+        sid = short["id"]
+        try:
+            jobs.start(sid, "auto", lambda progress: auto.run(sid, backend, s_cfg, progress, key))
+            auto_started = True
+        except jobs.JobBusy:
+            pass
+
+    return {"short_id": short["id"], "idea": ideas_mod.get(idea_id), "auto_started": auto_started}
 
 
 @router.post("/ideas/{idea_id}/reject")

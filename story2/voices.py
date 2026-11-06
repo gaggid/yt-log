@@ -20,7 +20,8 @@ ENGINES: dict[str, dict] = {
         # gender / age as listed by GET /audio/voices?model=maya-tts; every voice speaks every language
         "voices": {"Ahana": "female", "Vaidehi": "female", "Malini": "female", "Charvi": "female", "Jahnavi": "female", "Nivedita": "female", "Ishwari": "female",
                    "Vrinda": "female", "Kayal": "female", "Tanushree": "female", "Anirban": "male", "Nakul": "male", "Vasant": "male", "Siddhant": "male",
-                   "Satvik": "male", "Abhay": "male", "Ritvik": "male", "Sreekar": "male", "Shaunak": "male", "Akshat": "male"},
+                   "Satvik": "male", "Abhay": "male", "Ritvik": "male", "Sreekar": "male", "Shaunak": "male", "Akshat": "male",
+                   "bakhtawar_d": "male", "taksh_hn": "male"},
         "defaults": {"response_format": "wav", "seed": 7, "language": "hi", "speed": 1.0},       # sampler values are tuned by the gateway; narration is mixed script, so the language is named
         "emotions": True, "pace_wpm": 148,
     },
