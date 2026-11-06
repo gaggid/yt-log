@@ -50,19 +50,17 @@ document.head.append(css);
 
 // ── state ─────────────────────────────────────────────────────────────────────
 let _tab = 'all', _ideas = [], _busy = new Set(), _exp = {};
-let _diverse  = LS.get('ideas:diverse', false);
-let _autoRun  = LS.get('ideas:autorun', false);
-let _options  = null;   // loaded from /api/shorts/options
-let _cfg = {
-  pipeline: 'keyframe',
-  voice:    'taksh_hn',
-  language: 'hi',
-  target_s: 29,
-  tone_id:  'bigbro',
-  edge:     'clean',
-  upscale:  '2k',
-  ...LS.get('ideas:config', {}),
-};
+let _diverse  = false;
+let _autoRun  = false;
+let _options  = null;
+let _cfg      = {};
+const _CFG_DEFAULTS = {pipeline:'keyframe', voice:'taksh_hn', language:'hi', target_s:29, tone_id:'bigbro', edge:'clean', upscale:'2k'};
+
+function _loadState() {
+  _diverse = LS.get('ideas:diverse', false);
+  _autoRun = LS.get('ideas:autorun', false);
+  _cfg     = {..._CFG_DEFAULTS, ...LS.get('ideas:config', {})};
+}
 
 const call = (path, opts) => api('/shorts/ideas' + path, opts);
 const STATUS_TABS = ['all','pending','approved','conditioned','queued','rejected'];
@@ -410,6 +408,7 @@ function _wireCfg() {
 // ── main view ─────────────────────────────────────────────────────────────────
 
 window.viewIdeas = async function() {
+  _loadState();
   document.getElementById('app').innerHTML = `
     <div class="id-header">
       <h2 style="margin:0">Short Ideas</h2>
