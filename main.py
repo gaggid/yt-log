@@ -77,7 +77,8 @@ async def root():
     html = (STATIC / "index.html").read_text(encoding="utf-8").replace('src="/plan.js"', f'src="/plan.js?v={int((STATIC / "plan.js").stat().st_mtime)}"').replace(
         'src="/shorts.js"', f'src="/shorts.js?v={int((STATIC / "shorts.js").stat().st_mtime)}"').replace(
         'src="/characters.js"', f'src="/characters.js?v={int((STATIC / "characters.js").stat().st_mtime)}"').replace(
-        'src="/storage.js"', f'src="/storage.js?v={int((STATIC / "storage.js").stat().st_mtime)}"')
+        'src="/storage.js"', f'src="/storage.js?v={int((STATIC / "storage.js").stat().st_mtime)}"').replace(
+        'src="/ideas.js"', f'src="/ideas.js?v={int((STATIC / "ideas.js").stat().st_mtime)}"')
     return HTMLResponse(html, headers=NO_STORE)
 
 
@@ -99,6 +100,11 @@ async def storage_js():
 @app.get("/characters.js")
 async def characters_js():
     return FileResponse(STATIC / "characters.js", media_type="application/javascript", headers=NO_STORE)
+
+
+@app.get("/ideas.js")
+async def ideas_js():
+    return FileResponse(STATIC / "ideas.js", media_type="application/javascript", headers=NO_STORE)
 
 
 @app.get("/char-memory.js")
