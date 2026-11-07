@@ -1105,3 +1105,10 @@ def test_auto_queue_picks_the_best_good_enough_conditioned_idea(client):
     assert ideas_mod.next_for_autoqueue(0.0)["id"] == low["id"]
     short = store.get(out["short_id"])
     assert short["settings"]["voice"]["engine"] == "maya-tts" and short["settings"]["review_keyframes"] is False
+
+
+def test_the_ideas_list_route_is_not_taken_by_the_short_id_route(client):
+    from shorts import ideas as ideas_mod
+    ideas_mod.add("t", "hook?", [], "p", "w")
+    r = client.get("/api/shorts/ideas")
+    assert r.status_code == 200 and [i["hook"] for i in r.json()][-1:] == ["hook?"]

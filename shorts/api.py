@@ -177,6 +177,11 @@ async def cancel(short_id: str):
     return {"cancelled": jobs.cancel(short_id)}
 
 
+@router.get("/ideas")                      # before "/{short_id}", which would answer "no such short: ideas"
+async def ideas_list():
+    return ideas_mod.listing()
+
+
 @router.get("/{short_id}")
 async def state(short_id: str):
     short = _get(short_id)
@@ -996,11 +1001,6 @@ class _QueueReq(BaseModel):
     pipeline: str = "keyframe"
     settings: dict | None = None
     auto_run: bool = False
-
-
-@router.get("/ideas")
-async def ideas_list():
-    return ideas_mod.listing()
 
 
 _IDEAS_JOB = "ideas"                       # the job key (jobs.py keys jobs by plan id; ideas belong to no plan)
