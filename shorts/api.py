@@ -19,7 +19,7 @@ from characters import store as cstore, studio_edit
 from story.agent_store import for_plan as agent_decisions_for_plan
 
 from story3 import music
-from . import agent, auto, cast, checks, clips, formats, frames, ideas as ideas_mod, languages, looks, tones, models, motion, pipelines as P, planner, remix, stitch, store, subjects as subj, timeline, upscale, voice as svoice, wan
+from . import publish, agent, auto, cast, checks, clips, formats, frames, ideas as ideas_mod, languages, looks, tones, models, motion, pipelines as P, planner, remix, stitch, store, subjects as subj, timeline, upscale, voice as svoice, wan
 
 router = APIRouter(prefix="/api/shorts")
 MAX_UPLOAD = 12 * 1024 * 1024
@@ -190,7 +190,7 @@ async def state(short_id: str):
     out = {"id": short["id"], "title": short["title"], "pipeline": short["pipeline"], "pipeline_label": P.pipeline(short)["label"], "status": short["status"], "source": short["source"],
            "settings": short["settings"], "plan": short["plan"], "script": short.get("script"), "beats": short["beats"], "images": short["images"], "keyframes_confirmed": short.get("keyframes_confirmed", False), "keyframes_on": P.keyframes_on(short),
            "job": jobs.status(short_id), "estimate_s": P.estimate_s(short) if (short["shots"] or short["pipeline"] == "remix") else 0,
-           "voice": svoice.state(short), "voice_gate": checks.voice_gate(short), "auto": auto.state(short), "final": stitch.final_state(short_id)}
+           "voice": svoice.state(short), "voice_gate": checks.voice_gate(short), "auto": auto.state(short), "final": stitch.final_state(short_id), "publish": publish.view(short)}
     if short["pipeline"] == "remix":
         r = remix.data(short)
         ch = remix.character(short)
@@ -1031,33 +1031,57 @@ def _start_idea_job(kind: str, work) -> dict:
         raise HTTPException(409, str(e))
 
 
-@router.post("/ideas/generate")
-async def ideas_generate(body: _GenerateReq):
-    """Starts a background job and answers at once. Diverse runs score the new ideas when they are all written."""
-    n = max(1, min(15, body.n))
+def _generate_work(n: int, diverse: bool):
+    """The background job of one idea batch: search the web, write the ideas, reject duplicates, score the rest, and approve the ones above the threshold when auto-approve is on."""
+    from . import discover
     s, key = settings_mod.get(), settings_mod.api_key()
-    lenses = min(len(ideas_mod._LENSES), n)
+    lenses = min(len(ideas_mod._LENSES), n) if diverse else 1
+    total = lenses + 3
 
     async def work(progress):
+        cfg = ideas_mod.get_config()
+        _idea_run.update(grounded=False, dups=0, approved=0)
+        progress(0, total, "searching the web")
+        try:
+            sigs = await discover.signals(s, key)
+        except Exception as e:  # noqa: BLE001 - ideas can be written without signals
+            print(f"[ideas] web signals failed: {e}", flush=True)
+            sigs = []
+        _idea_run["grounded"] = bool(sigs)
         sink: list = []
 
-        def on_progress(done, total, label):
+        def on_progress(done, _t, label):
             _idea_run["new_ids"] = [i["id"] for i in sink]
-            progress(done, total + (1 if body.diverse else 0), label)
+            progress(1 + done, total, label)
 
         try:
-            await ideas_mod.generate(n, s, key, diverse=body.diverse, progress=on_progress, sink=sink)
+            await ideas_mod.generate(n, s, key, diverse=diverse, progress=on_progress, sink=sink, sigs=sigs)
         finally:
             _idea_run["new_ids"] = [i["id"] for i in sink]
-        if body.diverse and sink:
-            progress(lenses, lenses + 1, "scoring the new ideas")
+        ids = [i["id"] for i in sink]
+        progress(lenses + 1, total, "removing duplicates")
+        dups = await ideas_mod.dedup(ids, s, key) if ids else []
+        _idea_run["dups"] = len(dups)
+        keep = [i for i in ids if i not in dups]
+        if keep:
+            progress(lenses + 2, total, "scoring the new ideas")
             try:
-                _idea_run["rated"] = len(await ideas_mod.rate([i["id"] for i in sink], s, key))
+                _idea_run["rated"] = len(await ideas_mod.rate(keep, s, key))
             except Exception as e:  # noqa: BLE001 - the ideas stay; rating can be run again
                 _idea_run["error"] = f"scoring failed: {e}"[:300]
-        return f"{len(sink)} ideas written"
+        if cfg["auto_approve"]:
+            _idea_run["approved"] = len(ideas_mod.auto_approve(cfg["approve_min"]))
+        return (f"{len(ids)} ideas written" + ("" if _idea_run["grounded"] else " (web search gave nothing, so not grounded)") + (f", {len(dups)} duplicates rejected" if dups else "")
+                + (f", {_idea_run['approved']} auto-approved" if _idea_run["approved"] else ""))
 
-    return _start_idea_job("generate", work)
+    return work
+
+
+@router.post("/ideas/generate")
+async def ideas_generate(body: _GenerateReq):
+    """Starts a background job and answers at once."""
+    n = max(1, min(15, body.n))
+    return _start_idea_job("generate", _generate_work(n, body.diverse))
 
 
 @router.post("/ideas/rate")
@@ -1084,7 +1108,7 @@ async def ideas_approve(idea_id: str):
 async def ideas_condition(idea_id: str):
     s, key = settings_mod.get(), settings_mod.api_key()
     try:
-        return await ideas_mod.condition(idea_id, s, key)
+        return await ideas_mod.condition(idea_id, s, key, styles=ideas_mod.get_config()["styles"])
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
@@ -1114,11 +1138,12 @@ def _queue_idea(idea_id: str, pipeline: str, settings: dict | None, auto_run: bo
         tone_id = tones.DEFAULT
 
     vd = (c.get("visual_direction") or "").lower()
-    style = ""
-    for pid in looks.presets():
-        if pid in vd:
-            style = pid
-            break
+    style = ideas_mod.pick_style(ideas_mod.get_config()["styles"], vd)         # only from the styles ticked in the Ideas config
+    if not style and not ideas_mod.get_config()["styles"]:
+        for pid in looks.presets():
+            if pid in vd:
+                style = pid
+                break
 
     settings_override = {
         "tone_id": tone_id,
@@ -1130,6 +1155,7 @@ def _queue_idea(idea_id: str, pipeline: str, settings: dict | None, auto_run: bo
     src   = {"kind": "idea", "text": source_text, "candidate_id": "", "facts": ""}
     short = store.create(title, pipeline, src, settings_override)
     ideas_mod.set_status(idea_id, "queued", short["id"])
+    db.ex("UPDATE short_ideas SET style=? WHERE id=?", (style, idea_id))
 
     auto_started = False
     if auto_run and not manager.busy():
@@ -1162,27 +1188,147 @@ async def ideas_queue(idea_id: str, body: _QueueReq):
         raise HTTPException(400, str(e))
 
 
-AUTOQUEUE_EVERY_S = 60
+TICK_S = 30
+_cond_fail: dict[str, int] = {}                  # idea id -> failed conditioning runs (an idea that keeps failing is left alone)
+
+
+def _start_generate(cfg: dict) -> None:
+    _start_idea_job("generate", _generate_work(int(cfg["gen_n"]), bool(cfg["diverse"])))
+
+
+def _start_condition(cfg: dict) -> bool:
+    nxt = ideas_mod.next_to_condition(skip={k for k, v in _cond_fail.items() if v >= 2})
+    if not nxt:
+        return False
+    s, key = settings_mod.get(), settings_mod.api_key()
+
+    async def work(progress):
+        progress(0, 1, f"conditioning: {nxt['hook'][:60]}")
+        try:
+            await ideas_mod.condition(nxt["id"], s, key, styles=cfg["styles"])
+        except Exception:
+            _cond_fail[nxt["id"]] = _cond_fail.get(nxt["id"], 0) + 1
+            raise
+        return "brief written"
+
+    _start_idea_job("condition", work)
+    return True
+
+
+def _start_make(cfg: dict) -> str:
+    """Queue the best conditioned idea scoring at least `min_score` and start its pipeline. Returns the short id, or '' when nothing is ready."""
+    nxt = ideas_mod.next_for_autoqueue(float(cfg["min_score"]))
+    if not nxt:
+        return ""
+    out = _queue_idea(nxt["id"], cfg["run"].get("pipeline") or "keyframe", _run_settings(cfg["run"]), True)
+    return out["short_id"]
+
+
+async def conductor_tick(now: float | None = None) -> str | None:
+    """One step of the autopilot; it starts at most one job, and none while any job runs, because the gateway key serves one request at a time (so exactly one short is made at a time).
+    Order: approve (instant), then a due hourly batch, then a brief for the best approved idea, then (when due and under the review cap) the next short. Returns what it started."""
+    now = now if now is not None else time.time()
+    cfg = ideas_mod.get_config()
+    if not cfg["autopilot"]:
+        return None
+    if cfg["auto_approve"]:
+        ideas_mod.auto_approve(float(cfg["approve_min"]))
+    if jobs.busy() or manager.busy():
+        return None
+    if cfg["auto_generate"] and now >= cfg["next_gen_at"]:
+        ideas_mod.set_state(next_gen_at=now + cfg["gen_every_h"] * 3600)           # set first: a failed batch is not retried in a loop
+        if ideas_mod.counts().get("pending", 0) < cfg["pending_cap"]:
+            _start_generate(cfg)
+            return "generate"
+    if cfg["auto_condition"] and _start_condition(cfg):
+        return "condition"
+    if cfg["autorun"] and now >= cfg["next_make_at"]:
+        cap = int(cfg["review_cap"])
+        if cap and ideas_mod.counts()["waiting_review"] >= cap:
+            return None                                                            # enough finished shorts are waiting for a person
+        if _start_make(cfg):
+            ideas_mod.set_state(next_make_at=now + cfg["make_every_h"] * 3600)
+            return "make"
+    return None
 
 
 async def autoqueue_forever() -> None:
-    """With Auto-run ON in the saved config, queue the best good-enough conditioned idea whenever the machine is free, one short at a time, and start its pipeline. It retries every minute
-    while something else runs, so a busy machine never drops an idea; with Auto-run OFF it does nothing."""
+    """The autopilot loop (started in main.py): a tick every TICK_S seconds. With every Auto switch OFF it does nothing."""
     while True:
-        await asyncio.sleep(AUTOQUEUE_EVERY_S)
+        await asyncio.sleep(TICK_S)
         try:
-            cfg = ideas_mod.get_config()
-            if not cfg["autorun"] or jobs.busy() or manager.busy():
-                continue
-            nxt = ideas_mod.next_for_autoqueue(float(cfg["min_score"]))
-            if not nxt:
-                continue
-            print(f"[ideas] auto-queue: {nxt['id']} (score {nxt['engagement_score']:.1f})", flush=True)
-            _queue_idea(nxt["id"], cfg["run"].get("pipeline") or "keyframe", _run_settings(cfg["run"]), True)
+            await conductor_tick()
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001 - never stop the loop
-            print(f"[ideas] auto-queue failed: {e}", flush=True)
+            print(f"[ideas] autopilot failed: {e}", flush=True)
+
+
+@router.get("/ideas/autopilot")
+async def ideas_autopilot():
+    """What the Autopilot panel shows: the queues, the schedule and what is running now."""
+    cfg = ideas_mod.get_config()
+    running = jobs.busy()
+    who = jobs._current.get("plan_id") if running else ""
+    return {"now": time.time(), "on": cfg["autopilot"], "counts": ideas_mod.counts(), "next_gen_at": cfg["next_gen_at"], "next_make_at": cfg["next_make_at"],
+            "running": {"busy": bool(running), "kind": "ideas" if who == _IDEAS_JOB else ("short" if who else ""), "short_id": who if who and who != _IDEAS_JOB else ""},
+            "review_cap": cfg["review_cap"]}
+
+
+class _PublishReq(BaseModel):
+    note: str = ""
+
+
+@router.post("/{short_id}/publish")
+async def publish_write(short_id: str, body: _PublishReq):
+    """Write (or rewrite) the YouTube title, description, hashtags and tags of a short. Refused while a job runs: the gateway serves one request at a time."""
+    _get(short_id)
+    if jobs.busy() or manager.busy():
+        raise HTTPException(409, "another job is running; try again when it finishes")
+    s_cfg, backend = _backend()
+    try:
+        return await publish.make(short_id, backend, s_cfg, body.note)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except llm.LLMError as e:
+        raise HTTPException(502, str(e))
+
+
+class _StageReq(BaseModel):
+    stage: str
+
+
+@router.post("/ideas/autopilot/run")
+async def ideas_autopilot_run(body: _StageReq):
+    """Run one stage now, ignoring its timer (but never while another job runs)."""
+    cfg = ideas_mod.get_config()
+    if jobs.busy() or manager.busy():
+        raise HTTPException(409, "another job is running; one job at a time")
+    if body.stage == "generate":
+        _start_generate(cfg)
+    elif body.stage == "condition":
+        if not _start_condition(cfg):
+            raise HTTPException(400, "no approved idea waits for a brief")
+    elif body.stage == "make":
+        sid = _start_make(cfg)
+        if not sid:
+            raise HTTPException(400, f"no conditioned idea scores {cfg['min_score']:g} or more")
+        ideas_mod.set_state(next_make_at=time.time() + cfg["make_every_h"] * 3600)
+    else:
+        raise HTTPException(400, "stage is generate, condition or make")
+    return await ideas_autopilot()
+
+
+class _ReviewedReq(BaseModel):
+    reviewed: bool = True
+
+
+@router.post("/ideas/{idea_id}/reviewed")
+async def ideas_reviewed(idea_id: str, body: _ReviewedReq):
+    try:
+        return ideas_mod.mark_reviewed(idea_id, body.reviewed)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
 
 
 @router.post("/ideas/{idea_id}/reject")

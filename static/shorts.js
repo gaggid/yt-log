@@ -503,7 +503,22 @@ function finalView() {
   return `<div class="card pad mt sh-final"><div class="row"><h2 style="margin:0">The short</h2><span class="sp"></span>${upBtn}<button class="primary" id="b-final" ${miss.length || S.voice_gate || (S.job.state === 'running') ? 'disabled' : ''}>${last ? 'Put together again' : 'Put the short together'}</button></div>
     ${miss.length ? `<div class="mute small mt-s">Still missing: ${esc(miss.slice(0, 6).join(', '))}${miss.length > 6 ? ' and ' + (miss.length - 6) + ' more' : ''}</div>` : ''}
     ${last ? `<div class="mt-s">${vid(last.url)}</div><div class="row mt-s small"><a href="${esc(last.url)}" download>Download the MP4</a><span class="mute">${last.duration_s}s · ${want2k ? '1440x2560' : '1080x1920'}${last.bed ? ' · with sound bed' : ''}</span></div>` : '<p class="mute small">The 30-second 9:16 video appears here.</p>'}
-    ${f.attempts.filter(a => a.status === 'failed').slice(-1).map(a => `<div class="errbox">${esc(a.error)}</div>`).join('')}</div>`;
+    ${f.attempts.filter(a => a.status === 'failed').slice(-1).map(a => `<div class="errbox">${esc(a.error)}</div>`).join('')}</div>${last ? publishView() : ''}`;
+}
+
+/* the YouTube title, description and tags, ready to paste into YouTube Studio */
+function publishView() {
+  const p = S.publish, busy = S.job.state === 'running';
+  const field = (label, id, text, rows, hint) => `<div class="mt-s"><div class="row"><b>${label}</b><span class="mute small">${hint}</span><span class="sp"></span><button class="small" data-copy="${id}">Copy</button></div>
+    ${rows ? `<textarea id="${id}" rows="${rows}" style="width:100%" readonly>${esc(text)}</textarea>` : `<input id="${id}" value="${esc(text)}" style="width:100%" readonly>`}</div>`;
+  return `<div class="card pad mt"><div class="row"><h2 style="margin:0">Upload text for YouTube</h2><span class="sp"></span>
+      ${p ? '<button class="small" data-copy-all="1">Copy title + description</button>' : ''}
+      <button class="${p ? '' : 'primary'}" id="b-pub" ${busy ? 'disabled' : ''}>${p ? 'Write again' : 'Write title and description'}</button></div>
+    ${p ? `${p.stale ? '<div class="errbox mt-s">The narration changed after this text was written. Write it again.</div>' : ''}
+      ${field('Title', 'pub-title', p.title, 0, p.title.length + ' characters (70 shows fully on a phone)')}
+      ${field('Description', 'pub-desc', p.description, 12, p.description.length + ' characters (limit 5000); the first 150 show before "more"')}
+      ${field('Tags', 'pub-tags', p.tags_text, 3, 'paste into the Tags box under "Show more"')}`
+      : '<p class="mute small">Written automatically when the short is put together by Auto-run; press the button to write it now. Search-friendly title, hook-first description, hashtags and tags.</p>'}</div>`;
 }
 
 async function motionDialog(shotId) {
@@ -543,6 +558,9 @@ function wire() {
   on('#b-keys-ok', b => post(b, '/keyframes/confirm', {confirmed: !S.keyframes_confirmed}));
   on('#b-upscale', b => post(b, '/upscale', {}, 'Upscaling clips to 2K'));
   on('#b-final', b => post(b, '/final', {}, 'Putting the short together'));
+  on('#b-pub', b => post(b, '/publish', {}, 'Upload text written'));
+  all('[data-copy]').forEach(b => b.onclick = () => { const e = q('#' + b.dataset.copy); if (e) navigator.clipboard.writeText(e.value).then(() => toast('Copied'), () => { e.select(); document.execCommand('copy'); toast('Copied'); }); });
+  all('[data-copy-all]').forEach(b => b.onclick = () => navigator.clipboard.writeText(q('#pub-title').value + '\n\n' + q('#pub-desc').value).then(() => toast('Title and description copied')));
   on('#b-voice-all', b => post(b, '/voice', {only_missing: false}, 'Making the voice'));
   on('#b-subjects', b => post(b, '/subjects', {}, 'Finding the subjects'));
   all('[data-plan]').forEach(e => e.onchange = () => patch('/plan', {[e.dataset.plan]: e.value}));

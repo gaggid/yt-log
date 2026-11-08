@@ -3,6 +3,7 @@
 Flow: pending → approved → conditioned → queued (short created) | rejected
 """
 import hashlib
+import re
 from datetime import datetime
 
 from story import db, llm as llm_mod, settings as settings_mod
@@ -30,9 +31,17 @@ CREATE TABLE IF NOT EXISTS idea_config(
 );
 """
 
+# Columns added after the first release (ensure() adds them to an older database).
+EXTRA_COLUMNS = {"sources": "TEXT DEFAULT '[]'", "dup_of": "TEXT DEFAULT ''", "reject_reason": "TEXT DEFAULT ''", "style": "TEXT DEFAULT ''", "reviewed": "INTEGER DEFAULT 0", "auto": "INTEGER DEFAULT 0"}
+
 # What the Ideas screen keeps between visits and what the unattended auto-queue uses. Saved in the database, so any browser and the server see the same.
 CONFIG_DEFAULTS = {
     "autorun": False, "diverse": False, "n": 7, "min_score": 7.0,
+    "autopilot": False,                              # the master switch: OFF = nothing runs by itself, whatever the switches below say
+    "styles": [],                                   # picture styles the ideas may use (empty = any); the queue picks from these only
+    "auto_generate": False, "auto_approve": False, "auto_condition": False,
+    "gen_every_h": 1.0, "gen_n": 5, "approve_min": 7.8, "make_every_h": 2.0, "pending_cap": 30, "review_cap": 3,
+    "next_gen_at": 0.0, "next_make_at": 0.0,         # when the next hourly batch and the next short are due (kept here so a restart keeps the schedule)
     "run": {"pipeline": "keyframe", "voice": "taksh_hn", "language": "hi", "target_s": 29, "tone_id": "bigbro", "edge": "clean", "upscale": "2k"},
 }
 
@@ -49,6 +58,7 @@ class _IdeaSpec(M):
     mechanisms: list[str] = []
     premise:    Str       = ""
     why_works:  Str       = ""
+    sources:    list[int] = []
 
 
 class _IdeasBatch(M):
@@ -390,8 +400,8 @@ PRODUCTION BRIEF REQUIREMENTS
 
 5. VISUAL DIRECTION
    One clear sentence for the image model and director.
-   Include: style (realism/filmic/documentary/animated/concept-art), colour palette, lighting mood.
-   Example: "Cold, desaturated realism — steel-grey palette, harsh overhead light, documentary handheld feel."
+   Include: the picture style, colour palette, lighting mood. Scenes are bright and evenly lit by default; go dark only when the idea itself is about darkness.
+   Example: "Realism — bright natural daylight, clean warm palette, documentary handheld feel."
 
 6. SUGGESTED TONE
    Pick exactly ONE from this list: storyteller, soothing, documentary, bigbro, explorer, thriller, roaster
@@ -425,9 +435,14 @@ OUTPUT FORMAT — return valid JSON only, no explanation outside the JSON:
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────
 
+
 def ensure() -> None:
     with db.tx() as c:
         c.executescript(SCHEMA)
+        have = {r[1] for r in c.execute("PRAGMA table_info(short_ideas)")}
+        for col, ddl in EXTRA_COLUMNS.items():
+            if col not in have:
+                c.execute(f"ALTER TABLE short_ideas ADD COLUMN {col} {ddl}")
 
 
 def _load(r: dict | None) -> dict | None:
@@ -437,6 +452,7 @@ def _load(r: dict | None) -> dict | None:
     r["mechanisms"]     = db.jload(r.get("mechanisms"), [])
     r["score_breakdown"] = db.jload(r.get("score_breakdown"), {})
     r["conditioning"]   = db.jload(r.get("conditioning"), {})
+    r["sources"]        = db.jload(r.get("sources"), [])
     return r
 
 
@@ -457,6 +473,18 @@ def save_config(patch: dict) -> dict:
         cur["n"] = max(1, min(15, int(patch["n"] or 7)))
     if "min_score" in patch:
         cur["min_score"] = max(0.0, min(10.0, float(patch["min_score"] or 0)))
+    for k in ("autopilot", "auto_generate", "auto_approve", "auto_condition"):
+        if k in patch:
+            cur[k] = bool(patch[k])
+    for k, lo, hi in (("gen_every_h", 0.25, 48), ("make_every_h", 0.25, 48), ("approve_min", 0, 10)):
+        if k in patch:
+            cur[k] = max(lo, min(hi, float(patch[k] or lo)))
+    for k, lo, hi in (("gen_n", 1, 15), ("pending_cap", 1, 500), ("review_cap", 0, 100)):
+        if k in patch:
+            cur[k] = max(lo, min(hi, int(patch[k] if patch[k] not in (None, "") else lo)))
+    if "styles" in patch:
+        from . import looks
+        cur["styles"] = [x for x in dict.fromkeys(patch["styles"] or []) if x in looks.presets()]
     for k, v in (patch.get("run") or {}).items():
         if k in CONFIG_DEFAULTS["run"]:
             cur["run"][k] = max(5, min(180, int(v or 29))) if k == "target_s" else ("" if v is None else str(v))
@@ -465,21 +493,159 @@ def save_config(patch: dict) -> dict:
     return cur
 
 
+def set_state(**kw) -> None:
+    """Write schedule values (next_gen_at, next_make_at) without touching what the screen saved."""
+    cur = get_config()
+    cur.update({k: v for k, v in kw.items() if k in ("next_gen_at", "next_make_at")})
+    with db.tx() as c:
+        c.execute("INSERT INTO idea_config(id,data) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data", (db.jdump(cur),))
+
+
+def counts() -> dict:
+    ensure()
+    out = {r["status"]: r["n"] for r in db.q("SELECT status, COUNT(*) n FROM short_ideas GROUP BY status")}
+    out["waiting_review"] = (db.one("SELECT COUNT(*) n FROM short_ideas WHERE status='queued' AND COALESCE(reviewed,0)=0") or {}).get("n", 0)
+    return out
+
+
+def mark_reviewed(idea_id: str, reviewed: bool = True) -> dict:
+    get(idea_id)
+    db.ex("UPDATE short_ideas SET reviewed=?, updated_at=? WHERE id=?", (1 if reviewed else 0, db.now(), idea_id))
+    return get(idea_id)
+
+
+def next_to_condition(skip: set | None = None) -> dict | None:
+    """The best approved idea that has no brief yet."""
+    return max((i for i in listing("approved") if i["id"] not in (skip or set())), key=lambda i: (i.get("engagement_score") or 0, i["created_at"]), default=None)
+
+
+def auto_approve(min_score: float) -> list[str]:
+    """Approve every scored pending idea at or above `min_score`. Returns the ids."""
+    ids = [i["id"] for i in listing("pending") if (i.get("engagement_score") or 0) >= min_score]
+    for i in ids:
+        set_status(i, "approved")
+        db.ex("UPDATE short_ideas SET auto=1 WHERE id=?", (i,))
+    return ids
+
+
+def pick_style(allowed: list[str], direction: str) -> str:
+    """The picture style for a short: only from `allowed` (the Ideas config). The idea's own visual direction wins when it names an allowed style; otherwise the allowed style used least
+    so far, so styles rotate. No allowed styles = '' (the caller falls back to matching the direction against every style)."""
+    allowed = [x for x in allowed if x]
+    if not allowed:
+        return ""
+    d = (direction or "").lower()
+    for sid in allowed:
+        if re.search(rf"\b{re.escape(sid)}\b", d):
+            return sid
+    ensure()
+    used = {r["style"]: r["n"] for r in db.q("SELECT style, COUNT(*) n FROM short_ideas WHERE style<>'' GROUP BY style")}
+    return min(allowed, key=lambda x: (used.get(x, 0), allowed.index(x)))
+
+
 def next_for_autoqueue(min_score: float) -> dict | None:
     """The best conditioned idea that is good enough and not queued yet (highest score first)."""
     ready = [i for i in listing("conditioned") if (i.get("engagement_score") or 0) >= min_score]
     return max(ready, key=lambda i: i["engagement_score"], default=None)
 
 
-def add(title: str, hook: str, mechanisms: list, premise: str, why_works: str) -> dict:
+def add(title: str, hook: str, mechanisms: list, premise: str, why_works: str, sources: list | None = None) -> dict:
     ensure()
     iid = f"idea-{hashlib.sha1(f'{hook}{db.now()}'.encode()).hexdigest()[:8]}"
     db.ex(
-        "INSERT INTO short_ideas(id,title,hook,mechanisms,premise,why_works,status,created_at,updated_at)"
-        " VALUES(?,?,?,?,?,?,?,?,?)",
-        (iid, title, hook, db.jdump(mechanisms), premise, why_works, "pending", db.now(), db.now()),
+        "INSERT INTO short_ideas(id,title,hook,mechanisms,premise,why_works,status,sources,created_at,updated_at)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (iid, title, hook, db.jdump(mechanisms), premise, why_works, "pending", db.jdump(sources or []), db.now(), db.now()),
     )
     return get(iid)
+
+
+# ── Duplicates: the same context as an idea already seen (any status) is rejected before it is scored ──
+
+_STOP = set("a an the of to in on at is are was were be been being it its this that these those and or but for from with by as if than then so do does did how why what who whom which when where can could would should will "
+            "may might must you your we our us they them their he she his her i me my not no yes more most less very just into over under out up down about after before again ever never one two".split())
+SIMILAR_SURE = 0.55          # word overlap (Jaccard) that is a duplicate without asking the model
+SIMILAR_ASK = 0.08           # from here the model is asked (measured on title, hook and the start of the premise, so a paraphrase still comes close)
+
+
+def _words(x: dict, deep: bool = False) -> set[str]:
+    text = re.sub(r"[^a-z0-9 ]+", " ", f"{x.get('title', '')} {x.get('hook', '')}{(' ' + (x.get('premise') or '')[:220]) if deep else ''}".lower())
+    return {w[:-1] if w.endswith("s") and len(w) > 3 else w for w in text.split() if len(w) > 2 and w not in _STOP}
+
+
+def similarity(a: dict, b: dict, deep: bool = False) -> float:
+    wa, wb = _words(a, deep), _words(b, deep)
+    if not wa or not wb:
+        return 0.0
+    return len(wa & wb) / len(wa | wb)
+
+
+class _DupSpec(M):
+    id:      Str = ""
+    same_as: Str = ""
+    why:     Str = ""
+
+
+class _DupBatch(M):
+    results: list[_DupSpec] = []
+
+
+_DUP_SYSTEM = """You compare new short-video ideas with ideas already seen. Two ideas are the SAME CONTEXT when they would make essentially the same short: the same event, fact, mystery or question, even if worded differently. \
+A different angle or a different example inside the same broad field is NOT the same. Be strict only about real repeats.
+Return ONLY JSON: {"results": [{"id": "the new idea id", "same_as": "the id of the earlier idea it repeats, or empty", "why": "one short sentence"}]} with one entry for every new idea."""
+
+
+def reject_duplicate(idea_id: str, dup_of: str, why: str) -> dict:
+    ensure()
+    db.ex("UPDATE short_ideas SET status='rejected', dup_of=?, reject_reason=?, updated_at=? WHERE id=?", (dup_of, f"Duplicate: {why}"[:300], db.now(), idea_id))
+    return get(idea_id)
+
+
+async def dedup(new_ids: list[str], s: dict, key: str) -> list[str]:
+    """Reject the new ideas that repeat an earlier idea (approved, rejected, queued, pending ... any) or an earlier one of the same batch. Returns the ids rejected. A word-overlap check settles
+    the clear cases; the chat model judges the close ones, and if it fails only the clear cases are rejected."""
+    new = [get(i) for i in new_ids]
+    old = [i for i in listing() if i["id"] not in set(new_ids)]
+    rejected: list[str] = []
+    asks: list[tuple[dict, list[dict]]] = []
+    pool = list(old)
+    for idea in new:
+        scored = sorted(((similarity(idea, o), o) for o in pool), key=lambda t: -t[0])
+        if scored and scored[0][0] >= SIMILAR_SURE:
+            reject_duplicate(idea["id"], scored[0][1]["id"], f"same as '{scored[0][1]['hook'][:80]}' ({scored[0][1]['status']})")
+            rejected.append(idea["id"])
+            continue
+        deep = sorted(((similarity(idea, o, True), o) for o in pool), key=lambda t: -t[0])
+        close = [o for sc, o in deep[:3] if sc >= SIMILAR_ASK]
+        if close:
+            asks.append((idea, close))
+        pool.append(idea)
+    if asks:
+        try:
+            backend = llm_mod.ChatBackend(s, key)
+            caller = llm_mod.JsonCaller(backend, s)
+            caller.last_attempt = True
+            user = "NEW IDEAS, each with the earlier ideas that look close:\n" + "\n\n".join(
+                f"NEW {i['id']}: {i['title']} - {i['hook']}\n  premise: {i['premise'][:240]}\n" + "\n".join(f"  EARLIER {o['id']} ({o['status']}): {o['title']} - {o['hook']}" for o in close) for i, close in asks)
+            res = await caller.call(_DUP_SYSTEM, user, _DupBatch)
+            valid = {o["id"] for _, close in asks for o in close}
+            def full(x: str) -> str:                              # the model sometimes drops the "idea-" prefix of an id
+                x = (x or "").strip()
+                return x if not x or x.startswith("idea-") else "idea-" + x
+            for r in res.value.results or []:
+                rid, same = full(r.id), full(r.same_as)
+                if same in valid and rid in {i["id"] for i, _ in asks} and rid not in rejected:
+                    reject_duplicate(rid, same, r.why or "same context")
+                    rejected.append(rid)
+        except Exception as e:  # noqa: BLE001 - the clear cases are already handled
+            print(f"[ideas] duplicate check failed: {e}", flush=True)
+    return rejected
+
+
+def avoid_text(limit: int = 60) -> str:
+    """Topics already covered (rejected ones first), for the generator to stay away from."""
+    rows = sorted(listing(), key=lambda i: (i["status"] != "rejected", -i["created_at"]))[:limit]
+    return "\n".join(f"- {i['hook'][:110]}" for i in rows)
 
 
 def get(idea_id: str) -> dict:
@@ -598,7 +764,7 @@ def _date_context() -> str:
     )
 
 
-def _lens_user_prompt(n: int, lens: dict) -> str:
+def _lens_user_prompt(n: int, lens: dict, extra: str = "") -> str:
     return (
         f"Generate exactly {n} short video ideas following the Human Attention Engine framework.\n\n"
         f"{_date_context()}\n\n"
@@ -609,6 +775,7 @@ def _lens_user_prompt(n: int, lens: dict) -> str:
         "Find the angle in this domain that the average viewer would NEVER expect.\n"
         "The ideas must be unmistakably rooted in this domain — do not drift.\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"{extra}\n\n"
         "HARD REQUIREMENTS:\n"
         f"  — Return exactly {n} ideas.\n"
         "  — Every hook is a question (?) or a shock statement. Never a topic.\n"
@@ -622,10 +789,11 @@ def _lens_user_prompt(n: int, lens: dict) -> str:
     )
 
 
-def _standard_user_prompt(n: int) -> str:
+def _standard_user_prompt(n: int, extra: str = "") -> str:
     return (
         f"Generate exactly {n} short video ideas following the Human Attention Engine framework.\n\n"
         f"{_date_context()}\n\n"
+        f"{extra}\n\n"
         "HARD REQUIREMENTS:\n"
         f"  — Return exactly {n} ideas, numbered internally for your own verification.\n"
         "  — Every hook is a question (ending in ?) or a shock statement. Never a topic.\n"
@@ -643,19 +811,23 @@ def _standard_user_prompt(n: int) -> str:
 
 # ── LLM operations ────────────────────────────────────────────────────────────
 
-async def generate(n: int, s: dict, key: str, diverse: bool = False, progress=None, sink: list | None = None) -> list[dict]:
+async def generate(n: int, s: dict, key: str, diverse: bool = False, progress=None, sink: list | None = None, sigs: list | None = None) -> list[dict]:
     """Generate n ideas. diverse=True splits across domain lenses for variety. Each idea is saved as soon as it is written; `sink` gets it at once and `progress(done, total, label)` says where the run is."""
+    from . import discover
     sink = sink if sink is not None else []
+    sigs = sigs or []
+    avoid = avoid_text()
+    extra = "\n\n".join(x for x in (discover.block(sigs), ("ALREADY COVERED OR REJECTED (do not make an idea about the same subject, event or question as any of these):\n" + avoid) if avoid else "") if x)
     if not diverse:
         backend = llm_mod.ChatBackend(s, key)
         caller  = llm_mod.JsonCaller(backend, s)
         caller.last_attempt = True
         if progress:
             progress(0, 1, f"writing {n} ideas")
-        result = await caller.call(_GENERATE_SYSTEM, _standard_user_prompt(n), _IdeasBatch)
+        result = await caller.call(_GENERATE_SYSTEM, _standard_user_prompt(n, extra), _IdeasBatch)
         specs  = (result.value.ideas or [])[:n]
         for sp in specs:
-            sink.append(add(sp.title, sp.hook, sp.mechanisms, sp.premise, sp.why_works))
+            sink.append(add(sp.title, sp.hook, sp.mechanisms, sp.premise, sp.why_works, discover.pick(sigs, sp.sources)))
         return list(sink)
 
     # Diverse mode: distribute n across lenses, one sequential call per lens
@@ -670,10 +842,10 @@ async def generate(n: int, s: dict, key: str, diverse: bool = False, progress=No
         caller  = llm_mod.JsonCaller(backend, s)
         caller.last_attempt = True
         try:
-            result = await caller.call(_GENERATE_SYSTEM, _lens_user_prompt(count, lens), _IdeasBatch)
+            result = await caller.call(_GENERATE_SYSTEM, _lens_user_prompt(count, lens, extra), _IdeasBatch)
             specs  = (result.value.ideas or [])[:count]
             for sp in specs:
-                sink.append(add(sp.title, sp.hook, sp.mechanisms, sp.premise, sp.why_works))
+                sink.append(add(sp.title, sp.hook, sp.mechanisms, sp.premise, sp.why_works, discover.pick(sigs, sp.sources)))
         except Exception as e:
             print(f"[ideas] lens '{lens['perspective']}' failed: {e}", flush=True)
     if progress:
@@ -732,7 +904,14 @@ async def rate(idea_ids: list[str], s: dict, key: str) -> list[dict]:
     return sorted(all_ideas, key=lambda x: x["engagement_score"], reverse=True)
 
 
-async def condition(idea_id: str, s: dict, key: str) -> dict:
+def _styles_text(styles: list[str]) -> str:
+    from . import looks
+    pres = looks.presets()
+    return ("\nALLOWED PICTURE STYLES: the visual_direction MUST name exactly one of these style ids and may use no other: "
+            + "; ".join(f"{x} ({pres[x]['label']})" for x in styles if x in pres) + ".\n")
+
+
+async def condition(idea_id: str, s: dict, key: str, styles: list[str] | None = None) -> dict:
     """Expand an approved idea into a full production brief."""
     idea = get(idea_id)
     if idea["status"] not in ("approved", "conditioned"):
@@ -754,7 +933,8 @@ async def condition(idea_id: str, s: dict, key: str) -> dict:
             f"ANALYST VERDICT: {idea['score_breakdown'].get('verdict', '')}\n"
             f"ANALYST REASONING: {idea['score_breakdown'].get('reasoning', '')}\n"
             if idea.get("engagement_score") else ""
-        ) +
+        )
+        + (_styles_text(styles) if styles else "") +
         "\nRemember: SHARPEN, never sanitise. The brief must be MORE psychologically "
         "powerful than the input idea.\n\n"
         f'Return JSON exactly: {{"conditioning": {{...}}}}'

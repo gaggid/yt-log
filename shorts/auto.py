@@ -74,7 +74,7 @@ async def run(short_id: str, backend, s: dict, progress, key: str = "") -> str:
     def sub(label: str):
         return lambda d, t, l="": progress(d, t, f"{label}: {l}" if l else label)
     if short["pipeline"] == "remix":
-        return await _run_remix(short_id, s, progress, key)
+        return await _run_remix(short_id, backend, s, progress, key)
     if not short["shots"]:
         progress(0, 1, "planning the short")
         await planner.make_plan(short_id, backend, s, sub("plan"))
@@ -128,10 +128,21 @@ async def run(short_id: str, backend, s: dict, progress, key: str = "") -> str:
     import asyncio
     await asyncio.to_thread(stitch.build, short_id, sub("final"))
     did.append("put together")
+    await _upload_text(short_id, backend, s, did)
     return "Finished: " + ", ".join(did)
 
 
-async def _run_remix(short_id: str, s: dict, progress, key: str) -> str:
+async def _upload_text(short_id: str, backend, s: dict, did: list) -> None:
+    """The YouTube title and description, written once the video is put together. A bonus: a failure never undoes the video."""
+    try:
+        from . import publish
+        await publish.make(short_id, backend, s)
+        did.append("upload text")
+    except Exception as e:  # noqa: BLE001
+        did.append(f"no upload text ({str(e)[:80]})")
+
+
+async def _run_remix(short_id: str, backend, s: dict, progress, key: str) -> str:
     short = store.get(short_id)
     chk = remix.check(short)
     if chk["blockers"]:
@@ -151,4 +162,5 @@ async def _run_remix(short_id: str, s: dict, progress, key: str) -> str:
     import asyncio
     await asyncio.to_thread(remix.build, short_id, lambda d, t, l="": progress(d, t, f"putting together: {l}"))
     did.append("put together")
+    await _upload_text(short_id, backend, s, did)
     return "Finished: " + ", ".join(did)

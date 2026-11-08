@@ -50,6 +50,25 @@ css.textContent = `
 .id-prog-bar{height:6px;border-radius:99px;background:var(--line);margin-top:8px;overflow:hidden}
 .id-prog-bar i{display:block;height:100%;background:var(--accent);transition:width .4s}
 .id-prog.bad{border-color:var(--bad)}
+.id-auto{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin-bottom:12px}
+.id-auto.on{border-color:var(--ok)}
+.id-auto-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.id-auto-top .big{font-size:15px;font-weight:700}
+.id-auto-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px 18px;margin-top:10px}
+.id-auto-grid .it{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px}
+.id-auto-grid input[type=number]{width:62px;font:inherit;font-size:13px;padding:2px 6px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+.id-auto-grid .nx{width:100%;font-size:11px;color:var(--mute);padding-left:22px}
+.id-q{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+.id-q span{font-size:12px;padding:3px 10px;border-radius:99px;background:var(--bg);border:1px solid var(--line)}
+.id-q span b{font-weight:700}
+.id-q span.run{border-color:var(--accent);color:var(--accent)}
+.id-chips{display:flex;gap:6px;flex-wrap:wrap}
+.id-chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:3px 10px;border-radius:99px;border:1px solid var(--line);cursor:pointer;user-select:none}
+.id-chip input{margin:0}
+.id-chip.on{background:var(--accent-soft);border-color:var(--accent)}
+.id-src{margin:6px 0 0;font-size:12px}
+.id-src a{margin-right:10px}
+.id-why{font-size:12px;color:var(--warn);margin-top:4px}
 .id-card.id-new{animation:idnew 1.6s ease-out}
 @keyframes idnew{from{background:var(--accent-soft)}to{background:var(--panel)}}
 `;
@@ -64,12 +83,15 @@ let _cfg      = {};
 let _n        = 7;
 let _minScore = 7;
 let _job      = null, _seen = new Set(), _pollGen = 0;
+let _auto     = {autopilot:false, auto_generate:false, auto_approve:false, auto_condition:false, gen_every_h:1, gen_n:5, approve_min:7.8, make_every_h:2, pending_cap:30, review_cap:3, styles:[]};
+let _ap       = null, _apAt = 0, _apTimer = null;      // /ideas/autopilot (queues and schedule) and when it was read
 const _CFG_DEFAULTS = {pipeline:'keyframe', voice:'taksh_hn', language:'hi', target_s:29, tone_id:'bigbro', edge:'clean', upscale:'2k'};
 
 function _loadState() {                     // the browser's copy: shown at once; the server's copy (saved config) replaces it when it arrives
   _diverse  = LS.get('ideas:diverse', false);
   _autoRun  = LS.get('ideas:autorun', false);
   _cfg      = {..._CFG_DEFAULTS, ...LS.get('ideas:config', {})};
+  _auto     = {..._auto, ...LS.get('ideas:auto', {})};
   _n        = LS.get('ideas:n', 7);
   _minScore = LS.get('ideas:minscore', 7);
 }
@@ -78,14 +100,16 @@ function _applyServerCfg(c) {
   if (!c) return;
   _diverse = !!c.diverse; _autoRun = !!c.autorun; _n = c.n || 7; _minScore = c.min_score ?? 7;
   _cfg = {..._CFG_DEFAULTS, ...(c.run || {})};
+  for (const k of Object.keys(_auto)) if (c[k] !== undefined) _auto[k] = c[k];
+  LS.set('ideas:auto', _auto);
   LS.set('ideas:diverse', _diverse); LS.set('ideas:autorun', _autoRun); LS.set('ideas:config', _cfg); LS.set('ideas:n', _n); LS.set('ideas:minscore', _minScore);
 }
 
 let _saveT = null;
 function _persist() {                       // every change is saved on the server (debounced), so any browser and the unattended auto-queue see it
-  LS.set('ideas:diverse', _diverse); LS.set('ideas:autorun', _autoRun); LS.set('ideas:config', _cfg); LS.set('ideas:n', _n); LS.set('ideas:minscore', _minScore);
+  LS.set('ideas:diverse', _diverse); LS.set('ideas:autorun', _autoRun); LS.set('ideas:config', _cfg); LS.set('ideas:n', _n); LS.set('ideas:minscore', _minScore); LS.set('ideas:auto', _auto);
   clearTimeout(_saveT);
-  _saveT = setTimeout(() => call('/config', {method:'PUT', json:{autorun:_autoRun, diverse:_diverse, n:_n, min_score:_minScore, run:_cfg}})
+  _saveT = setTimeout(() => call('/config', {method:'PUT', json:{autorun:_autoRun, diverse:_diverse, n:_n, min_score:_minScore, run:_cfg, ..._auto}})
     .catch(e => toast('Settings not saved: ' + e.message, {bad:true})), 300);
 }
 
@@ -121,9 +145,9 @@ function _saveCfg() { _persist(); }
 function _syncCfgLock() {
   const panel = document.getElementById('id-cfg');
   if (!panel) return;
-  panel.classList.toggle('id-cfg-locked', _autoRun);
+  panel.classList.toggle('id-cfg-locked', _auto.autopilot);
   document.querySelectorAll('.id-cfg-cell select, .id-cfg-cell input').forEach(el => {
-    el.disabled = _autoRun;
+    el.disabled = _auto.autopilot;
   });
 }
 
@@ -193,14 +217,115 @@ function _cfgHtml() {
         <option value=""${_cfg.upscale===''?' selected':''}>1080p (1080×1920)</option>
       </select>`)}
     </div>
-    <div class="id-cfg-foot">
-      <label class="id-autorun-label" title="When ON: queueing a conditioned idea will also auto-run the full pipeline (plan → voice → pictures → clips → 2K → final). Settings above are locked until you turn Auto-run OFF.">
-        <input type="checkbox" id="id-autorun" ${_autoRun ? 'checked' : ''}>
-        <span>Auto-run after queue</span>
-      </label>
-      <label class="small" title="Only conditioned ideas scored at least this are queued by Auto-run">Min score <input type="number" id="id-minscore" min="0" max="10" step="0.5" value="${_minScore}" style="width:64px;font:inherit;font-size:13px;padding:2px 6px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--ink)"></label>
-      <span class="small mute">${_autoRun ? 'Auto-run is ON (saved on the server): every minute, when the machine is free, the best conditioned idea scoring at least the minimum is queued and run. Settings locked.' : 'When ON, conditioned ideas are queued and run by themselves, one at a time. Settings lock.'}</span>
+    <div class="id-cfg-foot" style="display:block">
+      <div class="small mute" style="margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:.05em">Picture styles <span style="text-transform:none;font-weight:400">— ideas and shorts use only the ticked styles, rotating; none ticked = any</span></div>
+      <div class="id-chips" id="id-styles">${_stylesHtml()}</div>
     </div>`;
+}
+
+function _stylesHtml() {
+  const list = ((_options && _options.visual_styles) || []).filter(m => m.id);
+  if (!list.length) return '<span class="mute small">Loading styles…</span>';
+  return list.map(m => {
+    const on = _auto.styles.includes(m.id);
+    return `<label class="id-chip ${on ? 'on' : ''}" title="${esc(m.description || '')}"><input type="checkbox" data-style="${esc(m.id)}" ${on ? 'checked' : ''} ${_auto.autopilot ? 'disabled' : ''}>${esc(m.label)}</label>`;
+  }).join('');
+}
+
+// ── autopilot panel: master switch, schedule, queues ──────────────────────────
+
+function _until(ts) {                       // "in 12m" from a server timestamp (corrected by the clock difference read with it)
+  const left = ts - (_ap ? _ap.now : Date.now() / 1000) - (Date.now() / 1000 - _apAt);
+  return left <= 0 ? 'due now' : 'in ' + hd(left);
+}
+
+function _autoHtml() {
+  const a = _auto, on = a.autopilot, c = (_ap && _ap.counts) || {}, run = _ap && _ap.running || {};
+  const num = (id, v, min, max, step) => `<input type="number" id="${id}" value="${v}" min="${min}" max="${max}" step="${step || 1}">`;
+  const sw = (id, label, checked, extra, next) => `<div class="it"><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="${id}" ${checked ? 'checked' : ''}> ${label}</label>${extra || ''}${next ? `<div class="nx">${next}</div>` : ''}</div>`;
+  const nextGen = on && a.auto_generate && _ap ? 'next batch ' + _until(_ap.next_gen_at) : '';
+  const nextMake = on && _autoRun && _ap ? 'next short ' + _until(_ap.next_make_at) : '';
+  const q = (label, n, cls) => `<span class="${cls || ''}">${label} <b>${n || 0}</b></span>`;
+  return `<div class="id-auto-top">
+      <label class="id-autorun-label" title="OFF: nothing runs by itself. ON: the switches below run in sequence, one job at a time (the gateway key serves one request at a time).">
+        <input type="checkbox" id="ap-master" ${on ? 'checked' : ''}><span class="big">Autopilot — full automated pipeline</span></label>
+      <span class="badge ${on ? 'good' : ''}">${on ? 'ON' : 'OFF'}</span>
+      <span class="sp"></span>
+      <span class="mute small">${on ? (run.busy ? (run.kind === 'short' ? 'A short is being made now' : 'An ideas job is running') : 'Idle: waiting for the next step') : 'Nothing runs by itself'}</span>
+    </div>
+    <div class="id-auto-grid">
+      ${sw('ap-gen', 'Generate ideas every', a.auto_generate, `${num('ap-gen-h', a.gen_every_h, 0.25, 48, 0.25)} h × ${num('ap-gen-n', a.gen_n, 1, 15)} ideas (web search, duplicates removed, rated)`, nextGen)}
+      ${sw('ap-appr', 'Auto-approve scoring at least', a.auto_approve, num('ap-appr-min', a.approve_min, 0, 10, 0.1))}
+      ${sw('ap-cond', 'Write the brief (condition) for approved ideas, best first', a.auto_condition)}
+      ${sw('id-autorun', 'Make a short every', _autoRun, `${num('ap-make-h', a.make_every_h, 0.25, 48, 0.25)} h, scoring at least ${num('id-minscore', _minScore, 0, 10, 0.5)}`, nextMake)}
+      <div class="it"><span>Pause making when</span>${num('ap-review', a.review_cap, 0, 100)}<span>finished shorts wait for your review (0 = no limit)</span></div>
+      <div class="it"><span>Keep at most</span>${num('ap-pending', a.pending_cap, 1, 500)}<span>ideas waiting for approval</span></div>
+    </div>
+    <div class="id-q">
+      ${q('To approve', c.pending)}${q('To condition', c.approved)}${q('To make', c.conditioned)}
+      ${run.busy && run.kind === 'short' ? `<span class="run">Making now: <a href="#/short/${esc(run.short_id)}">${esc(run.short_id)}</a></span>` : q('Making', 0)}
+      ${q('Waiting for review', c.waiting_review + (a.review_cap ? ' / ' + a.review_cap : ''))}${q('Rejected', c.rejected)}
+      <span class="sp"></span>
+      <button class="small" id="ap-run-gen" title="Run one batch now">Generate now</button>
+      <button class="small" id="ap-run-cond" title="Write the brief of the best approved idea now">Condition next</button>
+      <button class="small" id="ap-run-make" title="Make a short of the best conditioned idea now">Make next</button>
+    </div>`;
+}
+
+function _wireAuto() {
+  const el = document.getElementById('id-auto');
+  if (!el) return;
+  const flag = (id, key) => { const e = document.getElementById(id); if (e) e.onchange = () => { _auto[key] = e.checked; _persist(); _drawAuto(); }; };
+  const numf = (id, key, lo, hi, set) => { const e = document.getElementById(id); if (e) e.onchange = () => { const v = Math.max(lo, Math.min(hi, parseFloat(e.value) || lo)); e.value = v; set ? set(v) : (_auto[key] = v); _persist(); }; };
+  flag('ap-master', 'autopilot'); flag('ap-gen', 'auto_generate'); flag('ap-appr', 'auto_approve'); flag('ap-cond', 'auto_condition');
+  const ar = document.getElementById('id-autorun');
+  if (ar) ar.onchange = () => { _autoRun = ar.checked; _persist(); _drawAuto(); _render(); };
+  numf('ap-gen-h', 'gen_every_h', 0.25, 48); numf('ap-gen-n', 'gen_n', 1, 15); numf('ap-appr-min', 'approve_min', 0, 10);
+  numf('ap-make-h', 'make_every_h', 0.25, 48); numf('id-minscore', '', 0, 10, v => { _minScore = v; });
+  numf('ap-review', 'review_cap', 0, 100); numf('ap-pending', 'pending_cap', 1, 500);
+  const run = async (btn, stage) => {
+    await act(btn, async () => { _ap = await call('/autopilot/run', {method:'POST', json:{stage}}); _apAt = Date.now() / 1000; _poll(); }, stage === 'make' ? 'Short queued and started' : 'Started');
+    _drawAuto();
+  };
+  const g = document.getElementById('ap-run-gen'), c = document.getElementById('ap-run-cond'), m = document.getElementById('ap-run-make');
+  if (g) g.onclick = () => run(g, 'generate');
+  if (c) c.onclick = () => run(c, 'condition');
+  if (m) m.onclick = () => run(m, 'make');
+}
+
+function _drawAuto() {
+  const el = document.getElementById('id-auto');
+  if (!el) return;
+  el.className = 'id-auto' + (_auto.autopilot ? ' on' : '');
+  el.innerHTML = _autoHtml();
+  _wireAuto();
+  _syncCfgLock();
+  const st = document.getElementById('id-styles');
+  if (st) st.innerHTML = _stylesHtml(), _wireStyles();
+}
+
+function _wireStyles() {
+  document.querySelectorAll('#id-styles input[data-style]').forEach(e => e.onchange = () => {
+    _auto.styles = [...document.querySelectorAll('#id-styles input[data-style]:checked')].map(x => x.dataset.style);
+    e.closest('.id-chip').classList.toggle('on', e.checked);
+    _persist();
+  });
+}
+
+async function _refreshAuto() {             // queues, schedule and new ideas written while this screen is open
+  try {
+    _ap = await call('/autopilot'); _apAt = Date.now() / 1000;
+    if (!document.getElementById('id-auto')) return;
+    const keep = document.activeElement && document.activeElement.closest && document.activeElement.closest('#id-auto');
+    if (!keep) _drawAuto();
+    const list = await call('');
+    if (list.length !== _ideas.length || list.some((i, k) => _ideas[k] && (i.status !== _ideas[k].status || i.updated_at !== _ideas[k].updated_at))) {
+      _ideas = list; _render();
+    }
+    const j = await call('/run');
+    if (j.state === 'running' && !(_job && _job.state === 'running' && _pollGen)) { _job = j; _poll(); }
+    else if (j.state !== 'running' && _job && _job.state === 'running') { _job = j; _renderProg(); }
+  } catch(e) { /* a hiccup: next tick */ }
 }
 
 // ── panel renderers ───────────────────────────────────────────────────────────
@@ -276,6 +401,8 @@ function renderCard(idea) {
     actions.push(`<button class="primary small" ${busy?'disabled':''} onclick="idQueue('${idea.id}')">${busy?'<span class="spin"></span> Queuing…': (_autoRun ? '→ Queue + Auto-run' : '→ Queue')}</button>`);
   if (idea.status === 'queued' && idea.short_id)
     actions.push(`<a class="btn small" href="#/short/${idea.short_id}">Open short →</a>`);
+  if (idea.status === 'queued')
+    actions.push(`<button class="small ${idea.reviewed ? '' : 'primary'}" onclick="idReviewed('${idea.id}', ${idea.reviewed ? 'false' : 'true'})">${idea.reviewed ? 'Reviewed ✓ (undo)' : 'Mark reviewed'}</button>`);
   if (idea.status !== 'queued')
     actions.push(`<button class="small bad" onclick="idDelete('${idea.id}')">Delete</button>`);
   if (hasSc) actions.push(`<button class="small link" onclick="idToggle('${idea.id}','score')">${exp==='score'?'Hide score':'Score detail'}</button>`);
@@ -290,10 +417,13 @@ function renderCard(idea) {
     <div class="id-mech">${mechBadges(idea.mechanisms)}</div>
     <div class="row" style="gap:8px;flex-wrap:wrap">
       ${badge(statusKey, idea.status)}
+      ${idea.auto && idea.status !== 'rejected' ? '<span class="badge">auto-approved</span>' : ''}${idea.style ? `<span class="badge">${esc(idea.style)}</span>` : ''}
       ${idea.engagement_score ? `<span class="id-score ${scoreClass(idea.engagement_score)}">★ ${idea.engagement_score.toFixed(1)}</span>` : ''}
       ${busy ? '<span class="mute small"><span class="spin"></span> working…</span>' : ''}
     </div>
     ${idea.premise ? `<p class="small mute" style="margin:6px 0 0">${esc(idea.premise)}</p>` : ''}
+    ${(idea.sources || []).length ? `<div class="id-src"><span class="mute">Sources:</span> ${idea.sources.map(x => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc((x.title || x.url).slice(0, 60))}</a>`).join('')}</div>` : ''}
+    ${idea.reject_reason ? `<div class="id-why">${esc(idea.reject_reason)}${idea.dup_of ? ` (<a href="javascript:void(0)" onclick="idJump('${esc(idea.dup_of)}')">see the earlier idea</a>)` : ''}</div>` : ''}
     <div class="id-actions">${actions.join('')}</div>
     ${expandPanel}
   </div>`;
@@ -319,6 +449,20 @@ function _render() {
 // ── window actions (called from onclick in generated HTML) ────────────────────
 
 window.idTab = t => { _tab = t; _render(); };
+
+window.idReviewed = async (id, reviewed) => {
+  try {
+    const r = await call(`/${id}/reviewed`, {method:'POST', json:{reviewed}});
+    _ideas = _ideas.map(i => i.id === id ? r : i);
+    _render(); _refreshAuto();
+  } catch(e) { toast(e.message, {bad:true}); }
+};
+
+window.idJump = id => {
+  _tab = 'all'; _render();
+  const el = document.getElementById('card-' + id);
+  if (el) { el.scrollIntoView({behavior:'smooth', block:'center'}); el.classList.add('id-new'); }
+};
 
 window.idToggle = (id, mode) => {
   if (!mode) return;
@@ -419,20 +563,6 @@ function _wireCfg() {
   bind('cfg-tone',     'tone_id');
   bind('cfg-edge',     'edge');
   bind('cfg-upscale',  'upscale');
-  const ms = document.getElementById('id-minscore');
-  if (ms) ms.onchange = () => { _minScore = Math.max(0, Math.min(10, parseFloat(ms.value) || 0)); ms.value = _minScore; _persist(); };
-
-  const ar = document.getElementById('id-autorun');
-  if (ar) ar.onchange = e => {
-    _autoRun = e.target.checked;
-    _persist();
-    // re-render config panel to update hint text and lock state
-    const cfgEl = document.getElementById('id-cfg');
-    if (cfgEl) cfgEl.innerHTML = _cfgHtml();
-    _wireCfg();
-    _syncCfgLock();
-    _render(); // update queue button labels
-  };
   _syncCfgLock();
 }
 
@@ -459,11 +589,16 @@ window.viewIdeas = async function() {
       <button onclick="location.hash='#/shorts'">← Shorts</button>
     </div>
     <div id="id-prog"></div>
+    <div class="id-auto" id="id-auto"></div>
     <div class="id-cfg" id="id-cfg">${_cfgHtml()}</div>
     <div class="id-tabs" id="id-tabs"></div>
     <div id="id-list"><div class="pad"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div></div>`;
 
   _wireCfg();
+  _drawAuto();
+  clearInterval(_apTimer);
+  const mine = route_id;
+  _apTimer = setInterval(() => { if (mine !== route_id || !document.getElementById('id-auto')) { clearInterval(_apTimer); return; } _refreshAuto(); }, 15000);
 
   document.getElementById('id-diverse').onchange = e => { _diverse = e.target.checked; _persist(); };
   document.getElementById('id-n').onchange = e => { _n = parseInt(e.target.value) || 7; _persist(); };
@@ -495,7 +630,9 @@ window.viewIdeas = async function() {
   document.getElementById('id-diverse').checked = _diverse;
   // Re-render config panel now that we have live voices/languages
   const cfgEl = document.getElementById('id-cfg');
-  if (cfgEl) { cfgEl.innerHTML = _cfgHtml(); _wireCfg(); }
+  if (cfgEl) { cfgEl.innerHTML = _cfgHtml(); _wireCfg(); _wireStyles(); }
+  _drawAuto();
+  _refreshAuto();
   _seen = new Set(_ideas.map(i => i.id));
   _render();
   _renderProg();

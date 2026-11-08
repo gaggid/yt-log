@@ -190,6 +190,11 @@ class FakeChat:
         elif task == "p4_still":
             ids = re.search(r"Write the pictures of: ([^.]+)\.", messages[1]["content"]).group(1).split(", ")
             body = {"shots": [{"id": i, "still": self.still_text or f"Close-up of one courier holding one wallet beside a rusty bus stop, picture {i}, a single streetlight behind him.", "must_show": ["exactly 1 courier", "wallet in his hand"]} for i in ids]}
+        elif task == "p4_publish":
+            body = {"title": "Why a courier returned the wallet with one lakh rupees inside",
+                    "description": ("A courier finds a wallet with one lakh rupees on a rainy street. What he does next is the real story. " * 3) + "\n\nWould you give it back? Follow for more true stories.\n#Shorts #story",
+                    "hashtags": ["shorts", "#Wallet Story", "courier"],
+                    "tags": ["courier story", "lost wallet", "honesty story", "hindi story", "short story", "rainy night", "one lakh rupees", "moral story"]}
         elif task == "music_plan":
             body = {"genre": "ambient", "moods": ["gentle"], "bpm": 78, "instruments": ["soft piano", "warm pad"], "why": "A gentle bed under the story."}
         elif task == "p4_shotlist":

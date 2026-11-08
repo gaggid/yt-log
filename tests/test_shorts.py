@@ -1068,15 +1068,19 @@ def test_ideas_config_is_saved_on_the_server_and_the_job_reports_ideas_as_they_a
     assert saved["autorun"] and saved["n"] == 15 and saved["min_score"] == 6.5 and saved["run"]["voice"] == "x_voice" and saved["run"]["target_s"] == 180 and "bogus" not in saved["run"]
     assert client.get("/api/shorts/ideas/config").json() == saved
 
-    async def fake_generate(n, s, key, diverse=False, progress=None, sink=None):
+    async def fake_generate(n, s, key, diverse=False, progress=None, sink=None, sigs=None):
         for k in range(2):
             progress(k, 2, f"lens {k + 1} of 2")
-            sink.append(ideas_mod.add(f"t{k}", f"hook {k}?", ["novelty"], "p", "w"))
+            sink.append(ideas_mod.add(["Octopus hearts", "Mughal canals"][k], ["Why do octopuses have three hearts?", "How did Mughal engineers move water uphill?"][k], ["novelty"], "p", "w"))
             await asyncio.sleep(0.05)
         return list(sink)
 
     async def fake_rate(ids, s, key):
         return [ideas_mod.get(i) for i in ids]
+    async def no_signals(*a, **k):
+        return []
+    from shorts import discover
+    monkeypatch.setattr(discover, "signals", no_signals)
     monkeypatch.setattr(ideas_mod, "generate", fake_generate)
     monkeypatch.setattr(ideas_mod, "rate", fake_rate)
     r = client.post("/api/shorts/ideas/generate", json={"n": 2, "diverse": True})
@@ -1112,3 +1116,109 @@ def test_the_ideas_list_route_is_not_taken_by_the_short_id_route(client):
     ideas_mod.add("t", "hook?", [], "p", "w")
     r = client.get("/api/shorts/ideas")
     assert r.status_code == 200 and [i["hook"] for i in r.json()][-1:] == ["hook?"]
+
+
+def test_duplicates_of_any_earlier_idea_are_rejected_before_scoring(client):
+    from shorts import ideas as ideas_mod
+    old = ideas_mod.add("Octopus hearts", "Why do octopuses have three hearts and blue blood?", [], "p", "w")
+    ideas_mod.set_status(old["id"], "rejected")
+    same = ideas_mod.add("Three hearts octopus", "Why do octopuses have three hearts and blue blood really?", [], "p", "w")
+    other = ideas_mod.add("Mughal canals", "How did Mughal engineers move water uphill?", [], "p", "w")
+    dups = asyncio.run(ideas_mod.dedup([same["id"], other["id"]], {}, "k"))
+    assert dups == [same["id"]]
+    r = ideas_mod.get(same["id"])
+    assert r["status"] == "rejected" and r["dup_of"] == old["id"] and r["reject_reason"].startswith("Duplicate") and ideas_mod.get(other["id"])["status"] == "pending"
+    twin = ideas_mod.add("Mughal canals again", "How did Mughal engineers move the water uphill?", [], "p", "w")
+    assert asyncio.run(ideas_mod.dedup([twin["id"]], {}, "k")) == [twin["id"]], "a repeat of a pending idea is rejected too"
+
+
+def test_styles_come_only_from_the_ticked_list_and_rotate(client):
+    from shorts import ideas as ideas_mod
+    assert ideas_mod.pick_style([], "bright realism") == ""
+    cfg = ideas_mod.save_config({"styles": ["anime", "realism", "nonsense"]})
+    assert cfg["styles"] == ["anime", "realism"]
+    assert ideas_mod.pick_style(cfg["styles"], "Realism - bright daylight") == "realism"
+    assert ideas_mod.pick_style(cfg["styles"], "cyberpunk neon") == "anime"            # not allowed: the least used allowed style
+    i = ideas_mod.add("t", "hook", [], "p", "w")
+    from story import db
+    db.ex("UPDATE short_ideas SET style='anime' WHERE id=?", (i["id"],))
+    assert ideas_mod.pick_style(cfg["styles"], "") == "realism"
+
+
+def test_the_autopilot_starts_one_job_at_a_time_on_its_schedule(client, monkeypatch):
+    from shorts import api as shorts_api, ideas as ideas_mod
+    from story2 import jobs
+    started = []
+    monkeypatch.setattr(shorts_api, "_start_generate", lambda cfg: started.append("generate"))
+    monkeypatch.setattr(shorts_api, "_start_condition", lambda cfg: bool(started.append("condition")) or True)
+    monkeypatch.setattr(shorts_api, "_start_make", lambda cfg: started.append("make") or "sh-x")
+    tick = lambda now: asyncio.run(shorts_api.conductor_tick(now))
+    ideas_mod.save_config({"autopilot": True, "auto_generate": True, "auto_condition": True, "autorun": True, "review_cap": 1, "gen_every_h": 1, "make_every_h": 2})
+    monkeypatch.setattr(jobs, "busy", lambda: True)
+    assert tick(1000.0) is None, "never while another job runs"
+    monkeypatch.setattr(jobs, "busy", lambda: False)
+    assert tick(1000.0) == "generate" and ideas_mod.get_config()["next_gen_at"] == 1000.0 + 3600
+    assert tick(1010.0) == "condition", "the batch is not due again; an approved idea waits for its brief"
+    monkeypatch.setattr(shorts_api, "_start_condition", lambda cfg: False)
+    done = ideas_mod.add("t", "hook one two three", [], "p", "w")
+    ideas_mod.set_status(done["id"], "queued", "sh-1")                                      # one finished short waits for review: the cap is 1
+    assert tick(1020.0) is None
+    ideas_mod.mark_reviewed(done["id"])
+    assert tick(1030.0) == "make" and ideas_mod.get_config()["next_make_at"] == 1030.0 + 7200
+    assert tick(1040.0) is None, "the next short is two hours away"
+    assert started == ["generate", "condition", "make"]
+
+
+def test_the_master_switch_turns_the_whole_autopilot_off(client, monkeypatch):
+    from shorts import api as shorts_api, ideas as ideas_mod
+    from story2 import jobs
+    started = []
+    monkeypatch.setattr(shorts_api, "_start_generate", lambda cfg: started.append("generate"))
+    monkeypatch.setattr(jobs, "busy", lambda: False)
+    ideas_mod.save_config({"autopilot": False, "auto_generate": True})
+    assert asyncio.run(shorts_api.conductor_tick(5000.0)) is None and not started, "the sub-switches do nothing while the master switch is off"
+    ideas_mod.save_config({"autopilot": True})
+    assert asyncio.run(shorts_api.conductor_tick(5000.0)) == "generate"
+    assert client.get("/api/shorts/ideas/autopilot").json()["on"] is True
+
+
+def test_upload_text_is_written_cleaned_and_copy_ready(client):
+    from shorts import publish, store
+    sid = client.post("/api/shorts", json={"pipeline": "keyframe", "kind": "idea", "text": "A courier finds a wallet with a lakh rupees."}).json()["id"]
+    client.post(f"/api/shorts/{sid}/plan")
+    wait_job(client, sid)
+    r = client.post(f"/api/shorts/{sid}/publish", json={})
+    assert r.status_code == 200, r.text
+    p = r.json()
+    assert 20 <= len(p["title"]) <= publish.TITLE_MAX and "#" not in p["title"]
+    assert p["hashtags"][0] == "#Shorts" and "#WalletStory" in p["hashtags"] and len(p["hashtags"]) <= publish.HASHTAGS_MAX
+    assert p["description"].rstrip().endswith(" ".join(p["hashtags"])) and p["description"].count("#Shorts") == 1 and len(p["description"]) <= 5000
+    assert len(p["tags"]) >= 6 and p["tags_text"] == ", ".join(p["tags"]) and p["stale"] is False
+    assert client.get(f"/api/shorts/{sid}").json()["publish"]["title"] == p["title"]
+    short = store.get(sid)
+    short["beats"][0]["sentences"][0]["text"] = "Kuch aur।"
+    store.save(short)
+    assert client.get(f"/api/shorts/{sid}").json()["publish"]["stale"] is True, "the narration changed after the text was written"
+    assert publish.clean_title('"' + "word " * 30 + '"') .__len__() <= publish.TITLE_MAX
+
+
+def test_description_keeps_one_hashtag_line_and_dedup_accepts_ids_without_prefix(client, monkeypatch):
+    from shorts import ideas as ideas_mod, publish
+    d = publish.clean_description("Hook line here.\n\nFollow for more! #Shorts #India\n#Shorts #India #Facts", ["#Shorts", "#India"])
+    assert d == "Hook line here.\n\nFollow for more!\n\n#Shorts #India"
+    old = ideas_mod.add("S-400 final delivery", "Why is India's final S-400 delivery in November a game-changer?", [], "India gets the last S-400 squadron.", "")
+    new = ideas_mod.add("Last S-400 arrives", "What changes when India's last S-400 squadron arrives this month?", [], "The final S-400 system reaches India in November.", "")
+
+    class FakeCaller:
+        last_attempt = False
+
+        def __init__(self, *a, **k):
+            pass
+
+        async def call(self, system, user, model_cls, validate=None):
+            from types import SimpleNamespace
+            return SimpleNamespace(value=model_cls(results=[{"id": new["id"].removeprefix("idea-"), "same_as": old["id"].removeprefix("idea-"), "why": "same event"}]))
+    monkeypatch.setattr(ideas_mod.llm_mod, "JsonCaller", FakeCaller)
+    monkeypatch.setattr(ideas_mod.llm_mod, "ChatBackend", lambda s, k: None)
+    assert asyncio.run(ideas_mod.dedup([new["id"]], {}, "k")) == [new["id"]]
+    assert ideas_mod.get(new["id"])["dup_of"] == old["id"]

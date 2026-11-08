@@ -65,6 +65,10 @@ def model_field(s: dict) -> dict:
     return {"model": m} if m else {}
 
 
+CONCURRENCY_WAIT_S = 900.0        # how long a request waits for the one-request-at-a-time key before it gives up
+CONCURRENCY_POLL_S = 10.0
+
+
 class ChatBackend:
     """OpenAI-compatible /chat/completions. Endpoint, model and key come from settings, never hardcoded."""
 
@@ -80,10 +84,19 @@ class ChatBackend:
             payload["response_format"] = {"type": "json_object"}
         tries = max(1, int(self.s["transport_retries"]))
         err: Exception | None = None
-        for attempt in range(tries):
+        waited = 0.0
+        attempt = -1
+        while attempt < tries - 1:
+            attempt += 1
             try:
                 async with httpx.AsyncClient(timeout=self.s["timeout_s"]) as c:
                     r = await c.post(f"{self.base}/chat/completions", headers=self.headers, json=payload)
+                if r.status_code == 429 and "concurrency_limit" in r.text and waited < CONCURRENCY_WAIT_S:
+                    # the key serves one request at a time and another caller holds it: wait for it (this is not a failure, so it does not use a retry)
+                    await asyncio.sleep(CONCURRENCY_POLL_S)
+                    waited += CONCURRENCY_POLL_S
+                    attempt -= 1
+                    continue
                 if r.status_code == 429 or r.status_code >= 500:
                     err = LLMError(f"server returned {r.status_code}: {r.text[:200]}")
                 elif r.status_code >= 400:
