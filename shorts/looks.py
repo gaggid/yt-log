@@ -128,7 +128,7 @@ LIGHT = "Lit bright and clear in high-key daylight with a light, airy colour pal
 def brighten(look: str) -> str:
     """A light-theme look: the style's own words with the dark lighting words swapped for bright ones, and the daylight default said once."""
     look = re.sub(r"moody cinematic lighting", "soft bright cinematic lighting", look, flags=re.I)
-    look = re.sub(r"moody", "bright", look, flags=re.I)
+    look = re.sub(r"\bmoody\b", "bright", look, flags=re.I)
     return look if LIGHT in look else f"{look} {LIGHT}"
 
 

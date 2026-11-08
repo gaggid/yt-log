@@ -1222,3 +1222,124 @@ def test_description_keeps_one_hashtag_line_and_dedup_accepts_ids_without_prefix
     monkeypatch.setattr(ideas_mod.llm_mod, "ChatBackend", lambda s, k: None)
     assert asyncio.run(ideas_mod.dedup([new["id"]], {}, "k")) == [new["id"]]
     assert ideas_mod.get(new["id"])["dup_of"] == old["id"]
+
+
+def test_web_signals_use_search_the_now_tool_and_full_pages(client, monkeypatch):
+    import random
+    from datetime import datetime
+    from shorts import discover
+    calls = []
+
+    async def fake_post(c, base, key, name, body):
+        calls.append((name, body))
+        if name == "now":
+            return {"data": {"iso": "2026-11-08T10:34:37+05:30"}}
+        if name == "web_search":
+            q = body["query"]
+            return {"data": {"results": [{"title": f"{q} one", "url": f"https://x.test/{abs(hash(q)) % 999}/1", "snippet": "a   snippet"}, {"title": f"{q} two", "url": f"https://x.test/{abs(hash(q)) % 999}/2", "snippet": ""}]}}
+        if name == "fetch_url":
+            return {"result": "Title: t\nURL: u\n\n" + "A real page about the topic. " * 20}
+        return {}
+    monkeypatch.setattr(discover, "_post_tool", fake_post)
+    sigs = asyncio.run(discover.signals({"base_url": "http://gw/v1"}, "k", rnd=random.Random(1)))
+    names = [n for n, _ in calls]
+    assert names[0] == "now" and names.count("web_search") == discover.QUERIES_PER_RUN and names.count("fetch_url") == discover.PAGES_PER_RUN
+    assert [x["n"] for x in sigs] == list(range(1, len(sigs) + 1)) and len(sigs) <= discover.MAX_SIGNALS
+    detailed = [x for x in sigs if x.get("detail")]
+    assert len(detailed) == discover.PAGES_PER_RUN and all(len(x["detail"]) <= discover.DETAIL_CHARS and not x["detail"].startswith("Title") for x in detailed)
+    assert "November" in " ".join(q["query"] for n, q in calls if n == "web_search"), "queries use the date from the now tool"
+    text = discover.block(sigs)
+    assert "page: A real page" in text and "WEB SIGNALS" in text and discover.block([]) == ""
+    assert discover.pick(sigs, [2, 2, 99, "x"]) == [{"title": sigs[1]["title"], "url": sigs[1]["url"]}]
+    assert discover.queries(datetime(2026, 11, 8), random.Random(0))[:2] == ["India news today", "on this day in history November 8"]
+
+
+def test_web_search_down_means_no_signals_not_an_error(client, monkeypatch):
+    from shorts import discover
+
+    async def broken(*a, **k):
+        raise RuntimeError("search is down")
+    monkeypatch.setattr(discover, "_search", broken)
+    monkeypatch.setattr(discover, "RETRY_EMPTY_S", 0)
+    monkeypatch.setattr(discover, "_post_tool", lambda *a, **k: asyncio.sleep(0, result={}))
+    assert asyncio.run(discover.signals({"base_url": "http://gw/v1"}, "k")) == []
+
+
+def test_schedule_and_failures_survive_a_restart_and_a_chosen_idea_can_run_now(client, monkeypatch):
+    from shorts import api as shorts_api, ideas as ideas_mod
+    from story2 import jobs
+    ideas_mod.save_config({"autopilot": True, "auto_condition": True})
+    ideas_mod.set_state(next_gen_at=123456.0, next_make_at=234567.0)
+    cfg = ideas_mod.get_config()                                       # read straight from the database, as a restarted app would
+    assert cfg["next_gen_at"] == 123456.0 and cfg["next_make_at"] == 234567.0 and cfg["autopilot"] is True
+    a = ideas_mod.add("A", "hook a one two", [], "p", "w")
+    b = ideas_mod.add("B", "hook b three four", [], "p", "w")
+    for i, sc in ((a, 9.0), (b, 8.0)):
+        ideas_mod.save_score(i["id"], sc, {})
+        ideas_mod.set_status(i["id"], "approved")
+    assert ideas_mod.next_to_condition()["id"] == a["id"]
+    ideas_mod.bump_cond_fail(a["id"])
+    ideas_mod.bump_cond_fail(a["id"])
+    assert ideas_mod.get(a["id"])["cond_fails"] == 2 and ideas_mod.next_to_condition()["id"] == b["id"], "an idea whose brief failed twice is left alone, even after a restart"
+    started = []
+
+    def fake_start(kind, work):
+        started.append(kind)
+        return {}
+    monkeypatch.setattr(shorts_api, "_start_idea_job", fake_start)
+    monkeypatch.setattr(jobs, "busy", lambda: False)
+    r = client.post("/api/shorts/ideas/autopilot/run", json={"stage": "condition", "idea_id": a["id"]})
+    assert r.status_code == 200 and started == ["condition"], "a chosen idea runs even after failures"
+    assert client.post("/api/shorts/ideas/autopilot/run", json={"stage": "make", "idea_id": a["id"]}).status_code == 400, "not conditioned yet"
+    pend = ideas_mod.add("C", "hook c five six", [], "p", "w")
+    assert client.post("/api/shorts/ideas/autopilot/run", json={"stage": "condition", "idea_id": pend["id"]}).status_code == 400
+    ideas_mod.save_conditioning(a["id"], {"refined_hook": "h"})
+    assert ideas_mod.get(a["id"])["cond_fails"] == 0, "a brief that works clears the failures"
+
+
+def test_queues_and_upload_text_reach_the_ideas_screen(client):
+    from shorts import ideas as ideas_mod, store
+    x = ideas_mod.add("X", "hook x seven eight", [], "p", "w")
+    y = ideas_mod.add("Y", "hook y nine ten", [], "p", "w")
+    for i, sc in ((x, 8.0), (y, 9.5)):
+        ideas_mod.save_score(i["id"], sc, {})
+        ideas_mod.save_conditioning(i["id"], {"refined_hook": "h", "narrative_arc": [], "key_facts": []})
+    sh = store.create("Made", "keyframe", {"kind": "idea", "text": "t"}, {})
+    sh["beats"] = [{"id": "b1", "name": "n", "sentences": [{"text": "Ek।", "tag": ""}], "shot_ids": []}]
+    sh["status"] = "made"
+    from shorts import publish
+    sh["publish"] = {"title": "A title that is long enough", "description": "d\n\n#Shorts", "hashtags": ["#Shorts"], "tags": ["a"], "for": publish.narration_hash(sh)}
+    store.save(sh)
+    ideas_mod.set_status(ideas_mod.add("Z", "hook z one two three", [], "p", "w")["id"], "queued", sh["id"])
+    q = client.get("/api/shorts/ideas/autopilot").json()["queues"]
+    assert [i["id"] for i in q["conditioned"]] == [y["id"], x["id"]], "best score first"
+    assert q["queued"][0]["short_status"] == "made" and q["queued"][0]["publish"]["title"].startswith("A title") and q["queued"][0]["publish"]["stale"] is False
+    listed = [i for i in client.get("/api/shorts/ideas").json() if i["status"] == "queued"]
+    assert listed[0]["publish"]["tags_text"] == "a" and listed[0]["short_status"] == "made"
+    assert ideas_mod.get_config()["styles"] == list(ideas_mod.BRIGHT_STYLES), "bright styles are ticked until the person chooses"
+
+
+def test_the_visual_direction_always_names_an_allowed_style(client):
+    from shorts import ideas as ideas_mod
+    allowed = ["anime", "realism"]
+    assert ideas_mod.direction_with_style("Cinematic realism - deep blues", allowed) == "Cinematic realism - deep blues"
+    out = ideas_mod.direction_with_style("Dark noir chiaroscuro", allowed)
+    assert out.startswith("anime - bright natural light") and "Dark noir chiaroscuro" in out
+    assert ideas_mod.direction_with_style("anything", []) == "anything"
+
+
+def test_an_empty_search_is_tried_once_more(client, monkeypatch):
+    from shorts import discover
+    seen = {}
+
+    async def flaky(c, base, key, query):
+        seen[query] = seen.get(query, 0) + 1
+        return [] if seen[query] == 1 else [{"title": "t " + query, "url": "https://x.test/" + query.replace(" ", "-"), "snippet": "s", "query": query}]
+
+    async def no_tool(*a, **k):
+        return {}
+    monkeypatch.setattr(discover, "_search", flaky)
+    monkeypatch.setattr(discover, "_post_tool", no_tool)
+    monkeypatch.setattr(discover, "RETRY_EMPTY_S", 0)
+    sigs = asyncio.run(discover.signals({"base_url": "http://gw/v1"}, "k"))
+    assert len(sigs) == discover.QUERIES_PER_RUN and all(v == 2 for v in seen.values())

@@ -179,7 +179,21 @@ async def cancel(short_id: str):
 
 @router.get("/ideas")                      # before "/{short_id}", which would answer "no such short: ideas"
 async def ideas_list():
-    return ideas_mod.listing()
+    out = ideas_mod.listing()
+    for i in out:
+        if i["status"] == "queued" and i.get("short_id"):
+            _add_short_info(i)
+    return out
+
+
+def _add_short_info(i: dict) -> None:
+    """The made short's status and its YouTube upload text, so an idea card can show them."""
+    try:
+        sh = store.get(i["short_id"])
+    except store.ShortError:
+        i["short_status"], i["publish"] = "deleted", None
+        return
+    i["short_status"], i["publish"] = sh.get("status", "new"), publish.view(sh)
 
 
 @router.get("/{short_id}")
@@ -1189,17 +1203,18 @@ async def ideas_queue(idea_id: str, body: _QueueReq):
 
 
 TICK_S = 30
-_cond_fail: dict[str, int] = {}                  # idea id -> failed conditioning runs (an idea that keeps failing is left alone)
 
 
 def _start_generate(cfg: dict) -> None:
     _start_idea_job("generate", _generate_work(int(cfg["gen_n"]), bool(cfg["diverse"])))
 
 
-def _start_condition(cfg: dict) -> bool:
-    nxt = ideas_mod.next_to_condition(skip={k for k, v in _cond_fail.items() if v >= 2})
+def _start_condition(cfg: dict, idea_id: str = "") -> bool:
+    nxt = ideas_mod.get(idea_id) if idea_id else ideas_mod.next_to_condition()
     if not nxt:
         return False
+    if nxt["status"] not in ("approved", "conditioned"):
+        raise ValueError("the idea must be approved first")
     s, key = settings_mod.get(), settings_mod.api_key()
 
     async def work(progress):
@@ -1207,7 +1222,7 @@ def _start_condition(cfg: dict) -> bool:
         try:
             await ideas_mod.condition(nxt["id"], s, key, styles=cfg["styles"])
         except Exception:
-            _cond_fail[nxt["id"]] = _cond_fail.get(nxt["id"], 0) + 1
+            ideas_mod.bump_cond_fail(nxt["id"])
             raise
         return "brief written"
 
@@ -1215,9 +1230,9 @@ def _start_condition(cfg: dict) -> bool:
     return True
 
 
-def _start_make(cfg: dict) -> str:
-    """Queue the best conditioned idea scoring at least `min_score` and start its pipeline. Returns the short id, or '' when nothing is ready."""
-    nxt = ideas_mod.next_for_autoqueue(float(cfg["min_score"]))
+def _start_make(cfg: dict, idea_id: str = "") -> str:
+    """Queue the best conditioned idea scoring at least `min_score` (or the chosen one) and start its pipeline. Returns the short id, or '' when nothing is ready."""
+    nxt = ideas_mod.get(idea_id) if idea_id else ideas_mod.next_for_autoqueue(float(cfg["min_score"]))
     if not nxt:
         return ""
     out = _queue_idea(nxt["id"], cfg["run"].get("pipeline") or "keyframe", _run_settings(cfg["run"]), True)
@@ -1270,7 +1285,10 @@ async def ideas_autopilot():
     cfg = ideas_mod.get_config()
     running = jobs.busy()
     who = jobs._current.get("plan_id") if running else ""
-    return {"now": time.time(), "on": cfg["autopilot"], "counts": ideas_mod.counts(), "next_gen_at": cfg["next_gen_at"], "next_make_at": cfg["next_make_at"],
+    qs = ideas_mod.queues()
+    for i in qs["queued"]:
+        _add_short_info(i) if i.get("short_id") else None
+    return {"now": time.time(), "on": cfg["autopilot"], "counts": ideas_mod.counts(), "queues": qs, "next_gen_at": cfg["next_gen_at"], "next_make_at": cfg["next_make_at"],
             "running": {"busy": bool(running), "kind": "ideas" if who == _IDEAS_JOB else ("short" if who else ""), "short_id": who if who and who != _IDEAS_JOB else ""},
             "review_cap": cfg["review_cap"]}
 
@@ -1296,6 +1314,7 @@ async def publish_write(short_id: str, body: _PublishReq):
 
 class _StageReq(BaseModel):
     stage: str
+    idea_id: str = ""                    # run the stage for this idea instead of the best one
 
 
 @router.post("/ideas/autopilot/run")
@@ -1307,10 +1326,17 @@ async def ideas_autopilot_run(body: _StageReq):
     if body.stage == "generate":
         _start_generate(cfg)
     elif body.stage == "condition":
-        if not _start_condition(cfg):
+        try:
+            started = _start_condition(cfg, body.idea_id)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        if not started:
             raise HTTPException(400, "no approved idea waits for a brief")
     elif body.stage == "make":
-        sid = _start_make(cfg)
+        try:
+            sid = _start_make(cfg, body.idea_id)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
         if not sid:
             raise HTTPException(400, f"no conditioned idea scores {cfg['min_score']:g} or more")
         ideas_mod.set_state(next_make_at=time.time() + cfg["make_every_h"] * 3600)

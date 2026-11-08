@@ -10,6 +10,10 @@ QUERY_TIMEOUT_S = 60
 MAX_SIGNALS = 36
 SNIPPET_CHARS = 220
 QUERIES_PER_RUN = 6
+RETRY_EMPTY_S = 2.0
+PAGES_PER_RUN = 4                 # full pages read with fetch_url (the first result of the first queries)
+PAGE_CHARS = 1400                 # asked of fetch_url
+DETAIL_CHARS = 700                # kept per page for the prompt
 CONCURRENCY_POLLS = 30
 
 # Short queries work best (a long one can return nothing). {month} = "November", {year} = 2026, {day} = 8. The first two are always used, the rest are rotated.
@@ -39,27 +43,75 @@ def queries(now: datetime | None = None, rnd: random.Random | None = None) -> li
 
 
 async def _search(client: httpx.AsyncClient, base: str, key: str, query: str) -> list[dict]:
-    for _ in range(CONCURRENCY_POLLS):                # another caller may hold the key (one request at a time): wait for it
-        r = await client.post(f"{base.rstrip('/')}/tools/web_search", json={"query": query}, headers={"Authorization": f"Bearer {key}"}, timeout=QUERY_TIMEOUT_S)
-        if r.status_code == 429 and "concurrency_limit" in r.text:
-            await asyncio.sleep(10)
-            continue
-        break
-    if r.status_code != 200:
-        return []
-    rows = ((r.json().get("data") or {}).get("results")) or []
+    rows = ((await _post_tool(client, base, key, "web_search", {"query": query})).get("data") or {}).get("results") or []
     return [{"title": (x.get("title") or "").strip(), "url": (x.get("url") or "").strip(), "snippet": " ".join((x.get("snippet") or "").split())[:SNIPPET_CHARS], "query": query}
             for x in rows if x.get("title") and x.get("url")]
 
 
+async def _post_tool(client: httpx.AsyncClient, base: str, key: str, name: str, body: dict) -> dict:
+    """POST {base}/tools/{name}; waits while another caller holds the one-request-at-a-time key. Returns the JSON answer, {} on any failure."""
+    r = None
+    for _ in range(CONCURRENCY_POLLS):
+        r = await client.post(f"{base.rstrip('/')}/tools/{name}", json=body, headers={"Authorization": f"Bearer {key}"}, timeout=QUERY_TIMEOUT_S)
+        if r.status_code == 429 and "concurrency_limit" in r.text:
+            await asyncio.sleep(10)
+            continue
+        break
+    return r.json() if r is not None and r.status_code == 200 else {}
+
+
+async def today(s: dict, key: str) -> datetime:
+    """The date in India from the gateway's `now` tool (the server clock when the tool is unavailable)."""
+    try:
+        async with httpx.AsyncClient() as client:
+            iso = ((await _post_tool(client, s["base_url"], key, "now", {"timezone": "Asia/Kolkata"})).get("data") or {}).get("iso")
+        if iso:
+            return datetime.fromisoformat(iso).replace(tzinfo=None)
+    except Exception as e:  # noqa: BLE001
+        print(f"[ideas] now tool failed: {e}", flush=True)
+    return datetime.now()
+
+
+def _page_text(res: dict) -> str:
+    """The readable part of a fetch_url answer: its text without the Title/URL header lines."""
+    text = str(res.get("result") or "")
+    lines = [ln for ln in text.split("\n") if ln.strip() and not ln.startswith(("Title:", "URL:"))]
+    return " ".join(" ".join(lines).split())[:DETAIL_CHARS]
+
+
+async def _read_pages(client: httpx.AsyncClient, base: str, key: str, sigs: list[dict], first_of: list[str]) -> None:
+    """Add `detail` (the start of the page) to the first result of each of the first queries, so the ideas rest on more than a snippet."""
+    done = 0
+    for q in first_of:
+        if done >= PAGES_PER_RUN:
+            break
+        x = next((v for v in sigs if v.get("query") == q), None)
+        if not x:
+            continue
+        try:
+            res = await _post_tool(client, base, key, "fetch_url", {"url": x["url"], "max_chars": PAGE_CHARS})
+        except Exception as e:  # noqa: BLE001 - a page that cannot be read is skipped
+            print(f"[ideas] fetch '{x['url']}' failed: {e}", flush=True)
+            continue
+        text = _page_text(res)
+        if len(text) > 120:
+            x["detail"] = text
+            done += 1
+
+
 async def signals(s: dict, key: str, now: datetime | None = None, rnd: random.Random | None = None) -> list[dict]:
-    """Numbered web signals [{n, title, url, snippet}]; [] when search is unavailable (a failed query is skipped, never raised)."""
+    """Numbered web signals [{n, title, url, snippet, detail?}]; [] when search is unavailable (a failed query is skipped, never raised)."""
     out: list[dict] = []
     seen: set[str] = set()
+    now = now or await today(s, key)
+    qs = queries(now, rnd)
     async with httpx.AsyncClient() as client:
-        for q in queries(now, rnd):
+        for q in qs:
             try:
                 rows = await _search(client, s["base_url"], key, q)
+                if not rows:                                       # the search engine sometimes answers nothing at once; one more try
+                    await asyncio.sleep(RETRY_EMPTY_S)
+                    rows = await _search(client, s["base_url"], key, q)
             except Exception as e:  # noqa: BLE001 - search is a bonus, never a reason to stop
                 print(f"[ideas] search '{q}' failed: {e}", flush=True)
                 continue
@@ -67,15 +119,16 @@ async def signals(s: dict, key: str, now: datetime | None = None, rnd: random.Ra
                 if x["url"] not in seen:
                     seen.add(x["url"])
                     out.append(x)
-    out = out[:MAX_SIGNALS]
-    return [{"n": i + 1, **{k: x[k] for k in ("title", "url", "snippet")}} for i, x in enumerate(out)]
+        out = out[:MAX_SIGNALS]
+        await _read_pages(client, s["base_url"], key, out, qs)
+    return [{"n": i + 1, **{k: x[k] for k in ("title", "url", "snippet", "detail") if x.get(k)}} for i, x in enumerate(out)]
 
 
 def block(sigs: list[dict]) -> str:
     """The signals as prompt text."""
     if not sigs:
         return ""
-    lines = [f"{x['n']}. {x['title']} - {x['snippet']}" if x["snippet"] else f"{x['n']}. {x['title']}" for x in sigs]
+    lines = [(f"{x['n']}. {x['title']} - {x['snippet']}" if x.get("snippet") else f"{x['n']}. {x['title']}") + (f"\n   page: {x['detail']}" if x.get("detail") else "") for x in sigs]
     return ("WEB SIGNALS (real search results from today; the number is the signal id):\n" + "\n".join(lines) +
             "\n\nUse them: at least half of the ideas must be built on a signal (a current story, a new finding, or an anniversary or historical event the signals point to), and each such idea lists the "
             "signal ids it uses in \"sources\" (for example [3, 7]). Use only facts the signals or your own sure knowledge support; never invent a detail. The other ideas may be evergreen or historical, with \"sources\": [].")

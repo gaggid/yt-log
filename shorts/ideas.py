@@ -32,13 +32,16 @@ CREATE TABLE IF NOT EXISTS idea_config(
 """
 
 # Columns added after the first release (ensure() adds them to an older database).
-EXTRA_COLUMNS = {"sources": "TEXT DEFAULT '[]'", "dup_of": "TEXT DEFAULT ''", "reject_reason": "TEXT DEFAULT ''", "style": "TEXT DEFAULT ''", "reviewed": "INTEGER DEFAULT 0", "auto": "INTEGER DEFAULT 0"}
+EXTRA_COLUMNS = {"sources": "TEXT DEFAULT '[]'", "dup_of": "TEXT DEFAULT ''", "reject_reason": "TEXT DEFAULT ''", "style": "TEXT DEFAULT ''", "reviewed": "INTEGER DEFAULT 0", "auto": "INTEGER DEFAULT 0", "cond_fails": "INTEGER DEFAULT 0"}
+
+BRIGHT_STYLES = ("realism", "pixar3d", "anime", "ghibli", "tinyworld")        # ticked until the person chooses; the dark styles (noir, cyberpunk) are opt-in
+MAX_COND_FAILS = 2                                                           # an idea whose brief failed this many times is left alone by the autopilot
 
 # What the Ideas screen keeps between visits and what the unattended auto-queue uses. Saved in the database, so any browser and the server see the same.
 CONFIG_DEFAULTS = {
     "autorun": False, "diverse": False, "n": 7, "min_score": 7.0,
     "autopilot": False,                              # the master switch: OFF = nothing runs by itself, whatever the switches below say
-    "styles": [],                                   # picture styles the ideas may use (empty = any); the queue picks from these only
+    "styles": list(BRIGHT_STYLES),                                   # picture styles the ideas may use (empty = any); the queue picks from these only
     "auto_generate": False, "auto_approve": False, "auto_condition": False,
     "gen_every_h": 1.0, "gen_n": 5, "approve_min": 7.8, "make_every_h": 2.0, "pending_cap": 30, "review_cap": 3,
     "next_gen_at": 0.0, "next_make_at": 0.0,         # when the next hourly batch and the next short are due (kept here so a restart keeps the schedule)
@@ -514,9 +517,21 @@ def mark_reviewed(idea_id: str, reviewed: bool = True) -> dict:
     return get(idea_id)
 
 
-def next_to_condition(skip: set | None = None) -> dict | None:
-    """The best approved idea that has no brief yet."""
-    return max((i for i in listing("approved") if i["id"] not in (skip or set())), key=lambda i: (i.get("engagement_score") or 0, i["created_at"]), default=None)
+def next_to_condition() -> dict | None:
+    """The best approved idea that has no brief yet and has not failed too often."""
+    return max((i for i in listing("approved") if (i.get("cond_fails") or 0) < MAX_COND_FAILS), key=lambda i: (i.get("engagement_score") or 0, i["created_at"]), default=None)
+
+
+def bump_cond_fail(idea_id: str) -> None:
+    ensure()
+    db.ex("UPDATE short_ideas SET cond_fails=COALESCE(cond_fails,0)+1, updated_at=? WHERE id=?", (db.now(), idea_id))
+
+
+def queues(limit: int = 30) -> dict:
+    """The ideas in each stage in the order the autopilot takes them (best score first)."""
+    def best(status):
+        return sorted(listing(status), key=lambda i: (-(i.get("engagement_score") or 0), i["created_at"]))[:limit]
+    return {"approved": best("approved"), "conditioned": best("conditioned"), "queued": sorted(listing("queued"), key=lambda i: -i["updated_at"])[:limit]}
 
 
 def auto_approve(min_score: float) -> list[str]:
@@ -686,7 +701,7 @@ def save_score(idea_id: str, score: float, breakdown: dict) -> dict:
 
 def save_conditioning(idea_id: str, conditioning: dict) -> dict:
     ensure()
-    db.ex("UPDATE short_ideas SET conditioning=?, status=?, updated_at=? WHERE id=?",
+    db.ex("UPDATE short_ideas SET conditioning=?, status=?, cond_fails=0, updated_at=? WHERE id=?",
           (db.jdump(conditioning), "conditioned", db.now(), idea_id))
     return get(idea_id)
 
@@ -911,6 +926,14 @@ def _styles_text(styles: list[str]) -> str:
             + "; ".join(f"{x} ({pres[x]['label']})" for x in styles if x in pres) + ".\n")
 
 
+def direction_with_style(direction: str, styles: list[str]) -> str:
+    """The visual direction names one of the allowed styles. If the model named none (or one that is not allowed), the style the queue would pick comes first, in bright light."""
+    d = (direction or "").strip()
+    if not styles or any(re.search(rf"\b{re.escape(x)}\b", d.lower()) for x in styles):
+        return d
+    return f"{pick_style(styles, '')} - bright natural light, clean palette. {d}".strip()
+
+
 async def condition(idea_id: str, s: dict, key: str, styles: list[str] | None = None) -> dict:
     """Expand an approved idea into a full production brief."""
     idea = get(idea_id)
@@ -947,7 +970,7 @@ async def condition(idea_id: str, s: dict, key: str, styles: list[str] | None = 
         "narrative_arc":     c.narrative_arc,
         "emotional_journey": c.emotional_journey,
         "key_facts":         c.key_facts,
-        "visual_direction":  c.visual_direction,
+        "visual_direction":  direction_with_style(c.visual_direction, styles or []),
         "suggested_tone":    c.suggested_tone,
         "opening_line":      c.opening_line,
         "production_notes":  c.production_notes,

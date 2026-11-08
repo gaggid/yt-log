@@ -62,6 +62,16 @@ css.textContent = `
 .id-q span{font-size:12px;padding:3px 10px;border-radius:99px;background:var(--bg);border:1px solid var(--line)}
 .id-q span b{font-weight:700}
 .id-q span.run{border-color:var(--accent);color:var(--accent)}
+.id-board{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-bottom:14px}
+.id-col{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-width:0}
+.id-col h4{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--mute);display:flex;gap:6px;align-items:center}
+.id-col h4 .badge{margin-left:auto}
+.id-col .none{font-size:12px;color:var(--mute);padding:6px 0}
+.id-qi{border-top:1px solid var(--line);padding:7px 0;font-size:13px}
+.id-qi:first-of-type{border-top:0}
+.id-qi .t{line-height:1.3;word-break:break-word}
+.id-qi .m{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px;font-size:11px;color:var(--mute)}
+.id-pub textarea,.id-pub input{width:100%;font:inherit;font-size:13px;padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
 .id-chips{display:flex;gap:6px;flex-wrap:wrap}
 .id-chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:3px 10px;border-radius:99px;border:1px solid var(--line);cursor:pointer;user-select:none}
 .id-chip input{margin:0}
@@ -84,6 +94,7 @@ let _n        = 7;
 let _minScore = 7;
 let _job      = null, _seen = new Set(), _pollGen = 0;
 let _auto     = {autopilot:false, auto_generate:false, auto_approve:false, auto_condition:false, gen_every_h:1, gen_n:5, approve_min:7.8, make_every_h:2, pending_cap:30, review_cap:3, styles:[]};
+const BRIGHT_STYLES = ['realism', 'pixar3d', 'anime', 'ghibli', 'tinyworld'];
 let _ap       = null, _apAt = 0, _apTimer = null;      // /ideas/autopilot (queues and schedule) and when it was read
 const _CFG_DEFAULTS = {pipeline:'keyframe', voice:'taksh_hn', language:'hi', target_s:29, tone_id:'bigbro', edge:'clean', upscale:'2k'};
 
@@ -218,7 +229,8 @@ function _cfgHtml() {
       </select>`)}
     </div>
     <div class="id-cfg-foot" style="display:block">
-      <div class="small mute" style="margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:.05em">Picture styles <span style="text-transform:none;font-weight:400">— ideas and shorts use only the ticked styles, rotating; none ticked = any</span></div>
+      <div class="small mute" style="margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:.05em">Picture styles <span style="text-transform:none;font-weight:400">— ideas and shorts use only the ticked styles, rotating; none ticked = any</span>
+        <button class="small link" id="st-bright" type="button">Bright set</button><button class="small link" id="st-any" type="button">Any style</button></div>
       <div class="id-chips" id="id-styles">${_stylesHtml()}</div>
     </div>`;
 }
@@ -272,6 +284,32 @@ function _autoHtml() {
     </div>`;
 }
 
+function _queueItem(i, stage) {
+  const sc = i.engagement_score ? `<span class="id-score ${scoreClass(i.engagement_score)}" style="font-size:11px;padding:0 7px">★ ${i.engagement_score.toFixed(1)}</span>` : '';
+  const failed = (i.cond_fails || 0) >= 2 ? `<span class="bad">brief failed ${i.cond_fails}×: autopilot skips it</span>` : '';
+  const act = stage === 'approved' ? `<button class="small" data-now="condition" data-id="${i.id}">Condition now</button>`
+    : stage === 'conditioned' ? `<button class="small primary" data-now="make" data-id="${i.id}">Make now</button>`
+    : `${i.short_id ? `<a class="btn small" href="#/short/${i.short_id}">Open</a>` : ''}<button class="small" onclick="idReviewed('${i.id}', ${i.reviewed ? 'false' : 'true'})">${i.reviewed ? 'Reviewed ✓' : 'Mark reviewed'}</button>`;
+  const stat = stage === 'queued' ? `<span>${esc(i.short_status === 'made' ? 'video ready' : i.short_status === 'deleted' ? 'short deleted' : 'in progress')}</span>${i.reviewed ? '' : '<span>waiting for review</span>'}` : '';
+  return `<div class="id-qi"><div class="t">${esc((i.hook || '').slice(0, 110))}</div><div class="m">${sc}${stat}${failed}<span class="sp"></span>${act}</div></div>`;
+}
+
+function _boardHtml() {
+  const q = (_ap && _ap.queues) || {approved: [], conditioned: [], queued: []};
+  const col = (title, list, stage, note) => `<div class="id-col"><h4>${title}<span class="badge">${list.length}</span></h4>${list.length ? list.map(i => _queueItem(i, stage)).join('') : `<div class="none">${note}</div>`}</div>`;
+  return col('To condition (approved)', q.approved, 'approved', 'No approved idea waits for a brief.')
+       + col('To make (conditioned)', q.conditioned, 'conditioned', 'No conditioned idea is waiting to be made into a short.')
+       + col('Making / waiting for review', q.queued, 'queued', 'No short has been made from an idea yet.');
+}
+
+function _wireBoard() {
+  document.querySelectorAll('#id-board [data-now]').forEach(b => b.onclick = async () => {
+    await act(b, async () => { _ap = await call('/autopilot/run', {method:'POST', json:{stage: b.dataset.now, idea_id: b.dataset.id}}); _apAt = Date.now() / 1000; _poll(); },
+      b.dataset.now === 'make' ? 'Short queued and started' : 'Started');
+    _drawAuto();
+  });
+}
+
 function _wireAuto() {
   const el = document.getElementById('id-auto');
   if (!el) return;
@@ -299,12 +337,18 @@ function _drawAuto() {
   el.className = 'id-auto' + (_auto.autopilot ? ' on' : '');
   el.innerHTML = _autoHtml();
   _wireAuto();
+  const bd = document.getElementById('id-board');
+  if (bd) { bd.innerHTML = _boardHtml(); _wireBoard(); }
   _syncCfgLock();
   const st = document.getElementById('id-styles');
   if (st) st.innerHTML = _stylesHtml(), _wireStyles();
 }
 
 function _wireStyles() {
+  const setStyles = list => { _auto.styles = list; _persist(); const st = document.getElementById('id-styles'); if (st) { st.innerHTML = _stylesHtml(); _wireStyles(); } };
+  const b = document.getElementById('st-bright'), a = document.getElementById('st-any');
+  if (b) b.onclick = () => { if (!_auto.autopilot) setStyles([...BRIGHT_STYLES]); };
+  if (a) a.onclick = () => { if (!_auto.autopilot) setStyles([]); };
   document.querySelectorAll('#id-styles input[data-style]').forEach(e => e.onchange = () => {
     _auto.styles = [...document.querySelectorAll('#id-styles input[data-style]:checked')].map(x => x.dataset.style);
     e.closest('.id-chip').classList.toggle('on', e.checked);
@@ -344,6 +388,20 @@ function scorePanel(idea) {
       <div class="small" style="margin-bottom:6px">${rows}</div>
       <div class="id-reasoning">${esc(sc.reasoning)}</div>
     </div></div>`;
+}
+
+function pubPanel(idea) {
+  const p = idea.publish;
+  if (!p) return '';
+  const field = (label, key, text, rows) => `<div class="id-section"><div class="row"><h5 style="margin:0">${label}</h5><span class="sp"></span><button class="small" onclick="idCopy('${idea.id}','${key}')">Copy</button></div>
+    ${rows ? `<textarea rows="${rows}" readonly>${esc(text)}</textarea>` : `<input value="${esc(text)}" readonly>`}</div>`;
+  return `<div class="id-expand id-pub">
+    ${p.stale ? '<div class="id-why">The narration changed after this was written. Open the short and write it again.</div>' : ''}
+    ${field('Title (' + p.title.length + ' characters)', 'title', p.title, 0)}
+    ${field('Description', 'description', p.description, 10)}
+    ${field('Tags', 'tags_text', p.tags_text, 3)}
+    <div class="id-actions"><button class="small primary" onclick="idCopy('${idea.id}','all')">Copy title + description</button></div>
+  </div>`;
 }
 
 function condPanel(idea) {
@@ -405,11 +463,15 @@ function renderCard(idea) {
     actions.push(`<button class="small ${idea.reviewed ? '' : 'primary'}" onclick="idReviewed('${idea.id}', ${idea.reviewed ? 'false' : 'true'})">${idea.reviewed ? 'Reviewed ✓ (undo)' : 'Mark reviewed'}</button>`);
   if (idea.status !== 'queued')
     actions.push(`<button class="small bad" onclick="idDelete('${idea.id}')">Delete</button>`);
+  if (idea.status === 'queued' && idea.short_status === 'made')
+    actions.push(idea.publish
+      ? `<button class="small link" onclick="idToggle('${idea.id}','pub')">${exp==='pub'?'Hide upload text':'Upload text'}${idea.publish.stale ? ' (outdated)' : ''}</button>`
+      : `<button class="small" ${busy?'disabled':''} onclick="idWritePub('${idea.id}')">${busy?'<span class="spin"></span> Writing…':'Write upload text'}</button>`);
   if (hasSc) actions.push(`<button class="small link" onclick="idToggle('${idea.id}','score')">${exp==='score'?'Hide score':'Score detail'}</button>`);
   if (hasCo) actions.push(`<button class="small link" onclick="idToggle('${idea.id}','cond')">${exp==='cond'?'Hide brief':'View brief'}</button>`);
 
   const statusKey = idea.status==='queued'?'queued':idea.status==='conditioned'?'info':idea.status==='approved'?'done':idea.status==='rejected'?'error':'';
-  const expandPanel = exp === 'score' ? scorePanel(idea) : exp === 'cond' ? condPanel(idea) : '';
+  const expandPanel = exp === 'score' ? scorePanel(idea) : exp === 'cond' ? condPanel(idea) : exp === 'pub' ? pubPanel(idea) : '';
 
   const fresh = _job && _job.new_ids && _job.new_ids.includes(idea.id) && _job.state === 'running';
   return `<div class="id-card id-${idea.status}${fresh ? ' id-new' : ''}" id="card-${idea.id}">
@@ -424,6 +486,7 @@ function renderCard(idea) {
     ${idea.premise ? `<p class="small mute" style="margin:6px 0 0">${esc(idea.premise)}</p>` : ''}
     ${(idea.sources || []).length ? `<div class="id-src"><span class="mute">Sources:</span> ${idea.sources.map(x => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc((x.title || x.url).slice(0, 60))}</a>`).join('')}</div>` : ''}
     ${idea.reject_reason ? `<div class="id-why">${esc(idea.reject_reason)}${idea.dup_of ? ` (<a href="javascript:void(0)" onclick="idJump('${esc(idea.dup_of)}')">see the earlier idea</a>)` : ''}</div>` : ''}
+    ${(idea.cond_fails || 0) >= 2 && idea.status === 'approved' ? `<div class="id-why">The brief failed ${idea.cond_fails} times, so the autopilot skips this idea. Press Condition to try again.</div>` : ''}
     <div class="id-actions">${actions.join('')}</div>
     ${expandPanel}
   </div>`;
@@ -449,6 +512,26 @@ function _render() {
 // ── window actions (called from onclick in generated HTML) ────────────────────
 
 window.idTab = t => { _tab = t; _render(); };
+
+window.idCopy = (id, key) => {
+  const p = (_ideas.find(i => i.id === id) || {}).publish;
+  if (!p) return;
+  const text = key === 'all' ? p.title + '\n\n' + p.description : p[key];
+  navigator.clipboard.writeText(text).then(() => toast('Copied'), () => toast('Copy failed: select the text and copy it', {bad:true}));
+};
+
+window.idWritePub = async id => {
+  const idea = _ideas.find(i => i.id === id);
+  if (!idea || !idea.short_id) return;
+  _busy.add(id); _render();
+  try {
+    await api('/shorts/' + idea.short_id + '/publish', {method:'POST', json:{}});
+    _ideas = await call('');
+    _exp[id] = 'pub';
+    toast('Upload text written');
+  } catch(e) { toast(e.message, {bad:true}); }
+  _busy.delete(id); _render();
+};
 
 window.idReviewed = async (id, reviewed) => {
   try {
@@ -590,6 +673,7 @@ window.viewIdeas = async function() {
     </div>
     <div id="id-prog"></div>
     <div class="id-auto" id="id-auto"></div>
+    <div class="id-board" id="id-board"></div>
     <div class="id-cfg" id="id-cfg">${_cfgHtml()}</div>
     <div class="id-tabs" id="id-tabs"></div>
     <div id="id-list"><div class="pad"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div></div>`;
