@@ -11,7 +11,7 @@ from pydantic import BaseModel
 import config
 from story import llm, settings as settings_mod
 
-from . import engine, export as export_mod, jobs, memory, paint, portable, seed, state as S, store, templates, things
+from . import engine, export as export_mod, health, jobs, memory, paint, portable, seed, state as S, store, templates, things
 
 router = APIRouter(prefix="/api/sim", tags=["sim"])
 
@@ -97,7 +97,7 @@ def _state_now(pid: str, path: list[dict]) -> dict:
 
 def _chapter_view(c: dict, siblings: list[dict]) -> dict:
     return {**{k: c[k] for k in ("id", "parent_id", "idx", "branch_label", "status", "title", "prose", "story_time", "summary", "focus", "rolls", "options", "chosen", "fired", "panels", "flags")},
-            "plan": {k: c["plan"].get(k) for k in ("scene", "intent", "pressure", "beat", "where", "time_passes", "risks", "minds") if k in c["plan"]},
+            "plan": {k: c["plan"].get(k) for k in ("scene", "intent", "pressure", "beat", "where", "time_passes", "risks", "minds", "opposition", "calibration") if k in c["plan"]},
             "applied": c["delta"].get("applied", []), "dropped": c["delta"].get("dropped", []), "state_after": c["state_after"],
             "siblings": [{"id": x["id"], "label": x["branch_label"] or f"branch {i + 1}", "status": x["status"], "title": x["title"]} for i, x in enumerate(siblings)] if len(siblings) > 1 else []}
 
@@ -142,7 +142,7 @@ async def detail(pid: str):
             "failed": ({"id": failed["id"], "stage": store.run_info(pid).get("stage", ""), "error": failed["flags"].get("error", ""), "done": failed["flags"].get("done", [])} if failed else None),
             "run": {**jobs.status(pid), **store.run_info(pid)}, "reading_minutes": export_mod.reading_minutes(pid), "bytes": _bytes(pid),
             "branches": len([c for c in all_ch if c["id"] not in path_ids and c["status"] == "done"]), "tracker_kinds": list(store.TRACKER_KINDS),
-            "carry": {"default": int(p["settings"].get("carry_limit", 0) or 0), "people": memory.carry_map(ents)}}
+            "carry": {"default": int(p["settings"].get("carry_limit", 0) or 0), "people": memory.carry_map(ents)}, "health": health.report(pid, path)}
 
 
 class Patch(BaseModel):

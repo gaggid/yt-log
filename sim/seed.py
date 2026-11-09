@@ -88,10 +88,36 @@ async def seed_trackers(pid, backend, s, instruction="") -> list[dict]:
         r = await _json(backend, s, P.ITEMS, user, m.ItemsOut)
         data, _bad = S.normalize_tracker({**t, "start": [i.model_dump() for i in r.items[:25]]}, chars, places)
         store.save_tracker(pid, {**data, "id": t["id"], "name": t["name"]})
+    made += _relation_trackers(pid, ents, made, chars)
     if not [t for t in made if t["kind"] == "location"] and chars and places:
         made.append(store.save_tracker(pid, {"kind": "location", "name": "Where everyone is", "description": "who is where, and which places are locked",
                                              "start": {"at": {c: places[0] for c in chars}, "locked": []}}))
     return made
+
+
+COLD = {"rival", "rivals", "enemy", "enemies", "distrust", "distrusts", "hates", "hate", "resents", "resent", "suspicious", "suspects", "estranged", "betrayed", "jealous", "blames", "opposes", "adversary", "feud"}
+WARM = {"friend", "friends", "mother", "father", "sister", "brother", "daughter", "son", "partner", "trusts", "loyal", "ally", "allies", "lover", "spouse", "mentor", "protects", "cares", "colleague"}
+
+
+def _relation_trackers(pid: str, ents: list[dict], made: list[dict], chars: list[str]) -> list[dict]:
+    """The cast cards already say how people relate; the pairs that matter become relation trackers (at most three) so that people can clash and bond as the story moves."""
+    have = {frozenset((S.norm(t.get("a", "")), S.norm(t.get("b", "")))) for t in made if t["kind"] == "relation"}
+    out: list[dict] = []
+    for e in ents:
+        if e["kind"] != "character":
+            continue
+        for other, text in (e.get("relations") or {}).items():
+            o = S.pick({S.norm(n): n for n in chars}, other)
+            pair = frozenset((S.norm(e["name"]), S.norm(o or "")))
+            if not o or o == e["name"] or pair in have:
+                continue
+            if len(out) + len([1 for t in made if t["kind"] == "relation"]) >= 3:
+                return out
+            words = set(S._toks(str(text)))
+            trust, tension = (-1, 2) if words & COLD else (2, 0) if words & WARM else (0, 0)
+            out.append(store.save_tracker(pid, {"kind": "relation", "name": f"{e['name']} and {o}", "description": str(text)[:100], "a": e["name"], "b": o, "start": {"trust": trust, "tension": tension}}))
+            have.add(pair)
+    return out
 
 
 async def seed_rules(pid, backend, s, instruction="") -> list[dict]:

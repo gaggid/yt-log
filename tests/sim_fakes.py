@@ -80,7 +80,7 @@ class SimFake:
         beats = ["escalate", "setback", "discovery", "respite", "choice", "reversal", "reveal"]
         return {"focus": alive[:2], "where": "Aisle One", "scene": f"{alive[0]} moves to secure the doors while the noise outside grows.", "intent": f"{alive[0]} tries to barricade the doors with pallets.",
                 "pressure": "the clock", "risks": [{"who": alive[0], "act": "barricade the doors", "stats": [mp.group(1)] if mp else [], "items": ["Crowbar"], "difficulty": "normal"}],
-                "beat": beats[self.plan_n % len(beats)], "time_passes": "40 minutes", "addresses": due}
+                "beat": beats[self.plan_n % len(beats)], "time_passes": "40 minutes", "addresses": due, "opposition": "The noise outside grows and something tests the doors."}
 
     def _sm_minds(self, user):
         return {"wants": {n: "keeps watch" for n in re.findall(r"Others: (.*)", user)[0].split(", ")}}

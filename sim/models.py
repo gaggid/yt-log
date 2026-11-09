@@ -153,6 +153,7 @@ class ChapterPlan(M):
     time_passes: Str = ""
     addresses: StrList = []          # ids of the due instructions this chapter handles
     wait_reason: Str = ""            # why a conditional instruction waits one more chapter
+    opposition: Str = ""             # what the opposing force (threat, rival, deadline, a secret about to come out) does this chapter on its own
 
 
 class Op(M):
@@ -206,7 +207,8 @@ class FactIn(M):
 class OptionIn(M):
     who: Str = ""
     label: Str
-    hint: Str = ""
+    hint: Str = ""                   # what it might gain
+    cost: Str = ""                   # what it might cost or put at risk
     risk: Str = "medium"
 
 

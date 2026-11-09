@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS sim_templates(id TEXT PRIMARY KEY, name TEXT, data TE
 TABLES = ("sim_world", "sim_entities", "sim_trackers", "sim_guidelines", "sim_directives", "sim_chapters", "sim_facts", "sim_threads", "sim_runs")
 
 DEFAULT_SETTINGS = {"difficulty": "fair", "dice": True, "chapter_words": 350, "deep": False, "auto_images": False, "image_model": "", "panel_shape": "wide", "captions": True,
-                    "seed": 7, "template_id": "", "rules_version": 1, "thinking": "balanced", "content": "unfiltered", "carry_limit": 8}
+                    "seed": 7, "template_id": "", "rules_version": 1, "thinking": "balanced", "content": "unfiltered", "carry_limit": 8, "length": 0}
 DIFFICULTIES = ("gentle", "fair", "brutal")
 SHAPES = ("wide", "tall")
 GROUPS = ("hard", "world", "tone", "style", "craft")
@@ -108,6 +108,7 @@ def save_project(pid: str, **f) -> dict:
             raise SimError("panel shape must be wide or tall")
         st["chapter_words"] = max(150, min(900, int(st["chapter_words"])))
         st["carry_limit"] = max(0, min(40, int(st.get("carry_limit", 8) or 0)))
+        st["length"] = max(0, min(99, int(st.get("length", 0) or 0)))
         f["settings"] = db.jdump(st)
     f["updated_at"] = time.time()
     db.ex(f"UPDATE sim_projects SET {', '.join(k + '=?' for k in f)} WHERE id=?", (*f.values(), pid))

@@ -29,6 +29,7 @@ details.sm-d summary{cursor:pointer;color:var(--mute);font-size:12px}
 .sm-card{padding:12px 14px}.sm-card h4{margin:0 0 4px;font-size:14px}
 .sm-chip.thing{border-color:var(--accent)}.sm-chip.undone{opacity:.55;text-decoration:line-through}
 .sm-chip .link{background:none;border:0;color:var(--accent);cursor:pointer;font-size:11px;padding:0 2px}
+.sm-bars{display:flex;align-items:flex-end;gap:3px;height:48px;margin:6px 0}.sm-bar{display:inline-block;width:10px;background:var(--accent);border-radius:2px 2px 0 0}
 .sm-th{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
 .sm-th .row{margin:4px 0}
 @media(max-width:900px){.sm-side{position:static;max-height:none;overflow:visible}}
@@ -50,8 +51,8 @@ let el = null, my = 0, D = null, SID = '', TAB = 'story', poll = null, opening =
 const kindName = {items: 'Items', meter: 'Meter', clock: 'Clock', relation: 'Relationship', location: 'Locations', knowledge: 'Secrets', flag: 'Yes/no fact'};
 const GROUPS = [['hard', 'Hard rules (never broken)'], ['world', 'World rules'], ['tone', 'Tone and pacing'], ['style', 'Style'], ['craft', 'Making and finding']];
 const COND = ['', 'new', 'worn', 'damaged', 'crude', 'well made', 'broken'];
-const THING_OPS = ['discover', 'craft', 'item_give', 'item_take', 'item_use', 'item_change', 'skill_learn', 'owner_edit'];
-const THING_ICON = {discover: '🔍 ', craft: '🔧 ', item_give: '🤝 ', item_take: '✋ ', item_use: '▸ ', item_change: '✎ ', skill_learn: '★ ', owner_edit: '✎ '};
+const THING_OPS = ['discover', 'craft', 'item_give', 'item_take', 'item_use', 'item_change', 'skill_learn', 'owner_edit', 'cost'];
+const THING_ICON = {discover: '🔍 ', craft: '🔧 ', item_give: '🤝 ', item_take: '✋ ', item_use: '▸ ', item_change: '✎ ', skill_learn: '★ ', owner_edit: '✎ ', cost: '⚠ '};
 const thingBits = i => { const p = i.props || {}, b = []; if (p.condition) b.push(esc(p.condition)); if (p.uses !== null && p.uses !== undefined) b.push(`${p.uses} use${p.uses === 1 ? '' : 's'} left`); if (i.bound_to) b.push('bound to ' + esc(i.bound_to)); if (i.note) b.push(esc(i.note)); return b.length ? ` <span class="mute">(${b.join(', ')})</span>` : ''; };
 const itemTrackers = () => D.trackers.filter(t => t.active && t.kind === 'items');
 const carryOf = n => { const p = (D.carry && D.carry.people) || {}; return n in p ? p[n] : (D.carry ? D.carry.default : 0); };
@@ -171,6 +172,7 @@ function help() {
     <p><b>Rules and things tracked</b> keep the story honest: the AI may only use items that exist in the world card or that are made from items already used, the dead stay dead, and changes it proposes that do not fit are refused (shown under "What changed").</p>
     <p><b>Change your mind.</b> <i>Rewrite</i> a chapter with an instruction or roll <i>new dice</i>: the old version stays as another branch you can switch back to. <i>Edit text</i> lets you change the words; the AI can read your edit and propose how the state should change, and later chapters are marked as written before the edit. Only the last chapter of a line can be deleted.</p>
     <p><b>Things.</b> People can <i>find</i> things (a search that succeeds, an instruction, or something the world already holds), <i>make</i> them from parts they hold or that lie where they are (the AI works out what is really possible; skills, tools and a known recipe help the dice), <i>use</i> them up, <i>drop</i>, <i>give</i> and <i>take</i> them. Someone may refuse to hand a thing over; a thing can be <i>bound</i> to a person; nobody can carry more than their limit. The <b>Things</b> tab shows who has what, recipes and skills, and lets you change any of it. Under "What changed", <i>undo</i> takes one change back. <i>+ Give a thing</i> in the box below the chapter hands someone a thing, takes one away or lifts a binding in the next chapter.</p>
+    <p><b>Story health and the arc.</b> The <i>Story health</i> card is worked out by the system from the chapters (no AI call): the tension of each chapter, whether acts ever fail or cost anything, who is missing, which goals, fears and secrets have not come up, how chapters end and what words repeat. <i>Length</i> in Setup gives the story a shape (set-up, rising, twist, crisis, climax, resolution); the planner is told where the story is and how tense the chapter must be, the opposing force makes a move every chapter, a failed act always costs something, and acts get harder after a run of easy chapters.</p>
     <p><b>Content</b> (Setup, "Content") says how free the story is. <i>unfiltered</i> (the default) lets characters swear, abuse, lie, steal, kill and break the law whenever the story goes there, with real consequences but no softening or lectures, and mild sexual content between adults is allowed (the scene closes before explicit detail); <i>mature</i> and <i>clean</i> turn it down. The rules you write still apply.</p>
     <p><b>Thinking</b> (Setup, "Thinking") is how long the AI reasons before it plans, changes the state or checks a chapter. <i>balanced</i> is the default; <i>deep</i> is slower and more consistent; <i>off</i> is the fastest and makes more mistakes.</p>
     <p><b>Pictures</b> are optional: press <i>Paint this chapter</i> (or tick "Paint every chapter automatically" in Setup). They are cinematic paintings drawn from text. Each person and place gets a reference painting first, so faces and places stay alike; you can repaint, edit, replace with your own picture or remove any of them. Changing a person's look marks their pictures "old".</p>
@@ -204,11 +206,22 @@ function stateHtml(st) {
     ${found.length ? `<div><b>Found lately</b><br>${found.map(w => `<div class="small">${esc(w.kind)} · ${esc(w.name)}${w.where ? ` <span class="mute">at ${esc(w.where)}</span>` : ''}</div>`).join('')}</div>` : ''}</div>`;
 }
 
+function healthHtml() {
+  const h = D.health;
+  if (!h || !h.chapters) return '';
+  const dot = {bad: 'var(--bad)', warn: 'var(--warn)', ok: 'var(--ok)'};
+  const t = h.dice ? Object.entries(h.dice.tiers).map(([k, v]) => `${v} ${k}`).join(' · ') : '';
+  return `<div class="card pad sm-health"><b>Story health</b> <span class="small mute">worked out by the system from the chapters</span>
+    <div class="sm-bars" title="Tension of each chapter, out of 10">${h.intensity.map((v, i) => `<span class="sm-bar" style="height:${4 + v * 4}px" title="Chapter ${i + 1}: ${v}/10"></span>`).join('')}</div>
+    ${h.verdicts.map(v => `<div class="small" style="margin:4px 0"><span style="color:${dot[v.level]}">●</span> ${esc(v.text)}</div>`).join('')}
+    <div class="small mute" style="margin-top:6px">Rolls: ${t || 'none'} · endings: ${h.endings.join(', ')}</div></div>`;
+}
+
 function sideHtml() {
   const pend = D.directives.filter(d => d.pending && d.status !== 'cancelled');
   const th = D.threads;
   const rules = D.guidelines.filter(g => g.enabled);
-  return `<div class="sm-side">${stateHtml(D.state)}
+  return `<div class="sm-side">${healthHtml()}${stateHtml(D.state)}
     <div class="card pad"><div class="row"><b>Instructions waiting</b><span class="sp"></span><button class="small" id="sm-adddir">+ Add</button></div>
       ${pend.length ? pend.map(d => `<div class="small" style="margin:6px 0"><span class="sm-tag">${d.kind} · ${timingText(d.timing)}</span><br>${esc(d.text)} <button class="link" data-cdir="${d.id}" title="Cancel">✕</button></div>`).join('') : '<div class="small mute">None. Add an event, a limit or a twist at any time.</div>'}</div>
     ${th.length ? `<div class="card pad"><b>Open threads</b>${th.map(t => `<div class="small" style="margin:4px 0">• ${esc(t.text)}</div>`).join('')}</div>` : ''}
@@ -238,6 +251,8 @@ function chapterHtml(c, i) {
     ${flagsHtml}${paintErr}${panels ? `<div class="sm-panels">${panels}</div>` : ''}
     <div class="sm-prose mt-s">${paras(c.prose)}</div>
     ${c.rolls.length ? `<div>${c.rolls.map(r => `<span class="sm-chip ${r.tier}" title="${esc((r.why || []).join(', '))}">${esc(r.act)}: ${r.dice_off ? 'success' : `${r.die}${r.mod >= 0 ? '+' : ''}${r.mod} vs ${r.target} → ${r.tier}`}</span>`).join('')}</div>` : ''}
+    ${(c.flags && c.flags.arc) || (c.plan && c.plan.opposition) ? `<div class="small mute">${c.flags.arc ? `phase ${esc(c.flags.arc.phase)}, aimed at tension ${c.flags.arc.target}/10` : ''}${c.plan.opposition ? `${c.flags.arc ? ' · ' : ''}the opposition: ${esc(c.plan.opposition)}` : ''}${(c.plan.calibration || []).length ? ' · ' + c.plan.calibration.map(esc).join('; ') : ''}</div>` : ''}
+    ${(() => { const pc = (D.health && D.health.per_chapter || []).find(x => x.idx === c.idx); return pc ? `<div class="small mute">tension ${pc.intensity}/10 · ends on a ${esc(pc.ending)}${pc.costs.length ? ' · cost: ' + pc.costs.map(esc).join('; ') : ' · no cost'}</div>` : ''; })()}
     ${fired.length ? `<div>${fired.map(d => `<span class="sm-chip" style="border-color:var(--accent)">⚡ ${esc(d.kind)}: ${esc(d.text)}</span>`).join('')}</div>` : ''}
     <details class="sm-d mt-s"><summary>What changed${c.dropped.length ? ` · ${c.dropped.length} refused` : ''} · summary</summary>
       ${c.applied.length ? `<div class="small">${c.applied.map((a, ai) => `<span class="sm-chip ${THING_OPS.includes(a.op) ? 'thing' : ''} ${a.undone ? 'undone' : ''}">${THING_ICON[a.op] || ''}${esc(a.text)}${a.undone ? ' (taken back)' : ''}${a.undo && !a.undone ? ` <button class="link" data-undo="${c.id}:${ai}" title="Take this back">undo</button>` : ''}</span>`).join('')}</div>` : '<div class="small mute">No change to the state.</div>'}
@@ -253,7 +268,7 @@ function dockHtml() {
   const head = D.chapters[D.chapters.length - 1];
   const chars = Object.entries(D.state.entities || {}).filter(([, e]) => e.alive).map(([n]) => n);
   return `<div class="card pad sm-dock mt"><b>What happens next?</b>
-    ${head.options.map(o => `<button class="sm-opt sm-risk-${o.risk}" data-opt="${o.id}"><b>${esc(o.who)}:</b> ${esc(o.label)}<small>${esc(o.hint || '')} · ${o.risk} risk</small></button>`).join('')}
+    ${head.options.map(o => `<button class="sm-opt sm-risk-${o.risk}" data-opt="${o.id}"><b>${esc(o.who)}:</b> ${esc(o.label)}<small>${o.hint ? 'gain: ' + esc(o.hint) : ''}${o.cost ? ` · cost: ${esc(o.cost)}` : ''} · ${o.risk} risk</small></button>`).join('')}
     <div class="row mt-s"><select id="sm-who">${chars.map(c => `<option>${esc(c)}</option>`).join('')}</select><input id="sm-text" style="flex:1;min-width:200px" placeholder="…or write what they do (any action you like)"><button id="sm-go" class="primary">Do this</button></div>
     <div class="row mt-s"><button id="sm-let" title="The AI picks the most in-character option">Let it run</button><span class="small mute">Auto-run</span><input type="number" id="sm-n" value="3" min="1" max="10" style="width:60px"><button id="sm-auto">chapters</button><span class="sp"></span><button id="sm-give" title="Hand someone a thing, take one away or lift a binding">+ Give a thing</button><button id="sm-dir2">+ Add instruction</button></div></div>`;
 }
@@ -443,6 +458,7 @@ function drawSetup() {
       <label><input type="checkbox" id="s-dice" ${st.dice ? 'checked' : ''}> Dice decide risky acts</label>
       <label>Words per chapter <input type="number" id="s-words" value="${st.chapter_words}" min="150" max="900" step="10"></label>
       <label><input type="checkbox" id="s-deep" ${st.deep ? 'checked' : ''}> Let the other characters plan too (slower)</label>
+      <label title="How many chapters the story should have. The system builds the story toward a climax and an ending of that size; open-ended repeats a cycle of build-up, twist, crisis and release.">Length <select id="s-length">${[[0, 'open-ended'], [6, '6 chapters'], [8, '8 chapters'], [12, '12 chapters'], [16, '16 chapters'], [24, '24 chapters'], [36, '36 chapters'], [48, '48 chapters']].map(([v, l]) => `<option value="${v}" ${(st.length || 0) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <label title="How much one person can carry, in size units (a plain thing is 1). 0 means no limit. A person can have their own limit in their card.">Carry limit <input type="number" id="s-carry" value="${st.carry_limit ?? 8}" min="0" max="40" style="width:70px"></label>
       <label title="How freely the story may go. Unfiltered: strong language, cruelty, crime and mild adult romance are written as the scene needs them, without softening or moral comment.">Content <select id="s-content">${[['clean', 'clean'], ['mature', 'mature'], ['unfiltered', 'unfiltered (no limits)']].map(([v, l]) => `<option value="${v}" ${(st.content || 'unfiltered') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <label title="How long the AI thinks before it plans, changes the state or checks a chapter. More thinking is slower and keeps the story more consistent.">Thinking <select id="s-think">${[['off', 'off (fastest)'], ['balanced', 'balanced'], ['deep', 'deep (slowest)']].map(([v, l]) => `<option value="${v}" ${(st.thinking || 'balanced') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div>
@@ -485,7 +501,7 @@ function trackerSummary(t) {
 function wireSetup() {
   const on = (sel, fn) => el.querySelectorAll(sel).forEach(fn);
   const patch = async (json, ok) => { const r = await act(null, () => api('/sim/' + SID, {method: 'PATCH', json}), ok || 'Saved'); if (r) load(); };
-  $('#s-save').onclick = () => patch({idea: $('#s-idea').value, settings: {difficulty: $('#s-diff').value, dice: $('#s-dice').checked, chapter_words: +$('#s-words').value || 350, deep: $('#s-deep').checked, thinking: $('#s-think').value, content: $('#s-content').value, carry_limit: +$('#s-carry').value || 0,
+  $('#s-save').onclick = () => patch({idea: $('#s-idea').value, settings: {difficulty: $('#s-diff').value, dice: $('#s-dice').checked, chapter_words: +$('#s-words').value || 350, deep: $('#s-deep').checked, thinking: $('#s-think').value, content: $('#s-content').value, carry_limit: +$('#s-carry').value || 0, length: +$('#s-length').value || 0,
     auto_images: $('#s-auto').checked, panel_shape: $('#s-shape').value, captions: $('#s-cap').checked, image_model: $('#s-img').value.trim()}});
   $('#w-save').onclick = () => patch({world: Object.fromEntries(['place', 'period', 'tone', 'pacing', 'start_scene', 'start_time', 'exists', 'craft', 'goal'].map(k => [k, $('#w-' + k).value]))});
   $('#sm-dup').onclick = async () => { const r = await act(null, () => api(`/sim/${SID}/duplicate?full=false`, {method: 'POST'}), 'Copied'); if (r) hash(r.id, 'setup'); };

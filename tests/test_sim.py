@@ -461,7 +461,8 @@ def test_a_courtroom_story_runs_on_the_same_engine(sm):
     assert c1["status"] == c2["status"] == "done" and c2["state_before"]["trackers"] == c1["state_after"]["trackers"]
     assert "Asha" in fake.last("sm_plan")["user"] and "Ravi" not in fake.last("sm_plan")["user"]
     jury = next(t for t in store.trackers(pid) if t["name"] == "Jury support")
-    assert c1["state_after"]["trackers"][jury["id"]] == 4
+    cost = [a for a in c1["delta"]["applied"] if a["op"] == "cost"]                       # a failed or partial act with no real cost gets one added by the system
+    assert c1["state_after"]["trackers"][jury["id"]] == (4 if not cost else 4 - 2)
 
 
 # ── delete ────────────────────────────────────────────────────────────────────

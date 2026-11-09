@@ -5,7 +5,7 @@ import re
 
 from story import llm
 
-from . import dice, memory, models as m, prompts as P, state as S, store, things, think
+from . import dice, drama, health, memory, models as m, prompts as P, state as S, store, things, think
 
 WORD_SLACK = (0.8, 1.23)                 # chapter length accepted around the owner's setting (350 -> 280 to 430)
 MAX_RISKS = 3
@@ -198,6 +198,12 @@ async def run_chapter(pid: str, backend, s: dict, progress=None, *, parent_id: s
             think.boost.set(bool(THING_WORDS.search(act)))                      # the player's action is about making, finding or learning something
             last_beats = [c["plan"].get("beat") for c in path[-2:]]
             by_name = {e["name"].lower(): e["name"] for e in chars}
+            rep = health.report(pid, path)
+            length = int(cfg.get("length", 0) or 0)
+            arc = drama.arc(ch["idx"], length, rep.get("intensity", []))
+            neg = drama.neglected(rep)
+            flags["arc"] = {"phase": arc["phase"], "target": arc["target"], "length": length}
+            flags["neglected"] = [x["text"] for x in neg]
 
             def v(p: m.ChapterPlan, caller):
                 p.focus = [by_name[n.lower()] for n in p.focus if n.lower() in by_name and st0["entities"].get(by_name[n.lower()], {}).get("alive", True)][:3]
@@ -213,6 +219,10 @@ async def run_chapter(pid: str, backend, s: dict, progress=None, *, parent_id: s
                     raise ValueError(f"the last chapters were already '{p.beat}': choose a different beat")
                 if action.get("kind") == "text" and not _overlap(action.get("text", ""), p.intent + " " + p.scene) and not caller.last_attempt:
                     raise ValueError("the intent must follow the owner's action")
+                if not p.opposition.strip() and not caller.last_attempt:
+                    raise ValueError("opposition: say what the opposing force does this chapter on its own")
+                if neg and not caller.last_attempt and not drama.plan_touches(neg, " ".join([p.scene, p.intent, p.opposition, " ".join(p.focus)])):
+                    raise ValueError("move at least one neglected thing: " + "; ".join(x["text"] for x in neg[:3]))
                 p.risks = [r for r in p.risks if r.act][:MAX_RISKS]
                 for r in p.risks:
                     r.difficulty = r.difficulty if r.difficulty in m.DIFFICULTY else "normal"
@@ -222,7 +232,7 @@ async def run_chapter(pid: str, backend, s: dict, progress=None, *, parent_id: s
                     elif r.craft and not r.craft.makes:
                         r.craft.makes = r.act
 
-            user = (f"{memory.render(pk0, s)}\n\n## PLAYER'S ACTION\n{act}\n\n## DUE INSTRUCTIONS\n"
+            user = (f"{memory.render(pk0, s)}\n\n{drama.arc_block(arc, ch['idx'], length)}" + (f"\n\n{drama.neglected_block(neg)}" if neg else "") + f"\n\n## PLAYER'S ACTION\n{act}\n\n## DUE INSTRUCTIONS\n"
                     + ("\n".join(f"{d['label']} (id {d['id']}) [{d['kind']}] {'MUST' if d['must'] else 'MAY WAIT'}: {fence(d['text'])}" for d in due) or "(none)")
                     + "\n\n## UNDER PRESSURE\n" + ("\n".join(p["text"] for p in flags.get("pressure", [])) or "(nothing at its limit)")
                     + "\n\n## BEATS OF THE LAST CHAPTERS\n" + (", ".join(b for b in last_beats if b) or "(none yet)")
@@ -250,10 +260,12 @@ async def run_chapter(pid: str, backend, s: dict, progress=None, *, parent_id: s
         else:
             begin("resolve", "rolling the dice")
             if cfg["dice"]:
+                rep = health.report(pid, path)
+                plan["calibration"] = drama.calibrate(plan["risks"], rep, drama.target(ch["idx"], int(cfg.get("length", 0) or 0)))
                 rolls = [dice.roll(r, st0, trackers, cfg["seed"], ch["idx"], i + 1, cfg["difficulty"], salt) for i, r in enumerate(plan["risks"])]
             else:
                 rolls = [dice.free(r, i + 1) for i, r in enumerate(plan["risks"])]
-            finish("resolve", rolls=rolls)
+            finish("resolve", rolls=rolls, plan=plan)
         # delta -----------------------------------------------------------------
         if "delta" in done:
             st1 = store.chapter(cid)["state_after"]
@@ -263,7 +275,7 @@ async def run_chapter(pid: str, backend, s: dict, progress=None, *, parent_id: s
             think.boost.set(any(r.get("kind") in ("make", "search", "learn") for r in plan["risks"]))
             pkd = memory.build(pid, path, st0, plan["focus"], plan["scene"], s)
             fired_text = [d for d in due if d["id"] in plan["addresses"]]
-            user = (f"{memory.render(pkd, s)}\n\n## CHAPTER PLAN\nScene: {plan['scene']}\nIntent: {plan['intent']}\nPressure: {plan['pressure']}\nTime passes: {plan['time_passes']}\n"
+            user = (f"{memory.render(pkd, s)}\n\n## CHAPTER PLAN\nScene: {plan['scene']}\nIntent: {plan['intent']}\nPressure: {plan['pressure']}\nOpposition: {plan.get('opposition', '')}\nTime passes: {plan['time_passes']}\n"
                     + ("\n## DICE RESULTS (fixed)\n" + "\n".join(f"- {r['who']}: {r['act']} -> {r['tier'].upper()}: {r['text']}" for r in rolls) if rolls else "\n## DICE RESULTS\n(no risky acts this chapter)")
                     + ("\n\n## INSTRUCTIONS HAPPENING NOW\n" + "\n".join(f"- [{d['kind']}] {fence(d['text'])}" for d in fired_text) if fired_text else "")
                     + ("\n\n## WHAT THE OTHERS DO\n" + "\n".join(f"- {k}: {v}" for k, v in plan.get("minds", {}).items()) if plan.get("minds") else "")
@@ -277,6 +289,8 @@ async def run_chapter(pid: str, backend, s: dict, progress=None, *, parent_id: s
             ctx = make_ctx(pid, ents, world, trackers, cfg, rolls=rolls, fired=[d["text"] for d in fired_text], allow_death=allow_death, chapter=ch["idx"])
             ops = _instruction_ops(fired_text, st0, ctx) + list(r.ops)
             st1, applied, dropped = S.apply_ops(st0, ops, ctx)
+            st1, extra = drama.ensure_cost(rolls, st0, st1, trackers)
+            applied = applied + extra
             delta = {"ops": [o.model_dump() for o in ops], "applied": applied, "dropped": dropped, "new_places": adopted}
             flags["dropped"] = len([d for d in dropped if not d.get("partial")])
             finish("delta", state_after=st1, delta=delta)
@@ -370,7 +384,7 @@ async def _write(pid, backend, s, cid, path, st0, st1, plan, rolls, delta, instr
     w, lo, hi = words_range(cfg)
     pk = memory.build(pid, path, st1, plan["focus"], plan["scene"], s)
     system = P.WRITE.replace("{words}", str(w)).replace("{lo}", str(lo)).replace("{hi}", str(hi))
-    user = (f"{memory.render(pk, s)}\n\n## CHAPTER PLAN\nWhere: {plan['where']}\nFollowing: {', '.join(plan['focus'])}\nScene: {plan['scene']}\nIntent: {plan['intent']}\nTime passes: {plan['time_passes']}\n"
+    user = (f"{memory.render(pk, s)}\n\n## CHAPTER PLAN\nWhere: {plan['where']}\nFollowing: {', '.join(plan['focus'])}\nScene: {plan['scene']}\nIntent: {plan['intent']}\nOpposition (show its effect): {plan.get('opposition', '')}\nTime passes: {plan['time_passes']}\n"
             + ("\n## HOW EACH RISKY ACT ENDS (fixed)\n" + "\n".join(f"- {r['who']}: {r['act']} -> {r['text']}" for r in rolls) if rolls else "")
             + ("\n\n## CHANGES TO SHOW\n" + "\n".join(f"- {a['text']}" + (f" ({a['why']})" if a.get("why") else "") for a in delta["applied"]) if delta["applied"] else "")
             + ("\n\n## WHAT THE OTHERS DO\n" + "\n".join(f"- {k}: {v}" for k, v in plan.get("minds", {}).items()) if plan.get("minds") else "")
@@ -384,6 +398,8 @@ async def _write(pid, backend, s, cid, path, st0, st1, plan, rolls, delta, instr
         flags["words"] = n
         if (n < lo or n > hi) and not caller.last_attempt:
             raise ValueError(f"the chapter has {n} words; it must have between {lo} and {hi}")
+        if health.ending_kind(o.prose) == "menu" and not caller.last_attempt:
+            raise ValueError("the chapter ends on a list of routes (to the left, to the right). End on a hook, a decision or a reveal instead.")
 
     o = await _json(backend, s, system, user, m.WriteOut, v)
     st = copy.deepcopy(st1)
@@ -441,7 +457,8 @@ async def _archive(pid, backend, s, cid, path, st1, plan, flags) -> None:
             if any(_sim(x.label, y["label"]) > 0.6 for y in opts):
                 continue
             x.risk = x.risk if x.risk in m.RISKS else "medium"
-            opts.append({"who": who, "label": x.label.strip(), "hint": x.hint.strip(), "risk": x.risk})
+            hint = re.sub(r"[;,.]?\s*(?:risk|risks)\s*[:\-]?\s*(?:low|medium|high)\.?|\s*[·,;]?\s*(?:low|medium|high) risk\.?", "", x.hint, flags=re.I).strip(" ;,.")
+            opts.append({"who": who, "label": x.label.strip(), "hint": hint, "cost": x.cost.strip(), "risk": x.risk})
         if sum(1 for y in opts if y["risk"] == "high") > 1:
             seen = False
             for y in opts:
@@ -513,6 +530,9 @@ def stop_reason(ch: dict, before_alive: set[str]) -> str:
     ds = {d["id"]: d for d in store.directives(ch["project_id"])}
     if any(ds.get(i, {}).get("kind") == "steer" for i in ch["fired"]):
         return "a steering instruction was used; check the direction"
+    length = int(store.project(ch["project_id"])["settings"].get("length", 0) or 0)
+    if length and ch["idx"] >= length:
+        return f"the planned length of {length} chapters was reached"
     return ""
 
 
