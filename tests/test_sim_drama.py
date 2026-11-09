@@ -166,3 +166,17 @@ def test_setup_makes_relation_trackers_for_the_pairs_the_cast_cards_relate(clien
     from sim import seed
     cold = seed._relation_trackers  # the word lists are plain data
     assert "rival" in seed.COLD and "mother" in seed.WARM and callable(cold)
+
+
+def test_costs_spread_over_meters_that_still_have_room_and_a_meter_at_its_end_counts_as_pressure():
+    from sim import health, models as m
+    trackers = [{"id": "g", "kind": "meter", "name": "Morale", "min": 0, "max": 10, "owner": "group", "start": 0}, {"id": "s", "kind": "meter", "name": "Stamina", "min": 0, "max": 100, "owner": "Elias", "start": 80},
+                {"id": "n", "kind": "meter", "name": "Noise", "min": 0, "max": 100, "danger_above": 70, "start": 10}]
+    s0 = {"time": "", "trackers": {"g": 0.0, "s": 80.0, "n": 10.0}, "entities": {}}
+    after, extra = drama.ensure_cost([{"tier": "fail", "who": "Mira", "act": "hold the line"}], s0, copy.deepcopy(s0), trackers)
+    assert extra and after["trackers"]["g"] == 0.0 and (after["trackers"]["s"] < 80 or after["trackers"]["n"] > 10)          # morale is already at the bottom: another meter pays
+    flat = {"idx": 1, "rolls": [], "state_before": s0, "state_after": copy.deepcopy(s0), "prose": "x."}
+    calm = {"idx": 1, "rolls": [], "state_before": s0, "state_after": {**s0, "trackers": {"g": 6.0, "s": 80.0, "n": 10.0}}, "prose": "x."}
+    assert health.chapter_numbers(flat, trackers)["intensity"] > health.chapter_numbers(calm, trackers)["intensity"]
+    ops = m.DeltaOut.model_validate({"ops": [{"op": "clock_change", "tracker": "Dawn", "amount": 1}]}).ops
+    assert ops[0].op == "clock_advance"

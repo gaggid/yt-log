@@ -25,10 +25,15 @@ def _num(v):
 Num = Annotated[float, BeforeValidator(_num)]
 
 
+ALIASES = {"clock_change": "clock_advance", "clock_increase": "clock_advance", "clock_tick": "clock_advance", "add_item": "item_add", "remove_item": "item_remove", "move_item": "item_move", "set_flag": "flag_set"}
+
+
 def _ops(v):
     """The real model sometimes writes {"move": {"target": ..}} or {"operation": "move", ..} instead of {"op": "move", ..}; all of these are read as the same operation."""
     out = []
     for it in v or []:
+        if isinstance(it, dict) and it.get("op") in ALIASES:
+            it = {**it, "op": ALIASES[it["op"]]}
         if isinstance(it, dict) and "op" not in it:
             key = next((k for k in it if k in OPS), None)
             if key and isinstance(it[key], dict):

@@ -146,10 +146,19 @@ def ensure_cost(rolls: list[dict], before: dict, after: dict, trackers: list[dic
     r = max(bad, key=lambda r: COST_PERCENT[r["tier"]])
     st = {**after, "trackers": {k: (dict(v) if isinstance(v, dict) else v) for k, v in after["trackers"].items()}}
     meters = [t for t in trackers if t["kind"] == "meter"]
+
+    def room(t):
+        """How far a meter still is from its bad end, 0 to 1 (a meter already at the bottom cannot pay a cost)."""
+        span = max(1.0, float(t["max"]) - float(t["min"]))
+        cur = float(st["trackers"][t["id"]])
+        high_bad = t.get("danger_above") is not None and t.get("danger_below") is None
+        return (float(t["max"]) - cur if high_bad else cur - float(t["min"])) / span
+
     own = [t for t in meters if S.norm(t.get("owner", "")) == S.norm(r.get("who", ""))]
-    pool = own or [t for t in meters if S.norm(t.get("owner", "")) == "group"] or meters
+    group = [t for t in meters if S.norm(t.get("owner", "")) == "group"]
+    pool = [t for t in (own or group or meters) if room(t) > 0.1] or [t for t in meters if room(t) > 0.1]
     if pool:
-        t = pool[0]
+        t = max(pool, key=room)
         span = float(t["max"]) - float(t["min"])
         step = max(1.0, round(span * COST_PERCENT[r["tier"]]))
         cur = float(st["trackers"][t["id"]])

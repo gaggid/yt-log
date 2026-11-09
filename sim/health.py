@@ -91,6 +91,14 @@ def chapter_numbers(c: dict, trackers: list[dict]) -> dict:
     costs = diff_costs(c.get("state_before") or {}, c.get("state_after") or {}, trackers)
     points = sum(int(x.split("|")[0]) for x in costs) + 2 * tiers.get("fail", 0) + 3 * tiers.get("disaster", 0) + tiers.get("partial", 0)
     pressure = len(S.pressure(c.get("state_after") or {"trackers": {}}, trackers)) if c.get("state_after") else 0
+    after = c.get("state_after") or {"trackers": {}}
+    for t in trackers:                                                      # a meter sitting at its bad end is pressure even when it did not move this chapter
+        v = (after.get("trackers") or {}).get(t["id"])
+        if t["kind"] == "meter" and v is not None:
+            span = max(1.0, float(t["max"]) - float(t["min"]))
+            high_bad = t.get("danger_above") is not None and t.get("danger_below") is None
+            if ((float(t["max"]) - float(v)) if high_bad else (float(v) - float(t["min"]))) / span <= 0.1:
+                pressure += 1
     return {"idx": c["idx"], "title": c.get("title", ""), "tiers": dict(tiers), "costs": [x.split("|", 1)[1] for x in costs], "points": points,
             "intensity": max(0, min(10, points + pressure)), "free": points <= FREE_POINTS and not (tiers.get("fail") or tiers.get("disaster") or tiers.get("partial")), "ending": ending_kind(c.get("prose", "")), "words": len((c.get("prose") or "").split())}
 
