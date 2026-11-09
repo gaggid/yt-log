@@ -19,7 +19,7 @@ import config
 from story import db
 from story3 import store as media
 
-ID_RE = re.compile(r"^(?:pl|sh|ch)-[0-9a-f]{6,16}$")
+ID_RE = re.compile(r"^(?:pl|sh|ch|sm)-[0-9a-f]{6,16}$")
 SPECIAL = {"wardrobe": "Wardrobe (garment pictures)"}
 # folder -> (what it holds, can the app make it again?)
 FOLDERS = {
@@ -28,7 +28,7 @@ FOLDERS = {
     "key": ("Start pictures (storyboard)", True), "final": ("Final short videos", True), "frames": ("Cut frames", True), "remix": ("Remix motion guide and parts", False),
     "upload": ("Pictures you uploaded", False), "likeness": ("Photos used for a real person's likeness", False), "source": ("Photo a character was started from", False),
     "char_gen": ("Character pictures drawn from text", True), "char_sheet": ("Character sheet pictures", True), "char_edit": ("Character edits, looks and try-ons", True),
-    "garment": ("Garment pictures", False),
+    "garment": ("Garment pictures", False), "panels": ("Story pictures (painted panels)", True),
 }
 OTHER = {                                           # folders under data/ that only hold test output; the timing files the estimates read are kept
     "characters_probe": ("Character studio probe pictures", ("timings.json",)), "shorts_probe": ("Shorts probe clips", ("timings.json",)),
@@ -57,7 +57,7 @@ def _size(path: Path) -> tuple[int, int]:
 
 
 def kind_of(pid: str) -> str:
-    return {"pl": "long", "sh": "short", "ch": "character"}.get(pid[:2], "special")
+    return {"pl": "long", "sh": "short", "ch": "character", "sm": "story"}.get(pid[:2], "special")
 
 
 def _titles() -> dict[str, dict]:
@@ -67,7 +67,7 @@ def _titles() -> dict[str, dict]:
             out[r["id"]] = {"title": r["title"] or r["id"], "status": r["status"], "updated_at": r["updated_at"]}
     except Exception:  # noqa: BLE001 - a table may not exist yet on a fresh install
         pass
-    for table, key in (("shorts", "title"), ("chars", "name")):
+    for table, key in (("shorts", "title"), ("chars", "name"), ("sim_projects", "title")):
         try:
             for r in db.q(f"SELECT id, {key} AS t, status, updated_at FROM {table}"):
                 out[r["id"]] = {"title": r["t"] or r["id"], "status": r["status"], "updated_at": r["updated_at"]}
@@ -165,6 +165,17 @@ def _prune_after(pid: str) -> None:
             if len(keep) != len(data.get("reference_images", [])):
                 data["reference_images"] = keep
                 db.ex("UPDATE assets SET data=?, rev=rev+1, updated_at=? WHERE id=?", (db.jdump(data), db.now(), a["id"]))
+    elif pid.startswith("sm-"):
+        from sim import store as sstore
+        try:
+            sstore.ensure()
+            chapters = sstore.chapters(pid)
+        except sqlite3.OperationalError:
+            return
+        for ch in chapters:
+            fixed = [{**p, "file": "", "capfile": "", "media_id": "", "hash": ""} if p.get("file") and not (base / p["file"]).is_file() else p for p in ch["panels"]]
+            if fixed != ch["panels"]:
+                sstore.update_chapter(ch["id"], panels=fixed)
     elif pid.startswith("ch-"):
         from characters import store as cstore
         try:

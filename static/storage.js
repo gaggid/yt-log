@@ -2,7 +2,7 @@
    or everything for one project. Uses the helpers of index.html ($, api, esc, act, toast, dialog, badge). */
 (() => {
 const gb = b => b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB' : b >= 1048576 ? (b / 1048576).toFixed(0) + ' MB' : b >= 1024 ? (b / 1024).toFixed(0) + ' KB' : b + ' B';
-const KIND = {long: 'Long story', short: 'Short', character: 'Character', special: 'Library'};
+const KIND = {long: 'Long story', short: 'Short', character: 'Character', story: 'Story', special: 'Library'};
 let DATA = null;
 
 window.mountStorage = async function () {

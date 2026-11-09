@@ -27,6 +27,7 @@ from characters.api import router as characters_router
 from admin.api import router as storage_router
 from youtube.api import router as youtube_router
 from feedback.api import router as feedback_router
+from sim.api import router as sim_router
 from story.pipeline import manager
 
 STATIC = Path(__file__).with_name("static")
@@ -49,6 +50,8 @@ _GIT = _git_info()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init()
+    from sim import store as _sim_store
+    _sim_store.repair()                          # a story chapter left 'writing' by a stopped server is marked failed (docs/PLAN_simulation.md section 17)
     resumed = manager.resume_interrupted()      # unfinished sources continue after a restart / auto-deploy
     if resumed:
         print(f"Resuming interrupted processing: {', '.join(resumed)}", flush=True)
@@ -77,6 +80,7 @@ app.include_router(characters_router)
 app.include_router(storage_router)
 app.include_router(youtube_router)
 app.include_router(feedback_router)
+app.include_router(sim_router)
 
 
 NO_STORE = {"Cache-Control": "no-store"}
@@ -91,7 +95,8 @@ async def root():
         'src="/storage.js"', f'src="/storage.js?v={int((STATIC / "storage.js").stat().st_mtime)}"').replace(
         'src="/ideas.js"', f'src="/ideas.js?v={int((STATIC / "ideas.js").stat().st_mtime)}"').replace(
         'src="/youtube.js"', f'src="/youtube.js?v={int((STATIC / "youtube.js").stat().st_mtime)}"').replace(
-        'src="/learn.js"', f'src="/learn.js?v={int((STATIC / "learn.js").stat().st_mtime)}"')
+        'src="/learn.js"', f'src="/learn.js?v={int((STATIC / "learn.js").stat().st_mtime)}"').replace(
+        'src="/sim.js"', f'src="/sim.js?v={int((STATIC / "sim.js").stat().st_mtime)}"')
     return HTMLResponse(html, headers=NO_STORE)
 
 
@@ -118,6 +123,11 @@ async def characters_js():
 @app.get("/learn.js")
 async def learn_js():
     return FileResponse(STATIC / "learn.js", media_type="application/javascript", headers=NO_STORE)
+
+
+@app.get("/sim.js")
+async def sim_js():
+    return FileResponse(STATIC / "sim.js", media_type="application/javascript", headers=NO_STORE)
 
 
 @app.get("/youtube.js")
