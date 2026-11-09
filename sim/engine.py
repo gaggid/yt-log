@@ -5,11 +5,11 @@ import re
 
 from story import llm
 
-from . import dice, drama, health, memory, models as m, prompts as P, state as S, store, things, think
+from . import architect, dice, drama, health, memory, models as m, prompts as P, state as S, store, things, think
 
 WORD_SLACK = (0.8, 1.23)                 # chapter length accepted around the owner's setting (350 -> 280 to 430)
 MAX_RISKS = 3
-STAGES = ("gather", "plan", "minds", "resolve", "delta", "write", "referee", "archive")
+STAGES = ("gather", "plan", "minds", "resolve", "delta", "write", "polish", "referee", "archive")
 
 
 class Stopped(Exception):
@@ -23,6 +23,26 @@ def fence(text: str) -> str:
 def words_range(settings: dict) -> tuple[int, int, int]:
     w = int(settings["chapter_words"])
     return w, int(w * WORD_SLACK[0]), int(w * WORD_SLACK[1])
+
+
+META = re.compile(r"\b(stop reasoning|final answer|as an ai|language model|word count|word limit|i must (?:now )?(?:stop|answer|write)|let me (?:think|count|reason)|the user (?:wants|asked)|the prompt|json)\b", re.I)
+
+
+STOCK = {"heavy", "rhythmic", "guttural", "metallic", "thrum", "tang", "palpable", "visceral", "heavily", "rhythmically"}
+
+
+def stock_words(prose: str) -> list[str]:
+    return [w for w in health.words(prose) if w in STOCK]
+
+
+def meta_text(prose: str) -> str:
+    """Words of the model talking about its own task that ended up inside the story (a thinking model cut short sometimes does this)."""
+    m = META.search(prose or "")
+    return m.group(0) if m else ""
+
+
+def strip_meta(prose: str) -> str:
+    return " ".join(x for x in re.split(r"(?<=[.!?])\s+", prose.strip()) if not META.search(x))
 
 
 def _overlap(a: str, b: str) -> bool:
@@ -160,9 +180,13 @@ async def run_chapter(pid: str, backend, s: dict, progress=None, *, parent_id: s
     flags = dict(ch["flags"])
     flags.update(instruction=instruction, salt=salt, rules_version=cfg["rules_version"], kind="start" if not parent_id else "normal")
     done = set(flags.get("done", []))
+    bible = store.bible(pid)
+    beat = architect.beat_for(bible, ch["idx"])                                   # the story plan's beat for this chapter (a story with no plan has none)
+    if beat:
+        flags["beat"] = {k: beat[k] for k in ("n", "label", "title", "time", "purpose")}
     st0 = reconcile(parent["state_after"], trackers, ents) if parent else S.initial_state(trackers, ents, world)
     store.update_chapter(cid, chosen=action, state_before=st0, flags=flags, status="writing", parent_id=parent_id)
-    total = len(STAGES) - (0 if cfg["deep"] else 1)
+    total = len(STAGES) - (0 if cfg["deep"] else 1) - (0 if cfg.get("polish") else 1)
     state_hold = {"n": 0}
 
     def begin(name, text):
@@ -219,6 +243,8 @@ async def run_chapter(pid: str, backend, s: dict, progress=None, *, parent_id: s
                     raise ValueError(f"the last chapters were already '{p.beat}': choose a different beat")
                 if action.get("kind") == "text" and not _overlap(action.get("text", ""), p.intent + " " + p.scene) and not caller.last_attempt:
                     raise ValueError("the intent must follow the owner's action")
+                if beat and not caller.last_attempt and not architect.follows(beat, " ".join([p.scene, p.intent, p.pressure, p.opposition])):
+                    raise ValueError(f"the chapter must play its beat of the story plan: {beat['event']} (problem: {beat['problem']})")
                 if not p.opposition.strip() and not caller.last_attempt:
                     raise ValueError("opposition: say what the opposing force does this chapter on its own")
                 if neg and not caller.last_attempt and not drama.plan_touches(neg, " ".join([p.scene, p.intent, p.opposition, " ".join(p.focus)])):
@@ -232,7 +258,7 @@ async def run_chapter(pid: str, backend, s: dict, progress=None, *, parent_id: s
                     elif r.craft and not r.craft.makes:
                         r.craft.makes = r.act
 
-            user = (f"{memory.render(pk0, s)}\n\n{drama.arc_block(arc, ch['idx'], length)}" + (f"\n\n{drama.neglected_block(neg)}" if neg else "") + f"\n\n## PLAYER'S ACTION\n{act}\n\n## DUE INSTRUCTIONS\n"
+            user = (f"{memory.render(pk0, s)}\n\n{drama.arc_block(arc, ch['idx'], length)}" + (f"\n\n{architect.plan_block(bible, beat, ch['idx'])}" if beat else "") + (f"\n\n{drama.neglected_block(neg)}" if neg else "") + f"\n\n## PLAYER'S ACTION\n{act}\n\n## DUE INSTRUCTIONS\n"
                     + ("\n".join(f"{d['label']} (id {d['id']}) [{d['kind']}] {'MUST' if d['must'] else 'MAY WAIT'}: {fence(d['text'])}" for d in due) or "(none)")
                     + "\n\n## UNDER PRESSURE\n" + ("\n".join(p["text"] for p in flags.get("pressure", [])) or "(nothing at its limit)")
                     + "\n\n## BEATS OF THE LAST CHAPTERS\n" + (", ".join(b for b in last_beats if b) or "(none yet)")
@@ -303,6 +329,14 @@ async def run_chapter(pid: str, backend, s: dict, progress=None, *, parent_id: s
             done.add("write")
             flags["done"] = sorted(done)
             store.update_chapter(cid, flags=flags)
+        # polish (optional) -----------------------------------------------------
+        if cfg.get("polish"):
+            if "polish" not in done:
+                begin("polish", "polishing the prose")
+                await _polish(pid, backend, s, cid, cfg, flags)
+                finish("polish")
+        else:
+            done.add("polish")
         # referee ---------------------------------------------------------------
         if "referee" not in done:
             begin("referee", "checking the rules")
@@ -317,6 +351,11 @@ async def run_chapter(pid: str, backend, s: dict, progress=None, *, parent_id: s
         store.update_chapter(cid, status="done", fired=fired, flags=flags)
         store.save_project(pid, head_id=cid, status="running")
         await _maybe_rollup(pid, backend, s)
+        if architect.has_plan(bible) and action.get("kind") == "text" and not flags.get("replanned"):
+            begin("replan", "adjusting the story plan to what you wrote")
+            await architect.replan(pid, backend, s, f"The player wrote their own action in chapter {ch['idx']}: {action.get('text', '')}. Keep the hidden truth, rules, motifs, facts and the ending; change the beats after this chapter where the story has moved.")
+            flags["replanned"] = True
+            store.update_chapter(cid, flags=flags)
         progress(total, total, "chapter done")
         store.set_run(pid, replace=True, chapter_id=cid, stage="done", error="")
         return store.chapter(cid)
@@ -382,12 +421,15 @@ def _tail(chapter_text: str) -> str:
 
 async def _write(pid, backend, s, cid, path, st0, st1, plan, rolls, delta, instruction, violations, cfg, flags) -> None:
     w, lo, hi = words_range(cfg)
+    bible = store.bible(pid)
+    beat = architect.beat_for(bible, store.chapter(cid)["idx"])
     pk = memory.build(pid, path, st1, plan["focus"], plan["scene"], s)
     system = P.WRITE.replace("{words}", str(w)).replace("{lo}", str(lo)).replace("{hi}", str(hi))
     user = (f"{memory.render(pk, s)}\n\n## CHAPTER PLAN\nWhere: {plan['where']}\nFollowing: {', '.join(plan['focus'])}\nScene: {plan['scene']}\nIntent: {plan['intent']}\nOpposition (show its effect): {plan.get('opposition', '')}\nTime passes: {plan['time_passes']}\n"
             + ("\n## HOW EACH RISKY ACT ENDS (fixed)\n" + "\n".join(f"- {r['who']}: {r['act']} -> {r['text']}" for r in rolls) if rolls else "")
             + ("\n\n## CHANGES TO SHOW\n" + "\n".join(f"- {a['text']}" + (f" ({a['why']})" if a.get("why") else "") for a in delta["applied"]) if delta["applied"] else "")
             + ("\n\n## WHAT THE OTHERS DO\n" + "\n".join(f"- {k}: {v}" for k, v in plan.get("minds", {}).items()) if plan.get("minds") else "")
+            + (f"\n\n{architect.write_block(bible, beat)}" if beat else "")
             + ("\n\n## INSTRUCTIONS HAPPENING NOW\n" + "\n".join(f"- {fence(t)}" for t in _fired_texts(pid, plan)) if plan.get("addresses") else "")
             + (f"\n\n## OWNER'S NOTE FOR THIS CHAPTER\n{fence(instruction)}" if instruction else "")
             + ("\n\n## FIX THESE PROBLEMS FROM THE LAST DRAFT\n" + "\n".join(f"- {v['rule']}: \"{v['quote']}\" -> {v['fix']}" for v in violations) if violations else "")
@@ -398,13 +440,54 @@ async def _write(pid, backend, s, cid, path, st0, st1, plan, rolls, delta, instr
         flags["words"] = n
         if (n < lo or n > hi) and not caller.last_attempt:
             raise ValueError(f"the chapter has {n} words; it must have between {lo} and {hi}")
+        if meta_text(o.prose):
+            if not caller.last_attempt:
+                raise ValueError(f"the chapter contains words that are not part of the story ('{meta_text(o.prose)}'): write only the story")
+            o.prose = strip_meta(o.prose)
+        if len(stock_words(o.prose)) >= 3 and not caller.last_attempt:
+            raise ValueError("the chapter leans on stock words (" + ", ".join(sorted(set(stock_words(o.prose)))) + "): replace them with specific, concrete details")
         if health.ending_kind(o.prose) == "menu" and not caller.last_attempt:
             raise ValueError("the chapter ends on a list of routes (to the left, to the right). End on a hook, a decision or a reveal instead.")
 
     o = await _json(backend, s, system, user, m.WriteOut, v)
     st = copy.deepcopy(st1)
-    st["time"] = o.story_time or st1.get("time", "")
-    store.update_chapter(cid, title=o.title.strip()[:120], prose=o.prose.strip(), story_time=o.story_time.strip()[:60], state_after=st)
+    title, when = o.title.strip()[:120], o.story_time.strip()[:60]
+    if beat:                                                                       # the plan names the chapter and says when it is
+        title, when = beat["title"][:120] or title, architect.label_time(beat)[:60] or when
+    st["time"] = when or st1.get("time", "")
+    store.update_chapter(cid, title=title, prose=o.prose.strip(), story_time=when, state_after=st)
+
+
+async def _polish(pid, backend, s, cid, cfg, flags) -> None:
+    """An editor's pass over the written chapter: the same events and numbers in more specific, varied prose. The original is kept in the chapter's flags; a rewrite that is too short, too long or talks about its own task is dropped."""
+    ch = store.chapter(cid)
+    w, lo, hi = words_range(cfg)
+    bible = store.bible(pid)
+    beat = architect.beat_for(bible, ch["idx"])
+    voice = f"VOICE: {bible.get('voice', '')} Point of view: {bible.get('pov', 'as written')}.\n" if bible else "VOICE: keep the point of view and tense of the chapter.\n"
+    user = voice + (f"BEAT: {beat['label']}: {beat['event']} Ends on: {beat['hook']}\n" if beat else "") + f"\nCHAPTER ({len(ch['prose'].split())} words):\n{ch['prose']}\n\nRewrite it now."
+
+    def v(o: m.WriteOut, caller):
+        n = len(o.prose.split())
+        if (n < lo or n > hi) and not caller.last_attempt:
+            raise ValueError(f"the rewrite has {n} words; it must have between {lo} and {hi}: do not cut it short")
+        if (meta_text(o.prose) or len(stock_words(o.prose)) >= 2) and not caller.last_attempt:
+            raise ValueError("the rewrite talks about its own task or uses stock words: write only the story, with specific details")
+
+    try:
+        o = await _json(backend, s, P.POLISH, user, m.WriteOut, v)
+    except llm.ValidationFailed:
+        flags["polished"] = False
+        store.update_chapter(cid, flags=flags)
+        return
+    n = len(o.prose.split())
+    if lo <= n <= hi and not meta_text(o.prose):
+        flags["prose_before_polish"] = ch["prose"]
+        flags["polished"] = True
+        store.update_chapter(cid, prose=o.prose.strip(), flags=flags)
+    else:
+        flags["polished"] = False
+        store.update_chapter(cid, flags=flags)
 
 
 def _fired_texts(pid: str, plan: dict) -> list[str]:
@@ -415,17 +498,20 @@ def _fired_texts(pid: str, plan: dict) -> list[str]:
 async def _referee(pid, backend, s, cid, path, st0, st1, plan, rolls, delta, instruction, cfg, flags) -> None:
     rules, labels = memory.rules_text(pid)
     hardness = {g["id"]: g["grp"] for g in store.guidelines(pid, enabled_only=True)}
+    bible = store.bible(pid)
+    beat = architect.beat_for(bible, store.chapter(cid)["idx"])
     for attempt in (1, 2):
         ch = store.chapter(cid)
         st = ch["state_after"]
         user = (f"## RULES\n{rules}\n\n## WORLD\n{memory.world_text(store.world(pid))}\n\n## STATE AFTER THE CHAPTER\n{S.describe(st, store.trackers(pid))}\n\n"
                 + ("## DICE RESULTS (fixed)\n" + "\n".join(f"- {r['who']}: {r['act']} -> {r['tier']}" for r in rolls) + "\n\n" if rolls else "")
+                + (f"{architect.referee_block(bible, beat)}\n\n" if beat else "")
                 + f"## CHAPTER\n{ch['prose']}\n\nCheck it now.")
         r = await _json(backend, s, P.REFEREE, user, m.RefereeOut)
         hard = []
         for x in r.violations:
             gid = labels.get(x.rule.upper().strip())
-            if x.rule.lower().startswith("continuity") or (gid and hardness.get(gid) in ("hard", "world")):
+            if x.rule.lower().startswith(("continuity", "plan")) or (gid and hardness.get(gid) in ("hard", "world")):
                 hard.append(x.model_dump())
         if not hard:
             flags.pop("rule_break", None)
@@ -440,6 +526,8 @@ async def _referee(pid, backend, s, cid, path, st0, st1, plan, rolls, delta, ins
             return
         flags["first_violations"] = hard                                    # what made the first draft be written again (kept for the owner and for tuning)
         await _write(pid, backend, s, cid, path, st0, st1, plan, rolls, delta, instruction, hard, cfg, flags)
+        if cfg.get("polish"):
+            await _polish(pid, backend, s, cid, cfg, flags)
 
 
 async def _archive(pid, backend, s, cid, path, st1, plan, flags) -> None:
@@ -470,7 +558,7 @@ async def _archive(pid, backend, s, cid, path, st1, plan, flags) -> None:
             raise ValueError("write 3 or 4 different options, each for a living character")
         o.options = opts[:4]
 
-    user = (f"{memory.render(pk, s)}\n\n## THE CHAPTER\n{ch['title']} ({ch['story_time']})\n{ch['prose']}\n\nAlive: {', '.join(alive)}\nFollowed: {', '.join(foc)}\n\nWrite the archive and the options now.")
+    user = (f"{memory.render(pk, s)}\n\n## THE CHAPTER\n{ch['title']} ({ch['story_time']})\n{ch['prose']}\n\nAlive: {', '.join(alive)}\nFollowed: {', '.join(foc)}\n\n{architect.next_block(store.bible(pid), ch['idx'])}\n\nWrite the archive and the options now.")
     o = await _json(backend, s, P.ARCHIVE, user, m.ArchiveOut, v)
     options = [{"id": f"o{i}", **x} if isinstance(x, dict) else {"id": f"o{i}", **x.model_dump()} for i, x in enumerate(o.options, 1)]
     if not options:                                                           # the last attempt may have none: a story must never dead-end

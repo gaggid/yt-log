@@ -14,7 +14,7 @@ def export_data(pid: str, full: bool = False) -> dict:
     out = {"format": FORMAT, "kind": "full" if full else "setup", "project": {"title": p["title"], "idea": p["idea"], "settings": p["settings"]},
            "world": store.world(pid), "entities": [{k: v for k, v in e.items() if k != "project_id"} for e in store.entities(pid, active_only=False)],
            "trackers": [{k: v for k, v in t.items() if k != "project_id"} for t in store.trackers(pid, active_only=False)],
-           "guidelines": [{"grp": g["grp"], "text": g["text"], "enabled": g["enabled"], "origin": g["origin"]} for g in store.guidelines(pid)]}
+           "guidelines": [{"grp": g["grp"], "text": g["text"], "enabled": g["enabled"], "origin": g["origin"]} for g in store.guidelines(pid)], "bible": store.bible(pid)}
     if full:
         out["directives"] = [{k: v for k, v in d.items() if k != "project_id"} for d in store.directives(pid)]
         out["chapters"] = [{k: v for k, v in c.items() if k != "project_id"} for c in store.chapters(pid)]
@@ -34,6 +34,8 @@ def import_data(data: dict, title_suffix: str = "") -> dict:
     st = {k: v for k, v in (pj.get("settings") or {}).items() if k in store.DEFAULT_SETTINGS and k != "seed"}
     store.save_project(pid, settings=st)
     store.set_world(pid, data.get("world") or {})
+    if data.get("bible"):
+        store.set_bible(pid, data["bible"])
     for g in data.get("guidelines", []):
         store.save_guideline(pid, {**g, "origin": g.get("origin", "owner")})
     for e in data.get("entities", []):

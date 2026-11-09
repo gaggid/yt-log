@@ -148,17 +148,17 @@ def test_chapter_one_runs_every_stage_and_stores_it(sm):
     pid, fake = make()
     ch = go(pid, fake)
     assert ch["status"] == "done" and ch["idx"] == 1 and ch["parent_id"] == ""
-    assert 280 <= len(ch["prose"].split()) <= 430 and ch["title"] == "Barricade"
+    assert 280 <= len(ch["prose"].split()) <= 430 and ch["title"] == "Beat 1"
     assert ch["rolls"] and ch["rolls"][0]["tier"] in dice.TIERS
     assert [o["id"] for o in ch["options"]] == ["o1", "o2", "o3", "o4"]
     assert sum(1 for o in ch["options"] if o["risk"] == "high") <= 1
     assert ch["delta"]["dropped"] and "Rocket launcher" in str(ch["delta"]["dropped"])        # the invented item was refused
     clock = next(t for t in store.trackers(pid) if t["kind"] == "clock")
     assert ch["state_after"]["trackers"][clock["id"]] == ch["state_before"]["trackers"][clock["id"]] + 1
-    assert ch["state_after"]["time"] == "Day 1, 23:40"
+    assert ch["state_after"]["time"] == "Day 1"
     assert store.project(pid)["head_id"] == ch["id"] and store.project(pid)["status"] == "running"
     assert store.facts(pid) and store.threads(pid)
-    assert [c["task"] for c in fake.calls if c["task"] not in ("sm_world", "sm_cast", "sm_trackers", "sm_rules")] == ["sm_plan", "sm_delta", "sm_write", "sm_referee", "sm_archive"]
+    assert [c["task"] for c in fake.calls if c["task"] not in ("sm_world", "sm_cast", "sm_trackers", "sm_rules", "sm_bible", "sm_beats")] == ["sm_plan", "sm_delta", "sm_write", "sm_referee", "sm_archive"]
     assert fake.count("sm_plan") == fake.count("sm_write") == fake.count("sm_referee") == fake.count("sm_archive") == 1
 
 
@@ -169,7 +169,7 @@ def test_chapter_two_continues_from_the_option_and_the_state(sm):
     assert c2["idx"] == 2 and c2["parent_id"] == c1["id"] and c2["state_before"] == c1["state_after"]
     assert "Ravi tries plan number" not in c2["prose"]
     assert "PLAYER'S ACTION" in fake.last("sm_plan")["user"] and "plan number 2" in fake.last("sm_plan")["user"]
-    assert "Barricade" in fake.last("sm_plan")["user"]                           # the last chapter's ending is in the packet
+    assert "Beat 1" in fake.last("sm_plan")["user"]                           # the last chapter's ending is in the packet
     assert [p["id"] for p in store.path(pid)] == [c1["id"], c2["id"]]
 
 
@@ -462,7 +462,9 @@ def test_a_courtroom_story_runs_on_the_same_engine(sm):
     assert "Asha" in fake.last("sm_plan")["user"] and "Ravi" not in fake.last("sm_plan")["user"]
     jury = next(t for t in store.trackers(pid) if t["name"] == "Jury support")
     cost = [a for a in c1["delta"]["applied"] if a["op"] == "cost"]                       # a failed or partial act with no real cost gets one added by the system
-    assert c1["state_after"]["trackers"][jury["id"]] == (4 if not cost else 4 - 2)
+    from sim import drama
+    step = max([max(1, round(10 * drama.COST_PERCENT[r["tier"]])) for r in c1["rolls"] if r["tier"] in drama.COST_PERCENT] or [0])
+    assert c1["state_after"]["trackers"][jury["id"]] == (4 if not cost else 4 - step)
 
 
 # ── delete ────────────────────────────────────────────────────────────────────

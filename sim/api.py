@@ -11,7 +11,7 @@ from pydantic import BaseModel
 import config
 from story import llm, settings as settings_mod
 
-from . import engine, export as export_mod, health, jobs, memory, paint, portable, seed, state as S, store, templates, things
+from . import architect, engine, export as export_mod, health, jobs, memory, paint, portable, seed, state as S, store, templates, things
 
 router = APIRouter(prefix="/api/sim", tags=["sim"])
 
@@ -142,7 +142,20 @@ async def detail(pid: str):
             "failed": ({"id": failed["id"], "stage": store.run_info(pid).get("stage", ""), "error": failed["flags"].get("error", ""), "done": failed["flags"].get("done", [])} if failed else None),
             "run": {**jobs.status(pid), **store.run_info(pid)}, "reading_minutes": export_mod.reading_minutes(pid), "bytes": _bytes(pid),
             "branches": len([c for c in all_ch if c["id"] not in path_ids and c["status"] == "done"]), "tracker_kinds": list(store.TRACKER_KINDS),
-            "carry": {"default": int(p["settings"].get("carry_limit", 0) or 0), "people": memory.carry_map(ents)}, "health": health.report(pid, path)}
+            "carry": {"default": int(p["settings"].get("carry_limit", 0) or 0), "people": memory.carry_map(ents)}, "health": health.report(pid, path),
+            "plan": plan_view(store.bible(pid), False, len([c for c in path if c["status"] == "done"]))}
+
+
+def plan_view(bible: dict, spoilers: bool, done: int = 0) -> dict | None:
+    """The story plan for the page. Without `spoilers` the hidden truth, the clues and which beat reveals it are left out, so the owner can read the story as a reader would."""
+    if not bible or not bible.get("beats"):
+        return None
+    out = {k: v for k, v in bible.items() if k not in ("secret", "beats")}
+    out["done"] = done
+    sec = bible.get("secret", {})
+    out["secret"] = sec if spoilers else {"hidden": True, "clues": len(sec.get("clues", []))}
+    out["beats"] = [{**b, "status": "done" if b["n"] <= done else "next" if b["n"] == done + 1 else "later", **({} if spoilers else {"clues": [], "purpose": "turn" if b["purpose"] == "reveal" else b["purpose"]})} for b in bible["beats"]]
+    return out
 
 
 class Patch(BaseModel):
@@ -192,7 +205,7 @@ class SeedBody(BaseModel):
 @router.post("/{pid}/seed/{part}")
 async def seed_part(pid: str, part: str, body: SeedBody):
     if part != "all" and part not in seed.PARTS:
-        raise HTTPException(400, "part must be all, world, cast, trackers or rules")
+        raise HTTPException(400, "part must be all, world, cast, trackers, rules or bible")
     if part in ("cast", "trackers", "all") and _project(pid)["status"] != "setup":
         raise HTTPException(400, "the story already started; edit people and trackers one by one")
 
@@ -529,6 +542,87 @@ async def reread_apply(pid: str, cid: str):
     c = store.chapter(cid)
     store.update_chapter(cid, flags={k: v for k, v in c["flags"].items() if k != "reread"})
     return {"ok": True}
+
+
+@router.get("/{pid}/bible")
+async def get_bible(pid: str, spoilers: bool = False):
+    _project(pid)
+    path = store.path(pid)
+    return {"plan": plan_view(store.bible(pid), spoilers, len([c for c in path if c["status"] == "done"]))}
+
+
+class BibleBody(BaseModel):
+    logline: str | None = None
+    pov: str | None = None
+    voice: str | None = None
+    secret: dict | None = None
+    rules: list | None = None
+    motifs: list | None = None
+    facts: list | None = None
+    ending: dict | None = None
+
+
+@router.put("/{pid}/bible")
+async def put_bible(pid: str, body: BibleBody):
+    _project(pid)
+    b = store.bible(pid)
+    if not b:
+        raise HTTPException(400, "this story has no plan yet; write it first")
+    new = {k: v for k, v in body.model_dump().items() if v is not None}
+    if "pov" in new and new["pov"] not in ("first", "second", "third"):
+        raise HTTPException(400, "point of view must be first, second or third")
+    store.set_bible(pid, {**b, **new})
+    return {"ok": True}
+
+
+class BeatBody(BaseModel):
+    label: str | None = None
+    time: str | None = None
+    title: str | None = None
+    event: str | None = None
+    problem: str | None = None
+    turn: str | None = None
+    hook: str | None = None
+    purpose: str | None = None
+    challenge: str | None = None
+    clues: list[str] | None = None
+    rule: str | None = None
+    motif: str | None = None
+    fact: str | None = None
+
+
+@router.put("/{pid}/bible/beats/{n}")
+async def put_beat(pid: str, n: int, body: BeatBody):
+    _project(pid)
+    b = store.bible(pid)
+    beat = architect.beat_for(b, n)
+    if not beat:
+        raise HTTPException(404, "no such beat")
+    edit = {k: v for k, v in body.model_dump().items() if v is not None}
+    if "purpose" in edit and edit["purpose"] not in architect.PURPOSES:
+        raise HTTPException(400, "purpose must be one of " + ", ".join(architect.PURPOSES))
+    if "label" in edit and "title" not in edit and ":" in edit["label"]:
+        edit["time"], edit["title"] = (x.strip() for x in edit["label"].split(":", 1))
+    beat.update(edit)
+    store.set_bible(pid, b)
+    return {"ok": True}
+
+
+class ReplanBody(BaseModel):
+    instruction: str = ""
+
+
+@router.post("/{pid}/replan")
+async def replan(pid: str, body: ReplanBody):
+    _project(pid)
+    if not architect.has_plan(store.bible(pid)):
+        raise HTTPException(400, "this story has no plan yet; write it first")
+
+    async def make(backend, s, progress, cancel):
+        progress(0, 1, "writing the rest of the story plan")
+        await architect.replan(pid, backend, s, body.instruction)
+        return "the rest of the plan is rewritten"
+    return _job(pid, "replan", make)
 
 
 class ThingAction(BaseModel):

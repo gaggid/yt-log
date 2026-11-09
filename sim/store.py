@@ -30,12 +30,13 @@ CREATE INDEX IF NOT EXISTS sim_fc_p ON sim_facts(project_id);
 CREATE TABLE IF NOT EXISTS sim_threads(id TEXT PRIMARY KEY, project_id TEXT, text TEXT, opened_in TEXT DEFAULT '', closed_in TEXT DEFAULT '', status TEXT DEFAULT 'open');
 CREATE INDEX IF NOT EXISTS sim_th_p ON sim_threads(project_id);
 CREATE TABLE IF NOT EXISTS sim_runs(project_id TEXT PRIMARY KEY, data TEXT DEFAULT '{}');
+CREATE TABLE IF NOT EXISTS sim_bible(project_id TEXT PRIMARY KEY, data TEXT DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS sim_templates(id TEXT PRIMARY KEY, name TEXT, data TEXT DEFAULT '{}', builtin INTEGER DEFAULT 0, created_at REAL);
 """
-TABLES = ("sim_world", "sim_entities", "sim_trackers", "sim_guidelines", "sim_directives", "sim_chapters", "sim_facts", "sim_threads", "sim_runs")
+TABLES = ("sim_world", "sim_entities", "sim_trackers", "sim_guidelines", "sim_directives", "sim_chapters", "sim_facts", "sim_threads", "sim_runs", "sim_bible")
 
 DEFAULT_SETTINGS = {"difficulty": "fair", "dice": True, "chapter_words": 350, "deep": False, "auto_images": False, "image_model": "", "panel_shape": "wide", "captions": True,
-                    "seed": 7, "template_id": "", "rules_version": 1, "thinking": "balanced", "content": "unfiltered", "carry_limit": 8, "length": 0}
+                    "seed": 7, "template_id": "", "rules_version": 1, "thinking": "balanced", "content": "unfiltered", "carry_limit": 8, "length": 0, "plan": True, "polish": False}
 DIFFICULTIES = ("gentle", "fair", "brutal")
 SHAPES = ("wide", "tall")
 GROUPS = ("hard", "world", "tone", "style", "craft")
@@ -106,7 +107,7 @@ def save_project(pid: str, **f) -> dict:
             raise SimError("content must be clean, mature or unfiltered")
         if st["panel_shape"] not in SHAPES:
             raise SimError("panel shape must be wide or tall")
-        st["chapter_words"] = max(150, min(900, int(st["chapter_words"])))
+        st["chapter_words"] = max(100, min(900, int(st["chapter_words"])))
         st["carry_limit"] = max(0, min(40, int(st.get("carry_limit", 8) or 0)))
         st["length"] = max(0, min(99, int(st.get("length", 0) or 0)))
         f["settings"] = db.jdump(st)
@@ -147,6 +148,20 @@ def world(pid: str) -> dict:
 def set_world(pid: str, data: dict) -> dict:
     ensure()
     db.ex("INSERT INTO sim_world(project_id,data) VALUES(?,?) ON CONFLICT(project_id) DO UPDATE SET data=excluded.data", (pid, db.jdump(data)))
+    touch(pid)
+    return data
+
+
+def bible(pid: str) -> dict:
+    """The story plan of docs/PLAN_architect.md (empty for a story that has none)."""
+    ensure()
+    r = db.one("SELECT data FROM sim_bible WHERE project_id=?", (pid,))
+    return db.jload(r["data"], {}) if r else {}
+
+
+def set_bible(pid: str, data: dict) -> dict:
+    ensure()
+    db.ex("INSERT INTO sim_bible(project_id,data) VALUES(?,?) ON CONFLICT(project_id) DO UPDATE SET data=excluded.data", (pid, db.jdump(data)))
     touch(pid)
     return data
 

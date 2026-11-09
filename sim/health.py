@@ -182,8 +182,34 @@ def report(pid: str, path: list[dict] | None = None) -> dict:
             v = int((last_state.get("trackers") or {}).get(t["id"], 0))
             clocks.append({"name": t["name"], "at": v, "max": int(t["max"]), "per_chapter": round(v / n, 2), "full_in": (round((int(t["max"]) - v) / (v / n)) if v else None)})
     out["clocks"] = clocks
+    out["plan"] = plan_numbers(pid, path)
     out["verdicts"] = verdicts(out, chs, alive, n)
     return out
+
+
+def _hit(want: str, prose_kw: set[str]) -> bool:
+    kw = keywords(want)
+    return not kw or len(kw & prose_kw) >= (1 if len(kw) <= 3 else 2)
+
+
+def plan_numbers(pid: str, path: list[dict]) -> dict | None:
+    """For a story with a plan: did each chapter play its beat, plant its clues, show its rule and its recurring device (word overlap; a guess, but it shows a chapter that went its own way)."""
+    bible = store.bible(pid)
+    beats = {b["n"]: b for b in bible.get("beats", [])}
+    if not beats:
+        return None
+    rows = []
+    for c in path:
+        b = beats.get(c["idx"])
+        if not b:
+            continue
+        pk = keywords(c.get("prose", ""))
+        rule = next((r for r in bible.get("rules", []) if r["name"] == b.get("rule")), None)
+        motif = next((x for x in bible.get("motifs", []) if x["name"] == b.get("motif")), None)
+        rows.append({"n": b["n"], "label": b["label"], "hit": _hit(" ".join([b.get("event", ""), b.get("problem", ""), b.get("title", "")]), pk),
+                     "clues_missing": [x for x in b.get("clues", []) if not _hit(x, pk)], "rule_missing": bool(rule) and not (_hit(rule["text"], pk) or rule["name"].lower() in (c.get("prose") or "").lower()),
+                     "motif_missing": bool(motif) and not (_hit(motif["name"] + " " + motif.get("what", ""), pk))})
+    return {"beats": rows, "total": len(beats), "reveal_beat": bible.get("secret", {}).get("reveal_beat"), "played": len(rows)}
 
 
 def verdicts(r: dict, chs: list[dict], alive: list[dict], n: int) -> list[dict]:
@@ -230,6 +256,17 @@ def verdicts(r: dict, chs: list[dict], alive: list[dict], n: int) -> list[dict]:
     for c in r["clocks"]:
         if c["full_in"] is not None and c["full_in"] > 30:
             add("warn", f"'{c['name']}' moves {c['per_chapter']} a chapter: it would take about {c['full_in']} more chapters to fill.")
+    pl = r.get("plan")
+    if pl:
+        for row in pl["beats"][-3:]:
+            if not row["hit"]:
+                add("warn", f"Chapter {row['n']} did not play its beat of the story plan ({row['label']}).")
+            for clue in row["clues_missing"][:1]:
+                add("warn", f"The clue planted in beat {row['n']} is missing from the chapter: {clue}")
+            if row["rule_missing"]:
+                add("warn", f"Chapter {row['n']} does not show the rule it should teach.")
+            if row["motif_missing"]:
+                add("warn", f"Chapter {row['n']} leaves out its recurring device.")
     if not v:
         add("ok", "Nothing stands out: the story has costs, movement and variety so far.")
     return v

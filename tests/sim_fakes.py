@@ -56,6 +56,22 @@ class SimFake:
             {"name": "Why the dead walk", "kind": "knowledge", "start": {"The source": ["Dev"]}},
             {"name": "Power is on", "kind": "flag", "start": True}]}
 
+    def _sm_bible(self, user):
+        n, start = (int(x) for x in re.search(r"The plan covers (\d+) beats, numbered (\d+) to", user).groups())
+        end = start + n - 1
+        return {"logline": "A night, a store and a voice that always knows where you are.", "pov": "second", "voice": "Short sentences, present tense, dry humor, real numbers.",
+                "secret": {"truth": "The voice on the intercom is leaving them behind.", "who": "the manager", "reveal_beat": end - 1,
+                           "clues": [{"beat": start, "clue": "the intercom knows which aisle you are in"}, {"beat": start + 1, "clue": "the intercom never mentions the exit"}, {"beat": start + 2, "clue": "the manager's coat is missing"}]},
+                "rules": [{"name": "Rule one", "text": "Move when the noise moves.", "beat": start + 1}, {"name": "Rule two", "text": "They push; they cannot pull.", "beat": start + 2}],
+                "motifs": [{"name": "The bell", "what": "a bell that rings every 50 minutes", "first_beat": start, "payoffs": [end]}],
+                "facts": [{"fact": "A person needs about a gallon of water a day.", "use": "counting the days the water lasts", "beat": start}],
+                "ending": {"outcome": "They are alone.", "final_image": "the intercom clicks on", "closing_line": "Stay in your room."}}
+
+    def _sm_beats(self, user):
+        n, start = (int(x) for x in re.search(r"Write exactly (\d+) beats numbered (\d+) to", user).groups())
+        return {"beats": [{"n": start + i, "label": f"Day {start + i}: Beat {start + i}", "time": f"Day {start + i}", "title": f"Beat {start + i}", "event": "The people secure the doors while the noise outside grows",
+                           "problem": "barricade the doors with pallets before the noise draws them in", "turn": "the noise changes", "hook": "a knock on the shutter", "purpose": "problem", "challenge": "barricade the doors"} for i in range(n)]}
+
     def _sm_items(self, user):
         return {"items": [{"name": "Crowbar", "qty": 1, "at": "Aisle Two"}, {"name": "Rope", "qty": 2, "at": "Aisle Two"}, {"name": "Bandages", "qty": 4, "at": "Pharmacy"}]}
 
@@ -98,6 +114,9 @@ class SimFake:
 
     def _sm_write(self, user):
         return {"title": "Barricade", "prose": words(self.prose_words), "story_time": "Day 1, 23:40"}
+
+    def _sm_polish(self, user):
+        return {"title": "Polished", "prose": "polished " + words(self.prose_words), "story_time": "Day 1"}
 
     def _sm_referee(self, user):
         return {"ok": True, "violations": []}

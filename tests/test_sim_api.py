@@ -177,7 +177,7 @@ def test_auto_run_export_import_duplicate_and_templates(client):
     r = wait(c, pid)
     assert "2 chapters made" in r["note"]
     md = c.get(f"/api/sim/{pid}/export?format=md")
-    assert md.status_code == 200 and "## Chapter 3: Barricade" in md.text
+    assert md.status_code == 200 and "## Chapter 3: Beat 3" in md.text
     js = c.get(f"/api/sim/{pid}/export?format=json").json()
     assert [x["n"] for x in js["chapters"]] == [1, 2, 3] and js["cast"][0]["name"] == "Ravi"
     z = zipfile.ZipFile(io.BytesIO(c.get(f"/api/sim/{pid}/export?format=zip").content))

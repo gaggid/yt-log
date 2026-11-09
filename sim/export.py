@@ -17,10 +17,12 @@ def chapter_json(pid: str) -> dict:
     p = store.project(pid)
     ents = store.entities(pid)
     chapters = store.path(pid)
+    plan = store.bible(pid)
     return {"title": p["title"], "idea": p["idea"], "world": store.world(pid),
+            "plan": ({"logline": plan.get("logline", ""), "pov": plan.get("pov", ""), "voice": plan.get("voice", ""), "rules": plan.get("rules", []), "motifs": plan.get("motifs", []), "facts": plan.get("facts", []), "ending": plan.get("ending", {})} if plan else None),
             "cast": [{"name": e["name"], "kind": e["kind"], "role": e.get("role", ""), "look": e.get("look", ""), "skills": e.get("skills", [])} for e in ents],
             "chapters": [{"n": c["idx"], "title": c["title"], "story_time": c["story_time"], "prose": c["prose"], "summary": c["summary"], "focus": c["focus"],
-                          "things": [a["text"] for a in c["delta"].get("applied", []) if a.get("op") in ("discover", "craft", "item_give", "item_take", "item_use", "item_change", "skill_learn") and not a.get("undone")],
+                          "beat": (c.get("flags") or {}).get("beat", {}).get("label", ""), "things": [a["text"] for a in c["delta"].get("applied", []) if a.get("op") in ("discover", "craft", "item_give", "item_take", "item_use", "item_change", "skill_learn") and not a.get("undone")],
                           "panels": [{"file": f"images/{c['idx']:02d}-{i}.png", "caption": x.get("caption", ""), "shot": x.get("shot", ""), "who": x.get("who", []), "place": x.get("place", ""),
                                       "action": x.get("action", "")} for i, x in enumerate(_panels(c), 1)]} for c in chapters if c["status"] == "done"]}
 

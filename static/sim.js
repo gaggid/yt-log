@@ -149,7 +149,7 @@ async function run(btn, path, body, label) {
 function draw() {
   if (!live()) return;
   const p = D.project, running = D.run && D.run.state === 'running';
-  const tabs = [['story', 'Story'], ...(D.chapters.length ? [['things', 'Things']] : []), ['setup', 'Setup'], ['read', 'Read']];
+  const tabs = [['story', 'Story'], ['plan', 'Plan'], ...(D.chapters.length ? [['things', 'Things']] : []), ['setup', 'Setup'], ['read', 'Read']];
   if (!tabs.some(t => t[0] === TAB)) TAB = 'story';
   el.innerHTML = `<div class="row"><a href="#/sim">‹ Stories</a><h2 style="margin:0 0 0 8px;cursor:pointer" id="sm-title" title="Click to rename">${esc(p.title)}</h2><span class="sp"></span>
     ${badge(p.status === 'running' ? 'good' : 'warn', p.status === 'setup' ? 'setting up' : 'in progress')}<span class="small mute">${D.chapters.length} chapters · ${D.reading_minutes} min read</span></div>
@@ -161,7 +161,7 @@ function draw() {
   $('#sm-title').onclick = async () => { const t = await textDlg('Rename the story', 'Title', p.title); if (t) { await act(null, () => api('/sim/' + SID, {method: 'PATCH', json: {title: t}})); load(); } };
   el.querySelectorAll('.tabs button').forEach(b => b.onclick = () => { TAB = b.dataset.t; LS.set('sm-tab-' + SID, TAB); draw(); });
   const rb = document.getElementById('sm-retry'); if (rb) rb.onclick = e => run(e.target, `/chapters/${D.failed.id}/retry`, {}, 'Retrying');
-  ({story: drawStory, things: drawThings, setup: drawSetup, read: drawRead})[TAB]();
+  ({story: drawStory, plan: drawPlan, things: drawThings, setup: drawSetup, read: drawRead})[TAB]();
 }
 
 function help() {
@@ -173,6 +173,7 @@ function help() {
     <p><b>Change your mind.</b> <i>Rewrite</i> a chapter with an instruction or roll <i>new dice</i>: the old version stays as another branch you can switch back to. <i>Edit text</i> lets you change the words; the AI can read your edit and propose how the state should change, and later chapters are marked as written before the edit. Only the last chapter of a line can be deleted.</p>
     <p><b>Things.</b> People can <i>find</i> things (a search that succeeds, an instruction, or something the world already holds), <i>make</i> them from parts they hold or that lie where they are (the AI works out what is really possible; skills, tools and a known recipe help the dice), <i>use</i> them up, <i>drop</i>, <i>give</i> and <i>take</i> them. Someone may refuse to hand a thing over; a thing can be <i>bound</i> to a person; nobody can carry more than their limit. The <b>Things</b> tab shows who has what, recipes and skills, and lets you change any of it. Under "What changed", <i>undo</i> takes one change back. <i>+ Give a thing</i> in the box below the chapter hands someone a thing, takes one away or lifts a binding in the next chapter.</p>
     <p><b>Story health and the arc.</b> The <i>Story health</i> card is worked out by the system from the chapters (no AI call): the tension of each chapter, whether acts ever fail or cost anything, who is missing, which goals, fears and secrets have not come up, how chapters end and what words repeat. <i>Length</i> in Setup gives the story a shape (set-up, rising, twist, crisis, climax, resolution); the planner is told where the story is and how tense the chapter must be, the opposing force makes a move every chapter, a failed act always costs something, and acts get harder after a run of easy chapters.</p>
+    <p><b>The story plan</b> (the <b>Plan</b> tab). Before the first chapter the AI writes the backbone of the story: how it is told, a hidden truth with clues planted along the way, rules the person discovers, recurring devices, real-world facts that solve problems, the ending and one beat for each chapter. Each chapter plays its beat; your choices decide how the person handles it, and if you write your own action the beats still to come are rewritten. The secret is hidden until you press <i>Show the secret</i>; every part and every beat can be edited. Stories without a plan are improvised chapter by chapter.</p>
     <p><b>Content</b> (Setup, "Content") says how free the story is. <i>unfiltered</i> (the default) lets characters swear, abuse, lie, steal, kill and break the law whenever the story goes there, with real consequences but no softening or lectures, and mild sexual content between adults is allowed (the scene closes before explicit detail); <i>mature</i> and <i>clean</i> turn it down. The rules you write still apply.</p>
     <p><b>Thinking</b> (Setup, "Thinking") is how long the AI reasons before it plans, changes the state or checks a chapter. <i>balanced</i> is the default; <i>deep</i> is slower and more consistent; <i>off</i> is the fastest and makes more mistakes.</p>
     <p><b>Pictures</b> are optional: press <i>Paint this chapter</i> (or tick "Paint every chapter automatically" in Setup). They are cinematic paintings drawn from text. Each person and place gets a reference painting first, so faces and places stay alike; you can repaint, edit, replace with your own picture or remove any of them. Changing a person's look marks their pictures "old".</p>
@@ -375,6 +376,85 @@ async function directiveDialog(pre) {
   if (r) load();
 }
 
+/* ───────── plan tab ───────── */
+let PLAN_FULL = null;
+const PURPOSES = ['setup', 'problem', 'solution', 'turn', 'clue', 'payoff', 'reveal', 'ending'];
+const POVS = [['second', 'second person (you)'], ['first', 'first person (I)'], ['third', 'third person']];
+
+async function planAct(method, path, json, ok) {
+  const r = await act(null, () => api(`/sim/${SID}${path}`, {method, json}), ok || 'Saved');
+  if (r) { PLAN_FULL = null; load(); }
+  return r;
+}
+
+async function drawPlan() {
+  const b = $('#sm-body'), pl = D.plan, busy = D.run && D.run.state === 'running';
+  if (!pl) {
+    b.innerHTML = `<div class="card pad mt"><h3 style="margin-top:0">No story plan yet</h3>
+      <p class="mute">A story plan is written before the chapters: the point of view and voice, a hidden truth with clues planted along the way, rules the person discovers, recurring devices, real-world facts that solve problems, the ending, and one beat for each chapter. Chapters then play their beats; your choices decide how the person handles each one. Without a plan the story is improvised chapter by chapter.</p>
+      ${D.chapters.length ? '<p class="small mute">The story has started: the plan is written for the chapters still to come, from what has happened so far.</p>' : ''}
+      <button class="primary" id="pl-make" ${busy ? 'disabled' : ''}>Write the story plan with AI</button></div>`;
+    $('#pl-make').onclick = async () => { const t = await textDlg('Write the story plan', 'Anything the AI should keep in mind? (optional)', '', true); if (t !== null) run(null, '/seed/bible', {instruction: t}, 'Writing the story plan'); };
+    return;
+  }
+  let sec = pl.secret;
+  if (PLAN_FULL) sec = PLAN_FULL.secret;
+  const beats = PLAN_FULL ? PLAN_FULL.beats : pl.beats;
+  const chip = s => `<span class="sm-chip ${s === 'done' ? 'success' : s === 'next' ? 'thing' : ''}">${s === 'done' ? 'played' : s === 'next' ? 'next' : 'later'}</span>`;
+  b.innerHTML = `${busy ? '<div class="sm-banner warn">A step is running; changes wait until it is done.</div>' : ''}
+  <div class="card pad mt"><div class="row"><b>The story plan</b><span class="sp"></span><button class="small" id="pl-basics">Edit</button></div>
+    <p style="margin:6px 0"><i>${esc(pl.logline)}</i></p>
+    <div class="small"><b>Told in</b> ${esc((POVS.find(p => p[0] === pl.pov) || ['', pl.pov])[1])}. <b>Voice:</b> ${esc(pl.voice)}</div></div>
+  <div class="card pad mt"><div class="row"><b>The hidden truth</b><span class="sp"></span>${sec.hidden ? '<button class="small" id="pl-show">Show the secret</button>' : '<button class="small" id="pl-edit-secret">Edit</button><button class="small" id="pl-hide">Hide</button>'}</div>
+    ${sec.hidden ? `<div class="small mute">Hidden, so you can read the story as a reader would. ${sec.clues} clues are planted before it is revealed.</div>`
+      : `<div class="small" style="margin-top:6px">${esc(sec.truth)} <span class="mute">(held by ${esc(sec.who || 'someone')}; revealed in beat ${sec.reveal_beat})</span></div>${(sec.clues || []).map(c => `<div class="small mute">beat ${c.beat}: ${esc(c.clue)}</div>`).join('')}`}</div>
+  <div class="sm-th mt">
+    <div class="card pad"><div class="row"><b>Rules the person discovers</b><span class="sp"></span><button class="small" id="pl-rules">Edit</button></div>${(pl.rules || []).map(r => `<div class="small" style="margin:3px 0"><b>${esc(r.name)}</b> · beat ${r.beat}<br>${esc(r.text)}</div>`).join('') || '<div class="small mute">none</div>'}</div>
+    <div class="card pad"><div class="row"><b>Recurring devices</b><span class="sp"></span><button class="small" id="pl-motifs">Edit</button></div>${(pl.motifs || []).map(x => `<div class="small" style="margin:3px 0"><b>${esc(x.name)}</b> · from beat ${x.first_beat}${(x.payoffs || []).length ? ', pays off in ' + x.payoffs.join(', ') : ''}<br>${esc(x.what)}</div>`).join('') || '<div class="small mute">none</div>'}</div>
+    <div class="card pad"><div class="row"><b>Real-world facts</b><span class="sp"></span><button class="small" id="pl-facts">Edit</button></div><div class="small mute">The AI's general knowledge: please check them.</div>${(pl.facts || []).map(f => `<div class="small" style="margin:3px 0">beat ${f.beat}: ${esc(f.fact)}<br><span class="mute">${esc(f.use)}</span></div>`).join('') || '<div class="small mute">none</div>'}</div>
+    <div class="card pad"><div class="row"><b>The ending</b><span class="sp"></span><button class="small" id="pl-end">Edit</button></div><div class="small">${esc((pl.ending || {}).outcome || '')}<br><span class="mute">Last image:</span> ${esc((pl.ending || {}).final_image || '')}<br><span class="mute">Closing line:</span> ${esc((pl.ending || {}).closing_line || '')}</div></div></div>
+  <div class="card pad mt"><div class="row"><b>The beats</b> <span class="small mute">${pl.done} of ${beats.length} played</span><span class="sp"></span><button class="small" id="pl-replan" ${busy ? 'disabled' : ''}>Re-plan the rest…</button><button class="small" id="pl-redo" ${busy ? 'disabled' : ''}>Write the whole plan again…</button></div>
+    ${beats.map(x => `<div class="mt-s" style="border-top:1px solid var(--line);padding-top:8px"><div class="row"><b>${esc(x.label)}</b>${chip(x.status)}<span class="sm-tag">${esc(x.purpose)}</span><span class="sp"></span><button class="small" data-be="${x.n}">Edit</button></div>
+      <div class="small">${esc(x.event)}</div><div class="small mute">Problem: ${esc(x.problem)}${x.turn ? ` · Turn: ${esc(x.turn)}` : ''}${x.hook ? ` · Ends on: ${esc(x.hook)}` : ''}${x.rule ? ` · Rule: ${esc(x.rule)}` : ''}${x.motif ? ` · Device: ${esc(x.motif)}` : ''}${x.fact ? ` · Fact: ${esc(x.fact)}` : ''}${(x.clues || []).length ? ` · Plants: ${x.clues.map(esc).join('; ')}` : ''}</div></div>`).join('')}</div>`;
+  const on = (sel, fn) => el.querySelectorAll(sel).forEach(fn);
+  const full = async () => { const r = await act(null, () => api(`/sim/${SID}/bible?spoilers=true`)); if (r) { PLAN_FULL = r.plan; drawPlan(); } };
+  const bt = $('#pl-show'); if (bt) bt.onclick = full;
+  const hd2 = $('#pl-hide'); if (hd2) hd2.onclick = () => { PLAN_FULL = null; drawPlan(); };
+  $('#pl-basics').onclick = async () => {
+    const v = await dialog({title: 'Edit the story basics', html: `<label class="f">Logline<textarea id="pb-l">${esc(pl.logline)}</textarea></label><label class="f">Told in<select id="pb-p">${POVS.map(([k, l]) => `<option value="${k}" ${pl.pov === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label><label class="f">Voice<textarea id="pb-v">${esc(pl.voice)}</textarea></label>`,
+      buttons: [{label: 'Cancel', value: null}, {label: 'Save', primary: true, collect: l => ({logline: l.querySelector('#pb-l').value, pov: l.querySelector('#pb-p').value, voice: l.querySelector('#pb-v').value})}]});
+    if (v) planAct('PUT', '/bible', v);
+  };
+  const es = $('#pl-edit-secret'); if (es) es.onclick = async () => {
+    const v = await dialog({title: 'Edit the hidden truth', html: `<label class="f">The truth<textarea id="ps-t">${esc(sec.truth)}</textarea></label><label class="f">Who or what holds it<input id="ps-w" value="${esc(sec.who || '')}"></label><label class="f">Revealed in beat<input id="ps-r" type="number" value="${sec.reveal_beat}"></label>
+      <label class="f">Clues, one per line: beat | clue<textarea id="ps-c" style="min-height:110px">${(sec.clues || []).map(c => `${c.beat} | ${c.clue}`).join('\n')}</textarea></label>`,
+      buttons: [{label: 'Cancel', value: null}, {label: 'Save', primary: true, collect: l => ({secret: {truth: l.querySelector('#ps-t').value, who: l.querySelector('#ps-w').value, reveal_beat: +l.querySelector('#ps-r').value, clues: lines(l.querySelector('#ps-c').value).map(x => { const i = x.indexOf('|'); return {beat: +x.slice(0, i) || 1, clue: x.slice(i + 1).trim()}; })}})}]});
+    if (v) planAct('PUT', '/bible', v);
+  };
+  const listEdit = (id, title, hint, rows, key, fmt, parse) => { const btn = $(id); if (btn) btn.onclick = async () => {
+    const v = await dialog({title, html: `<label class="f">${hint}<textarea id="pe-x" style="min-height:160px">${rows.map(fmt).join('\n')}</textarea></label>`, buttons: [{label: 'Cancel', value: null}, {label: 'Save', primary: true, collect: l => ({[key]: lines(l.querySelector('#pe-x').value).map(parse)})}]});
+    if (v) planAct('PUT', '/bible', v); }; };
+  listEdit('#pl-rules', 'Edit the rules', 'One per line: name | the rule | beat where it is learned', pl.rules || [], 'rules', r => `${r.name} | ${r.text} | ${r.beat}`, x => { const p = x.split('|').map(s => s.trim()); return {name: p[0], text: p[1] || '', beat: +p[2] || 1}; });
+  listEdit('#pl-motifs', 'Edit the recurring devices', 'One per line: name | what it is | first beat | beats where it pays off (comma separated)', pl.motifs || [], 'motifs', r => `${r.name} | ${r.what} | ${r.first_beat} | ${(r.payoffs || []).join(', ')}`, x => { const p = x.split('|').map(s => s.trim()); return {name: p[0], what: p[1] || '', first_beat: +p[2] || 1, payoffs: (p[3] || '').split(',').map(s => +s.trim()).filter(Boolean)}; });
+  listEdit('#pl-facts', 'Edit the real-world facts', 'One per line: the fact | how the story uses it | beat', pl.facts || [], 'facts', r => `${r.fact} | ${r.use} | ${r.beat}`, x => { const p = x.split('|').map(s => s.trim()); return {fact: p[0], use: p[1] || '', beat: +p[2] || 1}; });
+  $('#pl-end').onclick = async () => {
+    const e = pl.ending || {};
+    const v = await dialog({title: 'Edit the ending', html: `<label class="f">How it ends<textarea id="pn-o">${esc(e.outcome || '')}</textarea></label><label class="f">The last image<input id="pn-i" value="${esc(e.final_image || '')}"></label><label class="f">The closing line<input id="pn-c" value="${esc(e.closing_line || '')}"></label>`,
+      buttons: [{label: 'Cancel', value: null}, {label: 'Save', primary: true, collect: l => ({ending: {outcome: l.querySelector('#pn-o').value, final_image: l.querySelector('#pn-i').value, closing_line: l.querySelector('#pn-c').value}})}]});
+    if (v) planAct('PUT', '/bible', v);
+  };
+  on('[data-be]', btn => btn.onclick = async () => {
+    const x = beats.find(y => y.n === +btn.dataset.be);
+    const v = await dialog({title: `Edit beat ${x.n}`, html: `<label class="f">Label (time: title)<input id="bb-l" value="${esc(x.label)}"></label><label class="f">What happens<textarea id="bb-e">${esc(x.event)}</textarea></label><label class="f">The problem to solve<textarea id="bb-p">${esc(x.problem)}</textarea></label>
+      <label class="f">The turn<input id="bb-t" value="${esc(x.turn || '')}"></label><label class="f">It ends on<input id="bb-h" value="${esc(x.hook || '')}"></label><label class="f">A risky act for the dice (optional)<input id="bb-c" value="${esc(x.challenge || '')}"></label>
+      <label class="f">Purpose<select id="bb-u">${PURPOSES.map(p => `<option ${x.purpose === p ? 'selected' : ''}>${p}</option>`).join('')}</select></label>`,
+      buttons: [{label: 'Cancel', value: null}, {label: 'Save', primary: true, collect: l => ({label: l.querySelector('#bb-l').value, event: l.querySelector('#bb-e').value, problem: l.querySelector('#bb-p').value, turn: l.querySelector('#bb-t').value, hook: l.querySelector('#bb-h').value, challenge: l.querySelector('#bb-c').value, purpose: l.querySelector('#bb-u').value})}]});
+    if (v) planAct('PUT', `/bible/beats/${x.n}`, v);
+  });
+  $('#pl-replan').onclick = async () => { const t = await textDlg('Re-plan the rest', 'What should change in the beats still to come? (optional)', '', true); if (t !== null) run(null, '/replan', {instruction: t}, 'Rewriting the rest of the plan'); };
+  $('#pl-redo').onclick = async () => { if (await confirmDlg('Write the whole plan again?', 'The hidden truth, rules, devices, facts, ending and the beats still to come are written again. Chapters already written stay.', 'Write it again')) { const t = await textDlg('Write the story plan', 'Anything the AI should keep in mind? (optional)', '', true); if (t !== null) run(null, '/seed/bible', {instruction: t}, 'Writing the story plan'); } };
+}
+
 /* ───────── things tab ───────── */
 async function thingAct(action, ok) {
   const r = await act(null, () => api(`/sim/${SID}/things`, {method: 'POST', json: {action}}), ok || 'Saved');
@@ -459,6 +539,8 @@ function drawSetup() {
       <label>Words per chapter <input type="number" id="s-words" value="${st.chapter_words}" min="150" max="900" step="10"></label>
       <label><input type="checkbox" id="s-deep" ${st.deep ? 'checked' : ''}> Let the other characters plan too (slower)</label>
       <label title="How many chapters the story should have. The system builds the story toward a climax and an ending of that size; open-ended repeats a cycle of build-up, twist, crisis and release.">Length <select id="s-length">${[[0, 'open-ended'], [6, '6 chapters'], [8, '8 chapters'], [12, '12 chapters'], [16, '16 chapters'], [24, '24 chapters'], [36, '36 chapters'], [48, '48 chapters']].map(([v, l]) => `<option value="${v}" ${(st.length || 0) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label title="Write a story plan with the AI when the story is set up: point of view, a hidden truth with clues, rules to discover, recurring devices, real facts, the ending and a beat for every chapter."><input type="checkbox" id="s-plan" ${st.plan !== false ? 'checked' : ''}> Write a story plan at setup</label>
+      <label title="An editor's pass over every chapter: the same events in more specific, varied prose, without the model's stock words. Costs about a minute a chapter."><input type="checkbox" id="s-polish" ${st.polish ? 'checked' : ''}> Polish every chapter</label>
       <label title="How much one person can carry, in size units (a plain thing is 1). 0 means no limit. A person can have their own limit in their card.">Carry limit <input type="number" id="s-carry" value="${st.carry_limit ?? 8}" min="0" max="40" style="width:70px"></label>
       <label title="How freely the story may go. Unfiltered: strong language, cruelty, crime and mild adult romance are written as the scene needs them, without softening or moral comment.">Content <select id="s-content">${[['clean', 'clean'], ['mature', 'mature'], ['unfiltered', 'unfiltered (no limits)']].map(([v, l]) => `<option value="${v}" ${(st.content || 'unfiltered') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <label title="How long the AI thinks before it plans, changes the state or checks a chapter. More thinking is slower and keeps the story more consistent.">Thinking <select id="s-think">${[['off', 'off (fastest)'], ['balanced', 'balanced'], ['deep', 'deep (slowest)']].map(([v, l]) => `<option value="${v}" ${(st.thinking || 'balanced') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div>
@@ -501,7 +583,7 @@ function trackerSummary(t) {
 function wireSetup() {
   const on = (sel, fn) => el.querySelectorAll(sel).forEach(fn);
   const patch = async (json, ok) => { const r = await act(null, () => api('/sim/' + SID, {method: 'PATCH', json}), ok || 'Saved'); if (r) load(); };
-  $('#s-save').onclick = () => patch({idea: $('#s-idea').value, settings: {difficulty: $('#s-diff').value, dice: $('#s-dice').checked, chapter_words: +$('#s-words').value || 350, deep: $('#s-deep').checked, thinking: $('#s-think').value, content: $('#s-content').value, carry_limit: +$('#s-carry').value || 0, length: +$('#s-length').value || 0,
+  $('#s-save').onclick = () => patch({idea: $('#s-idea').value, settings: {difficulty: $('#s-diff').value, dice: $('#s-dice').checked, chapter_words: +$('#s-words').value || 350, deep: $('#s-deep').checked, thinking: $('#s-think').value, content: $('#s-content').value, carry_limit: +$('#s-carry').value || 0, plan: $('#s-plan').checked, polish: $('#s-polish').checked, length: +$('#s-length').value || 0,
     auto_images: $('#s-auto').checked, panel_shape: $('#s-shape').value, captions: $('#s-cap').checked, image_model: $('#s-img').value.trim()}});
   $('#w-save').onclick = () => patch({world: Object.fromEntries(['place', 'period', 'tone', 'pacing', 'start_scene', 'start_time', 'exists', 'craft', 'goal'].map(k => [k, $('#w-' + k).value]))});
   $('#sm-dup').onclick = async () => { const r = await act(null, () => api(`/sim/${SID}/duplicate?full=false`, {method: 'POST'}), 'Copied'); if (r) hash(r.id, 'setup'); };

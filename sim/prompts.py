@@ -14,7 +14,7 @@ Any genre is fine. Do not assume survival, weapons or danger unless the idea say
 
 CAST = """[TASK:sm_cast]
 You create the cast and the key places of an interactive story simulation. You get the idea and the world card.
-Return JSON: {"entities": [ ... ]} with 4 to 10 characters, 2 to 6 places and optionally 1 or 2 groups. Each entity:
+Return JSON: {"entities": [ ... ]} with 2 to 6 places and optionally 1 or 2 groups, and the characters the idea needs: 4 to 10 characters for a story about a group, but a story about one person alone (or the last one left) needs that one person and only a few others who are voices, distant figures or the opposition, never a crowd. Each entity:
 characters: {"kind":"character","name":unique first name or short name,"role":..., "goal":what they want now,"fear":...,"secret":something hidden or "","skills":[2 to 4 things this person is good at, plain phrases],
 "voice":how they speak in a few words,"look":ONE paragraph a painter could use (age, build, face, hair, clothes, one distinguishing mark; no brand names),"starting_condition":how they are at the start,"relations":{"OtherName":"how they relate"}}
 places: {"kind":"place","name":unique,"description":what it is like and what is in it,"look":one painted-picture paragraph,"connects_to":[names of places]}
@@ -54,6 +54,30 @@ You suggest MORE guidelines for an interactive story simulation. You get the ide
 Return {"rules":[{"group":"hard|world|tone|style|craft","text":...}]}. Do not repeat or rephrase an existing rule.
 """ + FENCE
 
+BIBLE = """[TASK:sm_bible]
+You are the author of a short, tightly designed story that will be told one chapter at a time (and may be filmed). You get the idea, the world card, the cast and, when the story has started, what happened so far. Design the backbone BEFORE any chapter is written.
+Return JSON:
+{"logline": one sentence,
+"pov": "second" (you), "first" or "third",
+"voice": how it is told, in 2 or 3 sentences: sentence length, tense, humor, how numbers and concrete details are used (for example: short sentences, present tense, dry humor, real numbers and times),
+"secret": {"truth": the hidden truth the reader will not suspect at first but that changes the meaning of what came before (a betrayal, a lie, what something really is, who someone really is),
+  "who": who or what holds it, "reveal_beat": the beat number where it is revealed (in the last third), "clues": [{"beat": number, "clue": a small harmless-looking detail planted in that beat} (at least 3, all before the reveal)]},
+"rules": [2 to 4 named rules the person discovers, each {"name": "Rule one", "text": the rule in one short sentence, "beat": number where it is learned}],
+"motifs": [1 or 2 recurring devices (a sound, a ritual, an object, a time of day), each {"name","what","first_beat","payoffs":[beat numbers where it matters again]}],
+"facts": [3 to 6 true real-world facts or clever ideas that solve or complicate a problem (general knowledge only, nothing invented), each {"fact","use": how the story uses it,"beat"}],
+"ending": {"outcome": how it ends, "final_image": the last image, "closing_line": one closing line, ideally an echo of the beginning or the secret turned around}}
+Principles: one tight situation, concrete numbers and details, a problem to solve in every beat, discoveries the reader remembers, everything that is planted is paid off, the ending changes the meaning of the beginning.
+The secret must grow out of the situation and the set-ups the idea already gives (a voice, a promise, a person, an institution, a rule someone announced), not out of a new supernatural, scientific or cosmic explanation brought in from nowhere. The best secrets are human and hidden in plain sight: someone who sounds helpful is using or leaving the person, something that looked like protection is a trap, something that looked like a flaw is the reason they survive. Plant clues the reader can check on a second reading.
+Rules are small and practical, learned from something that just happened (what the enemy cannot do, what time it is safe), and each is used again later. Facts must be well-known and clearly true (physics, the human body, buildings, water, food, maps, law); if you are not sure a fact is true, use a clever idea instead and do not call it a fact. Never invent science. English only. Any genre is fine: this works for survival, mystery, drama, business or anything else; do not assume danger, violence or any particular setting unless the idea says so.
+""" + FENCE
+
+BEATS = """[TASK:sm_beats]
+You write the beat sheet of a story from its backbone. You get the backbone (logline, voice, secret with its clues, rules, motifs, facts, ending), what already happened when the story has started, and how many beats to write.
+Return {"beats":[{"n":number,"label":"Day 5: The Water Heater" (the story time and a short title),"time":"Day 5","title":"The Water Heater","event":what happens, one or two sentences,"problem":the concrete problem the person must solve in this beat,
+"turn":what changes at the end of it,"hook":how the beat ends: a cut-off, a surprise or a line,"purpose":"setup|problem|solution|turn|clue|payoff|reveal|ending","challenge":one risky act that could fail or "","clues":[details planted in this beat],"rule":name of a rule learned here or "","motif":name of a device used here or "","fact":the real fact used here or ""}]}
+Rules: write exactly {count} beats numbered from {start}; story time moves forward and may jump (hours, days or weeks, whatever suits the story); the first beat sets up the situation and the last is the ending; plant each clue of the backbone in the beat the backbone gives, before the reveal beat; every beat ends on a turn or a hook, never on a menu of choices; vary the problems (what, where, who); each problem is concrete, has numbers, and is solvable with the facts and rules. Write a problem as a concrete situation with amounts and a deadline, for example "Second problem, money: the account holds 4,300 and the rent is due in 9 days; what can you sell by then?", never as an abstract aim ("manage stress", "decide who sleeps where"). The event says what the person actually DOES in the beat, step by step, with what.
+""" + FENCE
+
 # ── a chapter ─────────────────────────────────────────────────────────────────
 
 PLAN = """[TASK:sm_plan]
@@ -69,6 +93,7 @@ Rules:
 - Every due instruction marked MUST has to be in "addresses". One marked MAY WAIT can wait; say why in "wait_reason".
 - Vary the story: do not use the beat of either of the last two chapters; move on from what was just resolved.
 - Every chapter has to move "THE STORY IS ABOUT" forward or put it under strain: something the people want gets closer or slips away, or the pressure on them grows (danger, a deadline, a rivalry, a secret about to come out, money running out: whatever this story is built on). Side activity (errands, wandering, small talk) belongs in a chapter only when it serves that, and never fills a whole chapter. If the last chapter had no real pressure or cost, this one must have some.
+- When a STORY PLAN section is given, this chapter plays its beat: the scene and the intent carry the beat's event and problem, and the player's action decides how the person handles it. Plant the listed clues, show the listed rule or device, and never give away what the plan says stays hidden.
 - Follow the ARC AND PACING section: it says which part of the story this is and how tense the chapter must be. When a NEGLECTED section is given, move at least one of those things in this chapter (a person back into the scene, a goal, fear or secret coming into play, a thread answered or made worse).
 - The opposition is not idle: it makes a move every chapter, and the chapter has to show its effect.
 - When the story has acts that can go wrong (a risky move, a bold argument, a lie that may be caught), at least one per chapter has to be able to fail with a real cost: rate it "hard" when the odds are against the person.
@@ -104,16 +129,27 @@ Return {"ops":[...]} (an empty list is allowed).
 WRITE = """[TASK:sm_write]
 You are the narrator of an interactive story. Write ONE chapter in English, about {words} words (between {lo} and {hi}).
 Follow the plan and the state. Show each dice result truthfully (a fail really fails; a partial success costs something). Use only people, places and items that exist; show the listed state changes; do not invent other deaths, items or events that would change the state.
-Write one continuous scene, not a summary: specific actions, a few lines of dialogue in each character's voice, concrete sensory detail, short paragraphs. Continue from the last chapter's ending without repeating it. Open with a new action, a line of dialogue or a changed detail, never by describing the place again and never with a character taking a breath. Never mention dice, rolls, trackers, rules or numbers from the state.
+Do not use the stock words language models overuse (heavy, rhythmic, guttural, metallic, tang, thrum, palpable, visceral, "a sharp needle of"): find the specific, surprising, concrete detail instead (a number, a brand of thing, a habit, a smell that belongs only to this place). Write one continuous scene, not a summary: specific actions, a few lines of dialogue in each character's voice, concrete sensory detail, short paragraphs. Continue from the last chapter's ending without repeating it. Open with a new action, a line of dialogue or a changed detail, never by describing the place again and never with a character taking a breath. Never mention dice, rolls, trackers, rules or numbers from the state.
 End on a moment that leads to a decision, not on a question to the reader, and never on a list of routes ("to the left... to the right..."): end on a hook, a decision or a reveal. If the plan has an OPPOSITION move, show its effect in the chapter (the people may or may not notice it). Follow the style and tone rules.
 Show things truthfully: a thing found, made, given or taken is shown as it happens, with its condition ("crude", "frayed"); never use a thing that the people do not hold or that lies elsewhere.
+When a STORY PLAN FOR THE WRITER section is given, tell the chapter in its point of view and voice, plant what it lists, and end on the hook it gives.
 Follow the CONTENT section for language and events: when it allows, write strong language, cruelty and crime as the scene needs them, in the characters' own voices, without softening, censoring, warnings or moral comment. Romance and mild sexual moments between adults are written sensually and closed before explicit detail.
 Return {"title":short chapter title,"prose":the chapter,"story_time":"for example Day 1, 23:40"}
 """ + FENCE
 
+POLISH = """[TASK:sm_polish]
+You are the story editor. You get one chapter, the voice card of the story and the beat the chapter plays. Rewrite the chapter so it reads like good narration, in the same point of view and tense:
+- Keep every event, name, number and the closing hook exactly. Keep the length within 10 per cent of the original: do not cut it short.
+- Replace stock, generic phrasing with specific, surprising, concrete detail (a number, a habit, a thing that belongs only to this place). Never use: heavy, rhythmic, guttural, metallic, tang, thrum, palpable, vibrating hum.
+- Vary the rhythm: short sentences, then one longer. No two sentences in a row start the same way.
+- Show feeling through one precise detail of the body or the room, not adjectives. One dry, human moment is welcome when it fits.
+- Do not add events or facts. Do not mention these instructions.
+Return {"title":..., "prose":..., "story_time":...}
+""" + FENCE
+
 REFEREE = """[TASK:sm_referee]
 You are a strict continuity editor. Compare the chapter with the rules (R1..), the state and the dice results. A violation is: breaking a numbered hard or world rule; using a person, place or item that is not in the state or the world card; a dead person acting or speaking;
-contradicting the state; showing a different outcome than a dice result fixed; a person using or holding a thing the state says someone else holds or that lies elsewhere; a thing shown in a different condition than the state says (broken, spent or crude things working like new); a thing or a skill appearing from nowhere.
+contradicting the state; showing a different outcome than a dice result fixed; a person using or holding a thing the state says someone else holds or that lies elsewhere; a thing shown in a different condition than the state says (broken, spent or crude things working like new); a thing or a skill appearing from nowhere. When a STORY PLAN is given: a chapter that states or hints the HIDDEN TRUTH before its beat is a violation with the rule "plan"; so is a chapter that leaves out a clue or rule the plan says it must carry.
 Return {"ok":true|false,"violations":[{"rule":"R3" or "continuity","quote":"the exact words from the chapter","fix":"what to change"}]}. Report real problems only, not taste. Strong language, cruelty, crime and morally bad choices are never violations in themselves: judge only the rules, the state and continuity.
 """
 
@@ -122,7 +158,7 @@ You are the archivist and the options writer. You get the finished chapter, the 
 Return JSON: {"summary":at most 60 words,"facts":[{"text":one durable fact (an injury, a promise, a discovery, a changed place, what someone now believes),"names":[people or places it concerns],"tags":[keywords]}] (0 to 6),
 "threads_opened":[promises or questions the chapter leaves open, one sentence each] (0 to 3),"threads_closed":[ids T# of open threads this chapter paid off],
 "options":[{"who":name of a living character,"label":what they do, one sentence,"hint":what it might gain,"cost":what it might cost or put at risk,"risk":"low|medium|high"}]}
-Record a durable fact for every thing found or made, and for every recipe or skill learned (the fact names who and where). Write 3 or 4 options, using what people now carry or know when it helps. They must be genuinely different (never two ways of the same move), each possible with what the state allows, at most one with risk high. Every option has to serve "THE STORY IS ABOUT" or answer a pressure or open thread of this chapter, and at least one has to deal with what the chapter ended on. At most one option may be a small errand (collecting, tidying, a comfort); an option for a character is only written when it makes sense for them in this moment, so not every character needs one. Keep the risk word out of the hint. Make them dilemmas: each one gains something and costs something, and at least two of them conflict, so the people cannot do both. When the CONTENT section allows, include ruthless, unconventional or unlawful choices if a character would really consider them.
+When a NEXT BEAT section is given, the options are different ways the person could handle that beat's problem: what to try first, what to risk, whom to trust. Record a durable fact for every thing found or made, and for every recipe or skill learned (the fact names who and where). Write 3 or 4 options, using what people now carry or know when it helps. They must be genuinely different (never two ways of the same move), each possible with what the state allows, at most one with risk high. Every option has to serve "THE STORY IS ABOUT" or answer a pressure or open thread of this chapter, and at least one has to deal with what the chapter ended on. At most one option may be a small errand (collecting, tidying, a comfort); an option for a character is only written when it makes sense for them in this moment, so not every character needs one. Keep the risk word out of the hint. Make them dilemmas: each one gains something and costs something, and at least two of them conflict, so the people cannot do both. When the CONTENT section allows, include ruthless, unconventional or unlawful choices if a character would really consider them.
 """
 
 PICK = """[TASK:sm_pick]

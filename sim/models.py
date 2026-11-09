@@ -263,3 +263,84 @@ class PanelsOut(M):
 
 class RuleSuggest(M):
     rules: list[GuidelineOut]
+
+
+# ── the story plan (docs/PLAN_architect.md) ───────────────────────────────────
+
+class ClueIn(M):
+    beat: Num = 0
+    clue: Str = ""
+
+
+class RulePlanIn(M):
+    name: Str = ""
+    text: Str = ""
+    beat: Num = 0
+
+
+class MotifIn(M):
+    name: Str = ""
+    what: Str = ""
+    first_beat: Num = 0
+    payoffs: Annotated[list[Num], BeforeValidator(lambda v: [v] if isinstance(v, (int, float, str)) and not isinstance(v, bool) else (v or []))] = []
+
+
+class FactPlanIn(M):
+    fact: Str = ""
+    use: Str = ""
+    beat: Num = 0
+
+
+class SecretIn(M):
+    truth: Str = ""
+    who: Str = ""
+    reveal_beat: Num = 0
+    clues: list[ClueIn] = []
+
+
+class EndingIn(M):
+    outcome: Str = ""
+    final_image: Str = ""
+    closing_line: Str = ""
+
+
+class BibleOut(M):
+    logline: Str
+    pov: Str = "second"
+    voice: Str = ""
+    secret: SecretIn = SecretIn()
+    rules: list[RulePlanIn] = []
+    motifs: list[MotifIn] = []
+    facts: list[FactPlanIn] = []
+    ending: EndingIn = EndingIn()
+
+
+def _clue_texts(v):
+    out = []
+    for x in v or []:
+        if isinstance(x, dict):
+            x = x.get("clue") or x.get("text") or ""
+        if str(x).strip():
+            out.append(str(x).strip())
+    return out
+
+
+class BeatIn(M):
+    n: Num = 0
+    label: Str = ""
+    title: Str = ""
+    time: Str = ""
+    event: Str = ""
+    problem: Str = ""
+    turn: Str = ""
+    hook: Str = ""
+    purpose: Str = "problem"
+    challenge: Str = ""
+    clues: Annotated[list[str], BeforeValidator(_clue_texts)] = []
+    rule: Str = ""
+    motif: Str = ""
+    fact: Str = ""
+
+
+class BeatsOut(M):
+    beats: list[BeatIn]

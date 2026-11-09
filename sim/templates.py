@@ -42,6 +42,14 @@ BUILTIN: list[dict] = [
      "tone": "intimate, emotional", "pacing": "a day or an evening per chapter", "settings": {"difficulty": "gentle", "dice": False, "carry_limit": 0}, "craft": "Letters, gifts and keepsakes can be found or made; they matter for what they mean.",
      "rules": [("hard", "A character cannot know a secret nobody told them or they did not witness."), ("tone", "Small gestures and silences carry weight."), ("style", "Dialogue should sound like real people, not speeches.")],
      "trackers": [("relation", "Trust between the two leads", ""), ("knowledge", "Secrets", ""), ("clock", "The event that forces a choice", "")]},
+    {"id": "tp-film", "name": "Day-by-day film", "blurb": "A short film told to \"you\": one tight situation, one scene per day, a hidden truth, rules you discover, a twist.",
+     "hint": "A short story that could be filmed in ten minutes, told to the reader as \"you\" in the present tense. One tight situation and one person. A concrete problem in every scene, solved with real-world knowledge and numbers. The person discovers named rules. "
+             "Something recurring marks time (a sound, a ritual). A hidden truth is planted from the first scene and revealed late; every setup is paid off; the ending turns the beginning around.",
+     "tone": "tense, dry humor, concrete", "pacing": "a day or a few days per scene, with time jumps", "settings": {"difficulty": "fair", "dice": True, "carry_limit": 0, "length": 12, "chapter_words": 160, "plan": True, "polish": True},
+     "craft": "What the person can make or do comes from real knowledge and what is in the room; nothing high-tech appears from nowhere.",
+     "rules": [("style", "Tell it in second person, present tense, short sentences, with real numbers (hours, days, amounts)."), ("tone", "Dry humor is allowed; fear is shown by what the person notices, not by adjectives."),
+               ("hard", "Every scene ends on a turn or a hook, never on a list of choices."), ("world", "The hidden truth is never stated before the scene that reveals it."), ("craft", "A solution uses a real fact or an item the person already has.")],
+     "trackers": [("clock", "Pressure that closes in", "rises with time and mistakes; when full something bad happens"), ("meter", "Supplies", "water, food or whatever the person lives on"), ("items", "What the person has", "")]},
     {"id": "tp-free", "name": "Free (no template)", "blurb": "Start from the idea alone.", "hint": "", "tone": "", "pacing": "", "settings": {}, "rules": [], "trackers": []},
 ]
 

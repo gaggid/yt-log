@@ -1,10 +1,10 @@
 """From an idea to a playable setup (docs/PLAN_simulation.md section 10). Four parts, each its own model call so any can be redone alone; all land in editable forms."""
 import json
 
-from . import content, memory, models as m, prompts as P, state as S, store, templates
+from . import architect, content, memory, models as m, prompts as P, state as S, store, templates
 from .engine import _json, fence
 
-PARTS = ("world", "cast", "trackers", "rules")
+PARTS = ("world", "cast", "trackers", "rules", "bible")
 
 
 def _idea_block(pid: str) -> str:
@@ -149,16 +149,19 @@ async def suggest_rules(pid, backend, s, instruction="") -> list[dict]:
 
 async def seed_part(pid, part, backend, s, instruction="") -> object:
     if part not in PARTS:
-        raise store.SimError("part must be world, cast, trackers or rules")
+        raise store.SimError("part must be world, cast, trackers, rules or bible")
+    if part == "bible":
+        return await architect.write_bible(pid, backend, s, instruction)
     return await {"world": seed_world, "cast": seed_cast, "trackers": seed_trackers, "rules": seed_rules}[part](pid, backend, s, instruction)
 
 
 async def seed_all(pid, backend, s, progress=None, cancel=lambda: False) -> None:
-    for i, part in enumerate(PARTS):
+    parts = [p for p in PARTS if p != "bible" or store.project(pid)["settings"].get("plan", True)]
+    for i, part in enumerate(parts):
         if cancel():
             return
         if progress:
-            progress(i, len(PARTS), f"writing the {part}")
+            progress(i, len(parts), f"writing the {'story plan' if part == 'bible' else part}")
         await seed_part(pid, part, backend, s)
     if progress:
-        progress(len(PARTS), len(PARTS), "setup ready: review it, then Start")
+        progress(len(parts), len(parts), "setup ready: review it, then Start")
