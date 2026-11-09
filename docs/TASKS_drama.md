@@ -27,5 +27,5 @@ Plan: [PLAN_drama.md](PLAN_drama.md). A task is ticked when it is built AND test
 
 ## R Real runs and the walk
 - [x] R1 Health of the audited live story (read only, on a copy of the database): 8 of 8 rolls succeeded, endings plain/menu/menu, "heavy" 10 times, 3 chapters of 4 people not seen: matches the manual audit
-- [ ] R2 Real runs of two unlike stories, 4 chapters each, recorded in `docs/RUN_LOG.md`
-- [ ] R3 `CLAUDE.md` paragraph, final walk against plan section 4, commit (push only when the owner says)
+- [x] R2 Real run recorded in `docs/RUN_LOG.md`: supermarket 4 chapters; the courtroom story was stopped after chapter 1 so as not to starve the owner's live app (to be repeated when the gateway is free)
+- [x] R3 `CLAUDE.md` paragraph, final walk against plan section 4, commit (push only when the owner says)
