@@ -11,7 +11,7 @@ import config
 
 COOKIE = "yt_session"
 TTL_S = 7 * 24 * 3600
-OPEN_PATHS = {"/login", "/logout", "/favicon.ico"}
+OPEN_PATHS = {"/login", "/logout", "/favicon.ico", "/about", "/privacy"}      # /about and /privacy are the public pages Google asks for
 _fails: dict[str, list[float]] = {}          # ip -> recent failure timestamps
 
 
