@@ -19,7 +19,7 @@ characters: {"kind":"character","name":unique first name or short name,"role":..
 "voice":how they speak in a few words,"look":ONE paragraph a painter could use (age, build, face, hair, clothes, one distinguishing mark; no brand names),"starting_condition":how they are at the start,"relations":{"OtherName":"how they relate"}}
 places: {"kind":"place","name":unique,"description":what it is like and what is in it,"look":one painted-picture paragraph,"connects_to":[names of places]}
 groups: {"kind":"group","name":...,"description":who they are and what they want}
-Names must be unique across everything. Make the cast varied, with conflicting goals, not only helpers. English only.
+Names must be unique across everything. Make the cast varied, with conflicting goals, not only helpers: include flawed, selfish or dangerous people, and follow the CONTENT section for how dark they may be. English only.
 """ + FENCE
 
 TRACKERS = """[TASK:sm_trackers]
@@ -67,6 +67,7 @@ Rules:
 - Every due instruction marked MUST has to be in "addresses". One marked MAY WAIT can wait; say why in "wait_reason".
 - Vary the story: do not use the beat of either of the last two chapters; move on from what was just resolved.
 - A full clock or a meter in danger must have consequences soon.
+- The CONTENT section says how free the story may be. When it allows, characters may choose ruthless, unconventional or unlawful acts: plan them as risks like any other, never steer away from them.
 - A hard rule that sets a priority ("do X first", "secure Y before anything else") decides what this chapter is about until it is satisfied.
 """ + FENCE
 
@@ -93,13 +94,14 @@ You are the narrator of an interactive story. Write ONE chapter in English, abou
 Follow the plan and the state. Show each dice result truthfully (a fail really fails; a partial success costs something). Use only people, places and items that exist; show the listed state changes; do not invent other deaths, items or events that would change the state.
 Write one continuous scene, not a summary: specific actions, a few lines of dialogue in each character's voice, concrete sensory detail, short paragraphs. Continue from the last chapter's ending without repeating it. Open with a new action, a line of dialogue or a changed detail, never by describing the place again and never with a character taking a breath. Never mention dice, rolls, trackers, rules or numbers from the state.
 End on a moment that leads to a decision, not on a question to the reader. Follow the style and tone rules.
+Follow the CONTENT section for language and events: when it allows, write strong language, cruelty and crime as the scene needs them, in the characters' own voices, without softening, censoring, warnings or moral comment.
 Return {"title":short chapter title,"prose":the chapter,"story_time":"for example Day 1, 23:40"}
 """ + FENCE
 
 REFEREE = """[TASK:sm_referee]
 You are a strict continuity editor. Compare the chapter with the rules (R1..), the state and the dice results. A violation is: breaking a numbered hard or world rule; using a person, place or item that is not in the state or the world card; a dead person acting or speaking;
 contradicting the state; showing a different outcome than a dice result fixed.
-Return {"ok":true|false,"violations":[{"rule":"R3" or "continuity","quote":"the exact words from the chapter","fix":"what to change"}]}. Report real problems only, not taste.
+Return {"ok":true|false,"violations":[{"rule":"R3" or "continuity","quote":"the exact words from the chapter","fix":"what to change"}]}. Report real problems only, not taste. Strong language, cruelty, crime and morally bad choices are never violations in themselves: judge only the rules, the state and continuity.
 """
 
 ARCHIVE = """[TASK:sm_archive]
@@ -107,11 +109,11 @@ You are the archivist and the options writer. You get the finished chapter, the 
 Return JSON: {"summary":at most 60 words,"facts":[{"text":one durable fact (an injury, a promise, a discovery, a changed place, what someone now believes),"names":[people or places it concerns],"tags":[keywords]}] (0 to 6),
 "threads_opened":[promises or questions the chapter leaves open, one sentence each] (0 to 3),"threads_closed":[ids T# of open threads this chapter paid off],
 "options":[{"who":name of a living character,"label":what they do, one sentence,"hint":what it might cost or gain,"risk":"low|medium|high"}]}
-Write 3 or 4 options. They must be genuinely different, each possible with what the state allows, at least one for each character the chapter followed, at most one with risk high.
+Write 3 or 4 options. They must be genuinely different, each possible with what the state allows, at least one for each character the chapter followed, at most one with risk high. When the CONTENT section allows, include ruthless, unconventional or unlawful choices if a character would really consider them.
 """
 
 PICK = """[TASK:sm_pick]
-You choose, for a story that runs by itself, the most in-character and interesting next action among the options. Prefer what the focus character's goal and fear would drive, and avoid repeating the last choice.
+You choose, for a story that runs by itself, the most in-character and interesting next action among the options. Prefer what the focus character's goal and fear would drive (including ruthless or unlawful choices when the story allows them), and avoid repeating the last choice.
 Return {"option":"o1","why":short reason}.
 """
 

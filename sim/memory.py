@@ -3,7 +3,7 @@ the last chapter's ending, matched fact cards and the open threads. Over budget,
 from story import settings as settings_mod
 from story.tokens import Budget
 
-from . import state as S, store
+from . import content, state as S, store
 
 PACKET_TOKENS = 6500
 SUMMARY_KEEP = 8                    # chapter summaries kept word for word after the story-so-far
@@ -106,6 +106,7 @@ def build(pid: str, path: list[dict], st: dict, focus: list[str] | None = None, 
     pk = Packet()
     world = store.world(pid)
     rules, pk.rule_labels = rules_text(pid)
+    pk.fixed.append(("CONTENT", content.text(store.project(pid)["settings"])))
     pk.fixed.append(("WORLD", world_text(world)))
     pk.fixed.append(("RULES", rules))
     pk.fixed.append(("STATE", S.describe(st, store.trackers(pid))))

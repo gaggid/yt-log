@@ -25,7 +25,7 @@ class SimFake:
     async def complete(self, messages, max_tokens, params=None):
         system, user = messages[0]["content"], messages[1]["content"]            # the first user message (a retry appends the complaint after it)
         task = re.match(r"\[TASK:(\w+)\]", system).group(1)
-        self.calls.append({"task": task, "system": system, "user": user})
+        self.calls.append({"task": task, "system": system, "user": user, "params": params or {}, "max_tokens": max_tokens})
         a = self.answers.get(task)
         if a is not None:
             out = a(user, self.count(task)) if callable(a) else a

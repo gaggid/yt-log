@@ -1,7 +1,7 @@
 """From an idea to a playable setup (docs/PLAN_simulation.md section 10). Four parts, each its own model call so any can be redone alone; all land in editable forms."""
 import json
 
-from . import memory, models as m, prompts as P, state as S, store, templates
+from . import content, memory, models as m, prompts as P, state as S, store, templates
 from .engine import _json, fence
 
 PARTS = ("world", "cast", "trackers", "rules")
@@ -10,7 +10,7 @@ PARTS = ("world", "cast", "trackers", "rules")
 def _idea_block(pid: str) -> str:
     p = store.project(pid)
     t = templates.get(p["settings"].get("template_id", ""))
-    return f"IDEA: {fence(p['idea'])}\n" + (templates.hint_text(t) + "\n" if templates.hint_text(t) else "")
+    return f"CONTENT: {content.text(p['settings'])}\n\nIDEA: {fence(p['idea'])}\n" + (templates.hint_text(t) + "\n" if templates.hint_text(t) else "")
 
 
 def _cast_text(pid: str) -> str:

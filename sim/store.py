@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS sim_templates(id TEXT PRIMARY KEY, name TEXT, data TE
 TABLES = ("sim_world", "sim_entities", "sim_trackers", "sim_guidelines", "sim_directives", "sim_chapters", "sim_facts", "sim_threads", "sim_runs")
 
 DEFAULT_SETTINGS = {"difficulty": "fair", "dice": True, "chapter_words": 350, "deep": False, "auto_images": False, "image_model": "", "panel_shape": "wide", "captions": True,
-                    "seed": 7, "template_id": "", "rules_version": 1}
+                    "seed": 7, "template_id": "", "rules_version": 1, "thinking": "balanced", "content": "unfiltered"}
 DIFFICULTIES = ("gentle", "fair", "brutal")
 SHAPES = ("wide", "tall")
 GROUPS = ("hard", "world", "tone", "style")
@@ -99,6 +99,10 @@ def save_project(pid: str, **f) -> dict:
         st = {**p["settings"], **f["settings"]}
         if st["difficulty"] not in DIFFICULTIES:
             raise SimError("difficulty must be gentle, fair or brutal")
+        if st.get("thinking", "balanced") not in ("off", "balanced", "deep"):
+            raise SimError("thinking must be off, balanced or deep")
+        if st.get("content", "unfiltered") not in ("clean", "mature", "unfiltered"):
+            raise SimError("content must be clean, mature or unfiltered")
         if st["panel_shape"] not in SHAPES:
             raise SimError("panel shape must be wide or tall")
         st["chapter_words"] = max(150, min(900, int(st["chapter_words"])))

@@ -5,7 +5,7 @@ import re
 
 from story import llm
 
-from . import dice, memory, models as m, prompts as P, state as S, store
+from . import dice, memory, models as m, prompts as P, state as S, store, think
 
 WORD_SLACK = (0.8, 1.23)                 # chapter length accepted around the owner's setting (350 -> 280 to 430)
 MAX_RISKS = 3
@@ -31,9 +31,15 @@ def _overlap(a: str, b: str) -> bool:
 
 
 async def _json(backend, s, system, user, model, validate=None):
-    caller = llm.JsonCaller(backend, s)
-    res = await caller.call(system, user, model, (lambda v: validate(v, caller)) if validate else None)
-    return res.value
+    for more in (False, True):
+        caller = llm.JsonCaller(backend, think.apply(think.room(s, more), "off" if more else None))
+        try:
+            res = await caller.call(system, user, model, (lambda v: validate(v, caller)) if validate else None)
+            return res.value
+        except llm.ValidationFailed as e:
+            if not (e.truncated and not more):
+                raise                                                    # a cut-off reply is asked once more, with no thinking and more room; anything else is the caller's
+    raise AssertionError("unreachable")
 
 
 def reconcile(st: dict, trackers: list[dict], entities: list[dict]) -> dict:

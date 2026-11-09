@@ -186,3 +186,10 @@ def test_an_empty_item_list_is_filled_from_the_world_card(sm):
     run(seed.seed_trackers(pid, fake, cfg()))
     items = next(t for t in store.trackers(pid) if t["kind"] == "items")
     assert fake.count("sm_items") == 1 and set(items["start"]) == {"Crowbar", "Rope", "Bandages"}
+
+
+def test_phone_layout_rules_exist():
+    js = open("static/sim.js", encoding="utf-8").read()
+    assert "@media(max-width:640px)" in js and "data-sm" in js and "min-height:40px" in js           # touch-size controls under 640 px, scoped to the Stories page
+    assert ".sm-side{position:static" in js                                                         # the state panel flows with the page on a phone
+    assert "viewport" in open("static/index.html", encoding="utf-8").read()

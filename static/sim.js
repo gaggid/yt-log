@@ -27,11 +27,26 @@ const STYLE = `
 details.sm-d summary{cursor:pointer;color:var(--mute);font-size:12px}
 .sm-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px}
 .sm-card{padding:12px 14px}.sm-card h4{margin:0 0 4px;font-size:14px}
+@media(max-width:900px){.sm-side{position:static;max-height:none;overflow:visible}}
+@media(max-width:640px){
+#app[data-sm] button,#app[data-sm] select,#app[data-sm] input:not([type=checkbox]):not([type=file]),#app[data-sm] .tab,#app[data-sm] summary{min-height:40px}
+#app[data-sm] input[type=checkbox]{width:20px;height:20px}
+#app[data-sm] .row{gap:8px}
+#app[data-sm] .card.pad{padding:12px 12px}
+.sm-kv{grid-template-columns:1fr;gap:2px}.sm-kv label{padding-top:0}
+.sm-sum{flex:1 1 100% !important;order:5}
+.sm-cards,.sm-panels{grid-template-columns:1fr}
+.sm-opt{padding:12px}
+.sm-dock #sm-text{flex:1 1 100% !important}
+#app[data-sm] .row>a:first-child{padding:10px 4px;margin:-10px 0}
+.sm-read{padding:0 2px}
+}
 `;
 let el = null, my = 0, D = null, SID = '', TAB = 'story', poll = null, opening = false;
 const kindName = {items: 'Items', meter: 'Meter', clock: 'Clock', relation: 'Relationship', location: 'Locations', knowledge: 'Secrets', flag: 'Yes/no fact'};
 const GROUPS = [['hard', 'Hard rules (never broken)'], ['world', 'World rules'], ['tone', 'Tone and pacing'], ['style', 'Style']];
 
+function mark(node) { node.dataset.sm = '1'; if (!window._smLeave) { window._smLeave = true; addEventListener('hashchange', () => { if (!location.hash.startsWith('#/sim')) { const a = document.getElementById('app'); if (a) delete a.dataset.sm; } }); } }
 function css() { if (!document.getElementById('sm-css')) { const s = document.createElement('style'); s.id = 'sm-css'; s.textContent = STYLE; document.head.append(s); } }
 const live = () => el && document.body.contains(el) && my === route_id;
 const paras = t => esc(t || '').split(/\n+/).filter(Boolean).map(p => `<p>${p}</p>`).join('');
@@ -39,7 +54,7 @@ const hash = (id, tab) => { location.hash = '#/sim' + (id ? '/' + id : '') + (ta
 
 /* ───────── library ───────── */
 window.viewSim = async function () {
-  css(); my = route_id; el = $('#app'); D = null; SID = '';
+  css(); my = route_id; el = $('#app'); mark(el); D = null; SID = '';
   el.innerHTML = '<div class="skel"></div>';
   let r; try { r = await api('/sim'); } catch (e) { el.innerHTML = `<div class="errbox">${esc(e.message)}</div>`; return; }
   if (!live()) return;
@@ -66,7 +81,7 @@ window.viewSim = async function () {
 
 /* ───────── one story ───────── */
 window.viewSimStory = async function (id) {
-  css(); my = route_id; el = $('#app'); SID = id;
+  css(); my = route_id; el = $('#app'); mark(el); SID = id;
   const q = new URLSearchParams(location.hash.split('?')[1] || '');
   TAB = q.get('t') || LS.get('sm-tab-' + id, 'story');
   el.innerHTML = '<div class="skel"></div><div class="skel"></div>';
@@ -138,6 +153,8 @@ function help() {
     <p><b>You steer</b> by clicking an option, writing your own action, pressing <b>Let it run</b> (the AI picks), or <b>Auto-run</b> several chapters (it stops on a death, a full clock, a broken rule or when you press Stop). <b>Add instruction</b> any time: an outside event, a limit, a twist or a steer, to happen next chapter, in some chapters, when something becomes true, or at a story time. Each instruction is used once on the line of the story it was added to.</p>
     <p><b>Rules and things tracked</b> keep the story honest: the AI may only use items that exist in the world card or that are made from items already used, the dead stay dead, and changes it proposes that do not fit are refused (shown under "What changed").</p>
     <p><b>Change your mind.</b> <i>Rewrite</i> a chapter with an instruction or roll <i>new dice</i>: the old version stays as another branch you can switch back to. <i>Edit text</i> lets you change the words; the AI can read your edit and propose how the state should change, and later chapters are marked as written before the edit. Only the last chapter of a line can be deleted.</p>
+    <p><b>Content</b> (Setup, "Content") says how free the story is. <i>unfiltered</i> (the default) lets characters swear, abuse, lie, steal, kill and break the law whenever the story goes there, with real consequences but no softening or lectures; <i>mature</i> and <i>clean</i> turn it down. The rules you write still apply.</p>
+    <p><b>Thinking</b> (Setup, "Thinking") is how long the AI reasons before it plans, changes the state or checks a chapter. <i>balanced</i> is the default; <i>deep</i> is slower and more consistent; <i>off</i> is the fastest and makes more mistakes.</p>
     <p><b>Pictures</b> are optional: press <i>Paint this chapter</i> (or tick "Paint every chapter automatically" in Setup). They are cinematic paintings drawn from text. Each person and place gets a reference painting first, so faces and places stay alike; you can repaint, edit, replace with your own picture or remove any of them. Changing a person's look marks their pictures "old".</p>
     <p><b>Reading and publishing.</b> The <b>Read</b> tab shows the story as a book; download it as Markdown, as a zip with pictures in order, or as chapter data for turning chapters into videos later. <i>Export setup</i> / <i>Save as template</i> / <i>Duplicate</i> in Setup let you reuse a story as a starting point for another.</p>
     <p class="mute">Steps run one at a time (the local model serves one request at a time), so a chapter takes a few minutes. You can leave this page; the work continues and the page picks it up when you come back.</p></div></details>`;
@@ -320,7 +337,9 @@ function drawSetup() {
       <label>Difficulty <select id="s-diff">${['gentle', 'fair', 'brutal'].map(x => `<option ${st.difficulty === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
       <label><input type="checkbox" id="s-dice" ${st.dice ? 'checked' : ''}> Dice decide risky acts</label>
       <label>Words per chapter <input type="number" id="s-words" value="${st.chapter_words}" min="150" max="900" step="10"></label>
-      <label><input type="checkbox" id="s-deep" ${st.deep ? 'checked' : ''}> Let the other characters plan too (slower)</label></div>
+      <label><input type="checkbox" id="s-deep" ${st.deep ? 'checked' : ''}> Let the other characters plan too (slower)</label>
+      <label title="How freely the story may go. Unfiltered: strong language, cruelty and crime are written as the scene needs them, without softening or moral comment.">Content <select id="s-content">${[['clean', 'clean'], ['mature', 'mature'], ['unfiltered', 'unfiltered (no limits)']].map(([v, l]) => `<option value="${v}" ${(st.content || 'unfiltered') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label title="How long the AI thinks before it plans, changes the state or checks a chapter. More thinking is slower and keeps the story more consistent.">Thinking <select id="s-think">${[['off', 'off (fastest)'], ['balanced', 'balanced'], ['deep', 'deep (slowest)']].map(([v, l]) => `<option value="${v}" ${(st.thinking || 'balanced') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div>
     <div class="row mt-s" style="gap:16px"><label><input type="checkbox" id="s-auto" ${st.auto_images ? 'checked' : ''}> Paint every chapter automatically</label>
       <label>Picture shape <select id="s-shape"><option value="wide" ${st.panel_shape === 'wide' ? 'selected' : ''}>wide (16:9)</option><option value="tall" ${st.panel_shape === 'tall' ? 'selected' : ''}>tall (9:16)</option></select></label>
       <label><input type="checkbox" id="s-cap" ${st.captions ? 'checked' : ''}> Captions on pictures</label><label>Image model <input id="s-img" value="${esc(st.image_model)}" placeholder="default" style="width:150px"></label>
@@ -337,7 +356,7 @@ function drawSetup() {
 
   <div class="card pad mt"><div class="row"><b>What the story keeps track of</b><span class="sp"></span>${started ? '' : '<button class="small" id="t-redo">Redo with AI…</button>'}<button class="small" id="t-add">+ Add</button></div>
     <div class="small mute">Items, meters, clocks, relationships, who is where, secrets and yes/no facts. The AI changes these as the story moves; the rules refuse changes that do not make sense.</div>
-    ${D.trackers.filter(t => t.active).map(t => `<div class="row mt-s"><span class="badge">${kindName[t.kind]}</span><b>${esc(t.name)}</b><span class="small mute" style="flex:1">${esc(trackerSummary(t))}</span><button class="small" data-te="${t.id}">Edit</button><button class="small bad" data-td="${t.id}">Remove</button></div>`).join('') || '<p class="mute">Nothing yet.</p>'}</div>
+    ${D.trackers.filter(t => t.active).map(t => `<div class="row mt-s"><span class="badge">${kindName[t.kind]}</span><b>${esc(t.name)}</b><span class="small mute sm-sum" style="flex:1">${esc(trackerSummary(t))}</span><button class="small" data-te="${t.id}">Edit</button><button class="small bad" data-td="${t.id}">Remove</button></div>`).join('') || '<p class="mute">Nothing yet.</p>'}</div>
 
   <div class="card pad mt"><div class="row"><b>Rules</b> <span class="small mute">version ${st.rules_version}</span><span class="sp"></span><button class="small" id="r-redo">Redo the AI's rules…</button><button class="small" id="r-more">Suggest more…</button><button class="small" id="r-add">+ Add a rule</button></div>
     ${GROUPS.map(([g, l]) => { const rs = D.guidelines.filter(x => x.grp === g); return `<div class="mt-s"><div class="sm-tag">${l}</div>${rs.map(x => `<div class="row" style="margin:3px 0"><input type="checkbox" data-rt="${x.id}" ${x.enabled ? 'checked' : ''} title="Use this rule"><span style="flex:1;${x.enabled ? '' : 'color:var(--mute)'}">${esc(x.text)}</span><span class="small mute">${x.origin === 'ai' ? 'AI' : 'you'}</span><button class="small" data-re="${x.id}">Edit</button><button class="small bad" data-rd="${x.id}">✕</button></div>`).join('') || '<div class="small mute">none</div>'}</div>`; }).join('')}</div>
@@ -360,7 +379,7 @@ function trackerSummary(t) {
 function wireSetup() {
   const on = (sel, fn) => el.querySelectorAll(sel).forEach(fn);
   const patch = async (json, ok) => { const r = await act(null, () => api('/sim/' + SID, {method: 'PATCH', json}), ok || 'Saved'); if (r) load(); };
-  $('#s-save').onclick = () => patch({idea: $('#s-idea').value, settings: {difficulty: $('#s-diff').value, dice: $('#s-dice').checked, chapter_words: +$('#s-words').value || 350, deep: $('#s-deep').checked,
+  $('#s-save').onclick = () => patch({idea: $('#s-idea').value, settings: {difficulty: $('#s-diff').value, dice: $('#s-dice').checked, chapter_words: +$('#s-words').value || 350, deep: $('#s-deep').checked, thinking: $('#s-think').value, content: $('#s-content').value,
     auto_images: $('#s-auto').checked, panel_shape: $('#s-shape').value, captions: $('#s-cap').checked, image_model: $('#s-img').value.trim()}});
   $('#w-save').onclick = () => patch({world: Object.fromEntries(['place', 'period', 'tone', 'pacing', 'start_scene', 'start_time', 'exists'].map(k => [k, $('#w-' + k).value]))});
   $('#sm-dup').onclick = async () => { const r = await act(null, () => api(`/sim/${SID}/duplicate?full=false`, {method: 'POST'}), 'Copied'); if (r) hash(r.id, 'setup'); };

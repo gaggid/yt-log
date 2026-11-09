@@ -2,6 +2,8 @@
 A cooperative Stop is checked at stage boundaries."""
 from story2 import jobs
 
+from . import store, think
+
 _stop: set[str] = set()
 
 
@@ -18,6 +20,7 @@ def start(pid: str, kind: str, work) -> dict:
 
     async def wrapped(progress):
         try:
+            think.mode.set(store.project(pid)["settings"].get("thinking", "balanced"))        # this job's own context: the story's thinking setting
             return await work(progress)
         finally:
             _stop.discard(pid)
