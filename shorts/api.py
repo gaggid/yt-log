@@ -177,11 +177,24 @@ async def cancel(short_id: str):
     return {"cancelled": jobs.cancel(short_id)}
 
 
+def _short_made(short_id: str) -> bool:
+    try:
+        return store.get(short_id).get("status") == "made"
+    except store.ShortError:
+        return False                                                           # a deleted short never finishes an idea
+
+
+def _sync_done() -> None:
+    """An idea whose short has its final video is done by itself (no review click needed)."""
+    ideas_mod.finish_ready(_short_made)
+
+
 @router.get("/ideas")                      # before "/{short_id}", which would answer "no such short: ideas"
 async def ideas_list():
+    _sync_done()
     out = ideas_mod.listing()
     for i in out:
-        if i["status"] == "queued" and i.get("short_id"):
+        if i["status"] in ("queued", "done") and i.get("short_id"):
             _add_short_info(i)
     return out
 
@@ -1138,12 +1151,10 @@ def _queue_idea(idea_id: str, pipeline: str, settings: dict | None, auto_run: bo
         raise ValueError(f"pipeline is one of: {', '.join(P.PIPELINES)}")
 
     c = idea["conditioning"]
-    arc_text   = "\n".join(c.get("narrative_arc", []))
     facts_text = "\n".join(f"• {f}" for f in c.get("key_facts", []))
-    source_text = (
-        f"{c.get('refined_hook') or idea['hook']}\n\n"
+    source_text = (                                                            # the concept only: the script room decides arc, beats, feelings and lines
+        f"Angle (the idea's hook, not a spoken line): {c.get('refined_hook') or idea['hook']}\n\n"
         f"{idea['premise']}\n\n"
-        f"Narrative arc:\n{arc_text}\n\n"
         f"Key facts:\n{facts_text}"
     ).strip()
 
@@ -1243,6 +1254,7 @@ async def conductor_tick(now: float | None = None) -> str | None:
     """One step of the autopilot; it starts at most one job, and none while any job runs, because the gateway key serves one request at a time (so exactly one short is made at a time).
     Order: approve (instant), then a due hourly batch, then a brief for the best approved idea, then (when due and under the review cap) the next short. Returns what it started."""
     now = now if now is not None else time.time()
+    _sync_done()
     cfg = ideas_mod.get_config()
     if not cfg["autopilot"]:
         return None
@@ -1282,15 +1294,16 @@ async def autoqueue_forever() -> None:
 @router.get("/ideas/autopilot")
 async def ideas_autopilot():
     """What the Autopilot panel shows: the queues, the schedule and what is running now."""
+    _sync_done()
     cfg = ideas_mod.get_config()
     running = jobs.busy()
     who = jobs._current.get("plan_id") if running else ""
-    qs = ideas_mod.queues()
-    for i in qs["queued"]:
+    qs = ideas_mod.queues(float(cfg["min_score"]))
+    for i in qs["queued"] + qs["done"]:
         _add_short_info(i) if i.get("short_id") else None
     return {"now": time.time(), "on": cfg["autopilot"], "counts": ideas_mod.counts(), "queues": qs, "next_gen_at": cfg["next_gen_at"], "next_make_at": cfg["next_make_at"],
             "running": {"busy": bool(running), "kind": "ideas" if who == _IDEAS_JOB else ("short" if who else ""), "short_id": who if who and who != _IDEAS_JOB else ""},
-            "review_cap": cfg["review_cap"]}
+            "review_cap": cfg["review_cap"], "make_every_h": cfg["make_every_h"], "autorun": cfg["autorun"], "min_score": cfg["min_score"]}
 
 
 class _PublishReq(BaseModel):

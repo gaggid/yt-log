@@ -1109,6 +1109,8 @@ def test_auto_queue_picks_the_best_good_enough_conditioned_idea(client):
     assert ideas_mod.next_for_autoqueue(0.0)["id"] == low["id"]
     short = store.get(out["short_id"])
     assert short["settings"]["voice"]["engine"] == "maya-tts" and short["settings"]["review_keyframes"] is False
+    text = short["source"]["text"]                                             # concept only: an old brief's arc is not handed to the script room
+    assert "Narrative arc" not in text and "0-5s" not in text and "Key facts:" in text and "• f" in text
 
 
 def test_the_ideas_list_route_is_not_taken_by_the_short_id_route(client):
@@ -1313,8 +1315,10 @@ def test_queues_and_upload_text_reach_the_ideas_screen(client):
     ideas_mod.set_status(ideas_mod.add("Z", "hook z one two three", [], "p", "w")["id"], "queued", sh["id"])
     q = client.get("/api/shorts/ideas/autopilot").json()["queues"]
     assert [i["id"] for i in q["conditioned"]] == [y["id"], x["id"]], "best score first"
-    assert q["queued"][0]["short_status"] == "made" and q["queued"][0]["publish"]["title"].startswith("A title") and q["queued"][0]["publish"]["stale"] is False
-    listed = [i for i in client.get("/api/shorts/ideas").json() if i["status"] == "queued"]
+    assert q["queued"] == [], "a finished short is not 'being made'"
+    assert q["done"][0]["short_status"] == "made" and q["done"][0]["publish"]["title"].startswith("A title") and q["done"][0]["publish"]["stale"] is False
+    assert [i["rank"] for i in q["conditioned"]] == [1, 2] and q["done"][0]["done_at"] > 0
+    listed = [i for i in client.get("/api/shorts/ideas").json() if i["status"] == "done"]
     assert listed[0]["publish"]["tags_text"] == "a" and listed[0]["short_status"] == "made"
     assert ideas_mod.get_config()["styles"] == list(ideas_mod.BRIGHT_STYLES), "bright styles are ticked until the person chooses"
 
@@ -1343,3 +1347,34 @@ def test_an_empty_search_is_tried_once_more(client, monkeypatch):
     monkeypatch.setattr(discover, "RETRY_EMPTY_S", 0)
     sigs = asyncio.run(discover.signals({"base_url": "http://gw/v1"}, "k"))
     assert len(sigs) == discover.QUERIES_PER_RUN and all(v == 2 for v in seen.values())
+
+
+def test_a_finished_short_marks_its_idea_done_and_the_queue_shows_the_order(client):
+    from shorts import ideas as ideas_mod, store
+    hi = ideas_mod.add("hi", "hook hi one two", [], "p", "w")
+    lo = ideas_mod.add("lo", "hook lo one two", [], "p", "w")
+    bad = ideas_mod.add("bad", "hook bad one two", [], "p", "w")
+    for i, sc in ((hi, 9.0), (lo, 6.0), (bad, 9.9)):
+        ideas_mod.save_score(i["id"], sc, {})
+        ideas_mod.set_status(i["id"], "approved")
+    ideas_mod.bump_cond_fail(bad["id"]); ideas_mod.bump_cond_fail(bad["id"])
+    q = ideas_mod.queues(7.0)
+    assert [(i["id"], i.get("rank")) for i in q["approved"]] == [(hi["id"], 1), (lo["id"], 2), (bad["id"], None)] and q["approved"][2]["hold"]
+    assert ideas_mod.next_to_condition()["id"] == hi["id"], "the screen's #1 is what the autopilot takes"
+    assert q["approved"][0]["approved_at"] > 0
+    ideas_mod.save_conditioning(lo["id"], {"refined_hook": "h"})
+    ideas_mod.save_conditioning(hi["id"], {"refined_hook": "h"})
+    c = ideas_mod.queues(7.0)["conditioned"]
+    assert c[0]["id"] == hi["id"] and c[0]["rank"] == 1 and not c[0]["hold"]
+    assert c[1]["id"] == lo["id"] and "rank" not in c[1] and "under 7" in c[1]["hold"]
+    assert c[0]["conditioned_at"] > 0
+    sh = store.create("S", "keyframe", {"kind": "idea", "text": "t"}, {})
+    ideas_mod.set_status(hi["id"], "queued", sh["id"])
+    ideas_mod.set_status(lo["id"], "queued", "sh-gone")
+    assert ideas_mod.finish_ready(lambda sid: False) == []
+    sh["status"] = "made"
+    store.save(sh)
+    assert client.get("/api/shorts/ideas/autopilot").status_code == 200
+    assert ideas_mod.get(hi["id"])["status"] == "done" and ideas_mod.get(hi["id"])["done_at"] > 0 and ideas_mod.get(hi["id"])["reviewed"] in (0, None), "done needs no review click"
+    assert ideas_mod.get(lo["id"])["status"] == "queued", "a deleted short never finishes an idea"
+    assert ideas_mod.counts()["waiting_review"] == 2

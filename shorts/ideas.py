@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS idea_config(
 """
 
 # Columns added after the first release (ensure() adds them to an older database).
-EXTRA_COLUMNS = {"sources": "TEXT DEFAULT '[]'", "dup_of": "TEXT DEFAULT ''", "reject_reason": "TEXT DEFAULT ''", "style": "TEXT DEFAULT ''", "reviewed": "INTEGER DEFAULT 0", "auto": "INTEGER DEFAULT 0", "cond_fails": "INTEGER DEFAULT 0"}
+EXTRA_COLUMNS = {"sources": "TEXT DEFAULT '[]'", "dup_of": "TEXT DEFAULT ''", "reject_reason": "TEXT DEFAULT ''", "style": "TEXT DEFAULT ''", "reviewed": "INTEGER DEFAULT 0", "auto": "INTEGER DEFAULT 0", "cond_fails": "INTEGER DEFAULT 0", "approved_at": "REAL DEFAULT 0", "conditioned_at": "REAL DEFAULT 0", "done_at": "REAL DEFAULT 0"}
 
 BRIGHT_STYLES = ("realism", "pixar3d", "anime", "ghibli", "tinyworld")        # ticked until the person chooses; the dark styles (noir, cyberpunk) are opt-in
 MAX_COND_FAILS = 2                                                           # an idea whose brief failed this many times is left alone by the autopilot
@@ -88,13 +88,9 @@ class _ScoreBatch(M):
 
 class _Conditioning(M):
     refined_hook:      Str       = ""
-    narrative_arc:     list[str] = []
-    emotional_journey: list[str] = []
     key_facts:         list[str] = []
     visual_direction:  Str       = ""
     suggested_tone:    Str       = ""
-    opening_line:      Str       = ""
-    production_notes:  Str       = ""
 
 
 class _ConditionResult(M):
@@ -356,82 +352,50 @@ OUTPUT FORMAT — return valid JSON only:
 
 
 _CONDITION_SYSTEM = """\
-You are a senior short-video producer preparing an approved idea for immediate production.
-Your job is to take an approved idea and expand it into a complete, unambiguous production brief.
+You are a senior short-video producer handing an approved idea to the script writers' room.
+Your job is to sharpen the idea and hand over the CONCEPT only. The writers' room (story bible, retention map, beat drafts, punch-up) decides the structure, the beats, the timing, the emotions, the cast and every spoken line. Do NOT plan any of that.
 
 CRITICAL RULE — SHARPEN, NEVER SANITISE:
 You are making the idea MORE psychologically powerful, not softening it into a topic description.
-The final brief must be harder-hitting than the input. If you flatten it, you have failed.
+The refined concept must be harder-hitting than the input. If you flatten it, you have failed.
 
 ═══════════════════════════════════════════════════════════════════
-PRODUCTION BRIEF REQUIREMENTS
+CONCEPT REQUIREMENTS
 ═══════════════════════════════════════════════════════════════════
 
 1. REFINED HOOK (required)
-   Rewrite the original hook to be even more psychologically precise and visceral.
+   The angle of the short: the one claim, question or contradiction that makes a viewer stop mid-scroll.
+   It is the angle, not the spoken line: the writers decide the exact words.
    Rules:
    - Maximum 15 words.
-   - Must work as the first spoken sentence OR the on-screen title.
    - Must trigger the stated attention mechanisms harder than the original.
    - Must be a question (?) or a shock statement. Never a topic label.
-   - Self-test: would a viewer who was mid-scroll stop dead?
 
-2. NARRATIVE ARC — the 30-second journey (exactly 5 items)
-   Cover these time windows: 0-5s, 5-10s, 10-15s, 15-25s, 25-30s.
-   Each item is ONE specific sentence: what the narrator says AND what appears on screen.
-   Format: "0-5s: [exact description]"
-   Rules:
-   - Every beat must change the viewer's understanding of what they are watching.
-   - The structure must escalate. Each beat must be more surprising than the last.
-   - The STRONGEST reveal goes at 25-30s. Never earlier.
-   - No vague descriptions. Specific > general. "12,000 Indian soldiers" not "many soldiers."
-
-3. EMOTIONAL JOURNEY (exactly 5 items matching arc timing)
-   Format: "0-5s: [primary emotion]"
-   Rules:
-   - Emotions must escalate. Never start at the peak.
-   - Allowed emotions: curiosity, unease, anticipation, disbelief, fear, awe, pride,
-     righteous anger, surprise, cognitive dissonance, admiration, shock.
-
-4. KEY FACTS (3-5 items)
-   Specific, verifiable facts that anchor the narrative.
-   These are the production team's research targets.
+2. KEY FACTS (3-5 items)
+   Specific, verifiable facts that anchor the story. The writers may invent atmosphere but must not invent facts, so these are what they can rely on.
    Rules:
    - Each fact must be specific enough to verify independently.
    - Bad: "India has a large military." Good: "India's mountain warfare corps operates at Siachen at 22,000 feet — the highest active battlefield on Earth."
    - No invented statistics. No approximated numbers presented as exact.
 
-5. VISUAL DIRECTION
+3. VISUAL DIRECTION
    One clear sentence for the image model and director.
    Include: the picture style, colour palette, lighting mood. Scenes are bright and evenly lit by default; go dark only when the idea itself is about darkness.
    Example: "Realism — bright natural daylight, clean warm palette, documentary handheld feel."
 
-6. SUGGESTED TONE
+4. SUGGESTED TONE
    Pick exactly ONE from this list: storyteller, soothing, documentary, bigbro, explorer, thriller, roaster
    Follow with one sentence explaining why this tone amplifies the specific emotional triggers of this idea.
 
-7. OPENING LINE
-   The EXACT first spoken sentence of the narration in Hinglish (mixed Hindi-English).
-   Must match the refined hook perfectly.
-   Maximum 12 words.
-   Must feel urgent. Must be a question or a shock statement.
-
-8. PRODUCTION NOTES
-   Critical notes for the director: pacing warnings, visual challenges, what could go wrong,
-   suggested shot types (close-up / satellite view / infographic / archival footage feel),
-   any specific transition moments to design around.
+Do not write an arc, beats, timings, an emotional journey, an opening line or shot notes.
 
 OUTPUT FORMAT — return valid JSON only, no explanation outside the JSON:
 {
   "conditioning": {
     "refined_hook": "...",
-    "narrative_arc": ["0-5s: ...", "5-10s: ...", "10-15s: ...", "15-25s: ...", "25-30s: ..."],
-    "emotional_journey": ["0-5s: ...", "5-10s: ...", "10-15s: ...", "15-25s: ...", "25-30s: ..."],
     "key_facts": ["...", "...", "..."],
     "visual_direction": "...",
-    "suggested_tone": "...",
-    "opening_line": "...",
-    "production_notes": "..."
+    "suggested_tone": "..."
   }
 }"""
 
@@ -507,7 +471,7 @@ def set_state(**kw) -> None:
 def counts() -> dict:
     ensure()
     out = {r["status"]: r["n"] for r in db.q("SELECT status, COUNT(*) n FROM short_ideas GROUP BY status")}
-    out["waiting_review"] = (db.one("SELECT COUNT(*) n FROM short_ideas WHERE status='queued' AND COALESCE(reviewed,0)=0") or {}).get("n", 0)
+    out["waiting_review"] = (db.one("SELECT COUNT(*) n FROM short_ideas WHERE status IN ('queued','done') AND COALESCE(reviewed,0)=0") or {}).get("n", 0)
     return out
 
 
@@ -519,7 +483,7 @@ def mark_reviewed(idea_id: str, reviewed: bool = True) -> dict:
 
 def next_to_condition() -> dict | None:
     """The best approved idea that has no brief yet and has not failed too often."""
-    return max((i for i in listing("approved") if (i.get("cond_fails") or 0) < MAX_COND_FAILS), key=lambda i: (i.get("engagement_score") or 0, i["created_at"]), default=None)
+    return next((i for i in order(listing("approved")) if (i.get("cond_fails") or 0) < MAX_COND_FAILS), None)
 
 
 def bump_cond_fail(idea_id: str) -> None:
@@ -527,11 +491,27 @@ def bump_cond_fail(idea_id: str) -> None:
     db.ex("UPDATE short_ideas SET cond_fails=COALESCE(cond_fails,0)+1, updated_at=? WHERE id=?", (db.now(), idea_id))
 
 
-def queues(limit: int = 30) -> dict:
-    """The ideas in each stage in the order the autopilot takes them (best score first)."""
-    def best(status):
-        return sorted(listing(status), key=lambda i: (-(i.get("engagement_score") or 0), i["created_at"]))[:limit]
-    return {"approved": best("approved"), "conditioned": best("conditioned"), "queued": sorted(listing("queued"), key=lambda i: -i["updated_at"])[:limit]}
+def order(items: list[dict]) -> list[dict]:
+    """The one order every stage is taken in: best score first, the one waiting longest first among equals. The pickers and the screen both use it, so the screen shows what will happen."""
+    return sorted(items, key=lambda i: (-(i.get("engagement_score") or 0), i["created_at"]))
+
+
+def queues(min_score: float = 0.0, limit: int = 30) -> dict:
+    """The ideas in each stage in the order the autopilot takes them. `rank` is the place in line (1 = next); an idea the autopilot will not take (brief failed twice, score under `min_score`) has no rank and carries `hold` (why), and sits after the ranked ones."""
+    def line(status, held):
+        ranked, left = [], []
+        for i in order(listing(status)):
+            why = held(i)
+            (left if why else ranked).append({**i, "hold": why})
+        for n, i in enumerate(ranked, 1):
+            i["rank"] = n
+        return (ranked + left)[:limit]
+    return {
+        "approved": line("approved", lambda i: f"brief failed {i['cond_fails']} times: skipped" if (i.get("cond_fails") or 0) >= MAX_COND_FAILS else ""),
+        "conditioned": line("conditioned", lambda i: f"score {(i.get('engagement_score') or 0):.1f} is under {min_score:g}: not taken automatically" if (i.get("engagement_score") or 0) < min_score else ""),
+        "queued": sorted(listing("queued"), key=lambda i: -i["updated_at"])[:limit],
+        "done": sorted(listing("done"), key=lambda i: -(i.get("done_at") or i["updated_at"]))[:limit],
+    }
 
 
 def auto_approve(min_score: float) -> list[str]:
@@ -560,8 +540,7 @@ def pick_style(allowed: list[str], direction: str) -> str:
 
 def next_for_autoqueue(min_score: float) -> dict | None:
     """The best conditioned idea that is good enough and not queued yet (highest score first)."""
-    ready = [i for i in listing("conditioned") if (i.get("engagement_score") or 0) >= min_score]
-    return max(ready, key=lambda i: i["engagement_score"], default=None)
+    return next((i for i in order(listing("conditioned")) if (i.get("engagement_score") or 0) >= min_score), None)
 
 
 def add(title: str, hook: str, mechanisms: list, premise: str, why_works: str, sources: list | None = None) -> dict:
@@ -689,7 +668,18 @@ def set_status(idea_id: str, status: str, short_id: str = "") -> dict:
     else:
         db.ex("UPDATE short_ideas SET status=?, updated_at=? WHERE id=?",
               (status, db.now(), idea_id))
+    stamp = {"approved": "approved_at", "done": "done_at"}.get(status)         # when the idea qualified for the next stage, for "waiting since"
+    if stamp:
+        db.ex(f"UPDATE short_ideas SET {stamp}=? WHERE id=?", (db.now(), idea_id))
     return get(idea_id)
+
+
+def finish_ready(is_made) -> list[str]:
+    """A queued idea whose short is finished (`is_made(short_id)`) is done: no click needed. Returns the ids moved."""
+    ids = [i["id"] for i in listing("queued") if i.get("short_id") and is_made(i["short_id"])]
+    for i in ids:
+        set_status(i, "done")
+    return ids
 
 
 def save_score(idea_id: str, score: float, breakdown: dict) -> dict:
@@ -701,8 +691,8 @@ def save_score(idea_id: str, score: float, breakdown: dict) -> dict:
 
 def save_conditioning(idea_id: str, conditioning: dict) -> dict:
     ensure()
-    db.ex("UPDATE short_ideas SET conditioning=?, status=?, cond_fails=0, updated_at=? WHERE id=?",
-          (db.jdump(conditioning), "conditioned", db.now(), idea_id))
+    db.ex("UPDATE short_ideas SET conditioning=?, status=?, cond_fails=0, updated_at=?, conditioned_at=? WHERE id=?",
+          (db.jdump(conditioning), "conditioned", db.now(), db.now(), idea_id))
     return get(idea_id)
 
 
@@ -945,7 +935,7 @@ async def condition(idea_id: str, s: dict, key: str, styles: list[str] | None = 
     caller.last_attempt = True
 
     user = (
-        f"Expand this approved short video idea into a full production brief.\n\n"
+        f"Sharpen this approved short video idea into a concept for the writers' room.\n\n"
         f"IDEA TITLE: {idea['title']}\n"
         f"HOOK: {idea['hook']}\n"
         f"MECHANISMS TRIGGERED: {', '.join(idea['mechanisms'])}\n"
@@ -958,8 +948,8 @@ async def condition(idea_id: str, s: dict, key: str, styles: list[str] | None = 
             if idea.get("engagement_score") else ""
         )
         + (_styles_text(styles) if styles else "") +
-        "\nRemember: SHARPEN, never sanitise. The brief must be MORE psychologically "
-        "powerful than the input idea.\n\n"
+        "\nRemember: SHARPEN, never sanitise. The concept must be MORE psychologically "
+        "powerful than the input idea. Do not plan beats, timings, emotions or lines.\n\n"
         f'Return JSON exactly: {{"conditioning": {{...}}}}'
     )
 
@@ -967,12 +957,8 @@ async def condition(idea_id: str, s: dict, key: str, styles: list[str] | None = 
     c = result.value.conditioning
     brief = {
         "refined_hook":      c.refined_hook,
-        "narrative_arc":     c.narrative_arc,
-        "emotional_journey": c.emotional_journey,
         "key_facts":         c.key_facts,
         "visual_direction":  direction_with_style(c.visual_direction, styles or []),
         "suggested_tone":    c.suggested_tone,
-        "opening_line":      c.opening_line,
-        "production_notes":  c.production_notes,
     }
     return save_conditioning(idea_id, brief)

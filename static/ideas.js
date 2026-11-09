@@ -1,5 +1,5 @@
 /* Short Ideas — parking lot for video ideas before production.
-   Flow: pending → approved → conditioned → queued (short created) | rejected
+   Flow: pending → approved → conditioned → queued (short being made) → done (short finished, by itself) | rejected
    Helpers from index.html: api, esc, toast, confirmDlg, fmtDate, badge, LS */
 (() => {
 const css = document.createElement('style');
@@ -70,6 +70,11 @@ css.textContent = `
 .id-qi{border-top:1px solid var(--line);padding:7px 0;font-size:13px}
 .id-qi:first-of-type{border-top:0}
 .id-qi .t{line-height:1.3;word-break:break-word}
+.id-rank{display:inline-block;min-width:26px;text-align:center;margin-right:6px;font-size:11px;font-weight:700;padding:0 6px;border-radius:99px;border:1px solid var(--line);color:var(--mute)}
+.id-rank.next{background:var(--accent);border-color:var(--accent);color:#fff}
+.id-rank.held{opacity:.6}
+.id-col .id-sub{font-size:11px;color:var(--mute);margin:-4px 0 6px}
+.id-card.id-done{border-left:4px solid var(--good, #2e9d5b)}
 .id-qi .m{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px;font-size:11px;color:var(--mute)}
 .id-pub textarea,.id-pub input{width:100%;font:inherit;font-size:13px;padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
 .id-chips{display:flex;gap:6px;flex-wrap:wrap}
@@ -125,7 +130,7 @@ function _persist() {                       // every change is saved on the serv
 }
 
 const call = (path, opts) => api('/shorts/ideas' + path, opts);
-const STATUS_TABS = ['all','pending','approved','conditioned','queued','rejected'];
+const STATUS_TABS = ['all','pending','approved','conditioned','queued','done','rejected'];
 const MECH_LABELS = {
   curiosity_gap:'Curiosity gap', threat_detection:'Threat detect',
   novelty:'Novelty', prediction_error:'Prediction error',
@@ -276,7 +281,7 @@ function _autoHtml() {
     <div class="id-q">
       ${q('To approve', c.pending)}${q('To condition', c.approved)}${q('To make', c.conditioned)}
       ${run.busy && run.kind === 'short' ? `<span class="run">Making now: <a href="#/short/${esc(run.short_id)}">${esc(run.short_id)}</a></span>` : q('Making', 0)}
-      ${q('Waiting for review', c.waiting_review + (a.review_cap ? ' / ' + a.review_cap : ''))}${q('Rejected', c.rejected)}
+      ${q('Done', c.done)}${q('Waiting for review', c.waiting_review + (a.review_cap ? ' / ' + a.review_cap : ''))}${q('Rejected', c.rejected)}
       <span class="sp"></span>
       <button class="small" id="ap-run-gen" title="Run one batch now">Generate now</button>
       <button class="small" id="ap-run-cond" title="Write the brief of the best approved idea now">Condition next</button>
@@ -284,22 +289,49 @@ function _autoHtml() {
     </div>`;
 }
 
+function _serverNow() { return (_ap ? _ap.now : Date.now() / 1000) + (Date.now() / 1000 - _apAt); }
+
+function _age(sec) {                        // "2d 4h", "3h 10m", "12 min"
+  sec = Math.max(0, Math.round(sec));
+  const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+  return d ? `${d}d ${h}h` : h ? `${h}h ${String(m).padStart(2, '0')}m` : `${Math.max(1, m)} min`;
+}
+
+function _since(i, field) {                 // how long the idea has waited at this stage (rows from before the stamps use the last change)
+  return _age(_serverNow() - (i[field] || i.updated_at));
+}
+
 function _queueItem(i, stage) {
   const sc = i.engagement_score ? `<span class="id-score ${scoreClass(i.engagement_score)}" style="font-size:11px;padding:0 7px">★ ${i.engagement_score.toFixed(1)}</span>` : '';
-  const failed = (i.cond_fails || 0) >= 2 ? `<span class="bad">brief failed ${i.cond_fails}×: autopilot skips it</span>` : '';
+  const a = _ap || {};
+  const rank = i.rank ? `<span class="id-rank${i.rank === 1 ? ' next' : ''}" title="${i.rank === 1 ? 'Taken next' : 'Place in line'}">${i.rank === 1 ? 'NEXT' : '#' + i.rank}</span>` : (i.hold ? '<span class="id-rank held">–</span>' : '');
+  const hold = i.hold ? `<span class="bad">${esc(i.hold)}</span>` : '';
   const act = stage === 'approved' ? `<button class="small" data-now="condition" data-id="${i.id}">Condition now</button>`
     : stage === 'conditioned' ? `<button class="small primary" data-now="make" data-id="${i.id}">Make now</button>`
+    : stage === 'queued' ? `${i.short_id ? `<a class="btn small" href="#/short/${i.short_id}">Open</a>` : ''}`
     : `${i.short_id ? `<a class="btn small" href="#/short/${i.short_id}">Open</a>` : ''}<button class="small" onclick="idReviewed('${i.id}', ${i.reviewed ? 'false' : 'true'})">${i.reviewed ? 'Reviewed ✓' : 'Mark reviewed'}</button>`;
-  const stat = stage === 'queued' ? `<span>${esc(i.short_status === 'made' ? 'video ready' : i.short_status === 'deleted' ? 'short deleted' : 'in progress')}</span>${i.reviewed ? '' : '<span>waiting for review</span>'}` : '';
-  return `<div class="id-qi"><div class="t">${esc((i.hook || '').slice(0, 110))}</div><div class="m">${sc}${stat}${failed}<span class="sp"></span>${act}</div></div>`;
+  let stat = '';
+  if (stage === 'approved') stat = i.hold ? '' : `<span title="Time since this idea was approved">approved ${_since(i, 'approved_at')} ago</span>`;
+  else if (stage === 'conditioned') {
+    stat = `<span title="Time since the brief was written, so this idea could be made">ready ${_since(i, 'conditioned_at')} ago</span>`;
+    if (i.rank) {                           // when the schedule reaches it: the next slot, then one more every "make every" hours
+      const on = _auto.autopilot && _autoRun;
+      const at = Math.max(a.next_make_at || 0, _serverNow()) + (i.rank - 1) * (a.make_every_h || 2) * 3600;
+      stat += on ? `<span title="Estimated: the next slot, then one short every ${a.make_every_h || 2} h (waits if reviews pile up)">starts ${_until(at)}</span>` : '<span>autopilot is not making shorts</span>';
+    }
+  }
+  else if (stage === 'queued') stat = `<span>${esc(i.short_status === 'deleted' ? 'short deleted' : 'being made')}</span>`;
+  else stat = `<span>finished ${_since(i, 'done_at')} ago</span>${i.reviewed ? '' : '<span>not reviewed</span>'}`;
+  return `<div class="id-qi"><div class="t">${rank}${esc((i.hook || '').slice(0, 110))}</div><div class="m">${sc}${stat}${hold}<span class="sp"></span>${act}</div></div>`;
 }
 
 function _boardHtml() {
-  const q = (_ap && _ap.queues) || {approved: [], conditioned: [], queued: []};
-  const col = (title, list, stage, note) => `<div class="id-col"><h4>${title}<span class="badge">${list.length}</span></h4>${list.length ? list.map(i => _queueItem(i, stage)).join('') : `<div class="none">${note}</div>`}</div>`;
-  return col('To condition (approved)', q.approved, 'approved', 'No approved idea waits for a brief.')
-       + col('To make (conditioned)', q.conditioned, 'conditioned', 'No conditioned idea is waiting to be made into a short.')
-       + col('Making / waiting for review', q.queued, 'queued', 'No short has been made from an idea yet.');
+  const q = (_ap && _ap.queues) || {approved: [], conditioned: [], queued: [], done: []};
+  const col = (title, list, stage, note, sub) => `<div class="id-col"><h4>${title}<span class="badge">${list.length}</span></h4>${sub ? `<div class="id-sub">${sub}</div>` : ''}${list.length ? list.map(i => _queueItem(i, stage)).join('') : `<div class="none">${note}</div>`}</div>`;
+  return col('1 · To condition (approved)', q.approved, 'approved', 'No approved idea waits for a brief.', 'Best score first. #1 gets its brief next.')
+       + col('2 · To make (conditioned)', q.conditioned, 'conditioned', 'No conditioned idea is waiting to be made into a short.', `Best score first, only scoring ${(_ap && _ap.min_score) || _minScore}+. #1 is made next.`)
+       + col('3 · Being made', q.queued || [], 'queued', 'No short is being made.', '')
+       + col('4 · Done (video ready)', q.done || [], 'done', 'No finished short yet.', 'An idea moves here by itself when its video is ready.');
 }
 
 function _wireBoard() {
@@ -457,20 +489,20 @@ function renderCard(idea) {
     actions.push(`<button class="small" ${busy?'disabled':''} onclick="idCondition('${idea.id}')">${busy?'<span class="spin"></span>':''}Re-condition</button>`);
   if (idea.status === 'conditioned')
     actions.push(`<button class="primary small" ${busy?'disabled':''} onclick="idQueue('${idea.id}')">${busy?'<span class="spin"></span> Queuing…': (_autoRun ? '→ Queue + Auto-run' : '→ Queue')}</button>`);
-  if (idea.status === 'queued' && idea.short_id)
+  if ((idea.status === 'queued' || idea.status === 'done') && idea.short_id)
     actions.push(`<a class="btn small" href="#/short/${idea.short_id}">Open short →</a>`);
-  if (idea.status === 'queued')
+  if (idea.status === 'done')
     actions.push(`<button class="small ${idea.reviewed ? '' : 'primary'}" onclick="idReviewed('${idea.id}', ${idea.reviewed ? 'false' : 'true'})">${idea.reviewed ? 'Reviewed ✓ (undo)' : 'Mark reviewed'}</button>`);
   if (idea.status !== 'queued')
     actions.push(`<button class="small bad" onclick="idDelete('${idea.id}')">Delete</button>`);
-  if (idea.status === 'queued' && idea.short_status === 'made')
+  if (idea.status === 'done')
     actions.push(idea.publish
       ? `<button class="small link" onclick="idToggle('${idea.id}','pub')">${exp==='pub'?'Hide upload text':'Upload text'}${idea.publish.stale ? ' (outdated)' : ''}</button>`
       : `<button class="small" ${busy?'disabled':''} onclick="idWritePub('${idea.id}')">${busy?'<span class="spin"></span> Writing…':'Write upload text'}</button>`);
   if (hasSc) actions.push(`<button class="small link" onclick="idToggle('${idea.id}','score')">${exp==='score'?'Hide score':'Score detail'}</button>`);
   if (hasCo) actions.push(`<button class="small link" onclick="idToggle('${idea.id}','cond')">${exp==='cond'?'Hide brief':'View brief'}</button>`);
 
-  const statusKey = idea.status==='queued'?'queued':idea.status==='conditioned'?'info':idea.status==='approved'?'done':idea.status==='rejected'?'error':'';
+  const statusKey = idea.status==='queued'?'queued':idea.status==='done'?'done':idea.status==='conditioned'?'info':idea.status==='approved'?'done':idea.status==='rejected'?'error':'';
   const expandPanel = exp === 'score' ? scorePanel(idea) : exp === 'cond' ? condPanel(idea) : exp === 'pub' ? pubPanel(idea) : '';
 
   const fresh = _job && _job.new_ids && _job.new_ids.includes(idea.id) && _job.state === 'running';
