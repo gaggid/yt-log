@@ -119,6 +119,16 @@ def view(short: dict) -> dict | None:
     return {**p, "tags_text": ", ".join(p.get("tags", [])), "stale": p.get("for") != narration_hash(short)}
 
 
+def learnings() -> str:
+    """What the channel's results say about titles (only from an approved Playbook; empty otherwise)."""
+    try:
+        from feedback import playbook
+        return playbook.learnings_block("title")
+    except Exception as e:  # noqa: BLE001 - upload text must never fail because of the feedback loop
+        print(f"[feedback] title learnings failed: {e}", flush=True)
+        return ""
+
+
 async def make(short_id: str, backend, s: dict | None = None, note: str = "") -> dict:
     """Write (or rewrite) the upload text of a short from its narration. `note` is the producer's wish (for example a keyword to lead with)."""
     from datetime import datetime
@@ -132,7 +142,7 @@ async def make(short_id: str, backend, s: dict | None = None, note: str = "") ->
     system = PUBLISH.replace("{today}", datetime.now().strftime("%d %B %Y")).replace("{language}", lang).replace("{tmin}", str(TITLE_MIN)).replace("{tmax}", str(TITLE_MAX))
     brief = (short.get("source") or {}).get("text", "")[:1500]
     user = (f"SHORT TITLE (working name): {short.get('title', '')}\nLOGLINE: {(short.get('plan') or {}).get('logline', '')}\n\nTHE NARRATION (what is said, in order):\n{narration(short)}"
-            + (f"\n\nTHE BRIEF THE SHORT WAS MADE FROM:\n{brief}" if brief else "") + (f"\n\nTHE PRODUCER ASKS: {note}" if note.strip() else "") + "\n\nWrite the upload text now.")
+            + (f"\n\nTHE BRIEF THE SHORT WAS MADE FROM:\n{brief}" if brief else "") + (f"\n\nTHE PRODUCER ASKS: {note}" if note.strip() else "") + (f"\n\n{learnings()}" if learnings() else "") + "\n\nWrite the upload text now.")
     caller = llm.JsonCaller(backend, s)
 
     def check(out: PublishOut) -> None:

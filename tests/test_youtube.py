@@ -45,6 +45,10 @@ class Google:
         if u.startswith(client.DATA + "/videos"):
             return httpx.Response(200, json={"items": [{"id": v["id"], "snippet": {"title": v["title"], "publishedAt": iso(v["at"])}, "contentDetails": {"duration": "PT45S"},
                                                          "statistics": {"viewCount": str(v["views"]), "likeCount": "9", "commentCount": "2"}} for v in self.videos]})
+        if u.startswith(client.DATA + "/commentThreads"):
+            if req.url.params["videoId"] == "BBBBBBBBBBB":
+                return httpx.Response(403, json={"error": {"message": "commentsDisabled"}})
+            return httpx.Response(200, json={"items": [{"id": "cm1", "snippet": {"topLevelComment": {"snippet": {"textOriginal": "Please explain how it works", "likeCount": 7, "publishedAt": "2026-11-05T10:00:00Z"}}}}]})
         if u.startswith(client.ANALYTICS):
             vid = req.url.params["filters"].split("==")[1]
             v = next(x for x in self.videos if x["id"] == vid)
@@ -61,6 +65,7 @@ def g(env, monkeypatch):
     monkeypatch.setenv("YT_CLIENT_ID", "cid")
     monkeypatch.setenv("YT_CLIENT_SECRET", "sec")
     monkeypatch.setenv("YT_REDIRECT_URI", "https://app.example/api/youtube/callback")
+    monkeypatch.setattr(httpx, "AsyncClient", httpx._client.AsyncClient)          # an earlier test file can leave a fake client behind
     mock = Google([])
     monkeypatch.setattr(oauth, "TRANSPORT", httpx.MockTransport(mock))
     return mock
@@ -188,3 +193,13 @@ def test_the_api_reports_status_refuses_a_foreign_callback_and_links_by_hand(env
         assert c.get("/api/youtube/performance").json()["linked"] == 0, "the video is not synced yet"
         c.delete("/api/youtube/link/AAAAAAAAAAA")
         assert store.links() == []
+
+
+def test_public_comments_of_the_best_videos_are_kept_and_a_video_with_comments_off_is_skipped(g):
+    from feedback import store as fbstore
+    now = time.time()
+    g.videos = [{"id": "AAAAAAAAAAA", "title": "First video here", "at": now - 10 * 86400, "views": 5000}, {"id": "BBBBBBBBBBB", "title": "Second video here", "at": now - 9 * 86400, "views": 900}]
+    connect()
+    asyncio.run(sync.run())
+    assert [c["text"] for c in fbstore.comments("AAAAAAAAAAA")] == ["Please explain how it works"] and fbstore.comments("AAAAAAAAAAA")[0]["likes"] == 7
+    assert fbstore.comments("BBBBBBBBBBB") == []

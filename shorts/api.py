@@ -1155,6 +1155,25 @@ async def ideas_condition(idea_id: str):
         raise HTTPException(500, str(e))
 
 
+def _feedback_tone(default: str) -> tuple[str, str]:
+    """The tone of a short: the idea's own, or a tone arm on an explore roll (only with an approved Playbook)."""
+    try:
+        from feedback import bandit
+        return bandit.choose_tone(default)
+    except Exception as e:  # noqa: BLE001 - the feedback loop must never stop a short from being made
+        print(f"[feedback] tone failed: {e}", flush=True)
+        return default, "idea"
+
+
+def _freeze_features(idea_id: str, short: dict, choices: dict) -> None:
+    """Keep the features of the idea as made, to compare with how the video does."""
+    try:
+        from feedback import features, store as fbstore
+        fbstore.freeze_features(idea_id, short["id"], features.freeze(ideas_mod.get(idea_id), short, choices), overwrite=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[feedback] freezing features failed: {e}", flush=True)
+
+
 def _queue_idea(idea_id: str, pipeline: str, settings: dict | None, auto_run: bool) -> dict:
     """Make the short for a conditioned idea and, when asked and the machine is free, start its whole pipeline. Used by the Queue button and by the unattended auto-queue."""
     idea = ideas_mod.get(idea_id)
@@ -1174,9 +1193,12 @@ def _queue_idea(idea_id: str, pipeline: str, settings: dict | None, auto_run: bo
     tone_id = c.get("suggested_tone", "").strip()
     if tone_id not in tones.TONES:
         tone_id = tones.DEFAULT
+    tone_id, tone_src = _feedback_tone(tone_id)
 
     vd = (c.get("visual_direction") or "").lower()
-    style = ideas_mod.pick_style(ideas_mod.get_config()["styles"], vd)         # only from the styles ticked in the Ideas config
+    style, style_src = ideas_mod.style_choice(ideas_mod.get_config()["styles"], vd)         # only from the styles ticked in the Ideas config
+    if style_src == "idea" and c.get("style_src"):
+        style_src = c["style_src"]                                              # the brief named it, but the bandit may have chosen it
     if not style and not ideas_mod.get_config()["styles"]:
         for pid in looks.presets():
             if pid in vd:
@@ -1194,6 +1216,7 @@ def _queue_idea(idea_id: str, pipeline: str, settings: dict | None, auto_run: bo
     short = store.create(title, pipeline, src, settings_override)
     ideas_mod.set_status(idea_id, "queued", short["id"])
     db.ex("UPDATE short_ideas SET style=? WHERE id=?", (style, idea_id))
+    _freeze_features(idea_id, short, {"style": style_src, "tone": tone_src})
 
     auto_started = False
     if auto_run and not manager.busy():
@@ -1254,6 +1277,25 @@ def _start_condition(cfg: dict, idea_id: str = "") -> bool:
     return True
 
 
+FEEDBACK_EVERY_S = 24 * 3600
+
+
+def _start_feedback(cfg: dict, now: float) -> bool:
+    """The daily feedback cycle (grade, tag, draft a Playbook, sequels, comment ideas) as an ideas job. Drafts only; nothing is approved by it."""
+    from feedback import generate, store as fbstore
+    from youtube import store as ytstore
+    if fbstore.kv("next_cycle_at", 0) > now or not ytstore.get_auth().get("refresh_token"):
+        return False
+    fbstore.set_kv("next_cycle_at", now + FEEDBACK_EVERY_S)                     # set first: a failed cycle is not retried in a loop
+    s, key = settings_mod.get(), settings_mod.api_key()
+
+    async def work(progress):
+        return await generate.run_cycle(s, key, progress, cfg)
+
+    _start_idea_job("feedback", work)
+    return True
+
+
 def _start_make(cfg: dict, idea_id: str = "") -> str:
     """Queue the best conditioned idea scoring at least `min_score` (or the chosen one) and start its pipeline. Returns the short id, or '' when nothing is ready."""
     nxt = ideas_mod.get(idea_id) if idea_id else ideas_mod.next_for_autoqueue(float(cfg["min_score"]))
@@ -1282,6 +1324,8 @@ async def conductor_tick(now: float | None = None) -> str | None:
             return "generate"
     if cfg["auto_condition"] and _start_condition(cfg):
         return "condition"
+    if cfg.get("auto_feedback") and _start_feedback(cfg, now):
+        return "feedback"
     if cfg["autorun"] and now >= cfg["next_make_at"]:
         cap = int(cfg["review_cap"])
         if cap and ideas_mod.counts()["waiting_review"] >= cap:
@@ -1304,6 +1348,15 @@ async def autoqueue_forever() -> None:
             print(f"[ideas] autopilot failed: {e}", flush=True)
 
 
+def _playbook_info() -> dict:
+    try:
+        from feedback import store as fbstore
+        pb = fbstore.approved_playbook()
+        return {"version": pb["version"] if pb else 0, "on": bool(ideas_mod.get_config().get("use_playbook")) and bool(pb), "drafts": sum(p["status"] == "draft" for p in fbstore.playbooks())}
+    except Exception:  # noqa: BLE001
+        return {"version": 0, "on": False, "drafts": 0}
+
+
 @router.get("/ideas/autopilot")
 async def ideas_autopilot():
     """What the Autopilot panel shows: the queues, the schedule and what is running now."""
@@ -1317,7 +1370,7 @@ async def ideas_autopilot():
     _add_youtube(qs["done"])
     return {"now": time.time(), "on": cfg["autopilot"], "counts": ideas_mod.counts(), "queues": qs, "next_gen_at": cfg["next_gen_at"], "next_make_at": cfg["next_make_at"],
             "running": {"busy": bool(running), "kind": "ideas" if who == _IDEAS_JOB else ("short" if who else ""), "short_id": who if who and who != _IDEAS_JOB else ""},
-            "review_cap": cfg["review_cap"], "make_every_h": cfg["make_every_h"], "autorun": cfg["autorun"], "min_score": cfg["min_score"]}
+            "review_cap": cfg["review_cap"], "make_every_h": cfg["make_every_h"], "autorun": cfg["autorun"], "min_score": cfg["min_score"], "playbook": _playbook_info()}
 
 
 class _PublishReq(BaseModel):

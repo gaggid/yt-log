@@ -26,6 +26,7 @@ from shorts.api import router as shorts_router
 from characters.api import router as characters_router
 from admin.api import router as storage_router
 from youtube.api import router as youtube_router
+from feedback.api import router as feedback_router
 from story.pipeline import manager
 
 STATIC = Path(__file__).with_name("static")
@@ -75,6 +76,7 @@ app.include_router(shorts_router)
 app.include_router(characters_router)
 app.include_router(storage_router)
 app.include_router(youtube_router)
+app.include_router(feedback_router)
 
 
 NO_STORE = {"Cache-Control": "no-store"}
@@ -88,7 +90,8 @@ async def root():
         'src="/characters.js"', f'src="/characters.js?v={int((STATIC / "characters.js").stat().st_mtime)}"').replace(
         'src="/storage.js"', f'src="/storage.js?v={int((STATIC / "storage.js").stat().st_mtime)}"').replace(
         'src="/ideas.js"', f'src="/ideas.js?v={int((STATIC / "ideas.js").stat().st_mtime)}"').replace(
-        'src="/youtube.js"', f'src="/youtube.js?v={int((STATIC / "youtube.js").stat().st_mtime)}"')
+        'src="/youtube.js"', f'src="/youtube.js?v={int((STATIC / "youtube.js").stat().st_mtime)}"').replace(
+        'src="/learn.js"', f'src="/learn.js?v={int((STATIC / "learn.js").stat().st_mtime)}"')
     return HTMLResponse(html, headers=NO_STORE)
 
 
@@ -110,6 +113,11 @@ async def storage_js():
 @app.get("/characters.js")
 async def characters_js():
     return FileResponse(STATIC / "characters.js", media_type="application/javascript", headers=NO_STORE)
+
+
+@app.get("/learn.js")
+async def learn_js():
+    return FileResponse(STATIC / "learn.js", media_type="application/javascript", headers=NO_STORE)
 
 
 @app.get("/youtube.js")

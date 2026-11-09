@@ -256,6 +256,14 @@ function _until(ts) {                       // "in 12m" from a server timestamp 
   return left <= 0 ? 'due now' : 'in ' + hd(left);
 }
 
+function _playbookChip() {                  // which Playbook (what the channel's results taught) steers the ideas
+  const p = _ap && _ap.playbook;
+  if (!p) return '';
+  const use = p.on ? `<span class="badge good" title="Idea generation, rating, titles and scripts use this Playbook">Using Playbook v${p.version}</span>` : '<span class="badge" title="No approved Playbook is steering the ideas">No Playbook in use</span>';
+  const draft = p.drafts ? ` <a href="#/youtube" class="badge warn" title="Review it on the YouTube page, Learn tab">${p.drafts} Playbook draft${p.drafts > 1 ? 's' : ''} to review</a>` : '';
+  return `<a href="#/youtube" style="text-decoration:none">${use}</a>${draft}`;
+}
+
 function _autoHtml() {
   const a = _auto, on = a.autopilot, c = (_ap && _ap.counts) || {}, run = _ap && _ap.running || {};
   const num = (id, v, min, max, step) => `<input type="number" id="${id}" value="${v}" min="${min}" max="${max}" step="${step || 1}">`;
@@ -269,6 +277,7 @@ function _autoHtml() {
       <span class="badge ${on ? 'good' : ''}">${on ? 'ON' : 'OFF'}</span>
       <span class="sp"></span>
       <span class="mute small">${on ? (run.busy ? (run.kind === 'short' ? 'A short is being made now' : 'An ideas job is running') : 'Idle: waiting for the next step') : 'Nothing runs by itself'}</span>
+      ${_playbookChip()}
     </div>
     <div class="id-auto-grid">
       ${sw('ap-gen', 'Generate ideas every', a.auto_generate, `${num('ap-gen-h', a.gen_every_h, 0.25, 48, 0.25)} h × ${num('ap-gen-n', a.gen_n, 1, 15)} ideas (web search, duplicates removed, rated)`, nextGen)}
@@ -510,7 +519,7 @@ function renderCard(idea) {
   const fresh = _job && _job.new_ids && _job.new_ids.includes(idea.id) && _job.state === 'running';
   return `<div class="id-card id-${idea.status}${fresh ? ' id-new' : ''}" id="card-${idea.id}">
     <div class="id-hook" onclick="idToggle('${idea.id}','${defaultExp}')">${esc(idea.hook)}</div>
-    <div class="id-mech">${mechBadges(idea.mechanisms)}</div>
+    <div class="id-mech">${mechBadges(idea.mechanisms)}${idea.origin && idea.origin !== 'generated' ? ` <span class="badge" title="${esc(idea.origin.startsWith('sequel') ? 'A follow-up to a video that did very well' : 'Inspired by what viewers wrote in the comments')}">${idea.origin.startsWith('sequel') ? 'sequel of a winner' : 'from comments'}</span>` : ''}${idea.territory ? ` <span class="badge" title="Subject territory">${esc(idea.territory.replace(/_/g, ' '))}</span>` : ''}</div>
     <div class="row" style="gap:8px;flex-wrap:wrap">
       ${badge(statusKey, idea.status)}
       ${idea.auto && idea.status !== 'rejected' ? '<span class="badge">auto-approved</span>' : ''}${idea.style ? `<span class="badge">${esc(idea.style)}</span>` : ''}

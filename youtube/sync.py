@@ -113,14 +113,32 @@ async def run() -> dict:
         except oauth.YTError as e:
             failed += 1
             first_error = first_error or str(e)
+    await _comments()
     store.set_kv("last_sync", {"at": time.time(), "videos": len(ids), "analytics": len(todo) - failed, "analytics_failed": failed, "analytics_error": first_error})
     return store.kv("last_sync")
+
+
+COMMENT_VIDEOS = 8               # the public comments of this many best videos are read (1 quota unit each)
+
+
+async def _comments() -> None:
+    """Top public comments of the best shorts, kept for the idea factory. A video with comments off, or any failure here, is skipped."""
+    from feedback import store as fbstore
+    best = sorted((v for v in store.videos() if not v["duration_s"] or v["duration_s"] <= 180), key=lambda v: -v["views"])[:COMMENT_VIDEOS]
+    for v in best:
+        try:
+            fbstore.save_comments(v["video_id"], await client.comments(v["video_id"]))
+        except oauth.YTAuthError:
+            raise
+        except oauth.YTError:
+            continue
 
 
 async def _job() -> None:
     _state.update(running=True, error="", note="Reading the channel…")
     try:
         r = await run()
+        _grade()
         _state["note"] = f"{r['videos']} videos, daily numbers for {r['analytics']}" + (f" ({r['analytics_failed']} failed: {r['analytics_error']})" if r["analytics_failed"] else "")
     except oauth.YTError as e:
         _state["error"] = str(e)
@@ -128,6 +146,15 @@ async def _job() -> None:
         _state["error"] = f"{type(e).__name__}: {e}"
     finally:
         _state.update(running=False, at=time.time())
+
+
+def _grade() -> None:
+    """New numbers are in: regrade the videos (no model call)."""
+    try:
+        from feedback import outcomes
+        outcomes.refresh()
+    except Exception as e:  # noqa: BLE001 - grading must never fail a sync
+        print(f"[feedback] grading failed: {e}", flush=True)
 
 
 def start() -> bool:

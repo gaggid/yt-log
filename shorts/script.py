@@ -174,6 +174,13 @@ def _source(short: dict) -> str:
         out += "\nThe cast is fixed by the producer; write for exactly these people:\n" + cast.block(short)
     if short["settings"].get("tone"):
         out += f"\nProducer's note on tone: {short['settings']['tone']}"
+    try:
+        from feedback import playbook
+        lb = playbook.learnings_block("script")
+        if lb:
+            out += "\n\n" + lb
+    except Exception as e:  # noqa: BLE001 - the script must never fail because of the feedback loop
+        print(f"[feedback] script learnings failed: {e}", flush=True)
     return out
 
 

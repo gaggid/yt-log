@@ -3,7 +3,7 @@
 const num = n => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e4 ? Math.round(n / 1e3) + 'k' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n || 0);
 const when = ts => ts ? new Date(ts * 1000).toLocaleDateString(undefined, {day: 'numeric', month: 'short', year: 'numeric'}) : '';
 const ago = ts => { const s = Date.now() / 1000 - ts; return s < 90 ? 'just now' : s < 3600 ? Math.round(s / 60) + ' min ago' : s < 86400 ? Math.round(s / 3600) + ' h ago' : Math.round(s / 86400) + ' d ago'; };
-let D = null, poll = null;
+let D = null, poll = null, tab = 'performance';
 
 window.viewYoutube = async function () {
   clearTimeout(poll);
@@ -21,7 +21,7 @@ async function load() {
   draw(body);
   const run = D.status.sync.running;
   clearTimeout(poll);
-  if (run) poll = setTimeout(() => { if (location.hash.startsWith('#/youtube')) load(); }, 3000);
+  if (run && tab !== 'learn') poll = setTimeout(() => { if (location.hash.startsWith('#/youtube')) load(); }, 3000);
 }
 
 function connectCard(s) {
@@ -76,12 +76,17 @@ function draw(body) {
   const note = sy.running ? `<span class="mute small"><span class="spin"></span> ${esc(sy.note || 'Syncing…')}</span>`
     : sy.error ? `<span class="bad small">${esc(sy.error)}</span>` : last ? `<span class="mute small">Synced ${ago(last.at)}: ${last.videos} videos${last.analytics_failed ? `, daily numbers failed for ${last.analytics_failed} (${esc(last.analytics_error)})` : ''}</span>` : '';
   const g = D.groups;
-  body.innerHTML = `<div class="row" style="gap:10px;flex-wrap:wrap"><b>${esc(s.channel || 'Channel')}</b>${badge('good', 'connected')}${note}<span class="sp"></span>
+  const header = `<div class="row" style="gap:10px;flex-wrap:wrap"><b>${esc(s.channel || 'Channel')}</b>${badge('good', 'connected')}${note}<span class="sp"></span>
       <button class="small primary" id="yt-sync" ${sy.running ? 'disabled' : ''}>Sync now</button><button class="small bad" id="yt-off">Disconnect</button></div>
-    <div class="mt">${tiles(D)}</div>
+    <div class="row mt-s" style="gap:6px"><button class="small ${tab === 'performance' ? 'primary' : ''}" id="yt-t-perf">Performance</button><button class="small ${tab === 'learn' ? 'primary' : ''}" id="yt-t-learn">Learn: what works</button></div>`;
+  const perf = `<div class="mt">${tiles(D)}</div>
     <h4 class="mt">What works <span class="mute small">average views in the first 7 days, videos with 7 complete days (${g.n})</span></h4>
     ${g.n ? `<div class="row" style="gap:10px;flex-wrap:wrap;align-items:stretch">${groupTable('Idea score', g.score)}${groupTable('Picture style', g.style)}${groupTable('Tone', g.tone)}${groupTable('Attention mechanism', g.mechanism)}</div>` : '<div class="card pad mute">Shows up once a linked video is more than 9 days old.</div>'}
     <h4 class="mt">Ideas on the channel</h4>${rowsTable(D)}${unlinkedBox(D)}`;
+  body.innerHTML = header + (tab === 'learn' ? '<div id="yt-learn" class="mt"></div>' : perf);
+  document.getElementById('yt-t-perf').onclick = () => { tab = 'performance'; draw(body); };
+  document.getElementById('yt-t-learn').onclick = () => { tab = 'learn'; draw(body); };
+  if (tab === 'learn') window.mountLearn(document.getElementById('yt-learn'));
   document.getElementById('yt-sync').onclick = async b => { await act(b.currentTarget, () => api('/youtube/sync', {method: 'POST'})); load(); };
   document.getElementById('yt-off').onclick = async () => {
     const ok = await dialog({title: 'Disconnect YouTube?', html: '<p>The saved sign-in is removed and Google is told to revoke it. Numbers already pulled stay.</p>', buttons: [{label: 'Cancel', value: false}, {label: 'Disconnect', value: true, danger: true}]});

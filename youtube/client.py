@@ -69,6 +69,17 @@ async def videos(ids: list[str]) -> list[dict]:
     return out
 
 
+async def comments(video_id: str, limit: int = 30) -> list[dict]:
+    """The most relevant public comments of a video (plain text)."""
+    j = await _get(f"{DATA}/commentThreads", {"part": "snippet", "videoId": video_id, "maxResults": min(limit, 100), "order": "relevance", "textFormat": "plainText"})
+    out = []
+    for it in j.get("items", []):
+        sn = it.get("snippet", {}).get("topLevelComment", {}).get("snippet", {})
+        if sn.get("textDisplay") or sn.get("textOriginal"):
+            out.append({"comment_id": it["id"], "text": (sn.get("textOriginal") or sn.get("textDisplay") or "")[:600], "likes": int(sn.get("likeCount", 0) or 0), "published_at": parse_time(sn.get("publishedAt", ""))})
+    return out
+
+
 async def daily(video_id: str, start: str, end: str) -> list[dict]:
     """One row per day from `start` to `end` (YYYY-MM-DD) for one video."""
     j = await _get(ANALYTICS, {"ids": "channel==MINE", "startDate": start, "endDate": end, "metrics": ",".join(METRICS), "dimensions": "day", "filters": f"video=={video_id}", "sort": "day"})

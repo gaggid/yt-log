@@ -9,6 +9,8 @@ from datetime import datetime
 from story import db, llm as llm_mod, settings as settings_mod
 from story.schemas import M, Str
 
+from feedback import features as fb_features
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS short_ideas(
   id TEXT PRIMARY KEY,
@@ -32,7 +34,7 @@ CREATE TABLE IF NOT EXISTS idea_config(
 """
 
 # Columns added after the first release (ensure() adds them to an older database).
-EXTRA_COLUMNS = {"sources": "TEXT DEFAULT '[]'", "dup_of": "TEXT DEFAULT ''", "reject_reason": "TEXT DEFAULT ''", "style": "TEXT DEFAULT ''", "reviewed": "INTEGER DEFAULT 0", "auto": "INTEGER DEFAULT 0", "cond_fails": "INTEGER DEFAULT 0", "approved_at": "REAL DEFAULT 0", "conditioned_at": "REAL DEFAULT 0", "done_at": "REAL DEFAULT 0"}
+EXTRA_COLUMNS = {"sources": "TEXT DEFAULT '[]'", "dup_of": "TEXT DEFAULT ''", "reject_reason": "TEXT DEFAULT ''", "style": "TEXT DEFAULT ''", "reviewed": "INTEGER DEFAULT 0", "auto": "INTEGER DEFAULT 0", "cond_fails": "INTEGER DEFAULT 0", "territory": "TEXT DEFAULT ''", "territory_src": "TEXT DEFAULT ''", "origin": "TEXT DEFAULT ''", "approved_at": "REAL DEFAULT 0", "conditioned_at": "REAL DEFAULT 0", "done_at": "REAL DEFAULT 0"}
 
 BRIGHT_STYLES = ("realism", "pixar3d", "anime", "ghibli", "tinyworld")        # ticked until the person chooses; the dark styles (noir, cyberpunk) are opt-in
 MAX_COND_FAILS = 2                                                           # an idea whose brief failed this many times is left alone by the autopilot
@@ -45,6 +47,8 @@ CONFIG_DEFAULTS = {
     "auto_generate": False, "auto_approve": False, "auto_condition": False,
     "gen_every_h": 1.0, "gen_n": 5, "approve_min": 7.8, "make_every_h": 2.0, "pending_cap": 30, "review_cap": 3,
     "next_gen_at": 0.0, "next_make_at": 0.0,         # when the next hourly batch and the next short are due (kept here so a restart keeps the schedule)
+    "use_playbook": True, "explore": 0.35, "auto_feedback": False, "playbook_min_new": 3,       # the channel's results steer the factory only through an APPROVED Playbook (docs/PLAN_feedback_loop.md)
+    "tone_arms": ["bigbro", "explorer", "storyteller", "viral", "thriller"],
     "run": {"pipeline": "keyframe", "voice": "taksh_hn", "language": "hi", "target_s": 29, "tone_id": "bigbro", "edge": "clean", "upscale": "2k"},
 }
 
@@ -62,6 +66,7 @@ class _IdeaSpec(M):
     premise:    Str       = ""
     why_works:  Str       = ""
     sources:    list[int] = []
+    territory:  Str       = ""
 
 
 class _IdeasBatch(M):
@@ -223,6 +228,13 @@ India's hidden capabilities and failures | Science of everyday phenomena | Impos
 Space and civilisation scale | Medical and biological mysteries | Financial systems and control"""
 
 
+TERRITORY_IDS = ", ".join(fb_features.TERRITORIES)
+
+
+def _generate_system() -> str:
+    return _GENERATE_SYSTEM.replace("__TERRITORIES__", TERRITORY_IDS)
+
+
 _GENERATE_SYSTEM = _FRAMEWORK + """
 
 ═══════════════════════════════════════════════════════════════════
@@ -255,7 +267,8 @@ OUTPUT FORMAT — return valid JSON only, no explanation, no commentary:
       "hook": "The exact opening question or shock statement. This IS the idea. Max 20 words. Must be a question (?) or shock statement — never a topic label.",
       "mechanisms": ["list", "of", "mechanism_ids"],
       "premise": "2-3 sentences. What this short actually covers. What the viewer learns beat by beat. What the reveal at the end is. Write it like a producer's one-paragraph brief.",
-      "why_works": "4-6 sentences. Analyse specifically which attention triggers fire and WHY this particular subject activates them psychologically. Be analytical, not promotional."
+      "why_works": "4-6 sentences. Analyse specifically which attention triggers fire and WHY this particular subject activates them psychologically. Be analytical, not promotional.",
+      "territory": "the subject territory, exactly one of: __TERRITORIES__"
     }
   ]
 }
@@ -440,7 +453,7 @@ def save_config(patch: dict) -> dict:
         cur["n"] = max(1, min(15, int(patch["n"] or 7)))
     if "min_score" in patch:
         cur["min_score"] = max(0.0, min(10.0, float(patch["min_score"] or 0)))
-    for k in ("autopilot", "auto_generate", "auto_approve", "auto_condition"):
+    for k in ("autopilot", "auto_generate", "auto_approve", "auto_condition", "use_playbook", "auto_feedback"):
         if k in patch:
             cur[k] = bool(patch[k])
     for k, lo, hi in (("gen_every_h", 0.25, 48), ("make_every_h", 0.25, 48), ("approve_min", 0, 10)):
@@ -449,6 +462,13 @@ def save_config(patch: dict) -> dict:
     for k, lo, hi in (("gen_n", 1, 15), ("pending_cap", 1, 500), ("review_cap", 0, 100)):
         if k in patch:
             cur[k] = max(lo, min(hi, int(patch[k] if patch[k] not in (None, "") else lo)))
+    if "explore" in patch:
+        cur["explore"] = max(0.3, min(0.4, float(patch["explore"]) if patch["explore"] not in (None, "") else 0.35))                # the owner wants 30 to 40 % of choices to try something new
+    if "playbook_min_new" in patch:
+        cur["playbook_min_new"] = max(1, min(50, int(patch["playbook_min_new"] or 3)))
+    if "tone_arms" in patch:
+        from . import tones
+        cur["tone_arms"] = [x for x in dict.fromkeys(patch["tone_arms"] or []) if x in tones.TONES]
     if "styles" in patch:
         from . import looks
         cur["styles"] = [x for x in dict.fromkeys(patch["styles"] or []) if x in looks.presets()]
@@ -523,19 +543,53 @@ def auto_approve(min_score: float) -> list[str]:
     return ids
 
 
-def pick_style(allowed: list[str], direction: str) -> str:
-    """The picture style for a short: only from `allowed` (the Ideas config). The idea's own visual direction wins when it names an allowed style; otherwise the allowed style used least
+def style_choice(allowed: list[str], direction: str) -> tuple[str, str]:
+    """(style, how it was chosen): `idea` when the idea's own visual direction names an allowed style, `exploit` or `explore` when the Playbook's bandit chose, else `rotation`.
+    The picture style for a short: only from `allowed` (the Ideas config). The idea's own visual direction wins when it names an allowed style; otherwise the allowed style used least
     so far, so styles rotate. No allowed styles = '' (the caller falls back to matching the direction against every style)."""
     allowed = [x for x in allowed if x]
     if not allowed:
-        return ""
+        return "", "idea"
     d = (direction or "").lower()
     for sid in allowed:
         if re.search(rf"\b{re.escape(sid)}\b", d):
-            return sid
+            return sid, "idea"
+    try:
+        from feedback import bandit
+        chosen = bandit.choose_style(allowed)
+    except Exception as e:  # noqa: BLE001 - the feedback loop must never stop a short from being made
+        print(f"[feedback] style bandit failed: {e}", flush=True)
+        chosen = None
+    if chosen:
+        return chosen
     ensure()
     used = {r["style"]: r["n"] for r in db.q("SELECT style, COUNT(*) n FROM short_ideas WHERE style<>'' GROUP BY style")}
-    return min(allowed, key=lambda x: (used.get(x, 0), allowed.index(x)))
+    return min(allowed, key=lambda x: (used.get(x, 0), allowed.index(x))), "rotation"
+
+
+def pick_style(allowed: list[str], direction: str) -> str:
+    return style_choice(allowed, direction)[0]
+
+
+def _plan_sources(sink: list) -> None:
+    """Match the ideas written to the slots of the territory plan (how each territory was chosen)."""
+    try:
+        from feedback import bandit
+        bandit.assign_sources([i["id"] for i in sink])
+    except Exception as e:  # noqa: BLE001
+        print(f"[feedback] plan sources failed: {e}", flush=True)
+
+
+def feedback_extra(n: int, lenses: bool = False) -> str:
+    """The approved Playbook's learnings and the territory plan of this batch (empty until a Playbook is approved)."""
+    try:
+        from feedback import bandit, playbook
+        if not playbook.enabled():
+            return ""
+        return "\n\n".join(x for x in (playbook.learnings_block("idea"), bandit.territory_block(n, lenses)) if x)
+    except Exception as e:  # noqa: BLE001
+        print(f"[feedback] learnings failed: {e}", flush=True)
+        return ""
 
 
 def next_for_autoqueue(min_score: float) -> dict | None:
@@ -543,13 +597,13 @@ def next_for_autoqueue(min_score: float) -> dict | None:
     return next((i for i in order(listing("conditioned")) if (i.get("engagement_score") or 0) >= min_score), None)
 
 
-def add(title: str, hook: str, mechanisms: list, premise: str, why_works: str, sources: list | None = None) -> dict:
+def add(title: str, hook: str, mechanisms: list, premise: str, why_works: str, sources: list | None = None, territory: str = "", origin: str = "") -> dict:
     ensure()
     iid = f"idea-{hashlib.sha1(f'{hook}{db.now()}'.encode()).hexdigest()[:8]}"
     db.ex(
-        "INSERT INTO short_ideas(id,title,hook,mechanisms,premise,why_works,status,sources,created_at,updated_at)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?)",
-        (iid, title, hook, db.jdump(mechanisms), premise, why_works, "pending", db.jdump(sources or []), db.now(), db.now()),
+        "INSERT INTO short_ideas(id,title,hook,mechanisms,premise,why_works,status,sources,created_at,updated_at,territory,origin)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        (iid, title, hook, db.jdump(mechanisms), premise, why_works, "pending", db.jdump(sources or []), db.now(), db.now(), fb_features.territory_of(territory), origin),
     )
     return get(iid)
 
@@ -822,17 +876,18 @@ async def generate(n: int, s: dict, key: str, diverse: bool = False, progress=No
     sink = sink if sink is not None else []
     sigs = sigs or []
     avoid = avoid_text()
-    extra = "\n\n".join(x for x in (discover.block(sigs), ("ALREADY COVERED OR REJECTED (do not make an idea about the same subject, event or question as any of these):\n" + avoid) if avoid else "") if x)
+    extra = "\n\n".join(x for x in (discover.block(sigs), feedback_extra(n, diverse), ("ALREADY COVERED OR REJECTED (do not make an idea about the same subject, event or question as any of these):\n" + avoid) if avoid else "") if x)
     if not diverse:
         backend = llm_mod.ChatBackend(s, key)
         caller  = llm_mod.JsonCaller(backend, s)
         caller.last_attempt = True
         if progress:
             progress(0, 1, f"writing {n} ideas")
-        result = await caller.call(_GENERATE_SYSTEM, _standard_user_prompt(n, extra), _IdeasBatch)
+        result = await caller.call(_generate_system(), _standard_user_prompt(n, extra), _IdeasBatch)
         specs  = (result.value.ideas or [])[:n]
         for sp in specs:
-            sink.append(add(sp.title, sp.hook, sp.mechanisms, sp.premise, sp.why_works, discover.pick(sigs, sp.sources)))
+            sink.append(add(sp.title, sp.hook, sp.mechanisms, sp.premise, sp.why_works, discover.pick(sigs, sp.sources), sp.territory))
+        _plan_sources(sink)
         return list(sink)
 
     # Diverse mode: distribute n across lenses, one sequential call per lens
@@ -847,15 +902,26 @@ async def generate(n: int, s: dict, key: str, diverse: bool = False, progress=No
         caller  = llm_mod.JsonCaller(backend, s)
         caller.last_attempt = True
         try:
-            result = await caller.call(_GENERATE_SYSTEM, _lens_user_prompt(count, lens, extra), _IdeasBatch)
+            result = await caller.call(_generate_system(), _lens_user_prompt(count, lens, extra), _IdeasBatch)
             specs  = (result.value.ideas or [])[:count]
             for sp in specs:
-                sink.append(add(sp.title, sp.hook, sp.mechanisms, sp.premise, sp.why_works, discover.pick(sigs, sp.sources)))
+                sink.append(add(sp.title, sp.hook, sp.mechanisms, sp.premise, sp.why_works, discover.pick(sigs, sp.sources), sp.territory))
         except Exception as e:
             print(f"[ideas] lens '{lens['perspective']}' failed: {e}", flush=True)
     if progress:
         progress(lens_count, lens_count, "ideas written")
+    _plan_sources(sink)
     return list(sink)
+
+
+def _rating_anchors() -> str:
+    """Past ideas with their score and their real grade on the channel (only while an approved Playbook is in use)."""
+    try:
+        from feedback import playbook
+        return playbook.rating_anchors()
+    except Exception as e:  # noqa: BLE001
+        print(f"[feedback] anchors failed: {e}", flush=True)
+        return ""
 
 
 async def rate(idea_ids: list[str], s: dict, key: str) -> list[dict]:
@@ -877,6 +943,7 @@ async def rate(idea_ids: list[str], s: dict, key: str) -> list[dict]:
     user = (
         f"Score these {len(ideas)} short video ideas against the YouTube Shorts engagement framework.\n\n"
         f"IDEAS:\n{ideas_json}\n\n"
+        f"{_rating_anchors()}"
         "CALIBRATION INSTRUCTIONS:\n"
         "  — Score each idea independently first.\n"
         "  — Then review all scores comparatively and adjust so the distribution reflects\n"
@@ -916,12 +983,17 @@ def _styles_text(styles: list[str]) -> str:
             + "; ".join(f"{x} ({pres[x]['label']})" for x in styles if x in pres) + ".\n")
 
 
-def direction_with_style(direction: str, styles: list[str]) -> str:
-    """The visual direction names one of the allowed styles. If the model named none (or one that is not allowed), the style the queue would pick comes first, in bright light."""
+def direction_choice(direction: str, styles: list[str]) -> tuple[str, str]:
+    """The visual direction names one of the allowed styles, and how that style was chosen (`idea`, `exploit`, `explore`, `rotation`). If the model named none (or one that is not allowed), the style the queue would pick comes first, in bright light."""
     d = (direction or "").strip()
     if not styles or any(re.search(rf"\b{re.escape(x)}\b", d.lower()) for x in styles):
-        return d
-    return f"{pick_style(styles, '')} - bright natural light, clean palette. {d}".strip()
+        return d, "idea"
+    style, src = style_choice(styles, "")
+    return f"{style} - bright natural light, clean palette. {d}".strip(), src
+
+
+def direction_with_style(direction: str, styles: list[str]) -> str:
+    return direction_choice(direction, styles)[0]
 
 
 async def condition(idea_id: str, s: dict, key: str, styles: list[str] | None = None) -> dict:
@@ -955,10 +1027,12 @@ async def condition(idea_id: str, s: dict, key: str, styles: list[str] | None = 
 
     result = await caller.call(_CONDITION_SYSTEM, user, _ConditionResult)
     c = result.value.conditioning
+    direction, style_src = direction_choice(c.visual_direction, styles or [])
     brief = {
         "refined_hook":      c.refined_hook,
         "key_facts":         c.key_facts,
-        "visual_direction":  direction_with_style(c.visual_direction, styles or []),
+        "visual_direction":  direction,
         "suggested_tone":    c.suggested_tone,
+        "style_src":         style_src,
     }
     return save_conditioning(idea_id, brief)
