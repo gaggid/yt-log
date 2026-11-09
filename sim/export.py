@@ -18,8 +18,9 @@ def chapter_json(pid: str) -> dict:
     ents = store.entities(pid)
     chapters = store.path(pid)
     return {"title": p["title"], "idea": p["idea"], "world": store.world(pid),
-            "cast": [{"name": e["name"], "kind": e["kind"], "role": e.get("role", ""), "look": e.get("look", "")} for e in ents],
+            "cast": [{"name": e["name"], "kind": e["kind"], "role": e.get("role", ""), "look": e.get("look", ""), "skills": e.get("skills", [])} for e in ents],
             "chapters": [{"n": c["idx"], "title": c["title"], "story_time": c["story_time"], "prose": c["prose"], "summary": c["summary"], "focus": c["focus"],
+                          "things": [a["text"] for a in c["delta"].get("applied", []) if a.get("op") in ("discover", "craft", "item_give", "item_take", "item_use", "item_change", "skill_learn") and not a.get("undone")],
                           "panels": [{"file": f"images/{c['idx']:02d}-{i}.png", "caption": x.get("caption", ""), "shot": x.get("shot", ""), "who": x.get("who", []), "place": x.get("place", ""),
                                       "action": x.get("action", "")} for i, x in enumerate(_panels(c), 1)]} for c in chapters if c["status"] == "done"]}
 

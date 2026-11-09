@@ -5,7 +5,7 @@ import re
 
 from story import llm
 
-from . import dice, memory, models as m, prompts as P, state as S, store, think
+from . import dice, memory, models as m, prompts as P, state as S, store, things, think
 
 WORD_SLACK = (0.8, 1.23)                 # chapter length accepted around the owner's setting (350 -> 280 to 430)
 MAX_RISKS = 3
@@ -36,9 +36,9 @@ async def _json(backend, s, system, user, model, validate=None):
         try:
             res = await caller.call(system, user, model, (lambda v: validate(v, caller)) if validate else None)
             return res.value
-        except llm.ValidationFailed as e:
-            if not (e.truncated and not more):
-                raise                                                    # a cut-off reply is asked once more, with no thinking and more room; anything else is the caller's
+        except llm.ValidationFailed:
+            if more:
+                raise                                                    # a reply that is cut off or will not parse is asked once more, with no thinking and more room
     raise AssertionError("unreachable")
 
 
@@ -50,11 +50,14 @@ def reconcile(st: dict, trackers: list[dict], entities: list[dict]) -> dict:
         st["trackers"].setdefault(t["id"], copy.deepcopy(t.get("start")))
     for k in [k for k in st["trackers"] if k not in ids]:
         del st["trackers"][k]
+    st.setdefault("world_add", [])
+    st.setdefault("recipes", {})
     for e in entities:
         if e["kind"] == "character":
-            st["entities"].setdefault(e["name"], {"alive": bool(e.get("alive", True)), "status": str(e.get("status") or "")})
+            st["entities"].setdefault(e["name"], {"alive": bool(e.get("alive", True)), "status": str(e.get("status") or ""), "skills": [str(x) for x in (e.get("skills") or [])][:things.MAX_SKILLS]})
+            st["entities"][e["name"]].setdefault("skills", [])
     names = {e["name"] for e in entities if e["kind"] == "character"}
-    places = {e["name"] for e in entities if e["kind"] == "place"}
+    places = {e["name"] for e in entities if e["kind"] == "place"} | {w["name"] for w in st["world_add"] if w.get("kind") == "place"}
     for n in [n for n in st["entities"] if n not in names]:                 # a retired person leaves the later chapters
         del st["entities"][n]
     for t in trackers:
@@ -63,6 +66,19 @@ def reconcile(st: dict, trackers: list[dict], entities: list[dict]) -> dict:
             v["at"] = {w: p for w, p in v.get("at", {}).items() if w in names and p in places}
             v["locked"] = [p for p in v.get("locked", []) if p in places]
     return st
+
+
+def make_ctx(pid: str, ents: list[dict], world: dict, trackers: list[dict], cfg: dict, *, rolls=None, fired=None, allow_death=True, chapter=0) -> S.Ctx:
+    """The rules a state change is checked against: the cast, the places (with what they look like), the world text, this chapter's resolved acts and the carrying limits."""
+    places = [e["name"] for e in ents if e["kind"] == "place"]
+    return S.Ctx(trackers, [e["name"] for e in ents], places, world.get("exists", ""), allow_death, {e["name"]: e.get("description", "") + " " + e.get("look", "") for e in ents if e["kind"] == "place"},
+                 rolls=list(rolls or []), fired=list(fired or []), dice_on=bool(cfg.get("dice", True)), carry=carry_map(ents), carry_default=int(cfg.get("carry_limit", 0) or 0), chapter=chapter)
+
+
+carry_map = memory.carry_map
+
+
+THING_WORDS = re.compile(r"\b(make|build|craft|rig|forge|fashion|repair|fix|search|look for|find|open|scavenge|rummage|improvise|assemble|learn|teach)\b", re.I)
 
 
 def action_text(action: dict, parent: dict | None) -> str:
@@ -113,7 +129,7 @@ async def due_directives(pid: str, path: list[dict], st: dict, idx: int, backend
                 r = await _json(backend, s, P.CONDITION, f"CONDITION: {fence(cond)}\n\nSTATE:\n{S.describe(st, trackers)}\n\nLAST CHAPTER SUMMARY: {summary}\n\nIs it met now?", m.CondOut)
                 due, must = r.met, False
         if due:
-            out.append({"id": d["id"], "label": f"D{len(out) + 1}", "kind": d["kind"], "text": d["text"], "must": must})
+            out.append({"id": d["id"], "label": f"D{len(out) + 1}", "kind": d["kind"], "text": d["text"], "must": must or d["kind"] in store.THING_DIRECTIVES, "thing": t.get("thing") or {}})
     return out
 
 
@@ -179,6 +195,7 @@ async def run_chapter(pid: str, backend, s: dict, progress=None, *, parent_id: s
             plan = cur["plan"]
         else:
             begin("plan", "planning the chapter")
+            think.boost.set(bool(THING_WORDS.search(act)))                      # the player's action is about making, finding or learning something
             last_beats = [c["plan"].get("beat") for c in path[-2:]]
             by_name = {e["name"].lower(): e["name"] for e in chars}
 
@@ -199,6 +216,11 @@ async def run_chapter(pid: str, backend, s: dict, progress=None, *, parent_id: s
                 p.risks = [r for r in p.risks if r.act][:MAX_RISKS]
                 for r in p.risks:
                     r.difficulty = r.difficulty if r.difficulty in m.DIFFICULTY else "normal"
+                    r.kind = r.kind if r.kind in m.ACT_KINDS else "other"
+                    if r.kind != "make":
+                        r.craft = None
+                    elif r.craft and not r.craft.makes:
+                        r.craft.makes = r.act
 
             user = (f"{memory.render(pk0, s)}\n\n## PLAYER'S ACTION\n{act}\n\n## DUE INSTRUCTIONS\n"
                     + ("\n".join(f"{d['label']} (id {d['id']}) [{d['kind']}] {'MUST' if d['must'] else 'MAY WAIT'}: {fence(d['text'])}" for d in due) or "(none)")
@@ -238,6 +260,7 @@ async def run_chapter(pid: str, backend, s: dict, progress=None, *, parent_id: s
             delta = store.chapter(cid)["delta"]
         else:
             begin("delta", "working out what changes")
+            think.boost.set(any(r.get("kind") in ("make", "search", "learn") for r in plan["risks"]))
             pkd = memory.build(pid, path, st0, plan["focus"], plan["scene"], s)
             fired_text = [d for d in due if d["id"] in plan["addresses"]]
             user = (f"{memory.render(pkd, s)}\n\n## CHAPTER PLAN\nScene: {plan['scene']}\nIntent: {plan['intent']}\nPressure: {plan['pressure']}\nTime passes: {plan['time_passes']}\n"
@@ -251,9 +274,10 @@ async def run_chapter(pid: str, backend, s: dict, progress=None, *, parent_id: s
                 ents = store.entities(pid)
                 places = [e["name"] for e in ents if e["kind"] == "place"]
             allow_death = (not cfg["dice"]) or any(x["tier"] in ("fail", "disaster") for x in rolls) or bool(fired_text) or any(p["kind"] == "clock_full" for p in flags.get("pressure", []))
-            ctx = S.Ctx(trackers, [e["name"] for e in ents], places, world.get("exists", ""), allow_death, {e["name"]: e.get("description", "") + " " + e.get("look", "") for e in ents if e["kind"] == "place"})
-            st1, applied, dropped = S.apply_ops(st0, r.ops, ctx)
-            delta = {"ops": [o.model_dump() for o in r.ops], "applied": applied, "dropped": dropped, "new_places": adopted}
+            ctx = make_ctx(pid, ents, world, trackers, cfg, rolls=rolls, fired=[d["text"] for d in fired_text], allow_death=allow_death, chapter=ch["idx"])
+            ops = _instruction_ops(fired_text, st0, ctx) + list(r.ops)
+            st1, applied, dropped = S.apply_ops(st0, ops, ctx)
+            delta = {"ops": [o.model_dump() for o in ops], "applied": applied, "dropped": dropped, "new_places": adopted}
             flags["dropped"] = len([d for d in dropped if not d.get("partial")])
             finish("delta", state_after=st1, delta=delta)
         # write -----------------------------------------------------------------
@@ -290,6 +314,27 @@ async def run_chapter(pid: str, backend, s: dict, progress=None, *, parent_id: s
         store.update_chapter(cid, status="failed", flags={**flags, "error": f"{type(e).__name__}: {e}"[:400]})
         store.set_run(pid, replace=True, chapter_id=cid, stage=store.run_info(pid).get("stage", ""), error=f"{type(e).__name__}: {e}"[:400])
         raise
+
+
+def _instruction_ops(fired: list[dict], st: dict, ctx: S.Ctx) -> list[m.Op]:
+    """Instructions that hand over, take away or unbind a thing are carried out by code (marked `forced`), not left to the model; the story shows them because they are listed as changes."""
+    ops: list[m.Op] = []
+    for d in fired:
+        t = d.get("thing") or {}
+        name, kind = str(t.get("item") or "").strip(), d.get("kind")
+        if not name or kind not in store.THING_DIRECTIVES:
+            continue
+        qty = max(1, int(S._num(t.get("qty"), 1)))
+        have = things.find_item(st, ctx, name)[1]
+        if kind == "grant":
+            to = str(t.get("to") or "")
+            ops.append(m.Op(op="item_move", target=have, to=to, kind="forced", why="instruction") if have else m.Op(op="item_add", target=name, qty=qty, to=to, kind="forced", why="instruction"))
+        elif kind == "take" and have:
+            to = str(t.get("to") or "")
+            ops.append(m.Op(op="item_move", target=have, to=to, kind="forced", why="instruction") if to else m.Op(op="item_remove", target=have, qty=qty, kind="forced", why="instruction"))
+        elif kind == "unbind" and have:
+            ops.append(m.Op(op="item_change", target=have, kind="forced", props={"bound_to": ""}, why="instruction"))
+    return ops
 
 
 def _adopt_places(pid: str, ops: list, ents: list[dict], world: dict) -> list[str]:
@@ -406,9 +451,6 @@ async def _archive(pid, backend, s, cid, path, st1, plan, flags) -> None:
                     seen = True
         if len(opts) < 3 and not caller.last_attempt:
             raise ValueError("write 3 or 4 different options, each for a living character")
-        missing = [f for f in foc if f in alive and not any(y["who"] == f for y in opts)]
-        if missing and len(opts) < 4 and not caller.last_attempt:
-            raise ValueError(f"add an option for {', '.join(missing)}")
         o.options = opts[:4]
 
     user = (f"{memory.render(pk, s)}\n\n## THE CHAPTER\n{ch['title']} ({ch['story_time']})\n{ch['prose']}\n\nAlive: {', '.join(alive)}\nFollowed: {', '.join(foc)}\n\nWrite the archive and the options now.")
@@ -508,8 +550,7 @@ async def reread(pid: str, cid: str, backend, s) -> dict:
     user = f"STATE BEFORE:\n{S.describe(ch['state_before'], trackers)}\n\nSTATE AFTER (as recorded):\n{S.describe(ch['state_after'], trackers)}\n\nEDITED CHAPTER:\n{fence(ch['prose'])}\n\nList the corrections now."
     r = await _json(backend, s, P.REREAD, user, m.RereadOut)
     ents = store.entities(pid)
-    ctx = S.Ctx(trackers, [e["name"] for e in ents], [e["name"] for e in ents if e["kind"] == "place"], store.world(pid).get("exists", ""), True,
-                {e["name"]: e.get("description", "") for e in ents if e["kind"] == "place"})
+    ctx = make_ctx(pid, ents, store.world(pid), trackers, store.project(pid)["settings"], chapter=ch["idx"])
     _, applied, dropped = S.apply_ops(ch["state_after"], r.ops, ctx)
     return {"ops": [o.model_dump() for o in r.ops], "preview": applied, "dropped": dropped, "note": r.note}
 
@@ -517,8 +558,7 @@ async def reread(pid: str, cid: str, backend, s) -> dict:
 def apply_reread(pid: str, cid: str, ops: list[dict]) -> dict:
     ch = store.chapter(cid)
     ents = store.entities(pid)
-    ctx = S.Ctx(store.trackers(pid), [e["name"] for e in ents], [e["name"] for e in ents if e["kind"] == "place"], store.world(pid).get("exists", ""), True,
-                {e["name"]: e.get("description", "") for e in ents if e["kind"] == "place"})
+    ctx = make_ctx(pid, ents, store.world(pid), store.trackers(pid), store.project(pid)["settings"], chapter=ch["idx"])
     st, applied, dropped = S.apply_ops(ch["state_after"], [m.Op(**o) for o in ops], ctx)
     delta = {**ch["delta"], "applied": ch["delta"].get("applied", []) + applied, "dropped": ch["delta"].get("dropped", []) + dropped}
     mark_stale(pid, cid)

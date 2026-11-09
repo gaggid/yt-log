@@ -37,11 +37,11 @@ class SimFake:
     def _sm_world(self, user):
         return {"title": "The Long Night", "place": "Fairview Supermarket", "period": "a winter night", "tone": "tense", "pacing": "minutes to hours",
                 "exists": "Aisle One food: canned beans, bottled water, rice. Aisle Two hardware: crowbar, rope, duct tape, kitchen knives. Pharmacy: bandages, painkillers. Loading Bay: steel shutter, pallets.",
-                "start_scene": "The lights flicker as the first scream comes from the street.", "start_time": "Day 1, 23:00"}
+                "craft": "Makeshift tools only; nothing electronic works.", "goal": "Survive until dawn: every chapter must move the group closer to or further from living through the night.", "start_scene": "The lights flicker as the first scream comes from the street.", "start_time": "Day 1, 23:00"}
 
     def _sm_cast(self, user):
         people = [("Ravi", "night salesman", "survive until dawn"), ("Meera", "cashier", "get home to her daughter"), ("Dev", "security guard", "protect the store"), ("Sana", "customer", "find her brother")]
-        ents = [{"kind": "character", "name": n, "role": r, "goal": g, "fear": "being alone", "voice": "plain", "look": f"{n}, a tired adult in a work uniform with a distinctive scar",
+        ents = [{"kind": "character", "name": n, "role": r, "goal": g, "fear": "being alone", "voice": "plain", "look": f"{n}, a tired adult in a work uniform with a distinctive scar", "skills": [f"{r} work", "improvising"],
                  "relations": {"Ravi": "colleague"} if n != "Ravi" else {}} for n, r, g in people]
         ents += [{"kind": "place", "name": p, "description": f"{p} of the supermarket", "look": f"{p}, harsh white light", "connects_to": ["Aisle One"]} for p in ("Aisle One", "Aisle Two", "Pharmacy", "Loading Bay")]
         return {"entities": ents}
@@ -61,7 +61,8 @@ class SimFake:
 
     def _sm_rules(self, user):
         return {"rules": [{"group": "hard", "text": "Only items that exist in the store may be used."}, {"group": "hard", "text": "Nobody can leave the building safely before dawn."},
-                          {"group": "world", "text": "Noise draws the dead."}, {"group": "tone", "text": "Keep it grounded and tense."}, {"group": "style", "text": "Third person, past tense."}]}
+                          {"group": "world", "text": "Noise draws the dead."}, {"group": "tone", "text": "Keep it grounded and tense."}, {"group": "style", "text": "Third person, past tense."},
+                          {"group": "craft", "text": "Things are made only from parts at hand."}]}
 
     def _sm_suggest(self, user):
         return {"rules": [{"group": "world", "text": "The dead are slow but never tire."}]}

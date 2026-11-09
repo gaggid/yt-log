@@ -1,5 +1,6 @@
 """/api/sim: stories that grow chapter by chapter (docs/PLAN_simulation.md section 14). Reading and editing the setup is instant; every model step runs as the one background job (the gateway serves
 one request at a time) and the screen polls /run, so leaving the page loses nothing."""
+import copy
 import random
 import re
 
@@ -10,7 +11,7 @@ from pydantic import BaseModel
 import config
 from story import llm, settings as settings_mod
 
-from . import engine, export as export_mod, jobs, memory, paint, portable, seed, state as S, store, templates
+from . import engine, export as export_mod, jobs, memory, paint, portable, seed, state as S, store, templates, things
 
 router = APIRouter(prefix="/api/sim", tags=["sim"])
 
@@ -140,7 +141,8 @@ async def detail(pid: str):
             "facts": [f for f in memory.path_facts(pid, path)], "missing": S.validate_setup(trackers, [e for e in ents if e["active"]]),
             "failed": ({"id": failed["id"], "stage": store.run_info(pid).get("stage", ""), "error": failed["flags"].get("error", ""), "done": failed["flags"].get("done", [])} if failed else None),
             "run": {**jobs.status(pid), **store.run_info(pid)}, "reading_minutes": export_mod.reading_minutes(pid), "bytes": _bytes(pid),
-            "branches": len([c for c in all_ch if c["id"] not in path_ids and c["status"] == "done"]), "tracker_kinds": list(store.TRACKER_KINDS)}
+            "branches": len([c for c in all_ch if c["id"] not in path_ids and c["status"] == "done"]), "tracker_kinds": list(store.TRACKER_KINDS),
+            "carry": {"default": int(p["settings"].get("carry_limit", 0) or 0), "people": memory.carry_map(ents)}}
 
 
 class Patch(BaseModel):
@@ -298,6 +300,7 @@ class DirectiveBody(BaseModel):
     kind: str = "event"
     text: str
     timing: dict = {"mode": "next"}
+    thing: dict | None = None            # grant, take, unbind: {item, to, from, qty}
 
 
 @router.post("/{pid}/directives")
@@ -308,7 +311,11 @@ async def save_directive(pid: str, body: DirectiveBody):
             d = store.directive(pid, body.id)
             if d["status"] == "cancelled" or d["id"] in memory.fired_ids(store.path(pid)):
                 raise store.SimError("this instruction was already used or cancelled")
-        return store.save_directive(pid, body.model_dump(exclude_none=True))
+        data = body.model_dump(exclude_none=True)
+        thing = data.pop("thing", None)
+        if thing is not None:
+            data["timing"] = {**data.get("timing", {"mode": "next"}), "thing": {k: v for k, v in thing.items() if k in ("item", "to", "from", "qty")}}
+        return store.save_directive(pid, data)
     except (store.SimError, ValueError) as e:
         _err(e)
 
@@ -522,6 +529,57 @@ async def reread_apply(pid: str, cid: str):
     c = store.chapter(cid)
     store.update_chapter(cid, flags={k: v for k, v in c["flags"].items() if k != "reread"})
     return {"ok": True}
+
+
+class ThingAction(BaseModel):
+    action: dict
+
+
+def _things_ctx(pid: str, ch: dict) -> S.Ctx:
+    return engine.make_ctx(pid, store.entities(pid), store.world(pid), store.trackers(pid), store.project(pid)["settings"], chapter=ch["idx"])
+
+
+@router.post("/{pid}/things")
+async def things_edit(pid: str, body: ThingAction):
+    """The Things tab: change a thing, a recipe or a skill in the state the story has now (the last chapter of the current line)."""
+    _project(pid)
+    if jobs.status(pid).get("state") == "running":
+        raise HTTPException(409, "a job is running for this story; wait or stop it")
+    path = store.path(pid)
+    if not path or path[-1]["status"] != "done":
+        raise HTTPException(400, "start the story first")
+    head = path[-1]
+    st = copy.deepcopy(head["state_after"])
+    try:
+        text = things.edit(st, _things_ctx(pid, head), body.action)
+    except (ValueError, KeyError) as e:
+        raise HTTPException(400, str(e))
+    delta = {**head["delta"], "applied": head["delta"].get("applied", []) + [{"op": "owner_edit", "text": text, "why": "you changed it"}]}
+    store.update_chapter(head["id"], state_after=st, delta=delta)
+    return {"ok": True, "text": text}
+
+
+class UndoBody(BaseModel):
+    index: int
+
+
+@router.post("/{pid}/chapters/{cid}/undo")
+async def undo_change(pid: str, cid: str, body: UndoBody):
+    """Take back one change a chapter made (a find, a make, a give...): its recorded way back is applied to the chapter's state, and the later chapters are marked as written under the old state."""
+    c = _own_chapter(pid, cid)
+    applied = list(c["delta"].get("applied", []))
+    if not 0 <= body.index < len(applied) or not applied[body.index].get("undo") or applied[body.index].get("undone"):
+        raise HTTPException(400, "this change cannot be taken back")
+    st = copy.deepcopy(c["state_after"])
+    ctx = _things_ctx(pid, c)
+    try:
+        for a in reversed(applied[body.index]["undo"]):
+            things.edit(st, ctx, a)
+    except (ValueError, KeyError) as e:
+        raise HTTPException(400, str(e))
+    applied[body.index] = {**applied[body.index], "undone": True}
+    store.update_chapter(cid, state_after=st, delta={**c["delta"], "applied": applied})
+    return {"ok": True, "stale": engine.mark_stale(pid, cid)}
 
 
 class HeadBody(BaseModel):

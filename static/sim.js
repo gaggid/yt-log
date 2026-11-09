@@ -27,6 +27,10 @@ const STYLE = `
 details.sm-d summary{cursor:pointer;color:var(--mute);font-size:12px}
 .sm-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px}
 .sm-card{padding:12px 14px}.sm-card h4{margin:0 0 4px;font-size:14px}
+.sm-chip.thing{border-color:var(--accent)}.sm-chip.undone{opacity:.55;text-decoration:line-through}
+.sm-chip .link{background:none;border:0;color:var(--accent);cursor:pointer;font-size:11px;padding:0 2px}
+.sm-th{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+.sm-th .row{margin:4px 0}
 @media(max-width:900px){.sm-side{position:static;max-height:none;overflow:visible}}
 @media(max-width:640px){
 #app[data-sm] button,#app[data-sm] select,#app[data-sm] input:not([type=checkbox]):not([type=file]),#app[data-sm] .tab,#app[data-sm] summary{min-height:40px}
@@ -44,7 +48,19 @@ details.sm-d summary{cursor:pointer;color:var(--mute);font-size:12px}
 `;
 let el = null, my = 0, D = null, SID = '', TAB = 'story', poll = null, opening = false;
 const kindName = {items: 'Items', meter: 'Meter', clock: 'Clock', relation: 'Relationship', location: 'Locations', knowledge: 'Secrets', flag: 'Yes/no fact'};
-const GROUPS = [['hard', 'Hard rules (never broken)'], ['world', 'World rules'], ['tone', 'Tone and pacing'], ['style', 'Style']];
+const GROUPS = [['hard', 'Hard rules (never broken)'], ['world', 'World rules'], ['tone', 'Tone and pacing'], ['style', 'Style'], ['craft', 'Making and finding']];
+const COND = ['', 'new', 'worn', 'damaged', 'crude', 'well made', 'broken'];
+const THING_OPS = ['discover', 'craft', 'item_give', 'item_take', 'item_use', 'item_change', 'skill_learn', 'owner_edit'];
+const THING_ICON = {discover: '🔍 ', craft: '🔧 ', item_give: '🤝 ', item_take: '✋ ', item_use: '▸ ', item_change: '✎ ', skill_learn: '★ ', owner_edit: '✎ '};
+const thingBits = i => { const p = i.props || {}, b = []; if (p.condition) b.push(esc(p.condition)); if (p.uses !== null && p.uses !== undefined) b.push(`${p.uses} use${p.uses === 1 ? '' : 's'} left`); if (i.bound_to) b.push('bound to ' + esc(i.bound_to)); if (i.note) b.push(esc(i.note)); return b.length ? ` <span class="mute">(${b.join(', ')})</span>` : ''; };
+const itemTrackers = () => D.trackers.filter(t => t.active && t.kind === 'items');
+const carryOf = n => { const p = (D.carry && D.carry.people) || {}; return n in p ? p[n] : (D.carry ? D.carry.default : 0); };
+function holdings(st) {
+  const out = {};
+  itemTrackers().forEach(t => Object.entries(st.trackers[t.id] || {}).forEach(([n, i]) => { (out[i.at || 'nowhere'] = out[i.at || 'nowhere'] || []).push([n, i, t.id]); }));
+  return out;
+}
+const sizeOf = i => ((i.props && i.props.size) || 1) * (i.qty || 1);
 
 function mark(node) { node.dataset.sm = '1'; if (!window._smLeave) { window._smLeave = true; addEventListener('hashchange', () => { if (!location.hash.startsWith('#/sim')) { const a = document.getElementById('app'); if (a) delete a.dataset.sm; } }); } }
 function css() { if (!document.getElementById('sm-css')) { const s = document.createElement('style'); s.id = 'sm-css'; s.textContent = STYLE; document.head.append(s); } }
@@ -132,7 +148,8 @@ async function run(btn, path, body, label) {
 function draw() {
   if (!live()) return;
   const p = D.project, running = D.run && D.run.state === 'running';
-  const tabs = [['story', 'Story'], ['setup', 'Setup'], ['read', 'Read']];
+  const tabs = [['story', 'Story'], ...(D.chapters.length ? [['things', 'Things']] : []), ['setup', 'Setup'], ['read', 'Read']];
+  if (!tabs.some(t => t[0] === TAB)) TAB = 'story';
   el.innerHTML = `<div class="row"><a href="#/sim">‹ Stories</a><h2 style="margin:0 0 0 8px;cursor:pointer" id="sm-title" title="Click to rename">${esc(p.title)}</h2><span class="sp"></span>
     ${badge(p.status === 'running' ? 'good' : 'warn', p.status === 'setup' ? 'setting up' : 'in progress')}<span class="small mute">${D.chapters.length} chapters · ${D.reading_minutes} min read</span></div>
   <div class="small mute" style="margin:2px 0 0">${esc(p.idea)}</div>
@@ -143,7 +160,7 @@ function draw() {
   $('#sm-title').onclick = async () => { const t = await textDlg('Rename the story', 'Title', p.title); if (t) { await act(null, () => api('/sim/' + SID, {method: 'PATCH', json: {title: t}})); load(); } };
   el.querySelectorAll('.tabs button').forEach(b => b.onclick = () => { TAB = b.dataset.t; LS.set('sm-tab-' + SID, TAB); draw(); });
   const rb = document.getElementById('sm-retry'); if (rb) rb.onclick = e => run(e.target, `/chapters/${D.failed.id}/retry`, {}, 'Retrying');
-  ({story: drawStory, setup: drawSetup, read: drawRead})[TAB]();
+  ({story: drawStory, things: drawThings, setup: drawSetup, read: drawRead})[TAB]();
 }
 
 function help() {
@@ -153,6 +170,7 @@ function help() {
     <p><b>You steer</b> by clicking an option, writing your own action, pressing <b>Let it run</b> (the AI picks), or <b>Auto-run</b> several chapters (it stops on a death, a full clock, a broken rule or when you press Stop). <b>Add instruction</b> any time: an outside event, a limit, a twist or a steer, to happen next chapter, in some chapters, when something becomes true, or at a story time. Each instruction is used once on the line of the story it was added to.</p>
     <p><b>Rules and things tracked</b> keep the story honest: the AI may only use items that exist in the world card or that are made from items already used, the dead stay dead, and changes it proposes that do not fit are refused (shown under "What changed").</p>
     <p><b>Change your mind.</b> <i>Rewrite</i> a chapter with an instruction or roll <i>new dice</i>: the old version stays as another branch you can switch back to. <i>Edit text</i> lets you change the words; the AI can read your edit and propose how the state should change, and later chapters are marked as written before the edit. Only the last chapter of a line can be deleted.</p>
+    <p><b>Things.</b> People can <i>find</i> things (a search that succeeds, an instruction, or something the world already holds), <i>make</i> them from parts they hold or that lie where they are (the AI works out what is really possible; skills, tools and a known recipe help the dice), <i>use</i> them up, <i>drop</i>, <i>give</i> and <i>take</i> them. Someone may refuse to hand a thing over; a thing can be <i>bound</i> to a person; nobody can carry more than their limit. The <b>Things</b> tab shows who has what, recipes and skills, and lets you change any of it. Under "What changed", <i>undo</i> takes one change back. <i>+ Give a thing</i> in the box below the chapter hands someone a thing, takes one away or lifts a binding in the next chapter.</p>
     <p><b>Content</b> (Setup, "Content") says how free the story is. <i>unfiltered</i> (the default) lets characters swear, abuse, lie, steal, kill and break the law whenever the story goes there, with real consequences but no softening or lectures, and mild sexual content between adults is allowed (the scene closes before explicit detail); <i>mature</i> and <i>clean</i> turn it down. The rules you write still apply.</p>
     <p><b>Thinking</b> (Setup, "Thinking") is how long the AI reasons before it plans, changes the state or checks a chapter. <i>balanced</i> is the default; <i>deep</i> is slower and more consistent; <i>off</i> is the fastest and makes more mistakes.</p>
     <p><b>Pictures</b> are optional: press <i>Paint this chapter</i> (or tick "Paint every chapter automatically" in Setup). They are cinematic paintings drawn from text. Each person and place gets a reference painting first, so faces and places stay alike; you can repaint, edit, replace with your own picture or remove any of them. Changing a person's look marks their pictures "old".</p>
@@ -165,7 +183,11 @@ function stateHtml(st) {
   const tr = D.trackers.filter(t => t.active);
   const rows = tr.map(t => {
     const v = st.trackers[t.id]; let body = '';
-    if (t.kind === 'items') body = Object.entries(v || {}).map(([n, i]) => `${esc(n)} ×${i.qty}${i.at ? ` <span class="mute">(${esc(i.at)})</span>` : ''}`).join('<br>') || '<span class="mute">none</span>';
+    if (t.kind === 'items') {
+      const by = {}; Object.entries(v || {}).forEach(([n, i]) => { (by[i.at || 'nowhere'] = by[i.at || 'nowhere'] || []).push([n, i]); });
+      body = Object.entries(by).map(([h, rows]) => { const person = h in (st.entities || {}); const lim = person ? carryOf(h) : 0; const used = rows.reduce((s, [, i]) => s + sizeOf(i), 0);
+        return `<div style="margin:3px 0"><span class="small">${person ? '' : '<span class="mute">at </span>'}<b>${esc(h)}</b>${person && lim ? ` <span class="mute">${used}/${lim}</span>` : ''}</span>${person && lim ? bar(Math.min(100, used / lim * 100), used >= lim ? 'fail' : '') : ''}${rows.map(([n, i]) => `<div class="small">${esc(n)} ×${i.qty}${thingBits(i)}</div>`).join('')}</div>`; }).join('') || '<span class="mute">none</span>';
+    }
     else if (t.kind === 'meter') body = `${bar((v - t.min) / (t.max - t.min) * 100, v <= (t.danger_below ?? -1e9) || v >= (t.danger_above ?? 1e9) ? 'fail' : '')} <span class="small">${(+v).toFixed(1).replace(/\.0$/, '')}/${t.max} ${esc(t.unit || '')}</span>`;
     else if (t.kind === 'clock') body = Array.from({length: t.max}, (_, i) => `<span style="font-size:15px;color:${i < v ? 'var(--bad)' : 'var(--line)'}">●</span>`).join(' ') + ` <span class="small mute">${esc(t.rises || '')}</span>`;
     else if (t.kind === 'relation') body = `${esc(t.a)} ↔ ${esc(t.b)}: trust ${v.trust}, tension ${v.tension}`;
@@ -174,8 +196,12 @@ function stateHtml(st) {
     else body = v ? 'yes' : 'no';
     return `<div><b>${esc(t.name)}</b> <span class="sm-tag">${kindName[t.kind]}</span><br>${body}</div>`;
   }).join('');
-  const people = Object.entries(st.entities || {}).map(([n, e]) => `<span class="${e.alive ? '' : 'sm-dead'}">${esc(n)}</span>${e.status && e.alive ? ` <span class="mute small">(${esc(e.status)})</span>` : ''}`).join(' · ');
-  return `<div class="card pad sm-state"><b>State</b> <span class="small mute">${esc(st.time || '')}</span>${D.pressure.length ? `<div class="err small">${D.pressure.map(p => esc(p.text)).join('<br>')}</div>` : ''}${rows}<div>${people}</div></div>`;
+  const people = Object.entries(st.entities || {}).map(([n, e]) => `<span class="${e.alive ? '' : 'sm-dead'}">${esc(n)}</span>${e.status && e.alive ? ` <span class="mute small">(${esc(e.status)})</span>` : ''}${(e.skills || []).length ? ` <span class="mute small">[${e.skills.map(esc).join(', ')}]</span>` : ''}`).join(' · ');
+  const rec = Object.entries(st.recipes || {});
+  const found = (st.world_add || []).slice(-5).reverse();
+  return `<div class="card pad sm-state"><b>State</b> <span class="small mute">${esc(st.time || '')}</span>${D.pressure.length ? `<div class="err small">${D.pressure.map(p => esc(p.text)).join('<br>')}</div>` : ''}${rows}<div>${people}</div>
+    ${rec.length ? `<div><b>Recipes</b><br>${rec.map(([n, r]) => `<div class="small">${esc(n)} <span class="mute">needs ${esc((r.needs || []).join(', ') || '—')}${(r.tools || []).length ? '; tools ' + esc(r.tools.join(', ')) : ''}</span></div>`).join('')}</div>` : ''}
+    ${found.length ? `<div><b>Found lately</b><br>${found.map(w => `<div class="small">${esc(w.kind)} · ${esc(w.name)}${w.where ? ` <span class="mute">at ${esc(w.where)}</span>` : ''}</div>`).join('')}</div>` : ''}</div>`;
 }
 
 function sideHtml() {
@@ -214,7 +240,8 @@ function chapterHtml(c, i) {
     ${c.rolls.length ? `<div>${c.rolls.map(r => `<span class="sm-chip ${r.tier}" title="${esc((r.why || []).join(', '))}">${esc(r.act)}: ${r.dice_off ? 'success' : `${r.die}${r.mod >= 0 ? '+' : ''}${r.mod} vs ${r.target} → ${r.tier}`}</span>`).join('')}</div>` : ''}
     ${fired.length ? `<div>${fired.map(d => `<span class="sm-chip" style="border-color:var(--accent)">⚡ ${esc(d.kind)}: ${esc(d.text)}</span>`).join('')}</div>` : ''}
     <details class="sm-d mt-s"><summary>What changed${c.dropped.length ? ` · ${c.dropped.length} refused` : ''} · summary</summary>
-      ${c.applied.length ? `<div class="small">${c.applied.map(a => `<span class="sm-chip">${esc(a.text)}</span>`).join('')}</div>` : '<div class="small mute">No change to the state.</div>'}
+      ${c.applied.length ? `<div class="small">${c.applied.map((a, ai) => `<span class="sm-chip ${THING_OPS.includes(a.op) ? 'thing' : ''} ${a.undone ? 'undone' : ''}">${THING_ICON[a.op] || ''}${esc(a.text)}${a.undone ? ' (taken back)' : ''}${a.undo && !a.undone ? ` <button class="link" data-undo="${c.id}:${ai}" title="Take this back">undo</button>` : ''}</span>`).join('')}</div>` : '<div class="small mute">No change to the state.</div>'}
+      ${(c.plan.risks || []).filter(r => r.craft && r.craft.reasoning).map(r => `<div class="small" style="margin-top:4px"><b>Why this works:</b> ${esc(r.who)} — ${esc(r.craft.reasoning)}</div>`).join('')}
       ${c.dropped.length ? `<div class="small mute" style="margin-top:4px">Refused by the rules: ${c.dropped.map(d => `${esc(d.op)} ${esc(d.target || '')} (${esc(d.why)})`).join('; ')}</div>` : ''}
       <div class="small" style="margin-top:6px"><b>Summary:</b> ${esc(c.summary)}</div></details>
     <div class="row mt-s">${last && D.project.status !== 'setup' ? '' : ''}<button class="small" data-rewrite="${c.id}">Rewrite…</button><button class="small" data-reroll="${c.id}" title="Same plan, new dice">New dice</button>
@@ -228,7 +255,7 @@ function dockHtml() {
   return `<div class="card pad sm-dock mt"><b>What happens next?</b>
     ${head.options.map(o => `<button class="sm-opt sm-risk-${o.risk}" data-opt="${o.id}"><b>${esc(o.who)}:</b> ${esc(o.label)}<small>${esc(o.hint || '')} · ${o.risk} risk</small></button>`).join('')}
     <div class="row mt-s"><select id="sm-who">${chars.map(c => `<option>${esc(c)}</option>`).join('')}</select><input id="sm-text" style="flex:1;min-width:200px" placeholder="…or write what they do (any action you like)"><button id="sm-go" class="primary">Do this</button></div>
-    <div class="row mt-s"><button id="sm-let" title="The AI picks the most in-character option">Let it run</button><span class="small mute">Auto-run</span><input type="number" id="sm-n" value="3" min="1" max="10" style="width:60px"><button id="sm-auto">chapters</button><span class="sp"></span><button id="sm-dir2">+ Add instruction</button></div></div>`;
+    <div class="row mt-s"><button id="sm-let" title="The AI picks the most in-character option">Let it run</button><span class="small mute">Auto-run</span><input type="number" id="sm-n" value="3" min="1" max="10" style="width:60px"><button id="sm-auto">chapters</button><span class="sp"></span><button id="sm-give" title="Hand someone a thing, take one away or lift a binding">+ Give a thing</button><button id="sm-dir2">+ Add instruction</button></div></div>`;
 }
 
 function drawStory() {
@@ -253,6 +280,8 @@ function wireStory() {
   const let_ = $('#sm-let'); if (let_) let_.onclick = () => run(let_, '/chapters', {kind: 'auto'}, 'Letting it run');
   const au = $('#sm-auto'); if (au) au.onclick = () => run(au, '/auto', {n: +$('#sm-n').value || 3}, 'Auto-run started');
   [$('#sm-dir2'), $('#sm-adddir')].forEach(b => { if (b) b.onclick = () => directiveDialog(); });
+  const gv = $('#sm-give'); if (gv) gv.onclick = () => directiveDialog('grant');
+  on('[data-undo]', b => b.onclick = async () => { const [cid, i] = b.dataset.undo.split(':'); if (await confirmDlg('Take this back?', 'The thing goes back to how it was. Chapters after this one are marked as written before the change.', 'Take it back')) { await act(null, () => api(`/sim/${SID}/chapters/${cid}/undo`, {method: 'POST', json: {index: +i}}), 'Taken back'); load(); } });
   on('[data-cdir]', b => b.onclick = async () => { if (await confirmDlg('Cancel this instruction?', 'It will not be used.', 'Cancel it')) { await act(null, () => api(`/sim/${SID}/directives/${b.dataset.cdir}`, {method: 'DELETE'})); load(); } });
   on('[data-rewrite]', b => b.onclick = async () => { const t = await textDlg('Rewrite this chapter', 'What should change? (the old version stays as another branch)', '', true); if (t && t.trim()) run(b, `/chapters/${b.dataset.rewrite}/rewrite`, {instruction: t}, 'Rewriting'); });
   on('[data-reroll]', b => b.onclick = () => run(b, `/chapters/${b.dataset.reroll}/reroll`, {}, 'Rolling again'));
@@ -293,19 +322,29 @@ async function editChapter(cid) {
   if (r.edited_prose) { if (await confirmDlg('Read your edit?', 'Let the AI check what your edit changes in the state (items, people, clocks). You approve before anything changes.', 'Read it')) await run(null, `/chapters/${cid}/reread`, {}, 'Reading your edit'); else load(); } else load();
 }
 
-async function directiveDialog() {
+async function directiveDialog(pre) {
   const trackers = D.trackers.filter(t => ['clock', 'meter', 'flag'].includes(t.kind));
-  const pr = dialog({title: 'Add an instruction to the story', html: `<p class="small mute">It can be an outside event (raiders arrive), a limit (no more food after day 2), a twist, or a steer toward somewhere. It is used once, on this line of the story.</p>
-    <label class="f">What<textarea id="di-t" placeholder="Raiders arrive at the loading bay and demand supplies"></textarea></label>
-    <label class="f">Kind<select id="di-k"><option value="event">Event</option><option value="constraint">Limit</option><option value="twist">Twist</option><option value="steer">Steer</option></select></label>
+  const known = Object.keys(holdings(D.state)).length ? [...new Set(Object.values(holdings(D.state)).flat().map(x => x[0]))] : [];
+  const holders = [...Object.keys(D.state.entities || {}), ...D.entities.filter(e => e.kind === 'place' && e.active).map(e => e.name)];
+  const kinds = [['event', 'Event'], ['constraint', 'Limit'], ['twist', 'Twist'], ['steer', 'Steer'], ['grant', 'Give a thing to someone'], ['take', 'Take a thing away'], ['unbind', 'Lift a binding on a thing']];
+  const thingForm = k => k === 'grant' || k === 'take' || k === 'unbind' ? `<label class="f">Which thing<input id="di-item" list="di-items" placeholder="Flare gun"><datalist id="di-items">${known.map(n => `<option value="${esc(n)}">`).join('')}</datalist></label>
+    ${k === 'unbind' ? '' : `<label class="f">${k === 'grant' ? 'Who gets it' : 'Where it goes (empty = it is gone)'}<select id="di-to">${k === 'take' ? '<option value="">(gone)</option>' : ''}${holders.map(h => `<option>${esc(h)}</option>`).join('')}</select></label><label class="f">How many<input id="di-q" type="number" min="1" value="1"></label>`}
+    <p class="small mute">This is done by the system in that chapter, whatever the dice say; the story then shows it.</p>` : '';
+  const pr = dialog({title: pre ? 'Give or take away a thing' : 'Add an instruction to the story', html: `<p class="small mute">It can be an outside event (raiders arrive), a limit (no more food after day 2), a twist, a steer toward somewhere, or a thing handed over or taken away. It is used once, on this line of the story.</p>
+    <label class="f">What (the story is told this; optional for things)<textarea id="di-t" placeholder="Raiders arrive at the loading bay and demand supplies"></textarea></label>
+    <label class="f">Kind<select id="di-k">${kinds.map(([v, l]) => `<option value="${v}" ${pre === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label><div id="di-th">${thingForm(pre)}</div>
     <label class="f">When<select id="di-m"><option value="next">In the next chapter</option><option value="in">In a number of chapters</option><option value="when">When something happens</option><option value="story_time">At a story time</option></select></label>
     <div id="di-x"></div>`,
-    buttons: [{label: 'Cancel', value: null}, {label: 'Add', primary: true, validate: v => !v.text.trim() ? 'Write the instruction' : (v.timing.mode === 'when' && !v.timing.condition && !v.timing.tracker ? 'Say when' : v.timing.mode === 'story_time' && !v.timing.at ? 'Say the story time' : ''),
+    buttons: [{label: 'Cancel', value: null}, {label: 'Add', primary: true, validate: v => !v.text.trim() && !['grant', 'take', 'unbind'].includes(v.kind) ? 'Write the instruction' : (['grant', 'take', 'unbind'].includes(v.kind) && !v.thing.item.trim() ? 'Say which thing' : v.kind === 'grant' && !v.thing.to ? 'Say who gets it' : v.timing.mode === 'when' && !v.timing.condition && !v.timing.tracker ? 'Say when' : v.timing.mode === 'story_time' && !v.timing.at ? 'Say the story time' : ''),
       collect: l => { const m = l.querySelector('#di-m').value; const t = {mode: m};
         if (m === 'in') t.chapters = +l.querySelector('#di-n').value || 1;
         if (m === 'when') { const tr = l.querySelector('#di-tr').value; if (tr) { t.tracker = tr; t.op = l.querySelector('#di-op').value; t.value = +l.querySelector('#di-val').value; } else t.condition = l.querySelector('#di-c').value; }
         if (m === 'story_time') t.at = l.querySelector('#di-at').value;
-        return {text: l.querySelector('#di-t').value, kind: l.querySelector('#di-k').value, timing: t}; }}]});
+        const kd = l.querySelector('#di-k').value, it = l.querySelector('#di-item'), to = l.querySelector('#di-to'), q = l.querySelector('#di-q');
+        const tx = l.querySelector('#di-t').value.trim() || (kd === 'grant' ? `${to ? to.value : 'Someone'} gets ${it ? it.value : 'a thing'}` : kd === 'take' ? `${it ? it.value : 'A thing'} is taken away${to && to.value ? ' to ' + to.value : ''}` : `${it ? it.value : 'A thing'} is no longer bound`);
+        return {text: tx, kind: kd, timing: t, thing: ['grant', 'take', 'unbind'].includes(kd) ? {item: it ? it.value : '', to: to ? to.value : '', qty: q ? +q.value || 1 : 1} : undefined}; }}]});
+  const ksel = document.getElementById('di-k');
+  if (ksel) ksel.onchange = () => { document.getElementById('di-th').innerHTML = thingForm(ksel.value); };
   const sel = document.getElementById('di-m');
   if (sel) sel.onchange = () => {
     const m = sel.value;
@@ -319,6 +358,72 @@ async function directiveDialog() {
   if (!v) return;
   const r = await act(null, () => api(`/sim/${SID}/directives`, {method: 'POST', json: v}), 'Instruction added');
   if (r) load();
+}
+
+/* ───────── things tab ───────── */
+async function thingAct(action, ok) {
+  const r = await act(null, () => api(`/sim/${SID}/things`, {method: 'POST', json: {action}}), ok || 'Saved');
+  if (r) load();
+  return r;
+}
+
+function drawThings() {
+  const st = D.state, busy = D.run && D.run.state === 'running';
+  const hold = holdings(st);
+  const people = Object.entries(st.entities || {});
+  const places = D.entities.filter(e => e.kind === 'place' && e.active).map(e => e.name).concat((st.world_add || []).filter(w => w.kind === 'place').map(w => w.name));
+  const thingRow = ([n, i]) => `<div class="row"><span style="flex:1"><b>${esc(n)}</b> ×${i.qty}${thingBits(i)}${i.origin && i.origin.how && i.origin.how !== 'start' && i.origin.how !== 'stock' ? ` <span class="small mute">· ${esc(i.origin.how)}${i.origin.chapter ? ' in chapter ' + i.origin.chapter : ''}${i.origin.by ? ' by ' + esc(i.origin.by) : ''}</span>` : ''}</span>
+    <button class="small" data-th-edit="${esc(n)}">Edit</button><button class="small bad" data-th-del="${esc(n)}">✕</button></div>`;
+  const personCard = ([n, e]) => { const rows = hold[n] || []; const lim = carryOf(n); const used = rows.reduce((s, [, i]) => s + sizeOf(i), 0);
+    return `<div class="card pad ${e.alive ? '' : 'sm-dead'}"><div class="row"><b>${esc(n)}</b>${lim ? `<span class="small mute">carries ${used}/${lim}</span>` : ''}<span class="sp"></span><button class="small" data-th-addto="${esc(n)}">+ Thing</button></div>
+      ${lim ? bar(Math.min(100, used / lim * 100), used >= lim ? 'fail' : '') : ''}
+      <div class="small mute" style="margin:4px 0">Skills: ${(e.skills || []).map(s => `<span class="sm-chip">${esc(s)} <button class="link" data-sk-del="${esc(n)}|${esc(s)}">✕</button></span>`).join('') || 'none'} <button class="link" data-sk-add="${esc(n)}">+ skill</button></div>
+      ${rows.map(([nm, i]) => thingRow([nm, i])).join('') || '<div class="small mute">Carries nothing.</div>'}</div>`; };
+  const placeCard = p => { const rows = hold[p] || []; return `<div class="card pad"><div class="row"><b>${esc(p)}</b><span class="sp"></span><button class="small" data-th-addto="${esc(p)}">+ Thing</button></div>${rows.map(([nm, i]) => thingRow([nm, i])).join('') || '<div class="small mute">Nothing lies here.</div>'}</div>`; };
+  const rec = Object.entries(st.recipes || {});
+  const found = st.world_add || [];
+  $('#sm-body').innerHTML = `${busy ? '<div class="sm-banner warn">A step is running; changes here wait until it is done.</div>' : ''}
+  <div class="small mute mt-s">Everything the people carry and know, as the story stands after the last chapter. Changes here apply to the next chapter. A thing can be bound to a person so nobody else can take or be given it; an instruction can still lift that.</div>
+  <h3 class="mt">People</h3><div class="sm-th">${people.map(personCard).join('')}</div>
+  <h3 class="mt">Places</h3><div class="sm-th">${places.map(placeCard).join('') || '<div class="mute">No places.</div>'}${hold.nowhere ? `<div class="card pad"><b>Nowhere in particular</b>${hold.nowhere.map(([nm, i]) => thingRow([nm, i])).join('')}</div>` : ''}</div>
+  <div class="card pad mt"><div class="row"><b>Recipes known</b><span class="sp"></span><button class="small" data-rc-add="1">+ Recipe</button></div>
+    ${rec.map(([n, r]) => `<div class="row"><span style="flex:1"><b>${esc(n)}</b> <span class="small mute">needs ${esc((r.needs || []).join(', ') || '—')}${(r.tools || []).length ? '; tools ' + esc(r.tools.join(', ')) : ''}${r.skill ? '; skill ' + esc(r.skill) : ''}${(r.learned_by || []).length ? '; known by ' + esc(r.learned_by.join(', ')) : ''}</span></span><button class="small" data-rc-edit="${esc(n)}">Edit</button><button class="small bad" data-rc-del="${esc(n)}">✕</button></div>`).join('') || '<div class="small mute">None yet. A recipe is remembered the first time something is made, or when someone is taught it.</div>'}</div>
+  <div class="card pad mt"><b>Found so far</b>${found.length ? found.slice().reverse().map(w => `<div class="small" style="margin:3px 0"><span class="sm-tag">${esc(w.kind)}</span> <b>${esc(w.name)}</b>${w.where ? ` at ${esc(w.where)}` : ''}${w.by ? ` · found by ${esc(w.by)}` : ''} · chapter ${w.chapter}${w.text ? `<br><span class="mute">${esc(w.text)}</span>` : ''}</div>`).join('') : '<div class="small mute">Nothing found yet. Things, places and clues found in the story are listed here.</div>'}</div>`;
+  const on = (sel, fn) => el.querySelectorAll(sel).forEach(fn);
+  const find = n => Object.values(hold).flat().find(x => x[0] === n);
+  on('[data-th-edit]', b => b.onclick = () => thingDialog(b.dataset.thEdit, find(b.dataset.thEdit)[1]));
+  on('[data-th-del]', b => b.onclick = async () => { if (await confirmDlg(`Remove ${b.dataset.thDel}?`, 'It disappears from the story from the next chapter.', 'Remove', true)) thingAct({do: 'remove_thing', name: b.dataset.thDel}, 'Removed'); });
+  on('[data-th-addto]', b => b.onclick = () => thingDialog('', {qty: 1, at: b.dataset.thAddto, props: {}}, true));
+  on('[data-sk-add]', b => b.onclick = async () => { const s = await textDlg(`A skill for ${b.dataset.skAdd}`, 'For example: first aid', ''); if (s && s.trim()) thingAct({do: 'add_skill', who: b.dataset.skAdd, skill: s.trim()}, 'Skill added'); });
+  on('[data-sk-del]', b => b.onclick = () => { const [w, s] = b.dataset.skDel.split('|'); thingAct({do: 'remove_skill', who: w, skill: s}, 'Skill removed'); });
+  on('[data-rc-add]', b => b.onclick = () => recipeDialog('', {}));
+  on('[data-rc-edit]', b => b.onclick = () => recipeDialog(b.dataset.rcEdit, st.recipes[b.dataset.rcEdit]));
+  on('[data-rc-del]', b => b.onclick = async () => { if (await confirmDlg(`Forget the recipe for ${b.dataset.rcDel}?`, 'People stop knowing how to make it.', 'Forget', true)) thingAct({do: 'remove_recipe', name: b.dataset.rcDel}, 'Removed'); });
+}
+
+async function thingDialog(name, i, isNew) {
+  const holders = [...Object.keys(D.state.entities || {}), ...D.entities.filter(e => e.kind === 'place' && e.active).map(e => e.name)];
+  const p = i.props || {};
+  const v = await dialog({title: isNew ? 'Add a thing' : `Edit ${name}`, html: `<label class="f">Name<input id="th-n" value="${esc(name)}" ${isNew ? '' : 'disabled'}></label>
+    <label class="f">Who has it, or where it lies<select id="th-at">${holders.map(h => `<option ${i.at === h ? 'selected' : ''}>${esc(h)}</option>`).join('')}</select></label>
+    <label class="f">How many<input id="th-q" type="number" min="1" value="${i.qty || 1}"></label>
+    <label class="f">Condition<select id="th-c">${COND.map(c => `<option value="${c}" ${(p.condition || '') === c ? 'selected' : ''}>${c || '(not said)'}</option>`).join('')}</select></label>
+    <label class="f">Uses left (empty = it does not wear out)<input id="th-u" type="number" min="0" value="${p.uses ?? ''}"></label>
+    <label class="f">Size (counts against what a person can carry)<input id="th-s" type="number" min="1" max="9" value="${p.size || 1}"></label>
+    <label class="f">Bound to (nobody else can take it or be given it)<select id="th-b"><option value="">(nobody)</option>${Object.keys(D.state.entities || {}).map(h => `<option ${i.bound_to === h ? 'selected' : ''}>${esc(h)}</option>`).join('')}</select></label>
+    <label class="f">Note<input id="th-note" value="${esc(i.note || '')}" placeholder="opens the pharmacy safe"></label>`,
+    buttons: [{label: 'Cancel', value: null}, {label: 'Save', primary: true, validate: v => v.name.trim() ? '' : 'Give it a name', collect: l => ({name: isNew ? l.querySelector('#th-n').value.trim() : name,
+      fields: {at: l.querySelector('#th-at').value, qty: +l.querySelector('#th-q').value || 1, condition: l.querySelector('#th-c').value, uses: l.querySelector('#th-u').value === '' ? null : +l.querySelector('#th-u').value, size: +l.querySelector('#th-s').value || 1, bound_to: l.querySelector('#th-b').value, note: l.querySelector('#th-note').value}})}]});
+  if (v) thingAct({do: 'set_thing', name: v.name, fields: v.fields}, 'Saved');
+}
+
+async function recipeDialog(name, r) {
+  const v = await dialog({title: name ? `Edit the recipe for ${name}` : 'Add a recipe', html: `<label class="f">What it makes<input id="rc-n" value="${esc(name)}" ${name ? 'disabled' : ''}></label>
+    <label class="f">Parts used up (comma separated)<input id="rc-p" value="${esc((r.needs || []).join(', '))}"></label><label class="f">Tools needed, not used up (comma separated)<input id="rc-t" value="${esc((r.tools || []).join(', '))}"></label>
+    <label class="f">Skill needed<input id="rc-s" value="${esc(r.skill || '')}"></label><label class="f">Known by (comma separated)<input id="rc-k" value="${esc((r.learned_by || []).join(', '))}"></label>`,
+    buttons: [{label: 'Cancel', value: null}, {label: 'Save', primary: true, validate: v => v.name.trim() ? '' : 'Say what it makes', collect: l => { const cs = id => l.querySelector('#' + id).value.split(',').map(s => s.trim()).filter(Boolean);
+      return {name: name || l.querySelector('#rc-n').value.trim(), needs: cs('rc-p'), tools: cs('rc-t'), skill: l.querySelector('#rc-s').value, learned_by: cs('rc-k')}; }}]});
+  if (v) thingAct({do: 'set_recipe', ...v}, 'Saved');
 }
 
 /* ───────── setup tab ───────── */
@@ -338,6 +443,7 @@ function drawSetup() {
       <label><input type="checkbox" id="s-dice" ${st.dice ? 'checked' : ''}> Dice decide risky acts</label>
       <label>Words per chapter <input type="number" id="s-words" value="${st.chapter_words}" min="150" max="900" step="10"></label>
       <label><input type="checkbox" id="s-deep" ${st.deep ? 'checked' : ''}> Let the other characters plan too (slower)</label>
+      <label title="How much one person can carry, in size units (a plain thing is 1). 0 means no limit. A person can have their own limit in their card.">Carry limit <input type="number" id="s-carry" value="${st.carry_limit ?? 8}" min="0" max="40" style="width:70px"></label>
       <label title="How freely the story may go. Unfiltered: strong language, cruelty, crime and mild adult romance are written as the scene needs them, without softening or moral comment.">Content <select id="s-content">${[['clean', 'clean'], ['mature', 'mature'], ['unfiltered', 'unfiltered (no limits)']].map(([v, l]) => `<option value="${v}" ${(st.content || 'unfiltered') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <label title="How long the AI thinks before it plans, changes the state or checks a chapter. More thinking is slower and keeps the story more consistent.">Thinking <select id="s-think">${[['off', 'off (fastest)'], ['balanced', 'balanced'], ['deep', 'deep (slowest)']].map(([v, l]) => `<option value="${v}" ${(st.thinking || 'balanced') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div>
     <div class="row mt-s" style="gap:16px"><label><input type="checkbox" id="s-auto" ${st.auto_images ? 'checked' : ''}> Paint every chapter automatically</label>
@@ -347,10 +453,10 @@ function drawSetup() {
 
   <div class="card pad mt"><div class="row"><b>The world</b><span class="sp"></span><button class="small" id="w-redo">Redo with AI…</button></div>
     ${[['place', 'Place'], ['period', 'When'], ['tone', 'Tone'], ['pacing', 'Pacing'], ['start_scene', 'First scene'], ['start_time', 'Story clock at start']].map(([k, l]) => field(l, 'w-' + k, w[k])).join('')}
-    ${field('What exists here', 'w-exists', w.exists, 'textarea', 'style="min-height:110px"')}<div class="row"><span class="small mute">The story may only use what exists here (items appear only from places that hold them).</span><span class="sp"></span><button id="w-save">Save the world</button></div></div>
+    ${field('What the story is about', 'w-goal', w.goal, 'textarea', 'style="min-height:60px" placeholder="What the people must achieve or avoid, and what is lost if they fail. Every chapter is steered by this."')}${field('What exists here', 'w-exists', w.exists, 'textarea', 'style="min-height:110px"')}${field('What can be made or found', 'w-craft', w.craft, 'textarea', 'style="min-height:60px" placeholder="For example: makeshift tools only; nothing electronic works"')}<div class="row"><span class="small mute">The story may only use what exists here (items appear only from places that hold them).</span><span class="sp"></span><button id="w-save">Save the world</button></div></div>
 
   <div class="card pad mt"><div class="row"><b>Cast and places</b><span class="sp"></span>${started ? '' : '<button class="small" id="c-redo">Redo with AI…</button>'}<button class="small" id="c-addc">+ Character</button><button class="small" id="c-addp">+ Place</button></div>
-    <div class="sm-cards mt-s">${[...chars, ...others].map(e => `<div class="card sm-card"><h4>${esc(e.name)} <span class="sm-tag">${e.kind}</span></h4><div class="small">${e.kind === 'character' ? `${esc(e.role || '')}${e.goal ? `<br><span class="mute">wants:</span> ${esc(e.goal)}` : ''}${e.fear ? `<br><span class="mute">fears:</span> ${esc(e.fear)}` : ''}` : esc(e.description || '')}</div>
+    <div class="sm-cards mt-s">${[...chars, ...others].map(e => `<div class="card sm-card"><h4>${esc(e.name)} <span class="sm-tag">${e.kind}</span></h4><div class="small">${e.kind === 'character' ? `${esc(e.role || '')}${e.goal ? `<br><span class="mute">wants:</span> ${esc(e.goal)}` : ''}${e.fear ? `<br><span class="mute">fears:</span> ${esc(e.fear)}` : ''}${(e.skills || []).length ? `<br><span class="mute">skills:</span> ${e.skills.map(esc).join(', ')}` : ''}` : esc(e.description || '')}</div>
       ${e.ref_file ? `<img src="/api/sim/file/${SID}/${esc(e.ref_file)}" style="width:100%;border-radius:8px;margin-top:6px" alt="">` : ''}${e.ref_old ? '<span class="badge b-warn">picture is out of date</span>' : ''}
       <div class="small mute" style="margin-top:4px">${esc((e.look || '').slice(0, 120))}${(e.look || '').length > 120 ? '…' : ''}</div><div class="row mt-s"><button class="small" data-ee="${e.id}">Edit</button><button class="small" data-ep="${e.id}">${e.ref_file ? 'Repaint' : 'Paint'}</button><button class="small bad" data-ed="${e.id}">${started ? 'Retire' : 'Delete'}</button></div></div>`).join('') || '<p class="mute">No one yet.</p>'}</div></div>
 
@@ -379,9 +485,9 @@ function trackerSummary(t) {
 function wireSetup() {
   const on = (sel, fn) => el.querySelectorAll(sel).forEach(fn);
   const patch = async (json, ok) => { const r = await act(null, () => api('/sim/' + SID, {method: 'PATCH', json}), ok || 'Saved'); if (r) load(); };
-  $('#s-save').onclick = () => patch({idea: $('#s-idea').value, settings: {difficulty: $('#s-diff').value, dice: $('#s-dice').checked, chapter_words: +$('#s-words').value || 350, deep: $('#s-deep').checked, thinking: $('#s-think').value, content: $('#s-content').value,
+  $('#s-save').onclick = () => patch({idea: $('#s-idea').value, settings: {difficulty: $('#s-diff').value, dice: $('#s-dice').checked, chapter_words: +$('#s-words').value || 350, deep: $('#s-deep').checked, thinking: $('#s-think').value, content: $('#s-content').value, carry_limit: +$('#s-carry').value || 0,
     auto_images: $('#s-auto').checked, panel_shape: $('#s-shape').value, captions: $('#s-cap').checked, image_model: $('#s-img').value.trim()}});
-  $('#w-save').onclick = () => patch({world: Object.fromEntries(['place', 'period', 'tone', 'pacing', 'start_scene', 'start_time', 'exists'].map(k => [k, $('#w-' + k).value]))});
+  $('#w-save').onclick = () => patch({world: Object.fromEntries(['place', 'period', 'tone', 'pacing', 'start_scene', 'start_time', 'exists', 'craft', 'goal'].map(k => [k, $('#w-' + k).value]))});
   $('#sm-dup').onclick = async () => { const r = await act(null, () => api(`/sim/${SID}/duplicate?full=false`, {method: 'POST'}), 'Copied'); if (r) hash(r.id, 'setup'); };
   $('#sm-tpls').onclick = async () => { const n = await textDlg('Save as template', 'Template name', D.project.title); if (n) act(null, () => api(`/sim/${SID}/save-template`, {method: 'POST', json: {name: n}}), 'Template saved'); };
   $('#sm-exps').onclick = () => { location = `/api/sim/${SID}/export?format=story`; };
@@ -412,24 +518,38 @@ async function ruleDialog(g) {
   const r = await act(null, () => api(`/sim/${SID}/guidelines`, {method: 'POST', json: v}), 'Saved'); if (r) load();
 }
 
-const ENT_FIELDS = {character: [['role', 'Role', 'input'], ['goal', 'Wants', 'input'], ['fear', 'Fears', 'input'], ['secret', 'Secret', 'input'], ['voice', 'How they speak', 'input'], ['look', 'How they look (used for pictures)', 'textarea'], ['starting_condition', 'Condition at the start', 'input']],
+const ENT_FIELDS = {character: [['role', 'Role', 'input'], ['goal', 'Wants', 'input'], ['fear', 'Fears', 'input'], ['secret', 'Secret', 'input'], ['voice', 'How they speak', 'input'], ['skills', 'Skills (comma separated: what they are good at)', 'input'], ['carry', 'Carry limit (empty = the story default, 0 = none)', 'input'], ['look', 'How they look (used for pictures)', 'textarea'], ['starting_condition', 'Condition at the start', 'input']],
   place: [['description', 'What it is like', 'textarea'], ['look', 'How it looks (used for pictures)', 'textarea']], group: [['description', 'Who they are', 'textarea']]};
 async function entityDialog(e, kind) {
   kind = e ? e.kind : kind;
-  const v = await dialog({title: e ? `Edit ${e.name}` : `Add a ${kind}`, html: `<label class="f">Name<input id="en-n" value="${esc(e ? e.name : '')}"></label>${ENT_FIELDS[kind].map(([k, l, t]) => `<label class="f">${l}${t === 'textarea' ? `<textarea id="en-${k}">${esc(e ? e[k] || '' : '')}</textarea>` : `<input id="en-${k}" value="${esc(e ? e[k] || '' : '')}">`}</label>`).join('')}`,
-    buttons: [{label: 'Cancel', value: null}, {label: 'Save', primary: true, validate: v => v.name.trim() ? '' : 'Give it a name', collect: l => ({name: l.querySelector('#en-n').value, data: {...(e || {}), ...Object.fromEntries(ENT_FIELDS[kind].map(([k]) => [k, l.querySelector('#en-' + k).value]))}})}]});
+  const v = await dialog({title: e ? `Edit ${e.name}` : `Add a ${kind}`, html: `<label class="f">Name<input id="en-n" value="${esc(e ? e.name : '')}"></label>${ENT_FIELDS[kind].map(([k, l, t]) => `<label class="f">${l}${t === 'textarea' ? `<textarea id="en-${k}">${esc(e ? e[k] || '' : '')}</textarea>` : `<input id="en-${k}" value="${esc(e ? (Array.isArray(e[k]) ? e[k].join(', ') : e[k] ?? '') : '')}">`}</label>`).join('')}`,
+    buttons: [{label: 'Cancel', value: null}, {label: 'Save', primary: true, validate: v => v.name.trim() ? '' : 'Give it a name', collect: l => ({name: l.querySelector('#en-n').value, data: {...(e || {}), ...Object.fromEntries(ENT_FIELDS[kind].map(([k]) => [k, k === 'skills' ? l.querySelector('#en-' + k).value.split(',').map(s => s.trim()).filter(Boolean) : l.querySelector('#en-' + k).value]))}})}]});
   if (!v) return;
   ['id', 'project_id', 'kind', 'name', 'position', 'active'].forEach(k => delete v.data[k]);
   const r = await act(null, () => api(`/sim/${SID}/entities`, {method: 'POST', json: {id: e ? e.id : undefined, kind, name: v.name, data: v.data}}), 'Saved'); if (r) load();
 }
 
+function itemLine(n, i) {
+  const p = i.props || {}, b = [];
+  if (p.uses !== null && p.uses !== undefined) b.push('uses ' + p.uses);
+  if (p.size && p.size > 1) b.push('size ' + p.size);
+  if (p.condition) b.push('condition ' + p.condition);
+  if (i.bound_to) b.push('bound ' + i.bound_to);
+  return `${n} x${i.qty}${i.at ? ' @ ' + i.at : ''}${b.length ? ' [' + b.join(', ') + ']' : ''}`;
+}
+function parseItemLine(x) {
+  let extra = ''; const br = x.match(/\[(.*)\]\s*$/); if (br) { extra = br[1]; x = x.slice(0, br.index); }
+  const m = x.match(/^(.*?)(?:\s+x\s*(\d+))?(?:\s*@\s*(.*))?$/i); const o = {name: m[1].trim(), qty: +(m[2] || 1), at: (m[3] || '').trim()};
+  extra.split(',').map(s => s.trim()).filter(Boolean).forEach(s => { const mm = s.match(/^(uses|size|condition|bound)\s+(.+)$/i); if (!mm) return; const key = mm[1].toLowerCase(), val = mm[2].trim(); if (key === 'uses') o.uses = +val; else if (key === 'size') o.size = +val; else if (key === 'condition') o.condition = val; else o.bound_to = val; });
+  return o;
+}
 function lines(txt) { return txt.split('\n').map(s => s.trim()).filter(Boolean); }
 async function trackerDialog(t) {
   const names = D.entities.filter(e => e.kind === 'character' && e.active).map(e => e.name), places = D.entities.filter(e => e.kind === 'place' && e.active).map(e => e.name);
   const kinds = Object.keys(kindName);
   const form = (k, t) => {
     const s = t ? t.start : null; const num = (id, l, v) => `<label class="f">${l}<input id="${id}" type="number" step="any" value="${v ?? ''}"></label>`;
-    if (k === 'items') return `<label class="f">One item per line: name x quantity @ holder<textarea id="tk-items" style="min-height:120px">${Object.entries(s || {}).map(([n, i]) => `${n} x${i.qty}${i.at ? ' @ ' + i.at : ''}`).join('\n')}</textarea></label>`;
+    if (k === 'items') return `<label class="f">One thing per line: name x quantity @ holder [uses 3, size 2, condition worn, bound Dev]<textarea id="tk-items" style="min-height:140px">${Object.entries(s || {}).map(([n, i]) => itemLine(n, i)).join('\n')}</textarea></label><div class="small mute">The part in square brackets is optional. Holders are people or places of the story.</div>`;
     if (k === 'meter') return num('tk-min', 'Lowest', t ? t.min : 0) + num('tk-max', 'Highest', t ? t.max : 10) + num('tk-start', 'Starts at', s ?? 5) + `<label class="f">Unit<input id="tk-unit" value="${esc(t ? t.unit || '' : '')}"></label>` + num('tk-lo', 'Danger at or below (optional)', t ? t.danger_below : '') + num('tk-hi', 'Danger at or above (optional)', t ? t.danger_above : '');
     if (k === 'clock') return num('tk-max', 'Steps until full', t ? t.max : 6) + num('tk-start', 'Starts at', s ?? 0) + `<label class="f">What makes it rise<input id="tk-rises" value="${esc(t ? t.rises || '' : '')}"></label><label class="f">What happens when full<input id="tk-ends" value="${esc(t ? t.ends || '' : '')}"></label>`;
     if (k === 'relation') return `<label class="f">Between<select id="tk-a">${names.map(n => `<option ${t && t.a === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select> and <select id="tk-b">${names.map(n => `<option ${t && t.b === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label>` + num('tk-trust', 'Trust (-5 to 5)', s ? s.trust : 0) + num('tk-tension', 'Tension (-5 to 5)', s ? s.tension : 0);
@@ -442,7 +562,7 @@ async function trackerDialog(t) {
     <label class="f">What it is for (optional)<input id="tk-d" value="${esc(t ? t.description || '' : '')}"></label><div id="tk-form">${form(t ? t.kind : kinds[0], t)}</div>`,
     buttons: [{label: 'Cancel', value: null}, {label: 'Save', primary: true, validate: v => v.name.trim() ? '' : 'Give it a name', collect: l => {
       const k = l.querySelector('#tk-k').value, g = id => { const e = l.querySelector('#' + id); return e ? e.value : ''; }; const d = {description: g('tk-d')};
-      if (k === 'items') d.start = lines(g('tk-items')).map(x => { const m = x.match(/^(.*?)(?:\s+x\s*(\d+))?(?:\s*@\s*(.*))?$/i); return {name: m[1].trim(), qty: +(m[2] || 1), at: (m[3] || '').trim()}; });
+      if (k === 'items') d.start = lines(g('tk-items')).map(parseItemLine);
       else if (k === 'meter') Object.assign(d, {min: +g('tk-min'), max: +g('tk-max'), start: +g('tk-start'), unit: g('tk-unit'), danger_below: g('tk-lo') === '' ? null : +g('tk-lo'), danger_above: g('tk-hi') === '' ? null : +g('tk-hi')});
       else if (k === 'clock') Object.assign(d, {max: +g('tk-max'), start: +g('tk-start'), rises: g('tk-rises'), ends: g('tk-ends')});
       else if (k === 'relation') Object.assign(d, {a: g('tk-a'), b: g('tk-b'), start: {trust: +g('tk-trust'), tension: +g('tk-tension')}});

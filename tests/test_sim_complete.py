@@ -150,10 +150,12 @@ def test_operations_without_an_exact_tracker_name_still_find_their_tracker(sm):
     fat = next(t for t in trackers if t["name"] == "Ravi's Fatigue")
     assert new["trackers"][fat["id"]] == 40 and len(applied) == 3 and len(dropped) == 1             # two meters exist, so the last one (no hint) is refused
     # the actor's own meter counts in the dice, and a meter that is only dangerous when high hurts when high
-    low = dice.modifier({"who": "Ravi", "act": "run", "stats": []}, st, trackers)
+    low = dice.modifier({"who": "Ravi", "act": "run", "stats": ["Ravi's Fatigue"]}, st, trackers)
+    assert low[0] > 0                                                                                # a meter the plan names can help
+    assert dice.modifier({"who": "Ravi", "act": "run", "stats": []}, st, trackers)[0] == 0           # the person's own meter in good shape gives no free bonus
     st["trackers"][fat["id"]] = 85
     high = dice.modifier({"who": "Ravi", "act": "run", "stats": []}, st, trackers)
-    assert low[0] > 0 > high[0] and any("Fatigue" in w for w in high[1])
+    assert high[0] < 0 and any("Fatigue" in w for w in high[1])                                      # but it hurts when it is bad
 
 
 def test_names_written_loosely_are_matched_and_areas_of_the_world_card_become_places(sm):

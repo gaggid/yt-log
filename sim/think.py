@@ -10,6 +10,9 @@ BUDGET = {"sm_world": 1024, "sm_cast": 2048, "sm_trackers": 2048, "sm_rules": 10
 DEEP_FACTOR, DEEP_MAX = 2, 8192
 
 mode: ContextVar[str] = ContextVar("sim_thinking", default="balanced")      # set by the job runner from the story's setting
+boost: ContextVar[bool] = ContextVar("sim_thinking_boost", default=False)   # set by the engine when a chapter is about making, finding or learning something
+BOOSTED = ("sm_plan", "sm_delta")
+BOOST_FACTOR = 1.5
 
 
 def budget(task: str, how: str | None = None) -> int:
@@ -17,6 +20,8 @@ def budget(task: str, how: str | None = None) -> int:
     if how == "off":
         return 0
     n = BUDGET.get(task, 0)
+    if boost.get() and task in BOOSTED:
+        n = int(n * BOOST_FACTOR)
     return min(DEEP_MAX, n * DEEP_FACTOR) if how == "deep" else n
 
 

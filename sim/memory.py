@@ -64,8 +64,12 @@ def rules_text(pid: str) -> tuple[str, dict[str, str]]:
 
 
 def world_text(world: dict) -> str:
-    keys = (("place", "Place"), ("period", "Period"), ("tone", "Tone"), ("pacing", "Pacing"), ("exists", "What exists here"))
+    keys = (("goal", "THE STORY IS ABOUT"), ("place", "Place"), ("period", "Period"), ("tone", "Tone"), ("pacing", "Pacing"), ("exists", "What exists here"), ("craft", "Making and finding here"))
     return "\n".join(f"{label}: {world[k]}" for k, label in keys if world.get(k))
+
+
+def carry_map(ents: list[dict]) -> dict:
+    return {e["name"]: int(e["carry"]) for e in ents if e["kind"] == "character" and str(e.get("carry", "")).strip().lstrip("-").isdigit()}
 
 
 def card(e: dict, st: dict) -> str:
@@ -73,7 +77,8 @@ def card(e: dict, st: dict) -> str:
         s = st.get("entities", {}).get(e["name"], {})
         live = "DEAD" if s and not s.get("alive", True) else "alive"
         bits = [e.get("role", ""), f"wants: {e['goal']}" if e.get("goal") else "", f"fears: {e['fear']}" if e.get("fear") else "", f"speaks: {e['voice']}" if e.get("voice") else "",
-                f"secret: {e['secret']}" if e.get("secret") else "", s.get("status") or e.get("starting_condition") or ""]
+                f"secret: {e['secret']}" if e.get("secret") else "", f"skills: {', '.join(s.get('skills') or e.get('skills') or [])}" if (s.get("skills") or e.get("skills")) else "",
+                s.get("status") or e.get("starting_condition") or ""]
         return f"- {e['name']} ({live}): " + "; ".join(b for b in bits if b)
     return f"- {e['name']} ({e['kind']}): {e.get('description', '')}"
 
@@ -109,7 +114,14 @@ def build(pid: str, path: list[dict], st: dict, focus: list[str] | None = None, 
     pk.fixed.append(("CONTENT", content.text(store.project(pid)["settings"])))
     pk.fixed.append(("WORLD", world_text(world)))
     pk.fixed.append(("RULES", rules))
-    pk.fixed.append(("STATE", S.describe(st, store.trackers(pid))))
+    cfg = store.project(pid)["settings"]
+    pk.fixed.append(("STATE", S.describe(st, store.trackers(pid), carry_map(store.entities(pid)), int(cfg.get("carry_limit", 0) or 0))))
+    recipes = S.recipes_text(st)
+    if recipes:
+        pk.drop.append((2, "RECIPES KNOWN", recipes))
+    found = S.found_text(st)
+    if found:
+        pk.drop.append((1, "FOUND LATELY", found))
     last = path[-1] if path else None
     if last and last.get("prose"):
         paras = [p for p in last["prose"].split("\n") if p.strip()]

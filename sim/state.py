@@ -4,6 +4,7 @@ import copy
 import re
 from dataclasses import dataclass, field
 
+from . import things
 from .models import OPS
 
 CLOCK_DEFAULT = 6
@@ -46,7 +47,9 @@ def normalize_tracker(t: dict, entity_names: list[str], place_names: list[str]) 
             at = str(r.get("at") or r.get("place") or r.get("holder") or "").strip()
             if at and norm(at) not in places and norm(at) not in ents:
                 bad.append(f"item {name}: unknown holder {at}")
-            items[name] = {"qty": max(1, int(_num(r.get("qty", 1), 1))), "at": at, "note": str(r.get("note") or "")}
+            items[name] = {"qty": max(1, int(_num(r.get("qty", 1), 1))), "at": at, "note": str(r.get("note") or ""),
+                           "props": things.clean_props({**(r.get("props") if isinstance(r.get("props"), dict) else {}), **{k: r[k] for k in ("condition", "uses", "size", "tags") if k in r}}),
+                           "origin": r.get("origin") if isinstance(r.get("origin"), dict) else {"how": "start"}, "bound_to": str(r.get("bound_to") or "")}
         out["start"] = items
     elif kind == "meter":
         lo, hi = _num(t.get("min"), 0), _num(t.get("max"), 10)
@@ -98,7 +101,9 @@ def normalize_tracker(t: dict, entity_names: list[str], place_names: list[str]) 
 def initial_state(trackers: list[dict], entities: list[dict], world: dict) -> dict:
     return {"time": str(world.get("start_time") or ""),
             "trackers": {t["id"]: copy.deepcopy(t.get("start")) for t in trackers},
-            "entities": {e["name"]: {"alive": bool(e.get("alive", True)), "status": str(e.get("status") or "")} for e in entities if e["kind"] == "character"}}
+            "entities": {e["name"]: {"alive": bool(e.get("alive", True)), "status": str(e.get("status") or ""), "skills": [str(x) for x in (e.get("skills") or [])][:things.MAX_SKILLS]}
+                         for e in entities if e["kind"] == "character"},
+            "world_add": [], "recipes": {}}
 
 
 def validate_setup(trackers: list[dict], entities: list[dict]) -> list[str]:
@@ -131,14 +136,14 @@ def pressure(state: dict, trackers: list[dict]) -> list[dict]:
     return out
 
 
-def describe(state: dict, trackers: list[dict]) -> str:
-    """The state as compact text for a prompt."""
+def describe(state: dict, trackers: list[dict], carry: dict | None = None, carry_default: int = 0) -> str:
+    """The state as compact text for a prompt. Things are grouped by holder; `carry` (limits per person, 0 = none) adds the carrying space."""
     lines = [f"Story time: {state.get('time') or 'unknown'}"]
     for t in trackers:
         v = state["trackers"].get(t["id"])
         k = t["kind"]
         if k == "items":
-            body = "; ".join(f"{n} x{i['qty']}" + (f" ({i['at']})" if i.get("at") else "") for n, i in (v or {}).items()) or "none"
+            body = _items_text(v or {}, state, carry or {}, carry_default)
         elif k == "meter":
             body = f"{v:g}/{t.get('max', 10):g} {t.get('unit', '')}".strip() + (f" [{t.get('owner')}]" if t.get("owner") else "")
         elif k == "clock":
@@ -154,8 +159,38 @@ def describe(state: dict, trackers: list[dict]) -> str:
         lines.append(f"[{t['name']}] ({k}) {body}")
     ents = state.get("entities") or {}
     if ents:
-        lines.append("People: " + "; ".join(f"{n} ({'alive' if e['alive'] else 'DEAD'}{', ' + e['status'] if e.get('status') else ''})" for n, e in ents.items()))
+        lines.append("People: " + "; ".join(f"{n} ({'alive' if e['alive'] else 'DEAD'}{', ' + e['status'] if e.get('status') else ''}{', skilled in ' + ', '.join(e['skills']) if e.get('skills') else ''})" for n, e in ents.items()))
     return "\n".join(lines)
+
+
+def _items_text(inv: dict, state: dict, carry: dict, carry_default: int) -> str:
+    groups: dict[str, list[str]] = {}
+    for n, i in inv.items():
+        groups.setdefault(i.get("at") or "nowhere", []).append(things.thing_text(n, i))
+    people = state.get("entities") or {}
+    out = []
+    for holder, rows in groups.items():
+        if holder in people:
+            lim = int(carry.get(holder, carry_default) or 0)
+            used = sum(int(i.get("qty", 1)) * things.props(i)["size"] for i in inv.values() if i.get("at") == holder)
+            out.append(f"{holder} carries" + (f" ({used}/{lim})" if lim else "") + ": " + "; ".join(rows))
+        else:
+            out.append(f"at {holder}: " + "; ".join(rows))
+    return " | ".join(out) or "none"
+
+
+def recipes_text(state: dict) -> str:
+    rows = []
+    for n, r in (state.get("recipes") or {}).items():
+        bits = [f"needs {', '.join(r['needs'])}" if r.get("needs") else "", f"tools {', '.join(r['tools'])}" if r.get("tools") else "", f"skill {r['skill']}" if r.get("skill") else "",
+                f"known by {', '.join(r['learned_by'])}" if r.get("learned_by") else ""]
+        rows.append(f"- {n}: " + "; ".join(b for b in bits if b))
+    return "\n".join(rows)
+
+
+def found_text(state: dict, last: int = 6) -> str:
+    rows = (state.get("world_add") or [])[-last:]
+    return "\n".join(f"- {w['kind']} {w['name']}" + (f" at {w['where']}" if w.get("where") else "") + (f": {w['text']}" if w.get("text") else "") for w in rows)
 
 
 # ── changing the state ────────────────────────────────────────────────────────
@@ -168,6 +203,20 @@ class Ctx:
     exists_text: str = ""
     allow_death: bool = True
     place_text: dict = field(default_factory=dict)
+    rolls: list = field(default_factory=list)            # this chapter's resolved acts (each with kind, tier, who)
+    fired: list = field(default_factory=list)            # texts of the instructions happening now
+    dice_on: bool = True
+    carry: dict = field(default_factory=dict)            # carrying limit per person (size units); a missing person uses carry_default, 0 = no limit
+    carry_default: int = 0
+    chapter: int = 0
+    used_rolls: set = field(default_factory=set)
+    removed: set = field(default_factory=set)            # things already used up by an earlier operation of this chapter
+    counts: dict = field(default_factory=lambda: {"find": 0, "make": 0, "skill": 0})
+    undo: list = field(default_factory=list)
+
+    def pop_undo(self) -> list:
+        out, self.undo = self.undo, []
+        return out
 
 
 def _toks(s: str) -> set[str]:
@@ -223,13 +272,29 @@ def apply_ops(state: dict, ops: list, ctx: Ctx) -> tuple[dict, list[dict], list[
     dropped: list[dict] = []
     ents = {norm(n): n for n in ctx.entity_names}
     places = {norm(n): n for n in ctx.place_names}
+    st.setdefault("world_add", [])
+    st.setdefault("recipes", {})
+    for w in st["world_add"]:
+        if w.get("kind") == "place":
+            places[norm(w["name"])] = w["name"]
     removed: set[str] = set()
+    ctx.removed = removed
+    ctx.undo = []
 
     def drop(op, why):
         dropped.append({"op": op.op, "target": op.target, "why": why})
 
-    def ok(op, text):
-        applied.append({"op": op.op, "text": text, "why": op.why})
+    def ok(op, text, undo=None):
+        row = {"op": op.op, "text": text, "why": op.why}
+        if undo:
+            row["undo"] = undo
+        applied.append(row)
+
+    def snap(tid, key):
+        """Remember a thing as it was before this operation, so the owner can undo it."""
+        prev = (st["trackers"].get(tid) or {}).get(key)
+        if not any(u.get("do") == "put_thing" and u["tracker"] == tid and u["name"] == key for u in ctx.undo):
+            ctx.undo.append({"do": "put_thing", "tracker": tid, "name": key, "entry": copy.deepcopy(prev)})
 
     for op in ops:
         if op.op not in OPS:
@@ -246,6 +311,9 @@ def apply_ops(state: dict, ops: list, ctx: Ctx) -> tuple[dict, list[dict], list[
             drop(op, f"{who} is dead")
             continue
         k = op.op
+        if k in things.NEW_OPS:
+            things.handle(k, op, who, st, ctx, ents, places, drop, ok, snap)
+            continue
         if k.startswith("item_"):
             trk = _find_tracker(ctx, op.tracker or op.name, ("items",))
             if not trk:
@@ -261,34 +329,52 @@ def apply_ops(state: dict, ops: list, ctx: Ctx) -> tuple[dict, list[dict], list[
                 holder = pick(places, op.to) or pick(ents, op.to) or ""
                 crafted = bool(op.parts) and all(norm(p) in removed for p in op.parts)
                 src = pick(places, op.source) or pick(ents, op.source)
-                exists_w = _words(ctx.exists_text) | (_words(ctx.place_text.get(src, "")) if src else set())
+                exists_w = _words(ctx.exists_text) | (_words(ctx.place_text.get(src, "")) if src else set()) | _words(" ".join(f"{w['name']} {w.get('text', '')}" for w in st["world_add"]))
                 item_ok = bool(have) or bool(_words(op.target) & exists_w) or any(norm(op.target) in norm(n) or norm(n) in norm(op.target) for n in inv)
                 src_ok = (not op.source) or bool(src) or bool(_words(op.source) & _words(ctx.exists_text))
                 found = item_ok and src_ok
-                if not (crafted or found):
+                forced = op.kind == "forced"
+                org = (inv[have].get("origin") or {}) if have else {}
+                if have and org.get("chapter") == ctx.chapter and org.get("how") in ("found", "made") and not forced:
+                    drop(op, f"{have} was already added by a find or a make in this chapter")
+                    continue
+                if not (crafted or found or forced):
                     drop(op, "an item can only appear from a known place that holds it, or be made from items used in the same step")
                     continue
+                p = things.clean_props(op.props)
+                if holder in ents.values() and not forced and not things.room_for(st, ctx, holder, qty * p["size"]):
+                    drop(op, f"{holder} cannot carry more")
+                    continue
+                snap(trk["id"], have or op.target)
                 if have:
                     inv[have]["qty"] += qty
                 else:
-                    inv[op.target] = {"qty": qty, "at": holder or src or "", "note": ""}
-                ok(op, f"+{qty} {op.target}")
+                    inv[op.target] = things.new_thing(qty, holder or src or "", "", p, {"how": "made" if crafted else "owner" if forced else "stock", "chapter": ctx.chapter, "by": who or ""})
+                ok(op, f"+{qty} {op.target}", ctx.pop_undo())
             elif k == "item_remove":
                 if not have or inv[have]["qty"] < qty:
                     drop(op, f"{op.target} is not there in that amount")
                     continue
+                snap(trk["id"], have)
                 inv[have]["qty"] -= qty
                 removed.add(norm(have))
                 if inv[have]["qty"] <= 0:
                     del inv[have]
-                ok(op, f"-{qty} {op.target}")
+                ok(op, f"-{qty} {op.target}", ctx.pop_undo())
             else:
                 holder = pick(places, op.to) or pick(ents, op.to)
                 if not have or not holder:
                     drop(op, "the item or the new holder is unknown")
                     continue
+                if inv[have].get("bound_to") and op.kind != "forced":
+                    drop(op, f"{have} is bound to {inv[have]['bound_to']} and stays with them")
+                    continue
+                if holder in ents.values() and norm(inv[have].get("at", "")) != norm(holder) and op.kind != "forced" and not things.room_for(st, ctx, holder, inv[have]["qty"] * things.props(inv[have])["size"]):
+                    drop(op, f"{holder} cannot carry more")
+                    continue
+                snap(trk["id"], have)
                 inv[have]["at"] = holder
-                ok(op, f"{op.target} now at {holder}")
+                ok(op, f"{op.target} now at {holder}", ctx.pop_undo())
         elif k in ("meter_set", "meter_change"):
             trk = _find_tracker(ctx, op.tracker or op.name, ("meter",), (op.target, op.who))
             if not trk:

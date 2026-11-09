@@ -11,7 +11,8 @@ BEATS = ("escalate", "setback", "discovery", "respite", "choice", "reversal", "r
 DIFFICULTY = ("easy", "normal", "hard")
 RISKS = ("low", "medium", "high")
 OPS = ("item_add", "item_remove", "item_move", "meter_set", "meter_change", "clock_advance", "clock_set", "relation_change", "move", "lock", "unlock", "learn", "flag_set", "entity_status",
-       "entity_dies")
+       "entity_dies", "discover", "craft", "item_give", "item_take", "item_use", "item_change", "skill_learn")
+ACT_KINDS = ("search", "make", "use", "persuade", "take", "fight", "move", "learn", "other")
 
 
 def _num(v):
@@ -50,6 +51,8 @@ class WorldOut(M):
     tone: Str = ""
     pacing: Str = ""
     exists: Str = ""                 # what exists in this world, as free text: the stock list, the evidence, the staff, the money
+    craft: Str = ""                  # what can and cannot be made or found here (limits of technology, magic, money)
+    goal: Str = ""                   # what the story is about: what the people must achieve or avoid, and what happens if they fail
     start_scene: Str = ""
     start_time: Str = ""
     title: Str = ""
@@ -69,6 +72,7 @@ class EntityOut(M):
     connects_to: StrList = []
     relations: dict[str, str] = {}
     member_of: Str = ""
+    skills: StrList = []             # two to four things this person is good at, as plain phrases
 
 
 class CastOut(M):
@@ -119,12 +123,23 @@ class RulesOut(M):
 
 # ── a chapter ─────────────────────────────────────────────────────────────────
 
+class CraftIn(M):
+    makes: Str = ""                  # what the person tries to make
+    parts: StrList = []              # things used up
+    tools: StrList = []              # things needed but not used up
+    skill: Str = ""                  # what the person would need to know
+    reasoning: Str = ""              # why this is possible with what they hold and know
+
+
 class RiskIn(M):
     who: Str = ""
     act: Str
     stats: StrList = []              # names of meter / relation trackers that help or hurt this act
     items: StrList = []              # items that are being used
     difficulty: Str = "normal"
+    kind: Str = "other"              # search, make, use, persuade, take, fight, move, learn, other
+    target: Str = ""                 # the person an act of persuading or taking is aimed at
+    craft: CraftIn | None = None
 
 
 class ChapterPlan(M):
@@ -154,6 +169,11 @@ class Op(M):
     why: Str = ""
     kind: Str = ""
     name: Str = ""
+    where: Str = ""                  # discover: the place it is found
+    text: Str = ""                   # discover: what a clue says, what a place is like
+    tools: StrList = []              # craft: needed, not used up
+    skill: Str = ""                  # craft, discover recipe, skill_learn
+    props: dict = {}                 # item_add, craft, discover: condition, uses, size, tags
 
 
 class DeltaOut(M):

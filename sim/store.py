@@ -35,13 +35,14 @@ CREATE TABLE IF NOT EXISTS sim_templates(id TEXT PRIMARY KEY, name TEXT, data TE
 TABLES = ("sim_world", "sim_entities", "sim_trackers", "sim_guidelines", "sim_directives", "sim_chapters", "sim_facts", "sim_threads", "sim_runs")
 
 DEFAULT_SETTINGS = {"difficulty": "fair", "dice": True, "chapter_words": 350, "deep": False, "auto_images": False, "image_model": "", "panel_shape": "wide", "captions": True,
-                    "seed": 7, "template_id": "", "rules_version": 1, "thinking": "balanced", "content": "unfiltered"}
+                    "seed": 7, "template_id": "", "rules_version": 1, "thinking": "balanced", "content": "unfiltered", "carry_limit": 8}
 DIFFICULTIES = ("gentle", "fair", "brutal")
 SHAPES = ("wide", "tall")
-GROUPS = ("hard", "world", "tone", "style")
+GROUPS = ("hard", "world", "tone", "style", "craft")
 ENTITY_KINDS = ("character", "place", "group")
 TRACKER_KINDS = ("items", "meter", "clock", "relation", "location", "knowledge", "flag")
-DIRECTIVE_KINDS = ("event", "constraint", "twist", "steer")
+DIRECTIVE_KINDS = ("event", "constraint", "twist", "steer", "grant", "take", "unbind")
+THING_DIRECTIVES = ("grant", "take", "unbind")
 
 
 class SimError(ValueError):
@@ -106,6 +107,7 @@ def save_project(pid: str, **f) -> dict:
         if st["panel_shape"] not in SHAPES:
             raise SimError("panel shape must be wide or tall")
         st["chapter_words"] = max(150, min(900, int(st["chapter_words"])))
+        st["carry_limit"] = max(0, min(40, int(st.get("carry_limit", 8) or 0)))
         f["settings"] = db.jdump(st)
     f["updated_at"] = time.time()
     db.ex(f"UPDATE sim_projects SET {', '.join(k + '=?' for k in f)} WHERE id=?", (*f.values(), pid))
@@ -281,7 +283,7 @@ def save_guideline(pid: str, g: dict) -> dict:
     ensure()
     grp, text = g.get("grp", "hard"), str(g.get("text", "")).strip()
     if grp not in GROUPS:
-        raise SimError("group must be hard, world, tone or style")
+        raise SimError("group must be hard, world, tone, style or craft")
     if not text:
         raise SimError("write the rule")
     gid = g.get("id") or new_id("gl", text)
@@ -321,7 +323,7 @@ def save_directive(pid: str, d: dict) -> dict:
     ensure()
     kind, text = d.get("kind", "event"), str(d.get("text", "")).strip()
     if kind not in DIRECTIVE_KINDS:
-        raise SimError("kind must be event, constraint, twist or steer")
+        raise SimError("kind must be event, constraint, twist, steer, grant, take or unbind")
     if not text:
         raise SimError("write the instruction")
     timing = dict(d.get("timing") or {"mode": "next"})
@@ -332,6 +334,12 @@ def save_directive(pid: str, d: dict) -> dict:
         timing["chapters"] = max(1, int(timing.get("chapters", 1)))
         if "from" not in timing:
             timing["from"] = len(path(pid))
+    if kind in THING_DIRECTIVES:
+        th = timing.get("thing") or {}
+        if not str(th.get("item", "")).strip():
+            raise SimError("say which thing")
+        if kind == "grant" and not str(th.get("to", "")).strip():
+            raise SimError("say who gets it")
     if mode in ("when", "story_time") and not (timing.get("condition") or timing.get("tracker") or timing.get("at")):
         raise SimError("say when it should happen")
     did = d.get("id") or new_id("dr", text)
