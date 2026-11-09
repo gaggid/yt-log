@@ -5,6 +5,7 @@ reach (views in the first 7 days), retention (average share of the video watched
 A component with no data is left out and the others renormalised (the grade is then `partial`). Medians, not averages: Shorts views are very uneven."""
 import statistics
 import time
+from datetime import datetime, timedelta, timezone
 
 from youtube import store as ytstore, sync
 
@@ -17,6 +18,18 @@ LABEL_MIN = 8                       # graded videos before labels use percentile
 WINNER_ABS, FLOP_ABS = 62.0, 38.0   # labels before there are enough graded videos
 WINNER_REACH = 3.0                  # a winner at or above this reach index earns sequels
 MIN_VIEWS_RATE = 30                 # engagement and growth need this many views to mean anything
+IST = timezone(timedelta(hours=5, minutes=30))
+LEARN_FROM_DEFAULT = datetime(2026, 11, 1, tzinfo=IST).timestamp()   # owner rule: nothing published before 1 Nov 2026 is learned from
+
+
+def learn_from() -> float:
+    """Videos published before this moment are ignored by every part of the loop (baseline, grades, lifts, Playbook, bandit, sequels, comments, tags). Owner-set; default 1 Nov 2026 IST."""
+    v = store.kv("learn_from")
+    return float(v) if v is not None else LEARN_FROM_DEFAULT
+
+
+def in_window(v: dict) -> bool:
+    return (v.get("published_at") or 0) >= learn_from()
 
 
 def video_metrics(v: dict, days: list[dict], now: float | None = None) -> dict:
@@ -44,7 +57,7 @@ def reference_videos(now: float | None = None) -> list[tuple[dict, dict]]:
     """[(video, metrics)] for the channel's shorts that have daily numbers: the sample every baseline is a median of."""
     out = []
     for v in ytstore.videos():
-        if v["duration_s"] and v["duration_s"] > SHORT_MAX_S:
+        if (v["duration_s"] and v["duration_s"] > SHORT_MAX_S) or not in_window(v):
             continue
         days = ytstore.days(v["video_id"])
         if days:
@@ -128,7 +141,7 @@ def refresh(now: float | None = None) -> dict:
     for o in store.outcomes():
         l = links.get(o["idea_id"])
         v = vids.get(l["video_id"]) if l else None
-        if not v:
+        if not v or not in_window(v):
             continue
         m = video_metrics(v, ytstore.days(v["video_id"]), now)
         g = grade(m, base)

@@ -1,4 +1,6 @@
 """/api/feedback: how the channel's results steer the idea factory. Reading and regrading are instant; the model steps run as the one background ideas job (the gateway serves one request at a time)."""
+from datetime import datetime
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -38,6 +40,21 @@ def _origins() -> dict:
         k = (i.get("origin") or "generated").split(":")[0]
         out[k] = out.get(k, 0) + 1
     return out
+
+
+class LearnFrom(BaseModel):
+    date: str   # YYYY-MM-DD, India time
+
+
+@router.post("/learn-from")
+async def set_learn_from(body: LearnFrom):
+    """Change the first day the loop learns from (default 1 Nov 2026). Videos published before it are ignored everywhere."""
+    try:
+        d = datetime.strptime(body.date.strip(), "%Y-%m-%d").replace(tzinfo=outcomes.IST)
+    except ValueError:
+        raise HTTPException(400, "date must look like 2026-11-01")
+    store.set_kv("learn_from", d.timestamp())
+    return {"result": outcomes.refresh(), **await overview()}
 
 
 @router.post("/refresh")

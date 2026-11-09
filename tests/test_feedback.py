@@ -40,6 +40,7 @@ class Scripted:
 def data(env):
     """Twelve shorts on the channel, each with 20 daily rows; the first ten linked to ideas with different looks and tones."""
     now = time.time()
+    fbstore.set_kv("learn_from", 0)   # the fixture videos are recent but the real default cut-off (1 Nov 2026) would hide them
     vids, ideas = [], []
     for i, d in enumerate(PER_DAY):
         vid = f"VID{i:08d}"[-11:].ljust(11, "x")
@@ -443,3 +444,30 @@ def test_with_perspective_lenses_the_territory_plan_is_a_preference(data):
     graded(data)
     assert "prefer these territories" in bandit.territory_block(3, True) and "write idea 1 in the first territory" in bandit.territory_block(3)
     assert "prefer these territories" in ideas_mod.feedback_extra(3, True)
+
+
+def test_nothing_before_the_learning_start_is_used(data):
+    """Owner rule: videos published before 1 Nov 2026 (default) are ignored by baseline, grades, rows, tags and comment ideas."""
+    assert len(graded(data)) >= 10
+    cut = data["vids"][5]["published_at"]
+    fbstore.set_kv("learn_from", cut)
+    outcomes.refresh(data["now"])
+    rows = outcomes.graded_rows(data["now"])
+    assert rows and all(r["published_at"] >= cut for r in rows)
+    assert len(rows) < 10
+    assert outcomes.baseline(now=data["now"])["n"] == len(rows)
+    assert all(outcomes.in_window(v) for v, _ in outcomes.reference_videos(data["now"]))
+    fbstore.set_kv("learn_from", None)
+    assert outcomes.learn_from() == outcomes.LEARN_FROM_DEFAULT
+    assert datetime.fromtimestamp(outcomes.learn_from(), outcomes.IST).strftime("%Y-%m-%d %H:%M") == "2026-11-01 00:00"
+
+
+def test_weekly_draft_when_a_week_old_and_something_new_is_graded(data):
+    graded(data)
+    n = len(outcomes.graded_rows(data["now"]))
+    pb = fbstore.add_playbook({"based_on": {"graded": n - 1}, "do_more": [], "do_less": []})
+    fbstore.set_playbook_status(pb["id"], "archived")
+    cfg = {"playbook_min_new": 5}
+    assert not generate.due_for_draft(cfg), "one new video, fresh Playbook: not due"
+    db.ex("UPDATE playbooks SET created_at=? WHERE id=?", (time.time() - 8 * 86400, pb["id"]))
+    assert generate.due_for_draft(cfg), "a week old and a new graded video: weekly report is due"

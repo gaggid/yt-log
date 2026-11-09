@@ -63,7 +63,8 @@ function controls() {
 function tiles() {
   const b = D.baseline, c = D.calibration;
   const t = (label, v, sub) => `<div class="card pad" style="min-width:140px"><div class="mute small">${label}</div><div style="font-size:22px;font-weight:700">${v}</div>${sub ? `<div class="mute small">${sub}</div>` : ''}</div>`;
-  return `<div class="row" style="gap:10px;flex-wrap:wrap">${t('Graded shorts', D.rows.length, `${D.n_app} by the app, ${D.n_history} older`)}${t('Winners / flops', D.winners + ' / ' + D.flops, 'top and bottom quarter')}
+  const lf = new Date(D.learn_from * 1000).toLocaleDateString('en-IN', {day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata'});
+  return `<div class="mute small mb-s">Learning only from shorts published on or after <b>${lf}</b> <a href="#" id="lf-change">change</a></div><div class="row" style="gap:10px;flex-wrap:wrap">${t('Graded shorts', D.rows.length, `${D.n_app} by the app, ${D.n_history} older`)}${t('Winners / flops', D.winners + ' / ' + D.flops, 'top and bottom quarter')}
     ${t('Typical 7-day views', num(b.reach || 0), `median of ${b.n} shorts`)}${t('Score predicts results?', c.total === null || c.total === undefined ? 'not yet' : c.total.toFixed(2), c.total === null || c.total === undefined ? `needs 5 ideas, has ${c.n}` : '1 = perfectly, 0 = not at all')}</div>`;
 }
 
@@ -148,14 +149,47 @@ function videosTable() {
       <td style="text-align:right">${num(r.v7)}</td><td style="text-align:right">${r.pct === null || r.pct === undefined ? '–' : r.pct.toFixed(0) + '%'}</td><td>${r.features && r.features.origin && r.features.origin !== 'generated' ? `<span class="badge">${esc(r.features.origin.split(':')[0])}</span>` : ''}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
+function help() {
+  let open = false;
+  try { open = localStorage.getItem('learn-help') === '1'; } catch (e) { /* storage may be blocked */ }
+  return `<details class="card pad mb-s" id="lr-help" ${open ? 'open' : ''}><summary><b>How this page works</b> <span class="mute small">what it learns, how to use it</span></summary>
+    <div class="small mt-s" style="line-height:1.55">
+    <p><b>What it is.</b> The loop that lets your channel's real results steer the idea factory. It grades every short, finds what separates winners from flops, writes that down as a <b>Playbook</b> for you to review, and only an approved Playbook changes how ideas, titles and scripts are made.</p>
+    <p><b>What it learns from.</b> Only shorts published on or after the date at the top (1 Nov 2026 unless you change it). Anything older is ignored everywhere. A short is graded after its first 7 days are complete plus 2 days of buffer, so new shorts show up here about 9 days after upload.</p>
+    <p><b>The grade (0 to 100).</b> Each short is compared with your channel's own typical short (the median, because Shorts views are very uneven): <b>reach</b> 40% (views in 7 days), <b>retention</b> 30% (share of the video watched), <b>engagement</b> 15% (likes, comments, shares per 1,000 views) and <b>growth</b> 15% (subscribers per 1,000 views). 50 means typical. The top quarter are <b>winners</b>, the bottom quarter <b>flops</b> (once 8 are graded). It needs 5 graded shorts before it trusts the baseline.</p>
+    <p><b>Buttons.</b><br>
+    <b>Regrade</b>: recompute every grade from the numbers already pulled (no model).<br>
+    <b>Tag subjects</b>: puts each idea and short into a subject territory (history, science, crime and so on) so subjects can be compared.<br>
+    <b>Draft a Playbook</b>: the model writes what to do more and less, each point citing real videos. Needs 6 graded shorts. A draft changes nothing.<br>
+    <b>Sequels of winners</b>: new ideas from shorts at 3 times your typical reach or more.<br>
+    <b>Ideas from comments</b>: new ideas from what viewers ask in the top comments.<br>
+    <b>Run the whole cycle</b>: all of the above, then checks the new ideas. New ideas still go through the normal duplicate check and rating.</p>
+    <p><b>Your part, step by step.</b><br>
+    1. Wait until shorts have grades (the tiles show the count).<br>
+    2. Press <b>Tag subjects</b>, then <b>Draft a Playbook</b>.<br>
+    3. Read the draft. Untick any point you disagree with, then <b>Approve</b>. <b>Reject</b> throws it away. A new approved version replaces the old one.<br>
+    4. Keep <b>Use the Playbook in idea generation</b> ticked. Now ideas, ratings, upload titles and scripts get the approved points. Untick it to go back to the old behaviour at once.<br>
+    5. Add <b>pinned principles</b> for rules that must never be overridden (for example "every fact must be real"). They apply whenever the switch is on.</p>
+    <p><b>Explore 30 to 40%.</b> That share of choices (subject, picture style, tone) deliberately takes the least-tried option, so new things get a chance. The rest favour what worked. A choice with 4 or more flops and no winner rests for 14 days. Each idea remembers whether it was an explore or exploit choice, so the <b>Experiments</b> block can show whether trying new things pays.</p>
+    <p><b>Daily feedback cycle.</b> When ticked, the autopilot grades, tags, drafts a Playbook (when 3 or more new shorts are graded, or at least weekly when something new is graded) and proposes ideas. It never approves anything.</p>
+    <p><b>The blocks below.</b><br>
+    <b>Playbook</b>: drafts to review, the approved one in use, and what changed against the last version.<br>
+    <b>What separates winners from flops</b>: for each feature, a lift (1.0 = typical, 2.0 = twice as good) shrunk for small samples. Groups under 3 shorts are hidden. Treat anything under 6 shorts as a hint.<br>
+    <b>Does our idea score predict results?</b>: compares your idea score with the real grade. If it does not, the page suggests a better approval threshold with an Apply button.<br>
+    <b>Best time to upload</b>, <b>Experiments</b> (explore against exploit) and <b>Graded shorts</b> (every graded short with its grade).</p>
+    <p class="mute">Small numbers lie: with few shorts everything here is an early signal. It gets better every week as more shorts are graded.</p></div></details>`;
+}
+
 function draw() {
-  host.innerHTML = `${controls()}<div class="mt">${tiles()}</div>${playbooks()}${lifts()}${calibration()}${hours()}${experiments()}${videosTable()}`;
+  host.innerHTML = `${help()}${controls()}<div class="mt">${tiles()}</div>${playbooks()}${lifts()}${calibration()}${hours()}${experiments()}${videosTable()}`;
   const q = id => document.getElementById(id);
+  q('lr-help').ontoggle = e => { try { localStorage.setItem('learn-help', e.target.open ? '1' : '0'); } catch (err) { /* ignore */ } };
   const cfg = patch => act(null, () => api('/shorts/ideas/config', {method: 'PUT', json: patch})).then(load);
   q('lr-use').onchange = e => cfg({use_playbook: e.target.checked});
   q('lr-explore').onchange = e => cfg({explore: parseFloat(e.target.value)});
   q('lr-auto').onchange = e => cfg({auto_feedback: e.target.checked});
   q('lr-refresh').onclick = async e => { await act(e.currentTarget, () => api('/feedback/refresh', {method: 'POST'}), 'Regraded'); load(); };
+  q('lf-change').onclick = async e => { e.preventDefault(); const d = (prompt('Learn only from shorts published on or after (YYYY-MM-DD, India time):', new Date(D.learn_from * 1000 + 19800000).toISOString().slice(0, 10)) || '').trim(); if (!d) return; await act(null, () => api('/feedback/learn-from', {method: 'POST', json: {date: d}}), 'Saved'); load(); };
   q('lr-tag').onclick = e => runJob(e.currentTarget, '/feedback/tag', 'Tagging');
   q('lr-draft').onclick = e => runJob(e.currentTarget, '/feedback/playbook/draft', 'Playbook');
   q('lr-seq').onclick = e => runJob(e.currentTarget, '/feedback/sequels', 'Sequels');

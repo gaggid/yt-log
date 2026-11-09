@@ -1,6 +1,7 @@
 """Model steps of the feedback loop: tag territories, sequels of winners, ideas from viewers' comments, and the daily cycle that runs them. Every new idea is `pending`: the normal checks (duplicates, rating,
 auto-approve at the owner's threshold) still decide whether it is ever made."""
 import re
+import time
 
 from story import llm
 from story.schemas import Str
@@ -12,6 +13,7 @@ from youtube import store as ytstore
 from . import features, outcomes, playbook, store
 
 TAG_BATCH = 25
+WEEK_S = 7 * 86400
 TAG = """[TASK:p4_tag]
 Sort each short-video title or hook into exactly ONE subject territory. The territories:
 {territories}
@@ -78,7 +80,7 @@ async def tag_missing(backend, s: dict | None = None, limit: int = 150) -> dict:
     for iid, terr in got.items():
         db.ex("UPDATE short_ideas SET territory=? WHERE id=?", (terr, iid))
     have = store.video_tags()
-    vids = [v for v in ytstore.videos() if v["video_id"] not in have and (not v["duration_s"] or v["duration_s"] <= outcomes.SHORT_MAX_S)][:limit]
+    vids = [v for v in ytstore.videos() if v["video_id"] not in have and outcomes.in_window(v) and (not v["duration_s"] or v["duration_s"] <= outcomes.SHORT_MAX_S)][:limit]
     gotv = await tag([{"id": v["video_id"], "text": v["title"]} for v in vids], backend, s) if vids else {}
     for vid, terr in gotv.items():
         store.tag_video(vid, terr)
@@ -115,7 +117,7 @@ def clean_comment(t: str) -> str:
 
 
 async def comment_ideas(backend, s: dict | None = None, videos: int = 5, per_video: int = 15, max_new: int = 5) -> list[str]:
-    best = sorted(ytstore.videos(), key=lambda v: -v["views"])
+    best = sorted((v for v in ytstore.videos() if outcomes.in_window(v)), key=lambda v: -v["views"])
     blocks, known = [], set()
     for v in best:
         cs = store.comments(v["video_id"], per_video)
@@ -147,7 +149,8 @@ def due_for_draft(cfg: dict) -> bool:
     if n < playbook.MIN_GRADED:
         return False
     last = pbs[0]["data"].get("based_on", {}).get("graded", 0) if pbs else 0
-    return n - last >= int(cfg.get("playbook_min_new", 3)) or not pbs
+    weekly = bool(pbs) and time.time() - pbs[0]["created_at"] >= WEEK_S and n > last   # the weekly evolution report: at least one draft a week while new videos are graded
+    return n - last >= int(cfg.get("playbook_min_new", 3)) or not pbs or weekly
 
 
 async def run_cycle(s: dict, key: str, progress, cfg: dict | None = None) -> str:
@@ -190,6 +193,6 @@ async def run_cycle(s: dict, key: str, progress, cfg: dict | None = None) -> str
         if kept:
             await ideas_mod.rate(kept, s, key)
         notes.append(f"{len(new_ids)} new ideas ({len(kept)} kept)")
-    store.set_kv("last_cycle", {"at": __import__("time").time(), "notes": notes})
+    store.set_kv("last_cycle", {"at": time.time(), "notes": notes})
     progress(6, 6, "done")
     return "; ".join(notes)

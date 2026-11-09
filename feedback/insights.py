@@ -118,4 +118,4 @@ def overview() -> dict:
     lf = lifts(rows)
     return {"rows": [{k: v for k, v in r.items() if k != "features"} | {"features": r["features"]} for r in rows], "lifts": lf, "best_hours": best_hours(lf), "calibration": calibration(rows),
             "experiments": experiments(rows), "n_app": sum(r["source"] == "app" for r in rows), "n_history": sum(r["source"] == "history" for r in rows),
-            "winners": sum(r["label"] == "winner" for r in rows), "flops": sum(r["label"] == "flop" for r in rows)}
+            "learn_from": outcomes.learn_from(), "winners": sum(r["label"] == "winner" for r in rows), "flops": sum(r["label"] == "flop" for r in rows)}
