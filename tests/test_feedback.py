@@ -258,9 +258,137 @@ def test_a_new_version_replaces_the_approved_one_and_reports_the_change(data):
     changed = playbook_answer(win, flop)
     changed["do_more"] = [{"text": "A brand new rule", "scope": "idea", "evidence": [win]}]
     two = asyncio.run(playbook.draft(Scripted(p4_playbook=changed), S()))
-    assert two["version"] == 2 and two["data"]["changes"]["against"] == 1 and "A brand new rule" in two["data"]["changes"]["added"] and "Say the number in the first line" in two["data"]["changes"]["removed"]
+    assert two["version"] == 2 and two["data"]["changes"]["against"] == 1 and "A brand new rule" in two["data"]["changes"]["added"]
+    texts = [i["text"] for i in two["data"]["do_more"]]
+    assert "Say the number in the first line" in texts and "Say the number in the first line" not in two["data"]["changes"]["removed"], "a lesson in force is carried over, not lost"
     fbstore.set_playbook_status(two["id"], "approved")
     assert [p["status"] for p in fbstore.playbooks()] == ["approved", "archived"] and fbstore.approved_playbook()["version"] == 2
+
+
+# ── memory of earlier lessons ────────────────────────────────────────────────
+
+def memory_states(pb):
+    return {i["text"]: i["memory"]["state"] for k in ("do_more", "do_less") for i in pb["data"][k]}
+
+
+def first_approved(data):
+    win, flop = data["vids"][10]["video_id"], data["vids"][11]["video_id"]
+    graded(data)
+    one = asyncio.run(playbook.draft(Scripted(p4_playbook=playbook_answer(win, flop)), S()))
+    return win, flop, fbstore.set_playbook_status(one["id"], "approved")
+
+
+def test_the_draft_prompt_lists_earlier_lessons_and_a_repeat_is_not_asked_again(data):
+    win, flop, one = first_approved(data)
+    bk = Scripted(p4_playbook=playbook_answer(win, flop))                                    # the model repeats v1 word for word and calls it new
+    with pytest.raises(playbook.NothingNew) as e:
+        asyncio.run(playbook.draft(bk, S()))
+    assert "LESSONS ALREADY REPORTED" in bk.calls[0]["user"] and "L1 [in force]" in bk.calls[0]["user"] and "Say the number in the first line" in bk.calls[0]["user"]
+    assert "nothing new since v1" in str(e.value) and len(fbstore.playbooks()) == 1, "no draft is made"
+    assert fbstore.kv("pb_checked")["graded"] == len(outcomes.graded_rows(data["now"]))
+    assert not generate.due_for_draft({"playbook_min_new": 1}), "the daily cycle does not ask the model again until another video is graded"
+
+
+def test_new_stronger_and_contradicting_lessons_are_tagged_and_the_rest_is_carried(data):
+    win, flop, one = first_approved(data)
+    ans = {"summary": "s", "do_more": [{"text": "Show the payoff object in the very first frame", "scope": "idea", "evidence": [win]},
+                                       {"text": "Say the number in the first line of narration, with proof", "scope": "script", "evidence": [win, flop], "relation": "stronger", "prior": "L2"}],
+           "do_less": [{"text": "Numbered lists with vague promises work after all", "scope": "idea", "evidence": [win], "relation": "contradicts", "prior": "L3"}]}
+    two = asyncio.run(playbook.draft(Scripted(p4_playbook=ans), S()))
+    states = memory_states(two)
+    assert states == {"Show the payoff object in the very first frame": "new", "Say the number in the first line of narration, with proof": "reinforced",
+                      "Numbered lists with vague promises work after all": "replaces", "Open with a why-question on a history subject": "carried"}
+    assert two["data"]["changes"]["counts"] == {"new": 1, "reinforced": 1, "replaces": 1, "known": 0, "carried": 1, "dropped": 0, "off_topic": 0}
+    stronger = next(i for i in two["data"]["do_more"] if i["memory"]["state"] == "reinforced")
+    assert stronger["evidence"] == [win, flop] and stronger["memory"]["of"] == 1 and "Say the number in the first line" == stronger["memory"]["of_text"]
+    assert "Avoid vague numbered lists" in two["data"]["changes"]["removed"] and "Say the number in the first line" in two["data"]["changes"]["removed"], "the replaced wording leaves the Playbook"
+    fbstore.set_playbook_status(two["id"], "approved")
+    assert "Avoid vague numbered lists" not in playbook.learnings_block("idea") and "Numbered lists with vague promises" in playbook.learnings_block("idea")
+
+
+def test_code_catches_a_reworded_repeat_that_the_model_called_new(data):
+    win, flop, one = first_approved(data)
+    ans = {"summary": "s", "do_more": [{"text": "Open with a why question on a history subject!", "scope": "idea", "evidence": [win], "relation": "new"},
+                                       {"text": "Cut the intro card", "scope": "script", "evidence": [win], "relation": "stronger", "prior": "L99"}], "do_less": []}
+    two = asyncio.run(playbook.draft(Scripted(p4_playbook=ans), S()))
+    assert [i["text"] for i in two["data"]["do_more"] if i["memory"]["state"] != "carried"] == ["Cut the intro card"]
+    assert memory_states(two)["Cut the intro card"] == "new", "a prior id that does not exist is not believed"
+    assert two["data"]["changes"]["counts"]["dropped"] == 1
+
+
+def test_a_reworded_lesson_in_the_grey_zone_is_decided_by_the_model_and_same_evidence_is_not_stronger(data):
+    win, flop = data["vids"][10]["video_id"], data["vids"][11]["video_id"]
+    graded(data)
+    first = playbook_answer(win, flop)
+    first["do_less"] = [{"text": "Limit nature animals territory until a stronger hook mechanism is found", "scope": "idea", "evidence": [flop]}]
+    one = asyncio.run(playbook.draft(Scripted(p4_playbook=first), S()))
+    fbstore.set_playbook_status(one["id"], "approved")
+    reworded = "Avoid nature animals territory until a more compelling hook is identified"
+    assert playbook.MATCH_SURE > playbook.similarity(reworded, "Limit nature animals territory until a stronger hook mechanism is found") >= playbook.ASK_AT
+    ans = {"summary": "s", "do_more": [{"text": "Open with a why-question on a history subject, always", "scope": "idea", "evidence": [win], "relation": "stronger", "prior": "L1"},
+                                       {"text": "Another truly new thing", "scope": "idea", "evidence": [win]}],
+           "do_less": [{"text": reworded, "scope": "idea", "evidence": [flop]}]}
+    bk = Scripted(p4_playbook=ans, p4_playbook_same=lambda u: {"results": [{"id": playbook.item_key(reworded), "same_as": "L3"}]})
+    two = asyncio.run(playbook.draft(bk, S()))
+    assert [c["task"] for c in bk.calls] == ["p4_playbook", "p4_playbook_same"] and reworded in bk.calls[1]["user"]
+    c = two["data"]["changes"]["counts"]
+    assert c["new"] == 1 and c["reinforced"] == 0 and c["dropped"] == 2 and c["carried"] == 3, "the reworded lesson and the 'stronger' one with the same videos are repeats"
+    assert reworded not in [i["text"] for i in two["data"]["do_less"]]
+    failed = Scripted(p4_playbook=ans)                                                                        # no answer for the comparison: the draft still works
+    c = asyncio.run(playbook.draft(failed, S()))["data"]["changes"]["counts"]
+    assert c["new"] == 1 and c["known"] == 1, "the reworded one stays; 'Another truly new thing' is already in the pending draft"
+
+
+def test_upload_time_lessons_are_left_out_and_old_ones_are_not_carried(data):
+    win, flop = data["vids"][10]["video_id"], data["vids"][11]["video_id"]
+    graded(data)
+    ans = playbook_answer(win, flop)
+    ans["do_more"] += [{"text": "Target Wednesday and Friday as the release days", "scope": "idea", "evidence": [win]}, {"text": "Schedule uploads in the morning for reach", "scope": "idea", "evidence": [win]}]
+    ans["do_less"] += [{"text": "Reduce afternoon and evening slots", "scope": "idea", "evidence": [flop]}, {"text": "Fewer night scenes in the pictures", "scope": "idea", "evidence": [flop]}]
+    one = asyncio.run(playbook.draft(Scripted(p4_playbook=ans), S()))
+    texts = [i["text"] for k in ("do_more", "do_less") for i in one["data"][k]]
+    assert one["data"]["changes"]["counts"]["off_topic"] == 3 and "Fewer night scenes in the pictures" in texts and not any("Wednesday" in t or "morning" in t or "afternoon" in t for t in texts)
+    assert all(playbook.off_topic(t) for t in ("Minimize uploads on Mondays and Thursdays", "Reduce 'afternoon' and 'evening' slots unless the content is exceptionally good"))
+    assert not playbook.off_topic("Open with the night-time scene") and not playbook.off_topic("Use a numbered list of five items")
+    d = one["data"]; d["do_more"].append({"key": "old", "text": "Post on Friday evenings", "scope": "idea", "evidence": [win]}); fbstore.save_playbook_data(one["id"], d)
+    fbstore.set_playbook_status(one["id"], "approved")
+    two = asyncio.run(playbook.draft(Scripted(p4_playbook={"summary": "s", "do_more": [{"text": "A fresh pattern", "scope": "idea", "evidence": [win]}], "do_less": []}), S()))
+    assert "Post on Friday evenings" not in [i["text"] for i in two["data"]["do_more"]]
+
+
+def test_a_draft_older_than_the_learning_window_is_flagged_stale(data):
+    from feedback import api as fbapi
+    win, flop = data["vids"][10]["video_id"], data["vids"][11]["video_id"]
+    graded(data)
+    pb = asyncio.run(playbook.draft(Scripted(p4_playbook=playbook_answer(win, flop)), S()))
+    assert fbapi._pb_view(pb)["stale"] is False
+    fbstore.set_kv("learn_from", time.time())
+    assert fbapi._pb_view(fbstore.playbook(pb["id"]))["stale"] is True
+    fbstore.set_playbook_status(pb["id"], "approved")
+    assert fbapi._pb_view(fbstore.playbook(pb["id"]))["stale"] is False, "only a draft is flagged"
+
+
+def test_a_lesson_from_a_rejected_draft_comes_back_tagged_and_a_switched_off_one_stays_off(data):
+    win, flop = data["vids"][10]["video_id"], data["vids"][11]["video_id"]
+    graded(data)
+    one = asyncio.run(playbook.draft(Scripted(p4_playbook=playbook_answer(win, flop)), S()))
+    off = one["data"]["do_more"][0]["key"]
+    playbook.toggle_item(one["id"], off)
+    fbstore.set_playbook_status(one["id"], "rejected")
+    ans = {"summary": "s", "do_more": [{"text": "Open with a why-question on a history subject", "scope": "idea", "evidence": [win]},
+                                       {"text": "Add a second, truly new idea", "scope": "idea", "evidence": [win]}], "do_less": []}
+    two = asyncio.run(playbook.draft(Scripted(p4_playbook=ans), S()))
+    st = {i["text"]: i["memory"] for i in two["data"]["do_more"]}
+    assert st["Open with a why-question on a history subject"] == {"state": "known", "of": 1, "status": "rejected"} and st["Add a second, truly new idea"]["state"] == "new"
+    assert two["data"]["disabled"] == [off], "the owner's off switch is remembered"
+    assert "why-question" not in "".join(playbook._items({**two, "status": "approved"}, "idea", "do_more"))
+
+
+def test_the_playbook_version_is_kept_with_an_idea_and_compared_in_lifts(data):
+    assert features.freeze({"hook": "h"}, {}, {"playbook": 3, "style": "exploit"})["playbook"] == 3
+    f = features.freeze({"hook": "h"}, {}, {"style": "exploit"})
+    assert f["playbook"] == 0 and f["choices"] == {"territory": "model", "style": "exploit"}
+    assert insights.APP_DIMS["playbook"]({"playbook": 2}) == ["v2"] and insights.APP_DIMS["playbook"]({"playbook": 0}) == ["no Playbook"] and insights.APP_DIMS["playbook"]({}) == []
 
 
 def test_rating_anchors_show_past_scores_against_real_grades(data):

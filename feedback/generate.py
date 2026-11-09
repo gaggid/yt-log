@@ -148,7 +148,10 @@ def due_for_draft(cfg: dict) -> bool:
     n = len(outcomes.graded_rows())
     if n < playbook.MIN_GRADED:
         return False
-    last = pbs[0]["data"].get("based_on", {}).get("graded", 0) if pbs else 0
+    checked = store.kv("pb_checked", None)
+    if checked and n <= checked.get("graded", 0):
+        return False                                                                  # the last look found nothing new and no video was graded since
+    last =pbs[0]["data"].get("based_on", {}).get("graded", 0) if pbs else 0
     weekly = bool(pbs) and time.time() - pbs[0]["created_at"] >= WEEK_S and n > last   # the weekly evolution report: at least one draft a week while new videos are graded
     return n - last >= int(cfg.get("playbook_min_new", 3)) or not pbs or weekly
 
@@ -173,6 +176,8 @@ async def run_cycle(s: dict, key: str, progress, cfg: dict | None = None) -> str
         if due_for_draft(cfg):
             pb = await playbook.draft(backend, s)
             notes.append(f"Playbook v{pb['version']} drafted: waiting for your review")
+    except playbook.NothingNew as e:
+        notes.append(f"Playbook: {e}")
     except Exception as e:  # noqa: BLE001
         notes.append(f"Playbook failed: {e}")
     new_ids: list[str] = []

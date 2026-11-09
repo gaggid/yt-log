@@ -16,6 +16,7 @@ Plan: [PLAN_feedback_loop.md](PLAN_feedback_loop.md). A task is ticked when it i
 ## B. Playbook and feeding
 
 - [x] B1 Playbook synthesis (`feedback/playbook.py`, task `p4_playbook`): items with scope + evidence, uncited dropped
+- [x] B1b Lesson memory: the draft sees every earlier lesson (`ledger`, ids L1..), items come back `new`/`stronger`/`contradicts`; code settles repeats by word overlap, the model judges the grey zone (`p4_playbook_same`); lessons in force are carried over (`memory.state` carried), "stronger" needs a new video id, upload day/hour lessons are dropped (`off_topic`), nothing new = `NothingNew` (no draft, `pb_checked` stops the daily retry), switched-off items stay off, drafts older than the learning window are `stale`, the Playbook version in use is frozen with each idea (`features.playbook`, lift dimension "Playbook version in use")
 - [x] B2 Versions draft / approved / rejected / archived; approve, reject, per-item disable, pins (principles)
 - [x] B3 Config: `use_playbook`, `explore` (clamped 0.30-0.40), `auto_feedback`, `playbook_min_new`, `tone_arms`
 - [x] B4 Learnings block in the generation prompt (`ideas.feedback_extra`): winners, flops, do more, do less, pins; approved only

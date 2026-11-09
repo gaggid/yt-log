@@ -81,7 +81,10 @@ def freeze(idea: dict, short: dict, choices: dict | None = None) -> dict:
     """The features of an idea as it was made (kept in `idea_outcomes`, so later edits do not blur the picture)."""
     st = (short or {}).get("settings", {}) or {}
     sb = idea.get("score_breakdown") or {}
+    choices = dict(choices or {})
+    pb = int(choices.pop("playbook", 0) or 0)                                  # the Playbook version in use when the short was queued (0 = none)
     return {
+        "playbook": pb,
         "mechanisms": list(idea.get("mechanisms") or []), "mech_pair": mech_pair(idea.get("mechanisms")), **title_features(idea.get("hook", "")), "hook": idea.get("hook", ""),
         "territory": territory_of(idea.get("territory", "")), "style": st.get("visual_style") or idea.get("style", ""), "tone": st.get("tone_id", ""),
         "target_s": st.get("target_s") or 0, "length": length_band(st.get("target_s")), "language": st.get("language", ""), "score": idea.get("engagement_score") or 0,

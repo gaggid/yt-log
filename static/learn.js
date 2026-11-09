@@ -3,13 +3,15 @@
 const num = n => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e4 ? Math.round(n / 1e3) + 'k' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(Math.round(n || 0));
 const when = ts => ts ? new Date(ts * 1000).toLocaleDateString(undefined, {day: 'numeric', month: 'short'}) : '';
 const DIMS = [['hook_type', 'Hook shape'], ['territory', 'Subject territory'], ['mechanism', 'Attention mechanism'], ['mech_pair', 'Mechanism pair'], ['style', 'Picture style'], ['tone', 'Tone'],
-  ['score_band', 'Idea score'], ['length', 'Length'], ['has_number', 'Number in the hook'], ['hook_len', 'Hook length'], ['origin', 'Where the idea came from']];
+  ['score_band', 'Idea score'], ['length', 'Length'], ['has_number', 'Number in the hook'], ['hook_len', 'Hook length'], ['origin', 'Where the idea came from'], ['playbook', 'Playbook version in use']];
 let D = null, host = null, poll = null;
 
 window.mountLearn = async function (el) {
   host = el;
   host.innerHTML = '<div class="skel"></div>';
   await load();
+  // A job started earlier keeps running on the server after the tab is left: pick up its progress again.
+  try { if ((await api('/shorts/ideas/run')).state === 'running') watch(); } catch (e) { /* no progress line, the job is unaffected */ }
 };
 
 async function load() {
@@ -68,10 +70,22 @@ function tiles() {
     ${t('Typical 7-day views', num(b.reach || 0), `median of ${b.n} shorts`)}${t('Score predicts results?', c.total === null || c.total === undefined ? 'not yet' : c.total.toFixed(2), c.total === null || c.total === undefined ? `needs 5 ideas, has ${c.n}` : '1 = perfectly, 0 = not at all')}</div>`;
 }
 
+function memoryBadge(it) {
+  const m = it.memory;
+  if (!m) return '';
+  const tip = t => t ? ` title="Earlier lesson: ${esc(t)}"` : '';
+  if (m.state === 'new') return badge('good', 'new');
+  if (m.state === 'reinforced') return `<span${tip(m.of_text)}>${badge('info', 'stronger evidence · was v' + m.of)}</span>`;
+  if (m.state === 'replaces') return `<span${tip(m.of_text)}>${badge('error', 'replaces a v' + m.of + ' lesson')}</span>`;
+  if (m.state === 'known') return badge('', 'reported before in v' + m.of + (m.status && m.status !== 'approved' ? ' (' + m.status + ')' : ''));
+  if (m.state === 'carried') return badge('', 'already in force' + (m.of ? ' since v' + m.of : ''));
+  return '';
+}
+
 function itemRow(pb, it, kind) {
   const off = (pb.data.disabled || []).includes(it.key);
   return `<li style="margin:6px 0;${off ? 'opacity:.45;text-decoration:line-through' : ''}"><label class="row" style="gap:8px;align-items:flex-start"><input type="checkbox" data-toggle="${pb.id}" data-key="${esc(it.key)}" ${off ? '' : 'checked'} title="Untick to stop using this item">
-    <span style="flex:1">${esc(it.text)} <span class="badge">${esc(it.scope)}</span> <span class="mute small">${it.evidence.map(e => `<a href="https://youtube.com/shorts/${esc(e)}" target="_blank" rel="noopener">${esc(e.slice(0, 5))}…</a>`).join(' ')}</span></span></label></li>`;
+    <span style="flex:1">${esc(it.text)} <span class="badge">${esc(it.scope)}</span> ${memoryBadge(it)} <span class="mute small">${it.evidence.map(e => `<a href="https://youtube.com/shorts/${esc(e)}" target="_blank" rel="noopener">${esc(e.slice(0, 5))}…</a>`).join(' ')}</span></span></label></li>`;
 }
 
 function playbookCard(pb) {
@@ -80,7 +94,9 @@ function playbookCard(pb) {
   const diff = (ch.added || []).length || (ch.removed || []).length ? `<div class="small mt-s"><b>What changed${ch.against ? ' since v' + ch.against : ''}</b>
     ${(ch.added || []).map(t => `<div style="color:var(--good,#2e9d5b)">+ ${esc(t)}</div>`).join('')}${(ch.removed || []).map(t => `<div style="color:var(--bad,#c0392b)">− ${esc(t)}</div>`).join('')}</div>` : '';
   const btns = pb.status === 'draft' ? `<button class="small primary" data-approve="${pb.id}">Approve: use it</button> <button class="small bad" data-reject="${pb.id}">Reject</button>` : '';
+  const stale = pb.stale ? `<div class="errbox small mt-s"><b>Written from older videos.</b> This draft used shorts published before the learning start date shown above, so it is not what the rule allows to steer the factory. Reject it and draft again once enough newer shorts are graded.</div>` : '';
   return `<div class="card pad mt-s"><div class="row" style="gap:8px"><b>Playbook v${pb.version}</b>${status}<span class="mute small">${when(pb.created_at)} · from ${d.based_on ? d.based_on.graded : '?'} graded shorts</span><span class="sp"></span>${btns}</div>
+    ${stale}${ch.counts ? `<div class="small mute">${ch.counts.new} new · ${ch.counts.reinforced} stronger evidence · ${ch.counts.replaces} replacing an older lesson · ${ch.counts.known} reported before · ${ch.counts.carried} already in force (kept without asking again)</div>` : ''}
     <p class="small">${esc(d.summary || '')}</p>
     <div class="row" style="gap:18px;align-items:flex-start;flex-wrap:wrap"><div style="flex:1;min-width:260px"><b class="small">Do more</b><ul style="padding-left:0;list-style:none">${(d.do_more || []).map(i => itemRow(pb, i)).join('') || '<li class="mute small">nothing yet</li>'}</ul></div>
       <div style="flex:1;min-width:260px"><b class="small">Do less</b><ul style="padding-left:0;list-style:none">${(d.do_less || []).map(i => itemRow(pb, i)).join('') || '<li class="mute small">nothing yet</li>'}</ul></div></div>
@@ -160,16 +176,19 @@ function help() {
     <p><b>Buttons.</b><br>
     <b>Regrade</b>: recompute every grade from the numbers already pulled (no model).<br>
     <b>Tag subjects</b>: puts each idea and short into a subject territory (history, science, crime and so on) so subjects can be compared.<br>
-    <b>Draft a Playbook</b>: the model writes what to do more and less, each point citing real videos. Needs 6 graded shorts. A draft changes nothing.<br>
+    <b>Draft a Playbook</b>: the model writes what to do more and less, each point citing real videos. Needs 6 graded shorts. A draft changes nothing. See "Playbook memory" below for what a new draft contains.<br>
     <b>Sequels of winners</b>: new ideas from shorts at 3 times your typical reach or more.<br>
     <b>Ideas from comments</b>: new ideas from what viewers ask in the top comments.<br>
     <b>Run the whole cycle</b>: all of the above, then checks the new ideas. New ideas still go through the normal duplicate check and rating.</p>
     <p><b>Your part, step by step.</b><br>
     1. Wait until shorts have grades (the tiles show the count).<br>
     2. Press <b>Tag subjects</b>, then <b>Draft a Playbook</b>.<br>
-    3. Read the draft. Untick any point you disagree with, then <b>Approve</b>. <b>Reject</b> throws it away. A new approved version replaces the old one.<br>
+    3. Read the draft: look at the tags (new, stronger, replaces) and how many shorts stand behind each point. Untick any point you disagree with, then <b>Approve</b>. <b>Reject</b> throws it away. A new approved version replaces the old one.<br>
     4. Keep <b>Use the Playbook in idea generation</b> ticked. Now ideas, ratings, upload titles and scripts get the approved points. Untick it to go back to the old behaviour at once.<br>
     5. Add <b>pinned principles</b> for rules that must never be overridden (for example "every fact must be real"). They apply whenever the switch is on.</p>
+    <p><b>Playbook memory.</b> Every draft is shown all the lessons from earlier versions (approved, replaced, rejected or switched off), so it does not report the same lesson twice, even in other words. A new draft is the lessons already in force (kept without asking again, tagged <i>already in force</i>) plus only what changed, each tagged:<br>
+    <b>new</b>: no earlier lesson covers it. <b>stronger evidence</b>: an older lesson now backed by at least one more video. <b>replaces a vN lesson</b>: the data now says the opposite; the old wording leaves the Playbook. <b>reported before in vN</b>: a lesson from a rejected or replaced version that came back; a point you switched off stays off.<br>
+    If the data holds nothing new, no draft is made and the cycle says so. Lessons about upload day or hour are left out on purpose: the factory cannot choose them (see <b>Best time to upload</b>). A draft that was written from shorts older than the start date at the top is marked <b>Written from older videos</b>: reject it and draft again later. Each idea also remembers which Playbook version was in use, and the lift row <b>Playbook version in use</b> compares how shorts did under each version.</p>
     <p><b>Explore 30 to 40%.</b> That share of choices (subject, picture style, tone) deliberately takes the least-tried option, so new things get a chance. The rest favour what worked. A choice with 4 or more flops and no winner rests for 14 days. Each idea remembers whether it was an explore or exploit choice, so the <b>Experiments</b> block can show whether trying new things pays.</p>
     <p><b>Daily feedback cycle.</b> When ticked, the autopilot grades, tags, drafts a Playbook (when 3 or more new shorts are graded, or at least weekly when something new is graded) and proposes ideas. It never approves anything.</p>
     <p><b>The blocks below.</b><br>

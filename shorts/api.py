@@ -1165,6 +1165,16 @@ def _feedback_tone(default: str) -> tuple[str, str]:
         return default, "idea"
 
 
+def _playbook_version() -> int:
+    try:
+        from feedback import playbook
+        pb = playbook.active()
+        return pb["version"] if pb else 0
+    except Exception as e:  # noqa: BLE001
+        print(f"[feedback] playbook version failed: {e}", flush=True)
+        return 0
+
+
 def _freeze_features(idea_id: str, short: dict, choices: dict) -> None:
     """Keep the features of the idea as made, to compare with how the video does."""
     try:
@@ -1216,7 +1226,7 @@ def _queue_idea(idea_id: str, pipeline: str, settings: dict | None, auto_run: bo
     short = store.create(title, pipeline, src, settings_override)
     ideas_mod.set_status(idea_id, "queued", short["id"])
     db.ex("UPDATE short_ideas SET style=? WHERE id=?", (style, idea_id))
-    _freeze_features(idea_id, short, {"style": style_src, "tone": tone_src})
+    _freeze_features(idea_id, short, {"style": style_src, "tone": tone_src, "playbook": _playbook_version()})
 
     auto_started = False
     if auto_run and not manager.busy():

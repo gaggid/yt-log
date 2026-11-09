@@ -12,7 +12,9 @@ router = APIRouter(prefix="/api/feedback", tags=["feedback"])
 
 
 def _pb_view(pb: dict) -> dict:
-    return {"id": pb["id"], "version": pb["version"], "status": pb["status"], "created_at": pb["created_at"], "decided_at": pb["decided_at"], "data": pb["data"]}
+    # a draft written from videos older than the learning start date (set or moved later) should not be approved without a second look
+    stale = pb["status"] == "draft" and (pb["data"].get("based_on") or {}).get("learn_from", 0) < outcomes.learn_from()
+    return {"id": pb["id"], "version": pb["version"], "status": pb["status"], "created_at": pb["created_at"], "decided_at": pb["decided_at"], "data": pb["data"], "stale": stale}
 
 
 def _state() -> dict:
@@ -90,7 +92,13 @@ async def playbook_draft():
 
     async def make(backend, s, key, progress):
         progress(0, 1, "writing the Playbook")
-        pb = await playbook.draft(backend, s)
+        try:
+            pb = await playbook.draft(backend, s)
+        except playbook.NothingNew as e:
+            return f"Playbook: {e}"
+        c = pb["data"]["changes"].get("counts") or {}
+        if c:
+            return f"Playbook v{pb['version']} drafted: {c.get('new', 0)} new, {c.get('reinforced', 0)} stronger, {c.get('replaces', 0)} replacing, {c.get('carried', 0)} carried over. Review it on the YouTube page"
         return f"Playbook v{pb['version']} drafted: review it on the YouTube page"
     return _job("playbook", make)
 

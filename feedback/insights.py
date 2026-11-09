@@ -11,6 +11,7 @@ MIN_N = 3
 APP_DIMS = {
     "mechanism": lambda f: f.get("mechanisms") or [], "mech_pair": lambda f: [f.get("mech_pair")], "style": lambda f: [f.get("style")], "tone": lambda f: [f.get("tone")],
     "score_band": lambda f: [f.get("score_band")], "length": lambda f: [f.get("length")], "origin": lambda f: [f.get("origin")],
+    "playbook": lambda f: [] if f.get("playbook") is None else [f"v{f['playbook']}" if f["playbook"] else "no Playbook"],      # shorts made before the version was kept have no entry
 }
 ALL_DIMS = {
     "hook_type": lambda f: [f.get("hook_type")], "has_number": lambda f: [f.get("has_number")], "hook_len": lambda f: [f.get("hook_len")], "territory": lambda f: [f.get("territory")],
