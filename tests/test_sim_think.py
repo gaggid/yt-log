@@ -73,3 +73,10 @@ def test_content_level_reaches_setup_and_chapter_prompts(client):
     c.post(f"/api/sim/{pid}/chapters", json={"kind": "auto"})
     wait(c, pid)
     assert "Keep the language clean" in c.fake.last("sm_write")["user"]
+
+
+def test_mild_adult_romance_is_allowed_with_limits():
+    from sim import content
+    for lv in ("mature", "unfiltered"):
+        assert "romance" in content.TEXT[lv].lower() and "before explicit detail" in content.TEXT[lv]
+    assert "Only adults (18 or older)" in content.TEXT["unfiltered"] and "romance" not in content.TEXT["clean"].lower()

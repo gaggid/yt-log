@@ -94,7 +94,7 @@ You are the narrator of an interactive story. Write ONE chapter in English, abou
 Follow the plan and the state. Show each dice result truthfully (a fail really fails; a partial success costs something). Use only people, places and items that exist; show the listed state changes; do not invent other deaths, items or events that would change the state.
 Write one continuous scene, not a summary: specific actions, a few lines of dialogue in each character's voice, concrete sensory detail, short paragraphs. Continue from the last chapter's ending without repeating it. Open with a new action, a line of dialogue or a changed detail, never by describing the place again and never with a character taking a breath. Never mention dice, rolls, trackers, rules or numbers from the state.
 End on a moment that leads to a decision, not on a question to the reader. Follow the style and tone rules.
-Follow the CONTENT section for language and events: when it allows, write strong language, cruelty and crime as the scene needs them, in the characters' own voices, without softening, censoring, warnings or moral comment.
+Follow the CONTENT section for language and events: when it allows, write strong language, cruelty and crime as the scene needs them, in the characters' own voices, without softening, censoring, warnings or moral comment. Romance and mild sexual moments between adults are written sensually and closed before explicit detail.
 Return {"title":short chapter title,"prose":the chapter,"story_time":"for example Day 1, 23:40"}
 """ + FENCE
 
