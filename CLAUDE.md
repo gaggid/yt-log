@@ -67,6 +67,12 @@ No linter or build step configured. `static/plan.js` is served from disk uncache
 - Styling `glamour` (`characters/choices.py` STYLING and OUTFITS, `store.glamour_problem`): fitted, softly revealing, tasteful and always clothed; only for invented people with a declared age of 21 or more, never from a photo; adds `requests.GLAMOUR_LINE` and the chat model's `GLAMOUR_RULES`; presets never contain nudity or lingerie.
 - Tests: `tests/test_characters.py`, `tests/test_characters_edit.py`, `tests/test_characters_declared.py`, `tests/test_shorts_cast.py` with `tests/characters_fakes.py`.
 
+## YouTube analytics (`youtube/`, `static/youtube.js`, page `#/youtube`)
+
+- Read-only Google OAuth (scopes `youtube.readonly`, `yt-analytics.readonly`); `.env` holds `YT_CLIENT_ID`, `YT_CLIENT_SECRET`, `YT_REDIRECT_URI` (must be https, or localhost, and be the address the app is opened on, because the login cookie has to come back with the callback). Refresh token in table `yt_auth`; `state` is signed and expires (`oauth.make_state`). Tests set `oauth.TRANSPORT` to a mock transport.
+- `sync.run`: channel -> uploads (Data API, newest 200) -> `yt_videos`; daily numbers per video (Analytics API, `dimensions=day`, 60 newest videos from the last 120 days, linked first) -> `yt_stats`. Background loop `sync.forever` (main.py) syncs every 3 h while connected; "Sync now" on the page.
+- Linking video -> short -> idea (`yt_links`): by title (>= 0.92 similarity to the short's upload title or title, video published after the short was made) or by hand (`POST /api/youtube/link`, a hand link is never replaced). Windows of views (first 2/7/28 days) count as complete two days after the window ends; "What works" averages the first 7 days by score band, style, tone and mechanism. Idea cards and the Done column show the channel's views (`yt`). Tests: `tests/test_youtube.py`.
+
 ## Storage clean-up (`admin/`, Settings page)
 
 - On demand only, never automatic. `admin/storage.py` measures `data/media/<id>/` per long-form plan (`pl-`), short (`sh-`), character (`ch-`) and the wardrobe, and clears one project by `folders`, `older` (keep the approved or newest finished attempt of each key, remove the rest and failed ones; skipped for characters) or `all`. The API (`/api/storage`) measures only unless `dry_run` is sent false; the screen (`static/storage.js`) always previews the size, then asks. A project's text, plan, approvals and exports are never touched.

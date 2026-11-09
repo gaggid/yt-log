@@ -184,6 +184,18 @@ def _short_made(short_id: str) -> bool:
         return False                                                           # a deleted short never finishes an idea
 
 
+def _add_youtube(items: list[dict]) -> None:
+    """The channel's numbers on ideas whose short is linked to a YouTube video (`yt`)."""
+    from youtube import store as ytstore
+    try:
+        by = ytstore.summary_by_short()
+    except Exception:  # noqa: BLE001 - analytics must never break the ideas screen
+        return
+    for i in items:
+        if i.get("short_id") in by:
+            i["yt"] = by[i["short_id"]]
+
+
 def _sync_done() -> None:
     """An idea whose short has its final video is done by itself (no review click needed)."""
     ideas_mod.finish_ready(_short_made)
@@ -196,6 +208,7 @@ async def ideas_list():
     for i in out:
         if i["status"] in ("queued", "done") and i.get("short_id"):
             _add_short_info(i)
+    _add_youtube(out)
     return out
 
 
@@ -1301,6 +1314,7 @@ async def ideas_autopilot():
     qs = ideas_mod.queues(float(cfg["min_score"]))
     for i in qs["queued"] + qs["done"]:
         _add_short_info(i) if i.get("short_id") else None
+    _add_youtube(qs["done"])
     return {"now": time.time(), "on": cfg["autopilot"], "counts": ideas_mod.counts(), "queues": qs, "next_gen_at": cfg["next_gen_at"], "next_make_at": cfg["next_make_at"],
             "running": {"busy": bool(running), "kind": "ideas" if who == _IDEAS_JOB else ("short" if who else ""), "short_id": who if who and who != _IDEAS_JOB else ""},
             "review_cap": cfg["review_cap"], "make_every_h": cfg["make_every_h"], "autorun": cfg["autorun"], "min_score": cfg["min_score"]}

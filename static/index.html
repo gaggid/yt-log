@@ -99,6 +99,7 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:8px;
   <a href="#/characters">Characters</a>
   <a href="/life" target="_blank">Virtual Life</a>
   <a href="#/shorts">Shorts</a>
+  <a href="#/youtube">YouTube</a>
   <a href="#/settings">Settings</a>
   <a href="/nxt" target="_blank" rel="noopener" title="Open NXT Studio" style="font-size:12px;padding:3px 10px;border:1px solid var(--line);border-radius:6px;color:var(--mute);white-space:nowrap">NXT ↗</a>
   <button class="small" onclick="logout()">Sign out</button>
@@ -109,6 +110,7 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:8px;
 <script src="/plan.js"></script>
 <script src="/shorts.js"></script>
 <script src="/ideas.js"></script>
+<script src="/youtube.js"></script>
 <script src="/characters.js"></script>
 <script src="/char-memory.js"></script>
 <script src="/storage.js"></script>
@@ -191,6 +193,7 @@ function route() {
   if (h === '/settings') return viewSettings();
   if (h === '/shorts') return viewShorts();
   if (h === '/ideas') return viewIdeas();
+  if (h === '/youtube') return viewYoutube();
   if (h === '/characters') return viewCharacters();
   if ((m = h.match(/^\/character\/([\w-]+)$/))) return viewCharacter(m[1]);
   if ((m = h.match(/^\/short\/([\w-]+)$/))) return viewShort(m[1]);

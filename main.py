@@ -25,6 +25,7 @@ from story3.api import router as media_router
 from shorts.api import router as shorts_router
 from characters.api import router as characters_router
 from admin.api import router as storage_router
+from youtube.api import router as youtube_router
 from story.pipeline import manager
 
 STATIC = Path(__file__).with_name("static")
@@ -57,8 +58,11 @@ async def lifespan(app: FastAPI):
     import asyncio
     from shorts import api as _shorts_api
     _aq = asyncio.create_task(_shorts_api.autoqueue_forever())
+    from youtube import sync as _yt_sync
+    _yt = asyncio.create_task(_yt_sync.forever())
     yield
     _aq.cancel()
+    _yt.cancel()
     _vl_loop.stop()
 
 
@@ -70,6 +74,7 @@ app.include_router(media_router)
 app.include_router(shorts_router)
 app.include_router(characters_router)
 app.include_router(storage_router)
+app.include_router(youtube_router)
 
 
 NO_STORE = {"Cache-Control": "no-store"}
@@ -82,7 +87,8 @@ async def root():
         'src="/shorts.js"', f'src="/shorts.js?v={int((STATIC / "shorts.js").stat().st_mtime)}"').replace(
         'src="/characters.js"', f'src="/characters.js?v={int((STATIC / "characters.js").stat().st_mtime)}"').replace(
         'src="/storage.js"', f'src="/storage.js?v={int((STATIC / "storage.js").stat().st_mtime)}"').replace(
-        'src="/ideas.js"', f'src="/ideas.js?v={int((STATIC / "ideas.js").stat().st_mtime)}"')
+        'src="/ideas.js"', f'src="/ideas.js?v={int((STATIC / "ideas.js").stat().st_mtime)}"').replace(
+        'src="/youtube.js"', f'src="/youtube.js?v={int((STATIC / "youtube.js").stat().st_mtime)}"')
     return HTMLResponse(html, headers=NO_STORE)
 
 
@@ -104,6 +110,11 @@ async def storage_js():
 @app.get("/characters.js")
 async def characters_js():
     return FileResponse(STATIC / "characters.js", media_type="application/javascript", headers=NO_STORE)
+
+
+@app.get("/youtube.js")
+async def youtube_js():
+    return FileResponse(STATIC / "youtube.js", media_type="application/javascript", headers=NO_STORE)
 
 
 @app.get("/ideas.js")

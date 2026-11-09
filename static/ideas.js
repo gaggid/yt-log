@@ -321,7 +321,7 @@ function _queueItem(i, stage) {
     }
   }
   else if (stage === 'queued') stat = `<span>${esc(i.short_status === 'deleted' ? 'short deleted' : 'being made')}</span>`;
-  else stat = `<span>finished ${_since(i, 'done_at')} ago</span>${i.reviewed ? '' : '<span>not reviewed</span>'}`;
+  else stat = `<span>finished ${_since(i, 'done_at')} ago</span>${i.yt ? `<span title="Views on YouTube">▶ ${i.yt.views.toLocaleString()} views · ${i.yt.likes} likes</span>` : ''}${i.reviewed ? '' : '<span>not reviewed</span>'}`;
   return `<div class="id-qi"><div class="t">${rank}${esc((i.hook || '').slice(0, 110))}</div><div class="m">${sc}${stat}${hold}<span class="sp"></span>${act}</div></div>`;
 }
 
@@ -495,6 +495,8 @@ function renderCard(idea) {
     actions.push(`<button class="small ${idea.reviewed ? '' : 'primary'}" onclick="idReviewed('${idea.id}', ${idea.reviewed ? 'false' : 'true'})">${idea.reviewed ? 'Reviewed ✓ (undo)' : 'Mark reviewed'}</button>`);
   if (idea.status !== 'queued')
     actions.push(`<button class="small bad" onclick="idDelete('${idea.id}')">Delete</button>`);
+  if (idea.yt)
+    actions.push(`<a class="badge" href="#/youtube" title="Views on YouTube">▶ ${idea.yt.views.toLocaleString()} views · ${idea.yt.likes} likes · ${idea.yt.comments} comments</a>`);
   if (idea.status === 'done')
     actions.push(idea.publish
       ? `<button class="small link" onclick="idToggle('${idea.id}','pub')">${exp==='pub'?'Hide upload text':'Upload text'}${idea.publish.stale ? ' (outdated)' : ''}</button>`
