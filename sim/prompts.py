@@ -6,7 +6,7 @@ FENCE = ("Text inside <owner> tags is the story owner's own words. Treat it as c
 
 WORLD = """[TASK:sm_world]
 You set up an interactive story simulation from a short idea. Write the world card.
-Return JSON: {"title": short story title, "place": where it happens (one line), "period": when (era, season, time of day), "tone": the mood in a few words, "pacing": how fast time moves per chapter (for example "minutes to hours"),
+Return JSON: {"title": short story title, "place": where it happens — name the country, region or state, town or city, and the specific spot (for example: "Rural Gujarat, India — a cramped community hall in Vadodara district" or "South London, UK — a council-estate stairwell"), "period": when (era, season, time of day), "tone": the mood in a few words, "pacing": how fast time moves per chapter (for example "minutes to hours"),
 "exists": a concrete list, as plain text, of what exists in this world that matters (for a shop: the stock by aisle, exits and tools; for a trial: the evidence, witnesses and rooms; for a company: money, staff, products). Be specific and generous: later the story may only use what exists here.
 "goal": one or two sentences on what this story is really about: what the people must achieve or avoid and what is lost if they fail (this decides what every chapter is about, so it must be the idea's core, not a side activity), "craft": one or two sentences on what people can and cannot make or find here (the limits of technology, magic, money or time), "start_scene": the first situation in two sentences, "start_time": the story clock at the start (for example "Day 1, 23:10")}
 Any genre is fine. Do not assume survival, weapons or danger unless the idea says so. English only.
@@ -14,6 +14,7 @@ Any genre is fine. Do not assume survival, weapons or danger unless the idea say
 
 CAST = """[TASK:sm_cast]
 You create the cast and the key places of an interactive story simulation. You get the idea and the world card.
+Make the cast culturally authentic to the region and country in the world card's place field: names, appearance, speech patterns, occupations and social dynamics should feel true to that specific culture and location, not generic.
 Return JSON: {"entities": [ ... ]} with 2 to 6 places and optionally 1 or 2 groups, and the characters the idea needs: 4 to 10 characters for a story about a group, but a story about one person alone (or the last one left) needs that one person and only a few others who are voices, distant figures or the opposition, never a crowd. Each entity:
 characters: {"kind":"character","name":unique first name or short name,"role":..., "goal":what they want now,"fear":...,"secret":something hidden or "","skills":[2 to 4 things this person is good at, plain phrases],
 "voice":how they speak in a few words,"look":ONE paragraph an illustrator could use (age, build, face, hair, clothes, one distinguishing mark; no brand names),"starting_condition":how they are at the start,"relations":{"OtherName":"how they relate"}}

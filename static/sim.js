@@ -86,17 +86,17 @@ window.viewSim = async function () {
   el.innerHTML = `<div class="row mb"><h2 style="margin:0">Stories</h2><span class="sp"></span><label class="small mute">Import <input type="file" id="sm-imp" accept=".json" hidden></label><button class="small" id="sm-impb">Import a story file</button></div>
   <div class="card pad mb"><b>New story</b><p class="mute small" style="margin:4px 0 8px">Write the idea in a few sentences. The AI will propose the cast, the world, the things to keep track of and the rules; you edit them, then start.</p>
     <textarea id="sm-idea" placeholder="For example: A night-shift salesman is alone in a supermarket when a zombie outbreak begins. He must survive until dawn using only what the store holds."></textarea>
-    <div class="row mt-s"><label class="small mute">Template <select id="sm-tpl">${r.templates.map(t => `<option value="${esc(t.id)}" title="${esc(t.blurb)}">${esc(t.name)}</option>`).join('')}</select></label><span class="sp"></span><button class="primary" id="sm-new">Create and set up with AI</button></div></div>
-  <div class="sm-cards">${r.stories.length ? r.stories.map(s => `<div class="card sm-card click" onclick="location.hash='#/sim/${s.id}'" style="cursor:pointer"><h4>${esc(s.title)}</h4>
+    <div class="row mt-s"><label class="small mute">Template <select id="sm-tpl">${r.templates.map(t => `<option value="${esc(t.id)}" title="${esc(t.blurb)}">${esc(t.name)}</option>`).join('')}</select></label><span class="sp"></span><button class="primary" id="sm-new">Create story</button></div></div>
+  <div class="sm-cards">${r.stories.length ? r.stories.map(s => `<div class="card sm-card" style="cursor:pointer" onclick="if(!event.target.closest('[data-del]'))location.hash='#/sim/${s.id}'"><h4>${esc(s.title)}</h4>
     <div class="small mute" style="margin-bottom:6px">${esc(s.idea.slice(0, 140))}${s.idea.length > 140 ? '…' : ''}</div>
-    <div class="row small">${badge(s.status === 'running' ? 'good' : 'warn', s.status === 'setup' ? 'setting up' : 'in progress')}<span>${s.chapters} chapters</span>${s.bytes ? `<span class="mute">${(s.bytes / 1048576).toFixed(1)} MB of pictures</span>` : ''}${s.running ? '<span class="spin"></span>' : ''}<span class="sp"></span><span class="mute">${fmtDate(s.updated_at)}</span></div></div>`).join('') : '<p class="mute">No stories yet. Write an idea above.</p>'}</div>`;
+    <div class="row small">${badge(s.status === 'running' ? 'good' : 'warn', s.status === 'setup' ? 'setting up' : 'in progress')}<span>${s.chapters} chapters</span>${s.bytes ? `<span class="mute">${(s.bytes / 1048576).toFixed(1)} MB of pictures</span>` : ''}${s.running ? '<span class="spin"></span>' : ''}<span class="sp"></span><span class="mute">${fmtDate(s.updated_at)}</span><button class="small bad" data-del="${s.id}" style="margin-left:8px">Delete</button></div></div>`).join('') : '<p class="mute">No stories yet. Write an idea above.</p>'}</div>`;
   $('#sm-new').onclick = async e => {
     const idea = $('#sm-idea').value.trim(); if (!idea) { toast('Write the idea first', {bad: true}); return; }
     const made = await act(e.target, () => api('/sim', {method: 'POST', json: {idea, template_id: $('#sm-tpl').value === 'tp-free' ? '' : $('#sm-tpl').value}}));
     if (!made) return;
-    try { await api(`/sim/${made.id}/seed/all`, {method: 'POST', json: {}}); } catch (er) { toast(er.message, {bad: true}); }
     hash(made.id, 'setup');
   };
+  el.querySelectorAll('[data-del]').forEach(b => { b.onclick = async e => { e.stopPropagation(); if (await confirmDlg('Delete this story?', 'All chapters, pictures and assets are permanently removed. This cannot be undone.', 'Delete', true)) { await act(null, () => api(`/sim/${b.dataset.del}`, {method: 'DELETE'})); load(); } }; });
   $('#sm-impb').onclick = () => $('#sm-imp').click();
   $('#sm-imp').onchange = async ev => {
     const f = ev.target.files[0]; if (!f) return;
@@ -629,7 +629,7 @@ function drawSetup() {
   <div class="card pad mt"><div class="row"><b>Rules</b> <span class="small mute">version ${st.rules_version}</span><span class="sp"></span><button class="small" id="r-redo">Redo the AI's rules…</button><button class="small" id="r-more">Suggest more…</button><button class="small" id="r-add">+ Add a rule</button></div>
     ${GROUPS.map(([g, l]) => { const rs = D.guidelines.filter(x => x.grp === g); return `<div class="mt-s"><div class="sm-tag">${l}</div>${rs.map(x => `<div class="row" style="margin:3px 0"><input type="checkbox" data-rt="${x.id}" ${x.enabled ? 'checked' : ''} title="Use this rule"><span style="flex:1;${x.enabled ? '' : 'color:var(--mute)'}">${esc(x.text)}</span><span class="small mute">${x.origin === 'ai' ? 'AI' : 'you'}</span><button class="small" data-re="${x.id}">Edit</button><button class="small bad" data-rd="${x.id}">✕</button></div>`).join('') || '<div class="small mute">none</div>'}</div>`; }).join('')}</div>
 
-  ${started ? '<div class="sm-banner">The story has started: changes here apply from the next chapter.</div>' : `<div class="card pad mt row"><span class="sp"></span>${D.missing.length ? `<span class="small err">Not ready: ${D.missing.map(esc).join('; ')}</span>` : ''}<button class="small" id="all-redo">Redo everything with AI</button><button class="primary" id="go-story" ${D.missing.length ? 'disabled' : ''}>Go to the story</button></div>`}`;
+  ${started ? '<div class="sm-banner">The story has started: changes here apply from the next chapter.</div>' : (() => { const noWorld = !D.world.place; return `<div class="card pad mt row"><span class="sp"></span>${D.missing.length ? `<span class="small err">Not ready: ${D.missing.map(esc).join('; ')}</span>` : ''}<button class="${noWorld ? 'primary' : 'small'}" id="all-redo">${noWorld ? 'Generate setup with AI' : 'Redo everything with AI'}</button><button class="primary" id="go-story" ${D.missing.length ? 'disabled' : ''}>Go to the story</button></div>`; })()}`;
   wireSetup();
 }
 
