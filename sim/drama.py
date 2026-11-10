@@ -31,7 +31,7 @@ LENGTHS = (0, 6, 8, 12, 16, 24, 36, 48)
 WAVE = 6
 FINALE_AFTER = WAVE * 2          # open-ended stories enter a one-time finale arc after this many chapters
 NEGLECT_AFTER = 3
-THREAD_AFTER = 4
+THREAD_AFTER = 3
 MAX_NEGLECTED = 4
 
 

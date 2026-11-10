@@ -300,10 +300,11 @@ function drawStory() {
 function wireStory() {
   const busy = D.run && D.run.state === 'running';
   const on = (sel, fn) => el.querySelectorAll(sel).forEach(fn);
-  on('[data-opt]', b => b.onclick = () => busy ? toast('A step is running', {bad: true}) : run(b, '/chapters', {kind: 'option', option_id: b.dataset.opt}, 'Writing the next chapter'));
-  const go = $('#sm-go'); if (go) go.onclick = () => { const t = $('#sm-text').value.trim(); if (!t) { toast('Write what they do', {bad: true}); return; } run(go, '/chapters', {kind: 'text', text: t, who: $('#sm-who').value}, 'Writing the next chapter'); };
-  const let_ = $('#sm-let'); if (let_) let_.onclick = () => run(let_, '/chapters', {kind: 'auto'}, 'Letting it run');
-  const au = $('#sm-auto'); if (au) au.onclick = () => run(au, '/auto', {n: +$('#sm-n').value || 3}, 'Auto-run started');
+  const lockInput = () => el.querySelectorAll('[data-opt],#sm-go,#sm-let,#sm-auto').forEach(x => x.disabled = true);
+  on('[data-opt]', b => b.onclick = () => { if (busy) { toast('A step is running', {bad: true}); return; } lockInput(); run(b, '/chapters', {kind: 'option', option_id: b.dataset.opt}, 'Writing the next chapter'); });
+  const go = $('#sm-go'); if (go) go.onclick = () => { const t = $('#sm-text').value.trim(); if (!t) { toast('Write what they do', {bad: true}); return; } lockInput(); run(go, '/chapters', {kind: 'text', text: t, who: $('#sm-who').value}, 'Writing the next chapter'); };
+  const let_ = $('#sm-let'); if (let_) let_.onclick = () => { lockInput(); run(let_, '/chapters', {kind: 'auto'}, 'Letting it run'); };
+  const au = $('#sm-auto'); if (au) au.onclick = () => { lockInput(); run(au, '/auto', {n: +$('#sm-n').value || 3}, 'Auto-run started'); };
   [$('#sm-dir2'), $('#sm-adddir')].forEach(b => { if (b) b.onclick = () => directiveDialog(); });
   const gv = $('#sm-give'); if (gv) gv.onclick = () => directiveDialog('grant');
   on('[data-undo]', b => b.onclick = async () => { const [cid, i] = b.dataset.undo.split(':'); if (await confirmDlg('Take this back?', 'The thing goes back to how it was. Chapters after this one are marked as written before the change.', 'Take it back')) { await act(null, () => api(`/sim/${SID}/chapters/${cid}/undo`, {method: 'POST', json: {index: +i}}), 'Taken back'); load(); } });
