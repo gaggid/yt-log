@@ -129,10 +129,10 @@ def _active_chars(chars: list[dict], st: dict, parent: dict | None, action: dict
     return [c for c in chars if c["name"] in names and c["name"] in alive][:5]
 
 
-async def _run_actors(backend, s: dict, active_chars: list[dict], st: dict, trackers: list[dict], path: list[dict], action: dict) -> list[dict]:
+async def _run_actors(backend, s: dict, active_chars: list[dict], st: dict, trackers: list[dict], path: list[dict], action: dict, world: dict | None = None) -> list[dict]:
     """One call per active character: each reasons about what to try next, without knowledge of what the world will decide."""
     act_text = action_text(action, None)
-    last_summary = path[-1]["summary"] if path else "(story begins)"
+    last_summary = path[-1]["summary"] if path else ((world or {}).get("start_scene") or "(story begins)")
     last_line = _tail(path[-1]["prose"]) if path else ""
     results = []
     for char in active_chars:
@@ -283,7 +283,7 @@ async def run_chapter(pid: str, backend, s: dict, progress=None, *, parent_id: s
         else:
             begin("actors", "each character decides what to try")
             active = _active_chars(chars, st0, parent, action)
-            actors = await _run_actors(backend, s, active, st0, trackers, path, action)
+            actors = await _run_actors(backend, s, active, st0, trackers, path, action, world)
             flags["actors"] = actors
             finish("actors")
         # plan ------------------------------------------------------------------
@@ -493,6 +493,7 @@ async def _write(pid, backend, s, cid, path, st0, st1, plan, rolls, delta, instr
     beat = architect.beat_for(bible, store.chapter(cid)["idx"])
     pk = memory.build(pid, path, st1, plan["focus"], plan["scene"], s)
     system = P.WRITE.replace("{words}", str(w)).replace("{lo}", str(lo)).replace("{hi}", str(hi))
+    is_first = len(path) == 0
     user = (f"{memory.render(pk, s)}\n\n## CHAPTER PLAN\nWhere: {plan['where']}\nFollowing: {', '.join(plan['focus'])}\nScene: {plan['scene']}\nIntent: {plan['intent']}\nOpposition (show its effect): {plan.get('opposition', '')}\nTime passes: {plan['time_passes']}\n"
             + ("\n## HOW EACH RISKY ACT ENDS (fixed)\n" + "\n".join(f"- {r['who']}: {r['act']} -> {r['text']}" for r in rolls) if rolls else "")
             + ("\n\n## CHANGES TO SHOW\n" + "\n".join(f"- {a['text']}" + (f" ({a['why']})" if a.get("why") else "") for a in delta["applied"]) if delta["applied"] else "")
@@ -500,6 +501,7 @@ async def _write(pid, backend, s, cid, path, st0, st1, plan, rolls, delta, instr
             + ("\n\n## INSTRUCTIONS HAPPENING NOW\n" + "\n".join(f"- {fence(t)}" for t in _fired_texts(pid, plan)) if plan.get("addresses") else "")
             + (f"\n\n## OWNER'S NOTE FOR THIS CHAPTER\n{fence(instruction)}" if instruction else "")
             + ("\n\n## FIX THESE PROBLEMS FROM THE LAST DRAFT\n" + "\n".join(f"- {v['rule']}: \"{v['quote']}\" -> {v['fix']}" for v in violations) if violations else "")
+            + ("\n\n## FIRST CHAPTER — ORIENT THE READER\nThis is chapter 1. The reader knows nothing. Before the conflict, give them one or two concrete sentences: what this place is, who these people are (their role, not their personality), what is at stake, and why it must be settled now. Then show the action." if is_first else "")
             + "\n\nWrite the chapter now.")
 
     def v(o: m.WriteOut, caller):
