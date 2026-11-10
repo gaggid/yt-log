@@ -642,8 +642,11 @@ async def _archive(pid, backend, s, cid, path, st1, plan, flags) -> None:
     store.drop_chapter_memory(cid)
     for f in o.facts[:6]:
         store.add_fact(pid, cid, f.text, f.names, f.tags)
-    for t in o.threads_opened[:3]:
-        store.add_thread(pid, cid, t)
+    existing_texts = {t["text"] for t in memory.open_threads(pid, path)}
+    for raw in o.threads_opened[:3]:
+        text = re.sub(r"^T\d+[\s:]+", "", raw).strip()
+        if text and text not in existing_texts:
+            store.add_thread(pid, cid, text)
     labels = pk.thread_labels
     for t in o.threads_closed:
         if t in labels:

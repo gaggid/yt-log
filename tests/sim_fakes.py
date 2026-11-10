@@ -135,9 +135,10 @@ class SimFake:
         return {"ok": True, "violations": []}
 
     def _sm_archive(self, user):
+        n = self.count("sm_archive")
         alive = [x.strip() for x in re.search(r"Alive: (.*)", user).group(1).split(",")]
         return {"summary": "The doors were barricaded as the noise grew.", "facts": [{"text": f"{alive[0]} used pallets to block the doors.", "names": [alive[0]], "tags": ["barricade"]}],
-                "threads_opened": ["Who is knocking on the loading bay shutter?"], "threads_closed": [],
+                "threads_opened": [f"Chapter {n}: what is knocking on the loading bay shutter?"], "threads_closed": [],
                 "options": [{"who": alive[i % len(alive)], "label": f"{alive[i % len(alive)]} tries plan number {i} to {w}", "hint": "uncertain", "risk": r}
                             for i, (w, r) in enumerate([("search the pharmacy", "low"), ("check the shutter", "medium"), ("signal the street", "high"), ("hide in the stockroom", "low")], 1)]}
 
