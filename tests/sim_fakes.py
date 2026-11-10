@@ -95,6 +95,11 @@ class SimFake:
         return {"rules": [{"group": "world", "text": "The dead are slow but never tire."}]}
 
     # ── a chapter ──
+    def _sm_actor(self, user):
+        m = re.search(r"CHARACTER: ([^—\n]+)", user)
+        name = m.group(1).strip() if m else "Unknown"
+        return {"name": name, "intent": f"{name} wants to secure the situation", "attempt": f"{name} moves carefully toward the nearest exit", "reasoning": "survival first, stay low, stay quiet"}
+
     def _people(self, user):
         sec = user.split("## PEOPLE")[1].split("##")[0] if "## PEOPLE" in user else ""
         return [m.group(1) for m in re.finditer(r"^- ([^(\n]+?) \(alive\)", sec, re.M)]

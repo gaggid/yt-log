@@ -1,5 +1,5 @@
 """The chapter engine (docs/PLAN_simulation.md section 5). One chapter is a fixed list of stages; each stage writes its result to the chapter row, so a stopped server loses at most the stage in
-flight and "Retry from this stage" continues from what is stored. Stages: gather (code + condition checks), plan, resolve (dice, code), delta, write, referee, archive."""
+flight and "Retry from this stage" continues from what is stored. Stages: gather (code + condition checks), actors (one call per active character), plan (world responds), resolve (dice, code), delta, write, referee, archive."""
 import copy
 import re
 
@@ -9,7 +9,7 @@ from . import architect, dice, drama, health, memory, models as m, prompts as P,
 
 WORD_SLACK = (0.8, 1.23)                 # chapter length accepted around the owner's setting (350 -> 280 to 430)
 MAX_RISKS = 3
-STAGES = ("gather", "plan", "resolve", "delta", "write", "polish", "referee", "archive")
+STAGES = ("gather", "actors", "plan", "resolve", "delta", "write", "polish", "referee", "archive")
 
 
 class Stopped(Exception):
@@ -96,6 +96,65 @@ def make_ctx(pid: str, ents: list[dict], world: dict, trackers: list[dict], cfg:
 
 
 carry_map = memory.carry_map
+
+
+def _char_location(st: dict, trackers: list[dict], name: str) -> str:
+    t = next((t for t in trackers if t["kind"] == "location"), None)
+    return str(st["trackers"].get(t["id"], {}).get("at", {}).get(name, "")) if t else ""
+
+
+def _char_items(st: dict, trackers: list[dict], name: str) -> list[str]:
+    out = []
+    for t in trackers:
+        if t["kind"] != "items":
+            continue
+        for item_name, item_data in st["trackers"].get(t["id"], {}).items():
+            if isinstance(item_data, dict) and item_data.get("at") == name:
+                out.append(item_name)
+    return out
+
+
+def _active_chars(chars: list[dict], st: dict, parent: dict | None, action: dict) -> list[dict]:
+    """Characters that get actor calls: those in the previous chapter's options + player's action target, capped at 5. First chapter: first 4 living characters."""
+    names: set[str] = set()
+    if parent:
+        for o in (parent.get("options") or []):
+            if o.get("who"):
+                names.add(o["who"])
+    if action.get("who"):
+        names.add(action["who"])
+    if not names:
+        names = {c["name"] for c in chars[:4]}
+    alive = {n for n, e in st.get("entities", {}).items() if e.get("alive", True)}
+    return [c for c in chars if c["name"] in names and c["name"] in alive][:5]
+
+
+async def _run_actors(backend, s: dict, active_chars: list[dict], st: dict, trackers: list[dict], path: list[dict], action: dict) -> list[dict]:
+    """One call per active character: each reasons about what to try next, without knowledge of what the world will decide."""
+    act_text = action_text(action, None)
+    last_summary = path[-1]["summary"] if path else "(story begins)"
+    last_line = _tail(path[-1]["prose"]) if path else ""
+    results = []
+    for char in active_chars:
+        char_state = st.get("entities", {}).get(char["name"], {})
+        location = _char_location(st, trackers, char["name"])
+        items = _char_items(st, trackers, char["name"])
+        system = P.ACTOR.replace("{name}", char["name"])
+        user = (
+            f"CHARACTER: {char['name']} — {char.get('role', '')}\n"
+            f"Goal: {char.get('goal', '')}\n"
+            f"Fear: {char.get('fear', '')}\n"
+            + (f"Secret you hold: {char.get('secret', '')}\n" if char.get("secret") else "")
+            + f"Skills: {', '.join(char.get('skills') or []) or 'none listed'}\n"
+            f"Status: {char_state.get('status', 'fine')}\n"
+            + (f"Where: {location}\n" if location else "")
+            + (f"Holding: {', '.join(items)}\n" if items else "")
+            + f"\nWHAT JUST HAPPENED:\n{last_summary}\n{last_line}\n\n"
+            f"PLAYER'S ACTION: {act_text}\n\nWhat do you do next?"
+        )
+        result = await _json(backend, s, system, user, m.ActorOut)
+        results.append(result.model_dump())
+    return results
 
 
 THING_WORDS = re.compile(r"\b(make|build|craft|rig|forge|fashion|repair|fix|search|look for|find|open|scavenge|rummage|improvise|assemble|learn|teach)\b", re.I)
@@ -214,11 +273,24 @@ async def run_chapter(pid: str, backend, s: dict, progress=None, *, parent_id: s
             finish("gather")
         act = action_text(action, parent)
         pk0 = memory.build(pid, path, st0, None, "", s)
+        # backward compat: chapters written before the actors stage skip it
+        if "plan" in done and "actors" not in done:
+            done.add("actors")
+            flags["actors"] = []
+        # actors ----------------------------------------------------------------
+        if "actors" in done:
+            actors = flags.get("actors", [])
+        else:
+            begin("actors", "each character decides what to try")
+            active = _active_chars(chars, st0, parent, action)
+            actors = await _run_actors(backend, s, active, st0, trackers, path, action)
+            flags["actors"] = actors
+            finish("actors")
         # plan ------------------------------------------------------------------
         if "plan" in done:
             plan = cur["plan"]
         else:
-            begin("plan", "planning the chapter")
+            begin("plan", "world responds to what the characters intend")
             think.boost.set(bool(THING_WORDS.search(act)))                      # the player's action is about making, finding or learning something
             last_beats = [c["plan"].get("beat") for c in path[-2:]]
             by_name = {e["name"].lower(): e["name"] for e in chars}
@@ -258,7 +330,16 @@ async def run_chapter(pid: str, backend, s: dict, progress=None, *, parent_id: s
                     elif r.craft and not r.craft.makes:
                         r.craft.makes = r.act
 
-            user = (f"{memory.render(pk0, s)}" + ("" if beat else f"\n\n{drama.arc_block(arc, ch['idx'], length)}") + (f"\n\n{architect.plan_block(bible, beat, ch['idx'])}" if beat else "") + (f"\n\n{drama.neglected_block(neg)}" if neg else "") + f"\n\n## PLAYER'S ACTION\n{act}\n\n## DUE INSTRUCTIONS\n"
+            actor_lines = "\n".join(
+                f"{a['name']}: {a['intent']} — will try: {a['attempt']}"
+                for a in actors if a.get("name")
+            )
+            user = (f"{memory.render(pk0, s)}"
+                    + (f"\n\n## WHAT EACH CHARACTER INTENDS THIS CHAPTER\n{actor_lines}" if actor_lines else "")
+                    + ("" if beat else f"\n\n{drama.arc_block(arc, ch['idx'], length)}")
+                    + (f"\n\n{architect.plan_block(bible, beat, ch['idx'])}" if beat else "")
+                    + (f"\n\n{drama.neglected_block(neg)}" if neg else "")
+                    + f"\n\n## PLAYER'S ACTION\n{act}\n\n## DUE INSTRUCTIONS\n"
                     + ("\n".join(f"{d['label']} (id {d['id']}) [{d['kind']}] {'MUST' if d['must'] else 'MAY WAIT'}: {fence(d['text'])}" for d in due) or "(none)")
                     + "\n\n## UNDER PRESSURE\n" + ("\n".join(p["text"] for p in flags.get("pressure", [])) or "(nothing at its limit)")
                     + "\n\n## BEATS OF THE LAST CHAPTERS\n" + (", ".join(b for b in last_beats if b) or "(none yet)")

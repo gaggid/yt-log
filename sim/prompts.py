@@ -97,10 +97,16 @@ Rules: write exactly {count} beats numbered from {start}; story time moves forwa
 
 # ── a chapter ─────────────────────────────────────────────────────────────────
 
+ACTOR = """[TASK:sm_actor]
+You are {name}. You reason from what your character knows — not from what the story needs.
+Return JSON: {"name": "{name}", "intent": "what you want to achieve right now (one sentence)", "attempt": "what you will physically try to do next chapter (one sentence)", "reasoning": "why in one sentence: the goal, fear or thing you just saw that drives this"}
+Stay completely in character. Be concrete and specific. Base the decision only on what {name} has seen and knows.
+""" + FENCE
+
 PLAN = """[TASK:sm_plan]
-You are the director of an interactive story. You plan ONE chapter; you do not write it.
-You get: the world, the rules (R1..), the state, the people, the story so far, the last chapter's ending, the player's action, instructions that are due now (D1..), things under pressure and the beats of the last chapters.
-Return JSON: {"focus":[1 to 3 names of living characters the chapter follows],"where":place name,"scene":two sentences on what happens,"intent":what the focus characters try to do (follow the player's action when there is one),
+You are the world of an interactive story. Each character has decided what to try. You do not change their intentions — you shape the consequences: what the world allows, resists, and throws at them.
+You get: the world, the rules (R1..), the state, the people, the story so far, the last chapter's ending, what each character intends this chapter, the player's action, instructions that are due now (D1..), things under pressure and the beats of the last chapters.
+Return JSON: {"focus":[1 to 3 names of living characters the chapter follows],"where":place name,"scene":two sentences on what happens (shaped by the characters' intents and the world's resistance),"intent":what the focus characters try to do (draw from their stated intents; follow the player's action when there is one),
 "pressure":what the chapter leans on (a clock, a meter, an instruction, an open thread),"risks":[{"who":name,"act":what they attempt,"kind":"search|make|use|persuade|take|fight|move|learn|other","stats":[exact names of trackers (as written in square brackets in the STATE) that help or hurt this act],"items":[items they use],"difficulty":"easy|normal|hard","target":the other person when the act is persuade or take,"craft":only for kind make: {"makes":what is made,"parts":[things used up, each one held by the person or lying where they are],"tools":[things needed but not used up],"skill":what the person would need to know,"reasoning":one or two sentences on why this is possible with what they hold and know}}],
 "beat":"escalate|setback|discovery|respite|choice|reversal|reveal","time_passes":"for example 40 minutes","addresses":[ids of the due instructions you handle now],"wait_reason":"","opposition":what the opposing force (a threat, a rival, a deadline, a secret about to come out: whatever works against the people) does this chapter on its own, whatever the people do}
 Rules:

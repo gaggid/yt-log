@@ -192,6 +192,13 @@ class WriteOut(M):
     story_time: Str = ""
 
 
+class ActorOut(M):
+    name: Str
+    intent: Str    # what they want to achieve this moment
+    attempt: Str   # what they will physically try to do
+    reasoning: Str # why: their goal, fear, or what they just saw
+
+
 class Violation(M):
     rule: Str = "continuity"
     quote: Str = ""

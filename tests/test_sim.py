@@ -158,7 +158,10 @@ def test_chapter_one_runs_every_stage_and_stores_it(sm):
     assert ch["state_after"]["time"] == "Day 1"
     assert store.project(pid)["head_id"] == ch["id"] and store.project(pid)["status"] == "running"
     assert store.facts(pid) and store.threads(pid)
-    assert [c["task"] for c in fake.calls if c["task"] not in ("sm_world", "sm_cast", "sm_trackers", "sm_rules", "sm_bible", "sm_beats")] == ["sm_plan", "sm_delta", "sm_write", "sm_referee", "sm_archive"]
+    chapter_tasks = [c["task"] for c in fake.calls if c["task"] not in ("sm_world", "sm_cast", "sm_trackers", "sm_rules", "sm_bible", "sm_beats")]
+    n_actors = fake.count("sm_actor")
+    assert n_actors >= 1 and all(t == "sm_actor" for t in chapter_tasks[:n_actors])
+    assert chapter_tasks[n_actors:] == ["sm_plan", "sm_delta", "sm_write", "sm_referee", "sm_archive"]
     assert fake.count("sm_plan") == fake.count("sm_write") == fake.count("sm_referee") == fake.count("sm_archive") == 1
 
 
