@@ -147,11 +147,11 @@ async def suggest_rules(pid, backend, s, instruction="") -> list[dict]:
     return made
 
 
-async def seed_part(pid, part, backend, s, instruction="") -> object:
+async def seed_part(pid, part, backend, s, instruction="", secret=None) -> object:
     if part not in PARTS:
         raise store.SimError("part must be world, cast, trackers, rules or bible")
     if part == "bible":
-        return await architect.write_bible(pid, backend, s, instruction)
+        return await architect.write_bible(pid, backend, s, instruction, secret)
     return await {"world": seed_world, "cast": seed_cast, "trackers": seed_trackers, "rules": seed_rules}[part](pid, backend, s, instruction)
 
 

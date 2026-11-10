@@ -41,9 +41,9 @@ SAMPLING: dict[str, dict] = {
     "char_slots": {"temperature": 0.5}, "p4_plan": {"temperature": 0.8, "top_p": 0.95, "frequency_penalty": 0.3}, "p4_shots": {"temperature": 0.6},
     "p4_bible": {"temperature": 0.9, "top_p": 0.95}, "p4_map": {"temperature": 0.7}, "p4_draft": {"temperature": 0.9, "top_p": 0.95, "frequency_penalty": 0.4}, "p4_punch": {"temperature": 0.6}, "p4_publish": {"temperature": 0.7},        # shorts (docs/PLAN_shorts.md)
     "sm_world": {"temperature": 0.8}, "sm_cast": {"temperature": 0.8}, "sm_trackers": {"temperature": 0.5}, "sm_rules": {"temperature": 0.7}, "sm_suggest": {"temperature": 0.8},
-    "sm_plan": {"temperature": 0.8}, "sm_minds": {"temperature": 0.9}, "sm_delta": {"temperature": 0.3}, "sm_write": {"temperature": 0.85, "top_p": 0.95, "frequency_penalty": 0.3},
+    "sm_plan": {"temperature": 0.8}, "sm_delta": {"temperature": 0.3}, "sm_write": {"temperature": 0.85, "top_p": 0.95, "frequency_penalty": 0.3},
     "sm_referee": {"temperature": 0.2}, "sm_archive": {"temperature": 0.4}, "sm_pick": {"temperature": 0.7}, "sm_condition": {"temperature": 0.1}, "sm_rollup": {"temperature": 0.3},
-    "sm_reread": {"temperature": 0.2}, "sm_bible": {"temperature": 0.8}, "sm_polish": {"temperature": 0.7, "top_p": 0.95}, "sm_beats": {"temperature": 0.6}, "sm_items": {"temperature": 0.4}, "sm_panels": {"temperature": 0.6},        # story simulator (docs/PLAN_simulation.md)
+    "sm_reread": {"temperature": 0.2}, "sm_bible": {"temperature": 0.8}, "sm_secrets": {"temperature": 0.9}, "sm_polish": {"temperature": 0.7, "top_p": 0.95}, "sm_beats": {"temperature": 0.6}, "sm_items": {"temperature": 0.4}, "sm_panels": {"temperature": 0.6},        # story simulator (docs/PLAN_simulation.md)
 }
 OPTIONAL_SAMPLING = ("top_p", "frequency_penalty", "presence_penalty")
 

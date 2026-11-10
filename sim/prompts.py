@@ -16,8 +16,8 @@ CAST = """[TASK:sm_cast]
 You create the cast and the key places of an interactive story simulation. You get the idea and the world card.
 Return JSON: {"entities": [ ... ]} with 2 to 6 places and optionally 1 or 2 groups, and the characters the idea needs: 4 to 10 characters for a story about a group, but a story about one person alone (or the last one left) needs that one person and only a few others who are voices, distant figures or the opposition, never a crowd. Each entity:
 characters: {"kind":"character","name":unique first name or short name,"role":..., "goal":what they want now,"fear":...,"secret":something hidden or "","skills":[2 to 4 things this person is good at, plain phrases],
-"voice":how they speak in a few words,"look":ONE paragraph a painter could use (age, build, face, hair, clothes, one distinguishing mark; no brand names),"starting_condition":how they are at the start,"relations":{"OtherName":"how they relate"}}
-places: {"kind":"place","name":unique,"description":what it is like and what is in it,"look":one painted-picture paragraph,"connects_to":[names of places]}
+"voice":how they speak in a few words,"look":ONE paragraph an illustrator could use (age, build, face, hair, clothes, one distinguishing mark; no brand names),"starting_condition":how they are at the start,"relations":{"OtherName":"how they relate"}}
+places: {"kind":"place","name":unique,"description":what it is like and what is in it,"look":one picture paragraph (what an illustrator would draw),"connects_to":[names of places]}
 groups: {"kind":"group","name":...,"description":who they are and what they want}
 Names must be unique across everything. Make the cast varied, with conflicting goals, not only helpers: include flawed, selfish or dangerous people, and follow the CONTENT section for how dark they may be. English only.
 """ + FENCE
@@ -60,22 +60,39 @@ Return JSON:
 {"logline": one sentence,
 "pov": "second" (you), "first" or "third",
 "voice": how it is told, in 2 or 3 sentences: sentence length, tense, humor, how numbers and concrete details are used (for example: short sentences, present tense, dry humor, real numbers and times),
+"opening": {"line": the first line of the story, "action": what the person does in the first scene, "belief": what the person believes or has been told at the start about what to do},
 "secret": {"truth": the hidden truth the reader will not suspect at first but that changes the meaning of what came before (a betrayal, a lie, what something really is, who someone really is),
-  "who": who or what holds it, "reveal_beat": the beat number where it is revealed (in the last third), "clues": [{"beat": number, "clue": a small harmless-looking detail planted in that beat} (at least 3, all before the reveal)]},
-"rules": [2 to 4 named rules the person discovers, each {"name": "Rule one", "text": the rule in one short sentence, "beat": number where it is learned}],
+  "kind": "authority_lie" | "trap" | "hidden_resource" | "betrayal" | "identity" | "other",
+  "lie": what the person or voice in charge publicly says (a number, a rule, a promise) that the truth contradicts,
+  "who": who or what holds it, "reveal_beat": the beat number where it is revealed (in the last third), "clues": [{"beat": number, "clue": a small harmless-looking detail planted in that beat} (at least 3, all before the reveal)],
+  "found_by": how the person finds out: something they DO (turn a list into a map, measure, count, compare two things) that shows the lie, "method_beat": a beat after the clues and before the reveal},
+"countdown": {"name": a number shown to the reader that keeps changing (days of food, people left, minutes to the end, money), "unit": its unit, "steps": [{"beat": number, "value": number, "note": why it changes} (at least 4, the first at the first beat, changing every few beats)]},
+"objects": [3 to 6 ordinary objects set up early and paid off late (a tool, a gift, a key, a food), each {"name", "what": how it first appears, "plant_beat", "payoff_beat", "payoff": how it pays off}],
+"midpoint": {"beat": the beat about halfway, "change": the event that changes the situation for good},
+"low_point": {"beat": a beat about three quarters of the way, "loss": what the person loses (a place, a friend, their position, their plan)},
+"rules": [2 to 4 named rules, each {"name": "Rule one", "text": the rule in one short sentence, "beat": number where it is learned, "kind": "stated" (said aloud) | "discovered" (learned from what has just happened) | "policy" (never said aloud: a hierarchy, list or procedure that shows by what happens),
+  "uses": [later beats where it is used again, in the same words], "shown": for a policy, how it shows without being said, "broken_beat": a beat in the last third where the person breaks this rule on purpose (for one rule only) or 0}],
 "motifs": [1 or 2 recurring devices (a sound, a ritual, an object, a time of day), each {"name","what","first_beat","payoffs":[beat numbers where it matters again]}],
 "facts": [3 to 6 true real-world facts or clever ideas that solve or complicate a problem (general knowledge only, nothing invented), each {"fact","use": how the story uses it,"beat"}],
-"ending": {"outcome": how it ends, "final_image": the last image, "closing_line": one closing line, ideally an echo of the beginning or the secret turned around}}
+"ending": {"outcome": how it ends, "final_image": the last image, "closing_line": one closing line that echoes the beginning, "inversion": how the ending turns the opening around: what the person did, believed or was told in the first scene, and what it means or becomes now}}
 Principles: one tight situation, concrete numbers and details, a problem to solve in every beat, discoveries the reader remembers, everything that is planted is paid off, the ending changes the meaning of the beginning.
+Structure that works: (1) the secret is usually something a trusted authority (a voice, a manager, a leader, a system) says that serves the authority, a number or rule that is not true; the person finds out by doing something methodical, and then must decide what to do about it. (2) A number the reader sees keeps changing and raises the stakes. (3) The person is knocked down at the low point (loses a place, a friend or a plan) before the end. (4) The last scene does the first scene again, turned around: the person who held a door pushes it, the rule that said never stop is broken once on purpose. (5) At least one rule is a policy the story shows without saying. (6) Objects and rules come back as refrains, with the same words each time.
+For a long plan (more than 16 beats) write more of each: up to 8 rules, 5 devices, 12 objects and 14 facts, and a countdown with a step every few beats.
 The secret must grow out of the situation and the set-ups the idea already gives (a voice, a promise, a person, an institution, a rule someone announced), not out of a new supernatural, scientific or cosmic explanation brought in from nowhere. The best secrets are human and hidden in plain sight: someone who sounds helpful is using or leaving the person, something that looked like protection is a trap, something that looked like a flaw is the reason they survive. Plant clues the reader can check on a second reading.
 Rules are small and practical, learned from something that just happened (what the enemy cannot do, what time it is safe), and each is used again later. Facts must be well-known and clearly true (physics, the human body, buildings, water, food, maps, law); if you are not sure a fact is true, use a clever idea instead and do not call it a fact. Never invent science. English only. Any genre is fine: this works for survival, mystery, drama, business or anything else; do not assume danger, violence or any particular setting unless the idea says so.
+""" + FENCE
+
+SECRETS = """[TASK:sm_secrets]
+You propose the hidden truth of a story. You get the idea, the world card and the cast. Write four different secrets, each one grown out of the situation the idea already gives (a voice, a promise, a person, an institution, a rule someone announced), never a new supernatural or scientific explanation from nowhere.
+Make them different from each other: at least two are an "authority_lie" (a person or voice in charge gives a number, rule or promise that is not true because it serves them: how long supplies last, where it is safe, what you must not do), held by different kinds of authority; the others may be a "trap", a "hidden_resource", a "betrayal" or an "identity". Each one must be something the reader can check on a second reading.
+Return {"candidates":[{"kind":"authority_lie|trap|hidden_resource|betrayal|identity|other","truth":the hidden truth in one or two sentences,"who":who holds it,"lie":what they publicly say that the truth contradicts (or "" if none),"found_by":what the person DOES to find out (turn a list into a map, count, measure, compare),"clues":[three small harmless-looking details that point to it]}]}
 """ + FENCE
 
 BEATS = """[TASK:sm_beats]
 You write the beat sheet of a story from its backbone. You get the backbone (logline, voice, secret with its clues, rules, motifs, facts, ending), what already happened when the story has started, and how many beats to write.
 Return {"beats":[{"n":number,"label":"Day 5: The Water Heater" (the story time and a short title),"time":"Day 5","title":"The Water Heater","event":what happens, one or two sentences,"problem":the concrete problem the person must solve in this beat,
-"turn":what changes at the end of it,"hook":how the beat ends: a cut-off, a surprise or a line,"purpose":"setup|problem|solution|turn|clue|payoff|reveal|ending","challenge":one risky act that could fail or "","clues":[details planted in this beat],"rule":name of a rule learned here or "","motif":name of a device used here or "","fact":the real fact used here or ""}]}
-Rules: write exactly {count} beats numbered from {start}; story time moves forward and may jump (hours, days or weeks, whatever suits the story); the first beat sets up the situation and the last is the ending; plant each clue of the backbone in the beat the backbone gives, before the reveal beat; every beat ends on a turn or a hook, never on a menu of choices; vary the problems (what, where, who); each problem is concrete, has numbers, and is solvable with the facts and rules. Write a problem as a concrete situation with amounts and a deadline, for example "Second problem, money: the account holds 4,300 and the rent is due in 9 days; what can you sell by then?", never as an abstract aim ("manage stress", "decide who sleeps where"). The event says what the person actually DOES in the beat, step by step, with what.
+"turn":what changes at the end of it,"hook":how the beat ends: a cut-off, a surprise or a line,"purpose":"setup|problem|solution|turn|clue|payoff|reveal|ending","challenge":one risky act that could fail or "","clues":[details planted in this beat],"rule":name of a rule learned here or "","motif":name of a device used here or "","fact":the real fact used here or "","solved_by":what solves the problem: a real fact, a rule, an object they hold or a clever idea}]}
+Rules: write exactly {count} beats numbered from {start}; story time moves forward and may jump (hours, days or weeks, whatever suits the story); the first beat of the whole plan sets up the situation and only the last beat of the whole plan is the ending (a part in the middle does not end the story); plant each clue of the backbone in the beat the backbone gives, before the reveal beat; every beat ends on a turn or a hook, never on a menu of choices; vary the problems (what, where, who); each problem is concrete, has numbers, and is solvable with the facts and rules; say in "solved_by" what solves it (a beat without a solution is a beat without a story); put the method beat of the secret where the backbone says; let the objects, rules and the number on screen of the backbone show in the beats that carry them. Write a problem as a concrete situation with amounts and a deadline, for example "Second problem, money: the account holds 4,300 and the rent is due in 9 days; what can you sell by then?", never as an abstract aim ("manage stress", "decide who sleeps where"). The event says what the person actually DOES in the beat, step by step, with what.
 """ + FENCE
 
 # ── a chapter ─────────────────────────────────────────────────────────────────
@@ -100,11 +117,6 @@ Rules:
 - A full clock or a meter in danger must have consequences soon.
 - The CONTENT section says how free the story may be. When it allows, characters may choose ruthless, unconventional or unlawful acts: plan them as risks like any other, never steer away from them.
 - A hard rule that sets a priority ("do X first", "secure Y before anything else") decides what this chapter is about until it is satisfied.
-""" + FENCE
-
-MINDS = """[TASK:sm_minds]
-For each listed character who is NOT a focus of this chapter, write in one short sentence what they want to do right now, from their goal, fear and the situation.
-Return {"wants":{"Name":"what they do"}}.
 """ + FENCE
 
 DELTA = """[TASK:sm_delta]
@@ -183,8 +195,8 @@ Return {"ops":[...],"note":one sentence on what changed}.
 """ + FENCE
 
 PANELS = """[TASK:sm_panels]
-You are the storyboard artist of a cinematic painted illustration series. Turn the chapter into 3 to 5 pictures in story order, each a single moment (not a sequence).
+You are the storyboard artist of an illustrated story. Turn the chapter into 3 to 5 pictures in story order, each a single moment (not a sequence). The chapter is given in numbered paragraphs.
 Return {"panels":[{"shot":"wide|medium|close|detail|over-shoulder","who":[at most 2 character names that appear],"place":place name,"action":one sentence saying exactly what is seen, in positive wording (say what is there, never what is not),
-"mood":light and colour in a few words,"caption":at most 12 words, narration style}]}.
+"mood":light and colour in a few words,"caption":at most 12 words, narration style,"after":the number of the paragraph this picture illustrates (the picture is shown right after that paragraph; spread the pictures through the chapter, in order)}]}.
 Use only characters and places that exist. English only.
 """

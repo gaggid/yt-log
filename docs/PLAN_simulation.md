@@ -116,7 +116,7 @@ Builds the **packet** (section 9), selects due directives (section 8), reads the
 Output schema `ChapterPlan`: `focus` (1 to 3 entity names), `scene` (where, what is happening in two sentences), `intent` (what the focus characters try, from the owner's action or from their goals), `pressure` (which clock/meter/directive the chapter leans on; must name at least one due thing when any exists), `risks` (0 to 3 risky acts, each `{who, act, stat_tracker_ids[], difficulty 'easy'|'normal'|'hard'}`), `beat` (one of `escalate|setback|discovery|respite|choice|reversal|reveal`), `time_passes` (e.g. "40 minutes").
 Code checks: focus names exist and are alive; `beat` differs from the previous two chapters' beats unless the plan states why (variety rule); every due directive is addressed or a reason to wait is given (a `when` directive may wait; a `next` directive may not); an owner `text` action must be reflected in `intent` (word overlap check, one retry).
 
-### 5.3 Cast minds (`sm_minds`, model; optional, setting `deep`, default OFF)
+### 5.3 Cast minds (removed 10 Nov 2026: the authored story plan decides what the others do; this step was off by default and never used)
 For each non-focus character on the same scene: one line of what they want to do now. Folded into the plan context for 5.4. (Generative-Agents style; off by default for speed, built and tested as a switch, not left out.)
 
 ### 5.4 Resolve (code, `sim/dice.py`)

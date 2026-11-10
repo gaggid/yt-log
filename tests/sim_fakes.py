@@ -59,18 +59,29 @@ class SimFake:
     def _sm_bible(self, user):
         n, start = (int(x) for x in re.search(r"The plan covers (\d+) beats, numbered (\d+) to", user).groups())
         end = start + n - 1
+        mid = start + (n - 1) // 2
         return {"logline": "A night, a store and a voice that always knows where you are.", "pov": "second", "voice": "Short sentences, present tense, dry humor, real numbers.",
-                "secret": {"truth": "The voice on the intercom is leaving them behind.", "who": "the manager", "reveal_beat": end - 1,
+                "opening": {"line": "Stay in your room, says the intercom.", "action": "locks the door and waits for the voice", "belief": "whoever talks on the intercom is on your side"},
+                "secret": {"truth": "The voice on the intercom is leaving them behind.", "kind": "authority_lie", "lie": "The intercom says help is coming at dawn.", "who": "the manager", "reveal_beat": end - 1,
+                           "found_by": "the person turns the list of intercom orders into a map of the store", "method_beat": end - 2,
                            "clues": [{"beat": start, "clue": "the intercom knows which aisle you are in"}, {"beat": start + 1, "clue": "the intercom never mentions the exit"}, {"beat": start + 2, "clue": "the manager's coat is missing"}]},
-                "rules": [{"name": "Rule one", "text": "Move when the noise moves.", "beat": start + 1}, {"name": "Rule two", "text": "They push; they cannot pull.", "beat": start + 2}],
+                "countdown": {"name": "Water", "unit": "days", "steps": [{"beat": start, "value": 22, "note": "start"}, {"beat": mid, "value": 14, "note": "a leak"}, {"beat": end - 1, "value": 3, "note": "the tank is empty"}]},
+                "objects": [{"name": "The cake", "what": "a cake box in the freezer", "plant_beat": start + 1, "payoff_beat": end, "payoff": "it is eaten at the end"}],
+                "midpoint": {"beat": mid, "change": "the lights go out for good"}, "low_point": {"beat": max(mid + 1, end - 2), "loss": "the door is lost"},
+                "rules": [{"name": "Rule one", "text": "Move when the noise moves.", "beat": start + 1, "kind": "stated", "uses": [mid, end]},
+                          {"name": "Rule two", "text": "They push; they cannot pull.", "beat": start + 2, "kind": "discovered", "broken_beat": end},
+                          {"name": "Staff list", "text": "Staff sleep nearest the door.", "beat": start + 3, "kind": "policy", "shown": "the manager puts the cook by the door"}],
                 "motifs": [{"name": "The bell", "what": "a bell that rings every 50 minutes", "first_beat": start, "payoffs": [end]}],
                 "facts": [{"fact": "A person needs about a gallon of water a day.", "use": "counting the days the water lasts", "beat": start}],
-                "ending": {"outcome": "They are alone.", "final_image": "the intercom clicks on", "closing_line": "Stay in your room."}}
+                "ending": {"outcome": "They are alone.", "final_image": "the intercom clicks on", "closing_line": "Stay in your room.", "inversion": "the person unlocks the door and walks out instead of waiting"}}
 
     def _sm_beats(self, user):
         n, start = (int(x) for x in re.search(r"Write exactly (\d+) beats numbered (\d+) to", user).groups())
         return {"beats": [{"n": start + i, "label": f"Day {start + i}: Beat {start + i}", "time": f"Day {start + i}", "title": f"Beat {start + i}", "event": "The people secure the doors while the noise outside grows",
-                           "problem": "barricade the doors with pallets before the noise draws them in", "turn": "the noise changes", "hook": "a knock on the shutter", "purpose": "problem", "challenge": "barricade the doors"} for i in range(n)]}
+                           "problem": "barricade the doors with pallets before the noise draws them in", "turn": "the noise changes", "hook": "a knock on the shutter", "purpose": "problem", "challenge": "barricade the doors", "solved_by": "pallets stacked against the doors hold"} for i in range(n)]}
+
+    def _sm_secrets(self, user):
+        return {"candidates": [{"kind": "authority_lie", "truth": f"The manager lies about help {i}.", "who": "the manager", "lie": "help comes at dawn", "found_by": "count the radio calls", "clues": ["a coat is missing", "the radio is silent"]} for i in range(5)]}
 
     def _sm_items(self, user):
         return {"items": [{"name": "Crowbar", "qty": 1, "at": "Aisle Two"}, {"name": "Rope", "qty": 2, "at": "Aisle Two"}, {"name": "Bandages", "qty": 4, "at": "Pharmacy"}]}
@@ -97,9 +108,6 @@ class SimFake:
         return {"focus": alive[:2], "where": "Aisle One", "scene": f"{alive[0]} moves to secure the doors while the noise outside grows.", "intent": f"{alive[0]} tries to barricade the doors with pallets.",
                 "pressure": "the clock", "risks": [{"who": alive[0], "act": "barricade the doors", "stats": [mp.group(1)] if mp else [], "items": ["Crowbar"], "difficulty": "normal"}],
                 "beat": beats[self.plan_n % len(beats)], "time_passes": "40 minutes", "addresses": due, "opposition": "The noise outside grows and something tests the doors."}
-
-    def _sm_minds(self, user):
-        return {"wants": {n: "keeps watch" for n in re.findall(r"Others: (.*)", user)[0].split(", ")}}
 
     def _sm_delta(self, user):
         mp = re.search(r"^\[([^\]]+)\] \(meter\)", user, re.M)
@@ -141,6 +149,6 @@ class SimFake:
         return {"ops": [{"op": "entity_status", "target": "Ravi", "value": "limping", "why": "edit"}], "note": "Ravi now limps."}
 
     def _sm_panels(self, user):
-        return {"panels": [{"shot": "wide", "who": ["Ravi"], "place": "Aisle One", "action": "Ravi stacks pallets against the glass doors under flickering light", "mood": "cold blue", "caption": "The doors would have to hold."},
-                           {"shot": "close", "who": ["Meera"], "place": "Aisle One", "action": "Meera listens at the shutter with a hand pressed to the metal", "mood": "dim amber", "caption": "Something moved outside."},
+        return {"panels": [{"shot": "wide", "who": ["Ravi"], "place": "Aisle One", "action": "Ravi stacks pallets against the glass doors under flickering light", "mood": "cold blue", "caption": "The doors would have to hold.", "after": 1},
+                           {"shot": "close", "who": ["Meera"], "place": "Aisle One", "action": "Meera listens at the shutter with a hand pressed to the metal", "mood": "dim amber", "caption": "Something moved outside.", "after": 99},
                            {"shot": "medium", "who": ["Ravi", "Meera"], "place": "Pharmacy", "action": "Ravi and Meera share a look over a torn box of bandages", "mood": "warm shadow", "caption": "Trust came slowly."}]}

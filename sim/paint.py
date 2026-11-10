@@ -1,4 +1,4 @@
-"""Pictures of a story (docs/PLAN_simulation.md section 12): cinematic painted illustrations drawn from text by the gateway image model. Not photographs, not from Character Studio. A character or place gets
+"""Pictures of a story (docs/PLAN_simulation.md section 12): illustrations in one chosen style (cinematic painting by default, or a comic book, or simple flat 2D) drawn from text by the gateway image model. Not photographs, not from Character Studio. A character or place gets
 one reference painting from its `look` text; panels are made by edit from those references (so faces and places stay alike) and fall back to the text alone when no reference can be used.
 Image requests are built only here. Captions are lettered by code (the image model never draws text)."""
 import hashlib
@@ -16,11 +16,25 @@ from .engine import Stopped, _json
 
 STYLE = "cinematic digital painting, dramatic lighting, painterly brushwork, rich colour grading, film-still composition, concept-art quality"
 KEEP_OUT = "An original painted illustration, not a photograph. No text, no letters, no numbers, no logo, no watermark, no collage, no split screen."
+STYLES = {
+    "painted": {"label": "Cinematic painting", "style": STYLE, "keep": KEEP_OUT, "word": "painted illustration"},
+    "comic": {"label": "Comic book", "word": "comic-book illustration",
+              "style": "bold comic-book illustration, thick clean ink outlines, flat cel-shaded colours, simple halftone shading, expressive faces, simple shapes, bright limited colour palette",
+              "keep": "An original comic-book illustration, not a photograph and not a painting. No text, no speech bubbles, no letters, no numbers, no logo, no watermark, no collage, no split screen."},
+    "flat": {"label": "Simple flat 2D", "word": "flat 2D illustration",
+             "style": "simple flat 2D vector illustration, minimal geometric shapes, solid colour fills, no gradients, no texture, clean uniform outlines, limited colour palette, storybook simplicity",
+             "keep": "An original flat 2D illustration, not a photograph and not a painting. No text, no letters, no numbers, no logo, no watermark, no collage, no split screen."},
+}
 SIZES = {"wide": "1280x720", "tall": "720x1280"}
 REF_SIZE = "1024x1024"
 SHOTS = {"wide": "A wide establishing view:", "medium": "A medium shot:", "close": "A close-up:", "detail": "A close detail shot:", "over-shoulder": "An over-the-shoulder shot:"}
 MAX_PANELS = 5
 NEGATIVE = re.compile(r"\b(no|not|without|never|nothing|none|isn't|aren't|doesn't)\b", re.I)
+
+
+def style_of(cfg: dict) -> dict:
+    """The picture style the story chose (setting `image_style`); an unknown name means the painted one."""
+    return STYLES.get(cfg.get("image_style") or "painted", STYLES["painted"])
 
 
 def model_of(cfg: dict) -> str:
@@ -42,14 +56,15 @@ def look_of(e: dict) -> str:
 
 
 def ref_hash(e: dict, cfg: dict) -> str:
-    return _h(look_of(e), e["name"], STYLE, model_of(cfg), e["kind"])
+    return _h(look_of(e), e["name"], style_of(cfg)["style"], model_of(cfg), e["kind"])
 
 
 def ref_request(e: dict, cfg: dict) -> dict:
+    st = style_of(cfg)
     if e["kind"] == "character":
-        text = f"{STYLE}. A portrait of {e['name']}: {look_of(e)} Head and shoulders, three-quarter view, a simple softly lit painted background. {KEEP_OUT}"
+        text = f"{st['style']}. A portrait of {e['name']}: {look_of(e)} Head and shoulders, three-quarter view, a simple softly lit background. {st['keep']}"
     else:
-        text = f"{STYLE}. An establishing view of {e['name']}: {look_of(e)} {KEEP_OUT}"
+        text = f"{st['style']}. An establishing view of {e['name']}: {look_of(e)} {st['keep']}"
     body = {"model": model_of(cfg), "prompt": text[:3900], "size": REF_SIZE, "n": 1, "seed": _seed(cfg, "ref", e["id"]), "response_format": "b64_json"}
     return {"how": "draw", "body": body, "refs": [], "hash": ref_hash(e, cfg)}
 
@@ -69,7 +84,7 @@ def ref_is_old(pid: str, e: dict, cfg: dict) -> bool:
 
 def panel_hash(p: dict, ents: dict, cfg: dict) -> str:
     looks = {n: look_of(ents[n]) for n in [*p.get("who", []), p.get("place", "")] if n in ents}
-    return _h(p.get("shot"), p.get("action"), p.get("mood"), p.get("who"), p.get("place"), p.get("prompt_override", ""), looks, STYLE, model_of(cfg), cfg["panel_shape"])
+    return _h(p.get("shot"), p.get("action"), p.get("mood"), p.get("who"), p.get("place"), p.get("prompt_override", ""), looks, style_of(cfg)["style"], model_of(cfg), cfg["panel_shape"])
 
 
 def _positive(text: str) -> str:
@@ -79,6 +94,7 @@ def _positive(text: str) -> str:
 def panel_request(pid: str, p: dict, ents: dict, cfg: dict, chapter_idx: int, n: int) -> dict:
     """An edit from the reference paintings of the people in the picture (at most two) and the place, or a plain drawing from their look texts."""
     size = SIZES[cfg["panel_shape"]]
+    st = style_of(cfg)
     seed = _seed(cfg, "panel", chapter_idx, n)
     who = [ents[x] for x in p.get("who", []) if x in ents and ents[x]["kind"] == "character"][:2]
     place = ents.get(p.get("place", ""))
@@ -95,12 +111,32 @@ def panel_request(pid: str, p: dict, ents: dict, cfg: dict, chapter_idx: int, n:
         parts = []
         for i, (e, r) in enumerate(names, 1):
             parts.append(f"Picture {i} shows {e['name']}." if e["kind"] == "character" else f"Picture {i} shows the place.")
-        text = (f"{' '.join(parts)} Create a new painted illustration in the same painted style. {shot} {scene}{mood} The people look exactly as in their pictures. {STYLE}. {KEEP_OUT}")[:3900]
+        text = (f"{' '.join(parts)} Create a new {st['word']} in the same style. {shot} {scene}{mood} The people look exactly as in their pictures. {st['style']}. {st['keep']}")[:3900]
         return {"how": "edit", "body": {"model": model_of(cfg), "prompt": text, "size": size, "n": 1, "seed": seed, "response_format": "b64_json"}, "refs": refs, "ref_ids": [r["id"] for _, r in names]}
     looks = " ".join(f"{e['name']}: {look_of(e)}" for e in who)
     setting = f" The setting: {look_of(place)}" if place else ""
-    text = f"{STYLE}. {shot} {scene}{mood} {looks}{setting} {KEEP_OUT}"[:3900]
+    text = f"{st['style']}. {shot} {scene}{mood} {looks}{setting} {st['keep']}"[:3900]
     return {"how": "draw", "body": {"model": model_of(cfg), "prompt": text, "size": size, "n": 1, "seed": seed, "response_format": "b64_json"}, "refs": [], "ref_ids": []}
+
+
+def paragraphs(prose: str) -> list[str]:
+    return [x.strip() for x in (prose or "").split("\n") if x.strip()]
+
+
+def placement(panels: list[dict], nparas: int) -> list[int]:
+    """The paragraph (counting from 1) after which each picture shows, in story order: the one the planner named, else spread evenly through the chapter. 0 when the chapter has no text."""
+    k = len(panels)
+    if not nparas:
+        return [0] * k
+    out, prev = [], 1
+    for i, p in enumerate(panels):
+        a = int(p.get("after") or 0)
+        if a < 1:
+            a = max(1, round((i + 1) * nparas / (k + 1)))
+        a = max(prev, min(nparas, a))
+        out.append(a)
+        prev = a
+    return out
 
 
 async def plan_panels(pid: str, cid: str, backend, s: dict) -> list[dict]:
@@ -125,9 +161,11 @@ async def plan_panels(pid: str, cid: str, backend, s: dict) -> list[dict]:
             raise ValueError("write 3 to 5 pictures")
         o.panels = out
 
-    user = (f"CHAPTER {ch['idx']}: {ch['title']} ({ch['story_time']})\n{ch['prose']}\n\nCHARACTERS: {', '.join(chars.values())}\nPLACES: {', '.join(places.values())}\n\nPlan the pictures now.")
+    paras = paragraphs(ch["prose"])
+    numbered = "\n".join(f"[{i}] {x}" for i, x in enumerate(paras, 1))
+    user = (f"CHAPTER {ch['idx']}: {ch['title']} ({ch['story_time']})\n{numbered}\n\nCHARACTERS: {', '.join(chars.values())}\nPLACES: {', '.join(places.values())}\n\nPlan the pictures now.")
     o = await _json(backend, s, P.PANELS, user, m.PanelsOut, v)
-    return [{"n": i, "shot": x.shot, "who": x.who, "place": x.place, "action": _positive(x.action), "mood": x.mood, "caption": x.caption, "file": "", "capfile": "", "media_id": "", "hash": "", "old": False}
+    return [{"n": i, "shot": x.shot, "who": x.who, "place": x.place, "action": _positive(x.action), "mood": x.mood, "caption": x.caption, "after": int(x.after) if 1 <= x.after <= len(paras) else 0, "file": "", "capfile": "", "media_id": "", "hash": "", "old": False}
             for i, x in enumerate(o.panels, 1)]
 
 

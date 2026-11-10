@@ -272,3 +272,51 @@ def test_the_storage_page_sees_stories_and_prunes_their_pictures(sm):
     assert not media.items(pid, "sim_panel") and media.items(pid, "sim_ref")
     run(paint.paint_chapter(pid, cid, fake, cfg(), "k", only=[1], send=Gate()))                 # references survive, so only the panel is drawn
     assert store.chapter(cid)["panels"][0]["file"]
+
+
+def test_the_picture_style_is_a_story_setting_that_changes_every_request_and_marks_old_pictures(sm):
+    from sim import store as st
+    assert set(paint.STYLES) == set(st.IMAGE_STYLES) and paint.style_of({}) is paint.STYLES["painted"] and paint.style_of({"image_style": "nonsense"}) is paint.STYLES["painted"]
+    pid, fake = make()
+    ch = go(pid, fake)
+    for name in ("comic", "flat"):
+        gate = Gate()
+        st.save_project(pid, settings={"image_style": name})
+        run(paint.paint_chapter(pid, ch["id"], fake, cfg(), "k", send=gate))
+        text = " ".join(r["body"]["prompt"] for r in gate.reqs)
+        assert paint.STYLES[name]["style"] in text and paint.STYLES[name]["keep"] in text and paint.STYLE not in text and "not a photograph and not a painting" in text
+        assert "photo" not in text.replace(paint.STYLES[name]["keep"], "").lower()
+    e = st.entities(pid)[0]
+    assert paint.ref_hash(e, {**cfg(), "image_style": "comic"}) != paint.ref_hash(e, cfg()) and paint.ref_hash(e, cfg()) == paint.ref_hash(e, {**cfg(), "image_style": "painted"})   # painted stays as it was
+    assert st.save_project(pid, settings={"image_style": "flat"})["settings"]["image_style"] == "flat"
+    with pytest.raises(st.SimError):
+        st.save_project(pid, settings={"image_style": "oil"})
+
+
+def test_each_picture_sits_after_the_paragraph_it_illustrates(sm):
+    assert paint.placement([{"after": 1}, {"after": 3}, {"after": 3}], 5) == [1, 3, 3]
+    assert paint.placement([{"after": 4}, {"after": 2}], 5) == [4, 4]                                   # never before the one that came first
+    assert paint.placement([{}, {}, {}], 8) == [2, 4, 6] and paint.placement([{"after": 99}], 4) == [4] and paint.placement([{}, {}], 0) == [0, 0]
+    assert paint.paragraphs("One.\n\nTwo.\n   \nThree.") == ["One.", "Two.", "Three."]
+    pid, fake = make()
+    ch = go(pid, fake)
+    run(paint.paint_chapter(pid, ch["id"], fake, cfg(), "k", send=Gate()))
+    saved = store.chapter(ch["id"])["panels"]
+    assert [p["after"] for p in saved] == [1, 0, 0]                                                       # the planner's number is kept when it is in range, else left for the code to spread
+    assert "[1] " in fake.last("sm_panels")["user"]                                                       # the planner sees numbered paragraphs
+
+
+def test_the_chapter_view_and_exports_place_pictures_among_the_paragraphs(client, env):
+    c = client
+    pid, fake = make()
+    ch = go(pid, fake)
+    store.update_chapter(ch["id"], prose="First paragraph here.\nSecond paragraph here.\nThird paragraph here.\nFourth paragraph here.\nFifth paragraph here.\nSixth paragraph here.")
+    run(paint.paint_chapter(pid, ch["id"], fake, cfg(), "k", send=Gate()))
+    view = next(x for x in c.get(f"/api/sim/{pid}").json()["chapters"] if x["id"] == ch["id"])
+    ats = [p["at"] for p in view["panels"]]
+    assert ats == sorted(ats) and ats[0] == 1 and all(1 <= a <= 6 for a in ats) and len(set(ats)) > 1          # spread through the chapter, not stacked on top
+    md = c.get(f"/api/sim/{pid}/export?format=md").text
+    assert md.index("First paragraph") < md.index("![") < md.index("Sixth paragraph")                         # the first picture is inside the text, not above it
+    assert md.index("![") > md.index("## Chapter 1")
+    js = c.get(f"/api/sim/{pid}/export?format=json").json()
+    assert [p["after"] for p in js["chapters"][0]["panels"]] == ats

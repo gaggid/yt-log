@@ -85,6 +85,6 @@ def as_template(pid: str) -> dict:
     w = store.world(pid)
     keep = ("items", "meter", "clock", "flag")
     return {"tone": w.get("tone", ""), "pacing": w.get("pacing", ""), "hint": f"Based on the story '{p['title']}'.",
-            "settings": {k: p["settings"][k] for k in ("difficulty", "dice", "chapter_words", "deep", "panel_shape", "captions", "thinking", "content", "carry_limit")}, "craft": w.get("craft", ""),
+            "settings": {k: p["settings"][k] for k in ("difficulty", "dice", "chapter_words", "panel_shape", "captions", "thinking", "content", "carry_limit")}, "craft": w.get("craft", ""),
             "rules": [(g["grp"], g["text"]) for g in store.guidelines(pid, enabled_only=True)],
             "trackers": [(t["kind"], t["name"], t.get("description", "")) for t in store.trackers(pid) if t["kind"] in keep]}

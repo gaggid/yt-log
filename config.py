@@ -34,7 +34,10 @@ def _ensure_password() -> str:
 APP_USER = os.environ.get("APP_USER", "admin")
 APP_PASSWORD = _ensure_password()
 
-API_KEY = os.environ.get("TRIPFICK_API_KEY", "")
+# SCRATCH=1 marks a throw-away copy of the app (tests, browser checks on another port and data dir): it never gets the gateway key, and the text model refuses to be called,
+# because the gateway serves one request at a time and a scratch copy must not take the live app's turn.
+SCRATCH = os.environ.get("SCRATCH", "") not in ("", "0")
+API_KEY = "" if SCRATCH else os.environ.get("TRIPFICK_API_KEY", "")
 # Local gateway by default: no Cloudflare 100s request limit on slow model loads.
 BASE_URL = os.environ.get("TRIPFICK_BASE_URL", "http://127.0.0.1:8810/v1")
 FFMPEG = (os.environ.get("FFMPEG_PATH") or shutil.which("ffmpeg")

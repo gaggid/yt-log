@@ -19,6 +19,7 @@ const STYLE = `
 .sm-kv input,.sm-kv textarea,.sm-kv select{width:100%}
 .sm-state div{margin:5px 0;font-size:13px}.sm-state b{font-weight:600}
 .sm-dead{text-decoration:line-through;color:var(--mute)}
+.sm-fig{margin:12px 0}.sm-fig img{width:100%;border-radius:8px;display:block;background:var(--line);min-height:90px}.sm-fig figcaption{font-size:12px;color:var(--mute);margin-top:2px}
 .sm-panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin:8px 0}
 .sm-panels figure{margin:0}.sm-panels img{width:100%;border-radius:8px;display:block;background:var(--line);min-height:90px}
 .sm-panels figcaption{font-size:12px;color:var(--mute);margin-top:2px}
@@ -67,6 +68,13 @@ function mark(node) { node.dataset.sm = '1'; if (!window._smLeave) { window._smL
 function css() { if (!document.getElementById('sm-css')) { const s = document.createElement('style'); s.id = 'sm-css'; s.textContent = STYLE; document.head.append(s); } }
 const live = () => el && document.body.contains(el) && my === route_id;
 const paras = t => esc(t || '').split(/\n+/).filter(Boolean).map(p => `<p>${p}</p>`).join('');
+/* the paragraphs of a chapter with each picture right after the paragraph it illustrates (p.at, counted from 1; the server works it out) */
+function withPictures(c, fig) {
+  const ps = (c.prose || '').split(/\n+/).map(x => x.trim()).filter(Boolean);
+  const pics = c.panels || [];
+  if (!ps.length) return pics.map(fig).join('');
+  return ps.map((x, i) => `<p>${esc(x)}</p>` + pics.filter(p => Math.min(Math.max(p.at || ps.length, 1), ps.length) === i + 1).map(fig).join('')).join('');
+}
 const hash = (id, tab) => { location.hash = '#/sim' + (id ? '/' + id : '') + (tab ? '?t=' + tab : ''); };
 
 /* ───────── library ───────── */
@@ -133,7 +141,7 @@ function watch() {
   poll = setTimeout(tick, 1500);
 }
 
-const STAGE = {gather: 'reading the situation', plan: 'planning', minds: 'what the others want', resolve: 'rolling the dice', delta: 'working out what changes', write: 'writing', referee: 'checking the rules', archive: 'remembering and offering options'};
+const STAGE = {gather: 'reading the situation', plan: 'planning', resolve: 'rolling the dice', delta: 'working out what changes', write: 'writing', referee: 'checking the rules', archive: 'remembering and offering options'};
 function runBanner(r) {
   return `<span class="spin"></span> ${esc(r.label || 'working')}… <span class="mute small">${r.elapsed_s ? hd(r.elapsed_s) : ''}</span> <span class="sp"></span><button class="small bad" onclick="window.smStop()">Stop</button>`;
 }
@@ -241,16 +249,17 @@ function chapterHtml(c, i) {
     f.stale ? '<div class="sm-banner warn">Written before an earlier chapter was edited.</div>' : '',
     last && f.rules_version && f.rules_version < D.project.settings.rules_version ? '<div class="sm-banner warn">The rules changed after this chapter; the next chapter follows the new rules.</div>' : '',
     f.reread ? `<div class="sm-banner">Your edit: ${esc(f.reread.note || 'no change to the state')} ${f.reread.preview.map(x => `<span class="sm-chip">${esc(x.text)}</span>`).join('')} <button class="small primary" data-apply="${c.id}">Apply to the state</button></div>` : ''].join('');
-  const panels = c.panels.map(p => `<figure>${p.file ? `<img loading="lazy" src="/api/sim/file/${SID}/${esc(p.capfile || p.file)}?v=${esc(p.media_id)}" alt="">` : '<div style="height:120px;background:var(--line);border-radius:8px"></div>'}
+  const fig = p => `<figure class="sm-fig">${p.file ? `<img loading="lazy" src="/api/sim/file/${SID}/${esc(p.capfile || p.file)}?v=${esc(p.media_id)}" alt="">` : '<div style="height:120px;background:var(--line);border-radius:8px"></div>'}
     <figcaption>${p.old ? '<span class="badge b-warn">old</span> ' : ''}${p.uploaded ? '<span class="badge">your picture</span> ' : ''}${esc(p.caption || '')}</figcaption>
-    <div class="row" style="gap:4px"><button class="small" data-pre="${c.id}:${p.n}">Redraw</button><button class="small" data-ped="${c.id}:${p.n}">Edit</button><button class="small" data-pup="${c.id}:${p.n}">Upload</button><button class="small bad" data-pdel="${c.id}:${p.n}">✕</button></div></figure>`).join('');
+    <div class="row" style="gap:4px"><button class="small" data-pre="${c.id}:${p.n}">Redraw</button><button class="small" data-ped="${c.id}:${p.n}">Edit</button><button class="small" data-pup="${c.id}:${p.n}">Upload</button><button class="small bad" data-pdel="${c.id}:${p.n}">✕</button></div></figure>`;
+  const prose = withPictures(c, fig);
   const paintErr = f.paint_error ? `<div class="sm-banner warn">The pictures could not be painted: ${esc(f.paint_error)}</div>` : '';
   return `<div class="card pad sm-ch mt" id="ch-${c.id}"><div class="row"><h3>Chapter ${c.idx}: ${esc(c.title || '(untitled)')}</h3><span class="sp"></span>
       ${c.siblings.length ? `<select data-branch="${c.id}" title="Other versions of this chapter">${c.siblings.map(s => `<option value="${s.id}" ${s.id === c.id ? 'selected' : ''}>${esc(s.label)}${s.status === 'failed' ? ' (failed)' : ''}</option>`).join('')}</select>` : ''}
       <span class="small mute">${esc(c.story_time || '')}</span></div>
     <div class="small mute">${esc(c.plan.beat || '')}${c.focus.length ? ' · following ' + c.focus.map(esc).join(', ') : ''}${c.chosen && c.chosen.label ? '' : ''}</div>
-    ${flagsHtml}${paintErr}${panels ? `<div class="sm-panels">${panels}</div>` : ''}
-    <div class="sm-prose mt-s">${paras(c.prose)}</div>
+    ${flagsHtml}${paintErr}
+    <div class="sm-prose mt-s">${prose}</div>
     ${c.rolls.length ? `<div>${c.rolls.map(r => `<span class="sm-chip ${r.tier}" title="${esc((r.why || []).join(', '))}">${esc(r.act)}: ${r.dice_off ? 'success' : `${r.die}${r.mod >= 0 ? '+' : ''}${r.mod} vs ${r.target} → ${r.tier}`}</span>`).join('')}</div>` : ''}
     ${(c.flags && c.flags.arc) || (c.plan && c.plan.opposition) ? `<div class="small mute">${c.flags.arc ? `phase ${esc(c.flags.arc.phase)}, aimed at tension ${c.flags.arc.target}/10` : ''}${c.plan.opposition ? `${c.flags.arc ? ' · ' : ''}the opposition: ${esc(c.plan.opposition)}` : ''}${(c.plan.calibration || []).length ? ' · ' + c.plan.calibration.map(esc).join('; ') : ''}</div>` : ''}
     ${(() => { const pc = (D.health && D.health.per_chapter || []).find(x => x.idx === c.idx); return pc ? `<div class="small mute">tension ${pc.intensity}/10 · ends on a ${esc(pc.ending)}${pc.costs.length ? ' · cost: ' + pc.costs.map(esc).join('; ') : ' · no cost'}</div>` : ''; })()}
@@ -387,13 +396,37 @@ async function planAct(method, path, json, ok) {
   return r;
 }
 
+const SECRET_KINDS = [['authority_lie', 'Someone in charge lies'], ['trap', 'A trap'], ['hidden_resource', 'A hidden resource'], ['betrayal', 'A betrayal'], ['identity', 'A hidden identity'], ['other', 'Other']];
+const RULE_KINDS = [['stated', 'said aloud'], ['discovered', 'learned from what happens'], ['policy', 'never said, shown']];
+const kindLabel = k => (SECRET_KINDS.find(x => x[0] === k) || ['', k || ''])[1];
+
+function pickerHtml(opts, busy) {
+  if (!opts || !opts.length) return '';
+  return `<h4 style="margin:14px 0 4px">Pick the twist</h4><p class="small mute">Four hidden truths grown out of your idea. Use one as it is, or edit it first; the plan is then written around it.</p>` + opts.map((o, i) => `<div class="card pad mt-s"><b>${esc(kindLabel(o.kind))}</b>
+    <div class="small" style="margin:4px 0">${esc(o.truth)}</div><div class="small mute">The lie: ${esc(o.lie || 'none')} · Found out by: ${esc(o.found_by || '-')}</div>${(o.clues || []).length ? `<div class="small mute">Clues: ${o.clues.map(esc).join('; ')}</div>` : ''}
+    <div class="row" style="margin-top:6px"><button class="small primary" data-pick="${i}" ${busy ? 'disabled' : ''}>Use this</button><button class="small" data-pick-edit="${i}" ${busy ? 'disabled' : ''}>Edit, then use</button></div></div>`).join('');
+}
+
+function bindPicker(root, opts, again) {
+  const use = o => run(null, '/seed/bible', {instruction: '', secret: o}, 'Writing the story plan');
+  root.querySelectorAll('[data-pick]').forEach(btn => btn.onclick = async () => { if (!again || await confirmDlg('Write the whole plan again?', 'The plan, its rules, objects and the beats still to come are written again around this twist. Chapters already written stay.', 'Write it again')) use(opts[+btn.dataset.pick]); });
+  root.querySelectorAll('[data-pick-edit]').forEach(btn => btn.onclick = async () => {
+    const o = opts[+btn.dataset.pickEdit];
+    const v = await dialog({title: 'Edit the twist', html: `<label class="f">The hidden truth<textarea id="pk-t">${esc(o.truth)}</textarea></label><label class="f">Held by<input id="pk-w" value="${esc(o.who || '')}"></label><label class="f">The lie everyone believes<input id="pk-l" value="${esc(o.lie || '')}"></label><label class="f">The person finds out by<textarea id="pk-f">${esc(o.found_by || '')}</textarea></label>`,
+      buttons: [{label: 'Cancel', value: null}, {label: 'Write the plan', primary: true, collect: l => ({...o, truth: l.querySelector('#pk-t').value, who: l.querySelector('#pk-w').value, lie: l.querySelector('#pk-l').value, found_by: l.querySelector('#pk-f').value})}]});
+    if (v && (!again || await confirmDlg('Write the whole plan again?', 'The plan, its rules, objects and the beats still to come are written again around this twist. Chapters already written stay.', 'Write it again'))) use(v);
+  });
+  const ps = root.querySelector('#pl-secrets'); if (ps) ps.onclick = () => run(null, '/secrets', {instruction: ''}, 'Thinking of four twists');
+}
+
 async function drawPlan() {
   const b = $('#sm-body'), pl = D.plan, busy = D.run && D.run.state === 'running';
   if (!pl) {
     b.innerHTML = `<div class="card pad mt"><h3 style="margin-top:0">No story plan yet</h3>
       <p class="mute">A story plan is written before the chapters: the point of view and voice, a hidden truth with clues planted along the way, rules the person discovers, recurring devices, real-world facts that solve problems, the ending, and one beat for each chapter. Chapters then play their beats; your choices decide how the person handles each one. Without a plan the story is improvised chapter by chapter.</p>
       ${D.chapters.length ? '<p class="small mute">The story has started: the plan is written for the chapters still to come, from what has happened so far.</p>' : ''}
-      <button class="primary" id="pl-make" ${busy ? 'disabled' : ''}>Write the story plan with AI</button></div>`;
+      <button class="primary" id="pl-make" ${busy ? 'disabled' : ''}>Write the story plan with AI</button> <button id="pl-secrets" ${busy ? 'disabled' : ''}>Propose four twists first</button>${pickerHtml(D.secret_options, busy)}</div>`;
+    bindPicker(b, D.secret_options || [], false);
     $('#pl-make').onclick = async () => { const t = await textDlg('Write the story plan', 'Anything the AI should keep in mind? (optional)', '', true); if (t !== null) run(null, '/seed/bible', {instruction: t}, 'Writing the story plan'); };
     return;
   }
@@ -404,51 +437,81 @@ async function drawPlan() {
   b.innerHTML = `${busy ? '<div class="sm-banner warn">A step is running; changes wait until it is done.</div>' : ''}
   <div class="card pad mt"><div class="row"><b>The story plan</b><span class="sp"></span><button class="small" id="pl-basics">Edit</button></div>
     <p style="margin:6px 0"><i>${esc(pl.logline)}</i></p>
-    <div class="small"><b>Told in</b> ${esc((POVS.find(p => p[0] === pl.pov) || ['', pl.pov])[1])}. <b>Voice:</b> ${esc(pl.voice)}</div></div>
+    <div class="small"><b>Told in</b> ${esc((POVS.find(p => p[0] === pl.pov) || ['', pl.pov])[1])}. <b>Voice:</b> ${esc(pl.voice)}</div>
+    ${pl.opening && (pl.opening.line || pl.opening.action || pl.opening.belief) ? `<div class="small" style="margin-top:4px"><b>Opens on</b> ${esc(pl.opening.line || '')} <span class="mute">${esc(pl.opening.action || '')}${pl.opening.belief ? ' · believes: ' + esc(pl.opening.belief) : ''}</span></div>` : ''}</div>
+  ${(pl.audit || []).length ? `<div class="card pad mt"><b>What the plan still lacks</b>${pl.audit.map(a => `<div class="small" style="margin:3px 0"><span class="sm-tag">${a.level === 'warn' ? 'missing' : 'note'}</span> ${esc(a.text)}</div>`).join('')}</div>` : '<div class="small mute mt">The plan has every part of the film framework.</div>'}
   <div class="card pad mt"><div class="row"><b>The hidden truth</b><span class="sp"></span>${sec.hidden ? '<button class="small" id="pl-show">Show the secret</button>' : '<button class="small" id="pl-edit-secret">Edit</button><button class="small" id="pl-hide">Hide</button>'}</div>
     ${sec.hidden ? `<div class="small mute">Hidden, so you can read the story as a reader would. ${sec.clues} clues are planted before it is revealed.</div>`
-      : `<div class="small" style="margin-top:6px">${esc(sec.truth)} <span class="mute">(held by ${esc(sec.who || 'someone')}; revealed in beat ${sec.reveal_beat})</span></div>${(sec.clues || []).map(c => `<div class="small mute">beat ${c.beat}: ${esc(c.clue)}</div>`).join('')}`}</div>
+      : `<div class="small" style="margin-top:6px">${esc(sec.truth)} <span class="mute">(held by ${esc(sec.who || 'someone')}; revealed in beat ${sec.reveal_beat})</span></div>
+      <div class="small mute">${esc(kindLabel(sec.kind))} · The lie: ${esc(sec.lie || 'none')} · Found out by: ${esc(sec.found_by || 'not said')}${sec.method_beat ? ' (beat ' + sec.method_beat + ')' : ''}</div>${(sec.clues || []).map(c => `<div class="small mute">beat ${c.beat}: ${esc(c.clue)}</div>`).join('')}`}</div>
   <div class="sm-th mt">
-    <div class="card pad"><div class="row"><b>Rules the person discovers</b><span class="sp"></span><button class="small" id="pl-rules">Edit</button></div>${(pl.rules || []).map(r => `<div class="small" style="margin:3px 0"><b>${esc(r.name)}</b> · beat ${r.beat}<br>${esc(r.text)}</div>`).join('') || '<div class="small mute">none</div>'}</div>
+    <div class="card pad"><div class="row"><b>Rules the person discovers</b><span class="sp"></span><button class="small" id="pl-rules">Edit</button></div>${(pl.rules || []).map(r => `<div class="small" style="margin:3px 0"><b>${esc(r.name)}</b> · ${esc((RULE_KINDS.find(k => k[0] === r.kind) || ['', r.kind || 'said aloud'])[1])} · beat ${r.beat}${(r.uses || []).length ? ', again in ' + r.uses.join(', ') : ''}${r.broken_beat ? ', broken in ' + r.broken_beat : ''}<br>${esc(r.text)}${r.shown ? `<br><span class="mute">Shown by: ${esc(r.shown)}</span>` : ''}</div>`).join('') || '<div class="small mute">none</div>'}</div>
     <div class="card pad"><div class="row"><b>Recurring devices</b><span class="sp"></span><button class="small" id="pl-motifs">Edit</button></div>${(pl.motifs || []).map(x => `<div class="small" style="margin:3px 0"><b>${esc(x.name)}</b> · from beat ${x.first_beat}${(x.payoffs || []).length ? ', pays off in ' + x.payoffs.join(', ') : ''}<br>${esc(x.what)}</div>`).join('') || '<div class="small mute">none</div>'}</div>
     <div class="card pad"><div class="row"><b>Real-world facts</b><span class="sp"></span><button class="small" id="pl-facts">Edit</button></div><div class="small mute">The AI's general knowledge: please check them.</div>${(pl.facts || []).map(f => `<div class="small" style="margin:3px 0">beat ${f.beat}: ${esc(f.fact)}<br><span class="mute">${esc(f.use)}</span></div>`).join('') || '<div class="small mute">none</div>'}</div>
-    <div class="card pad"><div class="row"><b>The ending</b><span class="sp"></span><button class="small" id="pl-end">Edit</button></div><div class="small">${esc((pl.ending || {}).outcome || '')}<br><span class="mute">Last image:</span> ${esc((pl.ending || {}).final_image || '')}<br><span class="mute">Closing line:</span> ${esc((pl.ending || {}).closing_line || '')}</div></div></div>
+    <div class="card pad"><div class="row"><b>The ending</b><span class="sp"></span><button class="small" id="pl-end">Edit</button></div><div class="small">${esc((pl.ending || {}).outcome || '')}<br><span class="mute">Last image:</span> ${esc((pl.ending || {}).final_image || '')}<br><span class="mute">Closing line:</span> ${esc((pl.ending || {}).closing_line || '')}${(pl.ending || {}).inversion ? `<br><span class="mute">Turns the opening around:</span> ${esc(pl.ending.inversion)}` : ''}</div></div>
+    <div class="card pad"><div class="row"><b>Number on screen</b><span class="sp"></span><button class="small" id="pl-count">Edit</button></div>${(pl.countdown || {}).name ? `<div class="small"><b>${esc(pl.countdown.name)}</b> <span class="mute">(${esc(pl.countdown.unit || '')})</span></div>${(pl.countdown.steps || []).map(s => `<div class="small mute">beat ${s.beat}: ${s.value}${s.note ? ' · ' + esc(s.note) : ''}</div>`).join('')}` : '<div class="small mute">none</div>'}</div>
+    <div class="card pad"><div class="row"><b>Planted objects</b><span class="sp"></span><button class="small" id="pl-objects">Edit</button></div>${(pl.objects || []).map(o => `<div class="small" style="margin:3px 0"><b>${esc(o.name)}</b> · planted in beat ${o.plant_beat}, pays off in ${o.payoff_beat}<br><span class="mute">${esc(o.what)} → ${esc(o.payoff)}</span></div>`).join('') || '<div class="small mute">none</div>'}</div>
+    <div class="card pad"><div class="row"><b>Acts</b><span class="sp"></span><button class="small" id="pl-acts">Edit</button></div><div class="small">Midpoint: ${(pl.midpoint || {}).beat ? `beat ${pl.midpoint.beat}: ${esc(pl.midpoint.change || '')}` : '<span class="mute">none</span>'}</div><div class="small">Low point: ${(pl.low_point || {}).beat ? `beat ${pl.low_point.beat}: ${esc(pl.low_point.loss || '')}` : '<span class="mute">none</span>'}</div></div></div>
   <div class="card pad mt"><div class="row"><b>The beats</b> <span class="small mute">${pl.done} of ${beats.length} played</span><span class="sp"></span><button class="small" id="pl-replan" ${busy ? 'disabled' : ''}>Re-plan the rest…</button><button class="small" id="pl-redo" ${busy ? 'disabled' : ''}>Write the whole plan again…</button></div>
     ${beats.map(x => `<div class="mt-s" style="border-top:1px solid var(--line);padding-top:8px"><div class="row"><b>${esc(x.label)}</b>${chip(x.status)}<span class="sm-tag">${esc(x.purpose)}</span><span class="sp"></span><button class="small" data-be="${x.n}">Edit</button></div>
-      <div class="small">${esc(x.event)}</div><div class="small mute">Problem: ${esc(x.problem)}${x.turn ? ` · Turn: ${esc(x.turn)}` : ''}${x.hook ? ` · Ends on: ${esc(x.hook)}` : ''}${x.rule ? ` · Rule: ${esc(x.rule)}` : ''}${x.motif ? ` · Device: ${esc(x.motif)}` : ''}${x.fact ? ` · Fact: ${esc(x.fact)}` : ''}${(x.clues || []).length ? ` · Plants: ${x.clues.map(esc).join('; ')}` : ''}</div></div>`).join('')}</div>`;
+      <div class="small">${esc(x.event)}</div><div class="small mute">Problem: ${esc(x.problem)}${x.turn ? ` · Turn: ${esc(x.turn)}` : ''}${x.hook ? ` · Ends on: ${esc(x.hook)}` : ''}${x.rule ? ` · Rule: ${esc(x.rule)}` : ''}${x.motif ? ` · Device: ${esc(x.motif)}` : ''}${x.fact ? ` · Fact: ${esc(x.fact)}` : ''}${(x.clues || []).length ? ` · Plants: ${x.clues.map(esc).join('; ')}` : ''}</div>
+      <div class="small mute">${esc(x.act || '')}${x.role ? ' · ' + x.role.replace('_', ' ') : ''}${x.problem_no ? ' · ' + esc(x.signpost) : ''}${x.solved_by ? ' · Solved by: ' + esc(x.solved_by) : ''}${x.count != null && pl.countdown && pl.countdown.name ? ' · ' + esc(pl.countdown.name) + ': ' + x.count : ''}${(x.plant || []).length ? ' · Sets up: ' + x.plant.map(esc).join(', ') : ''}${(x.pay || []).length ? ' · Pays off: ' + x.pay.map(esc).join(', ') : ''}${(x.rule_uses || []).length ? ' · Uses: ' + x.rule_uses.map(esc).join(', ') : ''}${x.method ? ' · Method: ' + esc(x.method) : ''}</div></div>`).join('')}</div>${pickerHtml(D.secret_options, busy) ? `<div class="card pad mt">${pickerHtml(D.secret_options, busy)}</div>` : ''}
+  <div class="row mt"><button class="small" id="pl-secrets" ${busy ? 'disabled' : ''}>Propose four new twists…</button></div>`;
+  bindPicker(b, D.secret_options || [], true);
   const on = (sel, fn) => el.querySelectorAll(sel).forEach(fn);
   const full = async () => { const r = await act(null, () => api(`/sim/${SID}/bible?spoilers=true`)); if (r) { PLAN_FULL = r.plan; drawPlan(); } };
   const bt = $('#pl-show'); if (bt) bt.onclick = full;
   const hd2 = $('#pl-hide'); if (hd2) hd2.onclick = () => { PLAN_FULL = null; drawPlan(); };
   $('#pl-basics').onclick = async () => {
-    const v = await dialog({title: 'Edit the story basics', html: `<label class="f">Logline<textarea id="pb-l">${esc(pl.logline)}</textarea></label><label class="f">Told in<select id="pb-p">${POVS.map(([k, l]) => `<option value="${k}" ${pl.pov === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label><label class="f">Voice<textarea id="pb-v">${esc(pl.voice)}</textarea></label>`,
-      buttons: [{label: 'Cancel', value: null}, {label: 'Save', primary: true, collect: l => ({logline: l.querySelector('#pb-l').value, pov: l.querySelector('#pb-p').value, voice: l.querySelector('#pb-v').value})}]});
+    const v = await dialog({title: 'Edit the story basics', html: `<label class="f">Logline<textarea id="pb-l">${esc(pl.logline)}</textarea></label><label class="f">Told in<select id="pb-p">${POVS.map(([k, l]) => `<option value="${k}" ${pl.pov === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label><label class="f">Voice<textarea id="pb-v">${esc(pl.voice)}</textarea></label>
+      <label class="f">The first line<input id="pb-ol" value="${esc((pl.opening || {}).line || '')}"></label><label class="f">What the person does in the first scene<input id="pb-oa" value="${esc((pl.opening || {}).action || '')}"></label><label class="f">What the person believes at the start<input id="pb-ob" value="${esc((pl.opening || {}).belief || '')}"></label>`,
+      buttons: [{label: 'Cancel', value: null}, {label: 'Save', primary: true, collect: l => ({logline: l.querySelector('#pb-l').value, pov: l.querySelector('#pb-p').value, voice: l.querySelector('#pb-v').value, opening: {line: l.querySelector('#pb-ol').value, action: l.querySelector('#pb-oa').value, belief: l.querySelector('#pb-ob').value}})}]});
     if (v) planAct('PUT', '/bible', v);
   };
   const es = $('#pl-edit-secret'); if (es) es.onclick = async () => {
     const v = await dialog({title: 'Edit the hidden truth', html: `<label class="f">The truth<textarea id="ps-t">${esc(sec.truth)}</textarea></label><label class="f">Who or what holds it<input id="ps-w" value="${esc(sec.who || '')}"></label><label class="f">Revealed in beat<input id="ps-r" type="number" value="${sec.reveal_beat}"></label>
+      <label class="f">What kind of secret<select id="ps-k">${SECRET_KINDS.map(([k, l]) => `<option value="${k}" ${sec.kind === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label><label class="f">The lie everyone believes (what the authority says)<input id="ps-l" value="${esc(sec.lie || '')}"></label>
+      <label class="f">The person finds out by (something they do)<textarea id="ps-f">${esc(sec.found_by || '')}</textarea></label><label class="f">Method beat<input id="ps-m" type="number" value="${sec.method_beat || ''}"></label>
       <label class="f">Clues, one per line: beat | clue<textarea id="ps-c" style="min-height:110px">${(sec.clues || []).map(c => `${c.beat} | ${c.clue}`).join('\n')}</textarea></label>`,
-      buttons: [{label: 'Cancel', value: null}, {label: 'Save', primary: true, collect: l => ({secret: {truth: l.querySelector('#ps-t').value, who: l.querySelector('#ps-w').value, reveal_beat: +l.querySelector('#ps-r').value, clues: lines(l.querySelector('#ps-c').value).map(x => { const i = x.indexOf('|'); return {beat: +x.slice(0, i) || 1, clue: x.slice(i + 1).trim()}; })}})}]});
+      buttons: [{label: 'Cancel', value: null}, {label: 'Save', primary: true, collect: l => ({secret: {truth: l.querySelector('#ps-t').value, who: l.querySelector('#ps-w').value, reveal_beat: +l.querySelector('#ps-r').value, kind: l.querySelector('#ps-k').value, lie: l.querySelector('#ps-l').value, found_by: l.querySelector('#ps-f').value, method_beat: +l.querySelector('#ps-m').value || 0, clues: lines(l.querySelector('#ps-c').value).map(x => { const i = x.indexOf('|'); return {beat: +x.slice(0, i) || 1, clue: x.slice(i + 1).trim()}; })}})}]});
     if (v) planAct('PUT', '/bible', v);
   };
   const listEdit = (id, title, hint, rows, key, fmt, parse) => { const btn = $(id); if (btn) btn.onclick = async () => {
     const v = await dialog({title, html: `<label class="f">${hint}<textarea id="pe-x" style="min-height:160px">${rows.map(fmt).join('\n')}</textarea></label>`, buttons: [{label: 'Cancel', value: null}, {label: 'Save', primary: true, collect: l => ({[key]: lines(l.querySelector('#pe-x').value).map(parse)})}]});
     if (v) planAct('PUT', '/bible', v); }; };
-  listEdit('#pl-rules', 'Edit the rules', 'One per line: name | the rule | beat where it is learned', pl.rules || [], 'rules', r => `${r.name} | ${r.text} | ${r.beat}`, x => { const p = x.split('|').map(s => s.trim()); return {name: p[0], text: p[1] || '', beat: +p[2] || 1}; });
+  listEdit('#pl-rules', 'Edit the rules', 'One per line: name | the rule | beat where it is learned | stated, discovered or policy | beats where it is used again (comma separated) | for a policy, how it shows without being said | beat where it is broken on purpose (0 = never)', pl.rules || [], 'rules',
+    r => `${r.name} | ${r.text} | ${r.beat} | ${r.kind || 'stated'} | ${(r.uses || []).join(', ')} | ${r.shown || ''} | ${r.broken_beat || 0}`,
+    x => { const p = x.split('|').map(s => s.trim()); return {name: p[0], text: p[1] || '', beat: +p[2] || 1, kind: ['stated', 'discovered', 'policy'].includes(p[3]) ? p[3] : 'stated', uses: (p[4] || '').split(',').map(s => +s.trim()).filter(Boolean), shown: p[5] || '', broken_beat: +p[6] || 0}; });
   listEdit('#pl-motifs', 'Edit the recurring devices', 'One per line: name | what it is | first beat | beats where it pays off (comma separated)', pl.motifs || [], 'motifs', r => `${r.name} | ${r.what} | ${r.first_beat} | ${(r.payoffs || []).join(', ')}`, x => { const p = x.split('|').map(s => s.trim()); return {name: p[0], what: p[1] || '', first_beat: +p[2] || 1, payoffs: (p[3] || '').split(',').map(s => +s.trim()).filter(Boolean)}; });
   listEdit('#pl-facts', 'Edit the real-world facts', 'One per line: the fact | how the story uses it | beat', pl.facts || [], 'facts', r => `${r.fact} | ${r.use} | ${r.beat}`, x => { const p = x.split('|').map(s => s.trim()); return {fact: p[0], use: p[1] || '', beat: +p[2] || 1}; });
   $('#pl-end').onclick = async () => {
     const e = pl.ending || {};
-    const v = await dialog({title: 'Edit the ending', html: `<label class="f">How it ends<textarea id="pn-o">${esc(e.outcome || '')}</textarea></label><label class="f">The last image<input id="pn-i" value="${esc(e.final_image || '')}"></label><label class="f">The closing line<input id="pn-c" value="${esc(e.closing_line || '')}"></label>`,
-      buttons: [{label: 'Cancel', value: null}, {label: 'Save', primary: true, collect: l => ({ending: {outcome: l.querySelector('#pn-o').value, final_image: l.querySelector('#pn-i').value, closing_line: l.querySelector('#pn-c').value}})}]});
+    const v = await dialog({title: 'Edit the ending', html: `<label class="f">How it ends<textarea id="pn-o">${esc(e.outcome || '')}</textarea></label><label class="f">The last image<input id="pn-i" value="${esc(e.final_image || '')}"></label><label class="f">The closing line<input id="pn-c" value="${esc(e.closing_line || '')}"></label><label class="f">How the ending turns the opening around<textarea id="pn-v">${esc(e.inversion || '')}</textarea></label>`,
+      buttons: [{label: 'Cancel', value: null}, {label: 'Save', primary: true, collect: l => ({ending: {outcome: l.querySelector('#pn-o').value, final_image: l.querySelector('#pn-i').value, closing_line: l.querySelector('#pn-c').value, inversion: l.querySelector('#pn-v').value}})}]});
+    if (v) planAct('PUT', '/bible', v);
+  };
+  const cb = $('#pl-count'); if (cb) cb.onclick = async () => {
+    const c = pl.countdown || {};
+    const v = await dialog({title: 'Edit the number on screen', html: `<label class="f">What is counted (days of food, people left...)<input id="pc-n" value="${esc(c.name || '')}"></label><label class="f">Unit<input id="pc-u" value="${esc(c.unit || '')}"></label>
+      <label class="f">Steps, one per line: beat | value | why it changes<textarea id="pc-s" style="min-height:140px">${(c.steps || []).map(s => `${s.beat} | ${s.value} | ${s.note || ''}`).join('\n')}</textarea></label>`,
+      buttons: [{label: 'Cancel', value: null}, {label: 'Save', primary: true, collect: l => ({countdown: {name: l.querySelector('#pc-n').value, unit: l.querySelector('#pc-u').value, steps: lines(l.querySelector('#pc-s').value).map(x => { const p = x.split('|').map(s => s.trim()); return {beat: +p[0] || 1, value: +p[1] || 0, note: p[2] || ''}; })}})}]});
+    if (v) planAct('PUT', '/bible', v);
+  };
+  listEdit('#pl-objects', 'Edit the planted objects', 'One per line: name | how it first appears | beat where it is planted | beat where it pays off | how it pays off', pl.objects || [], 'objects', o => `${o.name} | ${o.what} | ${o.plant_beat} | ${o.payoff_beat} | ${o.payoff}`,
+    x => { const p = x.split('|').map(s => s.trim()); return {name: p[0], what: p[1] || '', plant_beat: +p[2] || 1, payoff_beat: +p[3] || 0, payoff: p[4] || ''}; });
+  const ab = $('#pl-acts'); if (ab) ab.onclick = async () => {
+    const m1 = pl.midpoint || {}, l1 = pl.low_point || {};
+    const v = await dialog({title: 'Edit the acts', html: `<label class="f">Midpoint beat<input id="pa-mb" type="number" value="${m1.beat || ''}"></label><label class="f">What changes for good at the midpoint<input id="pa-mc" value="${esc(m1.change || '')}"></label>
+      <label class="f">Low point beat<input id="pa-lb" type="number" value="${l1.beat || ''}"></label><label class="f">What the person loses<input id="pa-ll" value="${esc(l1.loss || '')}"></label>`,
+      buttons: [{label: 'Cancel', value: null}, {label: 'Save', primary: true, collect: l => ({midpoint: {beat: +l.querySelector('#pa-mb').value || 0, change: l.querySelector('#pa-mc').value}, low_point: {beat: +l.querySelector('#pa-lb').value || 0, loss: l.querySelector('#pa-ll').value}})}]});
     if (v) planAct('PUT', '/bible', v);
   };
   on('[data-be]', btn => btn.onclick = async () => {
     const x = beats.find(y => y.n === +btn.dataset.be);
-    const v = await dialog({title: `Edit beat ${x.n}`, html: `<label class="f">Label (time: title)<input id="bb-l" value="${esc(x.label)}"></label><label class="f">What happens<textarea id="bb-e">${esc(x.event)}</textarea></label><label class="f">The problem to solve<textarea id="bb-p">${esc(x.problem)}</textarea></label>
+    const v = await dialog({title: `Edit beat ${x.n}`, html: `<label class="f">Label (time: title)<input id="bb-l" value="${esc(x.label)}"></label><label class="f">What happens<textarea id="bb-e">${esc(x.event)}</textarea></label><label class="f">The problem to solve<textarea id="bb-p">${esc(x.problem)}</textarea></label><label class="f">What solves it (a fact, a rule, an object, an idea)<input id="bb-s" value="${esc(x.solved_by || '')}"></label>
       <label class="f">The turn<input id="bb-t" value="${esc(x.turn || '')}"></label><label class="f">It ends on<input id="bb-h" value="${esc(x.hook || '')}"></label><label class="f">A risky act for the dice (optional)<input id="bb-c" value="${esc(x.challenge || '')}"></label>
       <label class="f">Purpose<select id="bb-u">${PURPOSES.map(p => `<option ${x.purpose === p ? 'selected' : ''}>${p}</option>`).join('')}</select></label>`,
-      buttons: [{label: 'Cancel', value: null}, {label: 'Save', primary: true, collect: l => ({label: l.querySelector('#bb-l').value, event: l.querySelector('#bb-e').value, problem: l.querySelector('#bb-p').value, turn: l.querySelector('#bb-t').value, hook: l.querySelector('#bb-h').value, challenge: l.querySelector('#bb-c').value, purpose: l.querySelector('#bb-u').value})}]});
+      buttons: [{label: 'Cancel', value: null}, {label: 'Save', primary: true, collect: l => ({label: l.querySelector('#bb-l').value, event: l.querySelector('#bb-e').value, problem: l.querySelector('#bb-p').value, solved_by: l.querySelector('#bb-s').value, turn: l.querySelector('#bb-t').value, hook: l.querySelector('#bb-h').value, challenge: l.querySelector('#bb-c').value, purpose: l.querySelector('#bb-u').value})}]});
     if (v) planAct('PUT', `/bible/beats/${x.n}`, v);
   });
   $('#pl-replan').onclick = async () => { const t = await textDlg('Re-plan the rest', 'What should change in the beats still to come? (optional)', '', true); if (t !== null) run(null, '/replan', {instruction: t}, 'Rewriting the rest of the plan'); };
@@ -537,14 +600,15 @@ function drawSetup() {
       <label>Difficulty <select id="s-diff">${['gentle', 'fair', 'brutal'].map(x => `<option ${st.difficulty === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
       <label><input type="checkbox" id="s-dice" ${st.dice ? 'checked' : ''}> Dice decide risky acts</label>
       <label>Words per chapter <input type="number" id="s-words" value="${st.chapter_words}" min="150" max="900" step="10"></label>
-      <label><input type="checkbox" id="s-deep" ${st.deep ? 'checked' : ''}> Let the other characters plan too (slower)</label>
       <label title="How many chapters the story should have. The system builds the story toward a climax and an ending of that size; open-ended repeats a cycle of build-up, twist, crisis and release.">Length <select id="s-length">${[[0, 'open-ended'], [6, '6 chapters'], [8, '8 chapters'], [12, '12 chapters'], [16, '16 chapters'], [24, '24 chapters'], [36, '36 chapters'], [48, '48 chapters']].map(([v, l]) => `<option value="${v}" ${(st.length || 0) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <label title="Write a story plan with the AI when the story is set up: point of view, a hidden truth with clues, rules to discover, recurring devices, real facts, the ending and a beat for every chapter."><input type="checkbox" id="s-plan" ${st.plan !== false ? 'checked' : ''}> Write a story plan at setup</label>
       <label title="An editor's pass over every chapter: the same events in more specific, varied prose, without the model's stock words. Costs about a minute a chapter."><input type="checkbox" id="s-polish" ${st.polish ? 'checked' : ''}> Polish every chapter</label>
+      <label title="The narration announces each problem aloud: First problem, water. Second problem, sleep. Works with a story plan."><input type="checkbox" id="s-signposts" ${st.signposts ? 'checked' : ''}> Announce each problem aloud</label>
       <label title="How much one person can carry, in size units (a plain thing is 1). 0 means no limit. A person can have their own limit in their card.">Carry limit <input type="number" id="s-carry" value="${st.carry_limit ?? 8}" min="0" max="40" style="width:70px"></label>
       <label title="How freely the story may go. Unfiltered: strong language, cruelty, crime and mild adult romance are written as the scene needs them, without softening or moral comment.">Content <select id="s-content">${[['clean', 'clean'], ['mature', 'mature'], ['unfiltered', 'unfiltered (no limits)']].map(([v, l]) => `<option value="${v}" ${(st.content || 'unfiltered') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <label title="How long the AI thinks before it plans, changes the state or checks a chapter. More thinking is slower and keeps the story more consistent.">Thinking <select id="s-think">${[['off', 'off (fastest)'], ['balanced', 'balanced'], ['deep', 'deep (slowest)']].map(([v, l]) => `<option value="${v}" ${(st.thinking || 'balanced') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div>
     <div class="row mt-s" style="gap:16px"><label><input type="checkbox" id="s-auto" ${st.auto_images ? 'checked' : ''}> Paint every chapter automatically</label>
+      <label title="How the pictures look. Changing it marks the pictures already drawn as old, so you can repaint them.">Picture style <select id="s-style">${[['painted', 'Cinematic painting'], ['comic', 'Comic book'], ['flat', 'Simple flat 2D']].map(([v, l]) => `<option value="${v}" ${(st.image_style || 'painted') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <label>Picture shape <select id="s-shape"><option value="wide" ${st.panel_shape === 'wide' ? 'selected' : ''}>wide (16:9)</option><option value="tall" ${st.panel_shape === 'tall' ? 'selected' : ''}>tall (9:16)</option></select></label>
       <label><input type="checkbox" id="s-cap" ${st.captions ? 'checked' : ''}> Captions on pictures</label><label>Image model <input id="s-img" value="${esc(st.image_model)}" placeholder="default" style="width:150px"></label>
       <span class="sp"></span><button class="primary" id="s-save">Save</button></div></div>
@@ -583,8 +647,8 @@ function trackerSummary(t) {
 function wireSetup() {
   const on = (sel, fn) => el.querySelectorAll(sel).forEach(fn);
   const patch = async (json, ok) => { const r = await act(null, () => api('/sim/' + SID, {method: 'PATCH', json}), ok || 'Saved'); if (r) load(); };
-  $('#s-save').onclick = () => patch({idea: $('#s-idea').value, settings: {difficulty: $('#s-diff').value, dice: $('#s-dice').checked, chapter_words: +$('#s-words').value || 350, deep: $('#s-deep').checked, thinking: $('#s-think').value, content: $('#s-content').value, carry_limit: +$('#s-carry').value || 0, plan: $('#s-plan').checked, polish: $('#s-polish').checked, length: +$('#s-length').value || 0,
-    auto_images: $('#s-auto').checked, panel_shape: $('#s-shape').value, captions: $('#s-cap').checked, image_model: $('#s-img').value.trim()}});
+  $('#s-save').onclick = () => patch({idea: $('#s-idea').value, settings: {difficulty: $('#s-diff').value, dice: $('#s-dice').checked, chapter_words: +$('#s-words').value || 350, thinking: $('#s-think').value, content: $('#s-content').value, carry_limit: +$('#s-carry').value || 0, plan: $('#s-plan').checked, polish: $('#s-polish').checked, signposts: $('#s-signposts').checked, length: +$('#s-length').value || 0,
+    auto_images: $('#s-auto').checked, panel_shape: $('#s-shape').value, image_style: $('#s-style').value, captions: $('#s-cap').checked, image_model: $('#s-img').value.trim()}});
   $('#w-save').onclick = () => patch({world: Object.fromEntries(['place', 'period', 'tone', 'pacing', 'start_scene', 'start_time', 'exists', 'craft', 'goal'].map(k => [k, $('#w-' + k).value]))});
   $('#sm-dup').onclick = async () => { const r = await act(null, () => api(`/sim/${SID}/duplicate?full=false`, {method: 'POST'}), 'Copied'); if (r) hash(r.id, 'setup'); };
   $('#sm-tpls').onclick = async () => { const n = await textDlg('Save as template', 'Template name', D.project.title); if (n) act(null, () => api(`/sim/${SID}/save-template`, {method: 'POST', json: {name: n}}), 'Template saved'); };
@@ -680,6 +744,6 @@ function drawRead() {
   const p = D.project;
   $('#sm-body').innerHTML = `<div class="row mt"><span class="sp"></span><a class="btn" href="/api/sim/${SID}/export?format=md">Download Markdown</a><a class="btn" href="/api/sim/${SID}/export?format=zip">Download with pictures (zip)</a><a class="btn" href="/api/sim/${SID}/export?format=json">Chapter data (JSON)</a></div>
   <div class="sm-read"><h1>${esc(p.title)}</h1><p class="mute"><i>${esc(p.idea)}</i></p>${D.chapters.filter(c => c.status === 'done').map(c => `<h2>Chapter ${c.idx}: ${esc(c.title)}</h2><div class="small mute">${esc(c.story_time)}</div>
-    ${c.panels.filter(x => x.file).map(x => `<figure style="margin:12px 0"><img src="/api/sim/file/${SID}/${esc(x.capfile || x.file)}" style="width:100%;border-radius:8px"></figure>`).join('')}<div class="sm-prose">${paras(c.prose)}</div>`).join('') || '<p class="mute">Nothing written yet.</p>'}</div>`;
+    <div class="sm-prose">${withPictures({...c, panels: c.panels.filter(x => x.file)}, x => `<figure class="sm-fig"><img src="/api/sim/file/${SID}/${esc(x.capfile || x.file)}" alt="">${x.caption ? `<figcaption>${esc(x.caption)}</figcaption>` : ''}</figure>`)}</div>`).join('') || '<p class="mute">Nothing written yet.</p>'}</div>`;
 }
 })();

@@ -58,7 +58,7 @@ def test_the_plan_s_endpoints_all_exist():
 
 
 def test_every_setting_has_a_control_and_an_effect(sm):
-    for key, ctl in {"difficulty": "s-diff", "dice": "s-dice", "chapter_words": "s-words", "deep": "s-deep", "auto_images": "s-auto", "panel_shape": "s-shape", "captions": "s-cap", "image_model": "s-img"}.items():
+    for key, ctl in {"difficulty": "s-diff", "dice": "s-dice", "chapter_words": "s-words", "auto_images": "s-auto", "panel_shape": "s-shape", "captions": "s-cap", "image_model": "s-img"}.items():
         assert key in store.DEFAULT_SETTINGS and f'id="{ctl}"' in JS, key
     # chapter length: the accepted range follows the setting
     pid, fake = make()

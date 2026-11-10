@@ -17,7 +17,7 @@ def test_the_backbone_is_repaired_into_a_plan_that_plants_before_it_reveals():
     assert b["pov"] == "second" and 8 <= b["secret"]["reveal_beat"] <= 12                          # the reveal sits in the last third
     assert all(c["beat"] < b["secret"]["reveal_beat"] for c in b["secret"]["clues"]) and b["secret"]["clues"][0]["clue"] == "early clue"
     assert b["rules"][0]["name"] == "Rule 1" and b["rules"][0]["beat"] == 12 and b["motifs"][0]["payoffs"] == [5]
-    beats = [m.BeatIn(event="e", problem="p", purpose="problem") for _ in range(12)]
+    beats = [m.BeatIn(event="e", problem="p", purpose="problem", solved_by="s") for _ in range(12)]
     out = architect.clean_beats(beats, b, 1, 12)
     assert [x["n"] for x in out] == list(range(1, 13)) and out[-1]["purpose"] == "ending" and out[b["secret"]["reveal_beat"] - 1]["purpose"] == "reveal"
     assert "early clue" in out[0]["clues"] and out[0]["motif"] == "bell" and out[2]["fact"] == "f" and out[11]["rule"] == "Rule 1"
@@ -46,6 +46,7 @@ def test_a_chapter_plays_its_beat_and_the_writer_keeps_the_secret(client):
     c.post(f"/api/sim/{pid}/start")
     wait(c, pid)
     p = c.fake.last("sm_plan")["user"]
+    assert "ARC AND PACING" not in p.replace("ARC AND PACING", "", 0) and "## ARC AND PACING" not in p                       # the plan's acts replace the pacing block
     assert "## STORY PLAN (chapter 1 plays this beat)" in p and "Event: The people secure the doors" in p and "the intercom knows which aisle" in p and "never say or hint it outright" in p
     w = c.fake.last("sm_write")["user"]
     assert "## STORY PLAN FOR THE WRITER" in w and "Point of view: second person" in w and "Voice: Short sentences" in w and "End on: a knock on the shutter" in w and "Never reveal the hidden truth" in w

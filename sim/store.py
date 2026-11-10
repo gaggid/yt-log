@@ -35,8 +35,9 @@ CREATE TABLE IF NOT EXISTS sim_templates(id TEXT PRIMARY KEY, name TEXT, data TE
 """
 TABLES = ("sim_world", "sim_entities", "sim_trackers", "sim_guidelines", "sim_directives", "sim_chapters", "sim_facts", "sim_threads", "sim_runs", "sim_bible")
 
-DEFAULT_SETTINGS = {"difficulty": "fair", "dice": True, "chapter_words": 350, "deep": False, "auto_images": False, "image_model": "", "panel_shape": "wide", "captions": True,
-                    "seed": 7, "template_id": "", "rules_version": 1, "thinking": "balanced", "content": "unfiltered", "carry_limit": 8, "length": 0, "plan": True, "polish": False}
+IMAGE_STYLES = ("painted", "comic", "flat")                                    # keep equal to paint.STYLES (a test checks)
+DEFAULT_SETTINGS = {"difficulty": "fair", "dice": True, "chapter_words": 350, "auto_images": False, "image_model": "", "panel_shape": "wide", "image_style": "painted", "captions": True,
+                    "seed": 7, "template_id": "", "rules_version": 1, "thinking": "balanced", "content": "unfiltered", "carry_limit": 8, "length": 0, "plan": True, "polish": False, "signposts": False}
 DIFFICULTIES = ("gentle", "fair", "brutal")
 SHAPES = ("wide", "tall")
 GROUPS = ("hard", "world", "tone", "style", "craft")
@@ -105,6 +106,8 @@ def save_project(pid: str, **f) -> dict:
             raise SimError("thinking must be off, balanced or deep")
         if st.get("content", "unfiltered") not in ("clean", "mature", "unfiltered"):
             raise SimError("content must be clean, mature or unfiltered")
+        if st.get("image_style", "painted") not in IMAGE_STYLES:
+            raise SimError("picture style must be " + ", ".join(IMAGE_STYLES))
         if st["panel_shape"] not in SHAPES:
             raise SimError("panel shape must be wide or tall")
         st["chapter_words"] = max(100, min(900, int(st["chapter_words"])))

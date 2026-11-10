@@ -1,5 +1,5 @@
 """The chapter engine (docs/PLAN_simulation.md section 5). One chapter is a fixed list of stages; each stage writes its result to the chapter row, so a stopped server loses at most the stage in
-flight and "Retry from this stage" continues from what is stored. Stages: gather (code + condition checks), plan, minds (optional), resolve (dice, code), delta, write, referee, archive."""
+flight and "Retry from this stage" continues from what is stored. Stages: gather (code + condition checks), plan, resolve (dice, code), delta, write, referee, archive."""
 import copy
 import re
 
@@ -9,7 +9,7 @@ from . import architect, dice, drama, health, memory, models as m, prompts as P,
 
 WORD_SLACK = (0.8, 1.23)                 # chapter length accepted around the owner's setting (350 -> 280 to 430)
 MAX_RISKS = 3
-STAGES = ("gather", "plan", "minds", "resolve", "delta", "write", "polish", "referee", "archive")
+STAGES = ("gather", "plan", "resolve", "delta", "write", "polish", "referee", "archive")
 
 
 class Stopped(Exception):
@@ -186,7 +186,7 @@ async def run_chapter(pid: str, backend, s: dict, progress=None, *, parent_id: s
         flags["beat"] = {k: beat[k] for k in ("n", "label", "title", "time", "purpose")}
     st0 = reconcile(parent["state_after"], trackers, ents) if parent else S.initial_state(trackers, ents, world)
     store.update_chapter(cid, chosen=action, state_before=st0, flags=flags, status="writing", parent_id=parent_id)
-    total = len(STAGES) - (0 if cfg["deep"] else 1) - (0 if cfg.get("polish") else 1)
+    total = len(STAGES) - (0 if cfg.get("polish") else 1)
     state_hold = {"n": 0}
 
     def begin(name, text):
@@ -258,7 +258,7 @@ async def run_chapter(pid: str, backend, s: dict, progress=None, *, parent_id: s
                     elif r.craft and not r.craft.makes:
                         r.craft.makes = r.act
 
-            user = (f"{memory.render(pk0, s)}\n\n{drama.arc_block(arc, ch['idx'], length)}" + (f"\n\n{architect.plan_block(bible, beat, ch['idx'])}" if beat else "") + (f"\n\n{drama.neglected_block(neg)}" if neg else "") + f"\n\n## PLAYER'S ACTION\n{act}\n\n## DUE INSTRUCTIONS\n"
+            user = (f"{memory.render(pk0, s)}" + ("" if beat else f"\n\n{drama.arc_block(arc, ch['idx'], length)}") + (f"\n\n{architect.plan_block(bible, beat, ch['idx'])}" if beat else "") + (f"\n\n{drama.neglected_block(neg)}" if neg else "") + f"\n\n## PLAYER'S ACTION\n{act}\n\n## DUE INSTRUCTIONS\n"
                     + ("\n".join(f"{d['label']} (id {d['id']}) [{d['kind']}] {'MUST' if d['must'] else 'MAY WAIT'}: {fence(d['text'])}" for d in due) or "(none)")
                     + "\n\n## UNDER PRESSURE\n" + ("\n".join(p["text"] for p in flags.get("pressure", [])) or "(nothing at its limit)")
                     + "\n\n## BEATS OF THE LAST CHAPTERS\n" + (", ".join(b for b in last_beats if b) or "(none yet)")
@@ -268,18 +268,6 @@ async def run_chapter(pid: str, backend, s: dict, progress=None, *, parent_id: s
             plan["due_ids"] = [d["id"] for d in due]
             flags["trimmed"] = pk0.trimmed
             finish("plan", plan=plan, focus=plan["focus"])
-        # minds (optional) ------------------------------------------------------
-        if cfg["deep"]:
-            if "minds" not in done:
-                begin("minds", "what the others want")
-                others = [e for e in chars if e["name"] not in plan["focus"] and st0["entities"].get(e["name"], {}).get("alive", True)][:5]
-                if others:
-                    pkm = memory.build(pid, path, st0, [e["name"] for e in others], plan["scene"], s)
-                    r = await _json(backend, s, P.MINDS, f"{memory.render(pkm, s)}\n\n## SCENE\n{plan['scene']}\n\nOthers: {', '.join(e['name'] for e in others)}", m.MindsOut)
-                    plan["minds"] = {k: v for k, v in r.wants.items() if k.lower() in {e['name'].lower() for e in others}}
-                finish("minds", plan=plan)
-        else:
-            done.add("minds")
         # resolve (dice, code) --------------------------------------------------
         if "resolve" in done:
             rolls = store.chapter(cid)["rolls"]
@@ -304,7 +292,6 @@ async def run_chapter(pid: str, backend, s: dict, progress=None, *, parent_id: s
             user = (f"{memory.render(pkd, s)}\n\n## CHAPTER PLAN\nScene: {plan['scene']}\nIntent: {plan['intent']}\nPressure: {plan['pressure']}\nOpposition: {plan.get('opposition', '')}\nTime passes: {plan['time_passes']}\n"
                     + ("\n## DICE RESULTS (fixed)\n" + "\n".join(f"- {r['who']}: {r['act']} -> {r['tier'].upper()}: {r['text']}" for r in rolls) if rolls else "\n## DICE RESULTS\n(no risky acts this chapter)")
                     + ("\n\n## INSTRUCTIONS HAPPENING NOW\n" + "\n".join(f"- [{d['kind']}] {fence(d['text'])}" for d in fired_text) if fired_text else "")
-                    + ("\n\n## WHAT THE OTHERS DO\n" + "\n".join(f"- {k}: {v}" for k, v in plan.get("minds", {}).items()) if plan.get("minds") else "")
                     + "\n\nList the operations now.")
             r = await _json(backend, s, P.DELTA, user, m.DeltaOut)
             adopted = _adopt_places(pid, r.ops, ents, world)
@@ -428,8 +415,7 @@ async def _write(pid, backend, s, cid, path, st0, st1, plan, rolls, delta, instr
     user = (f"{memory.render(pk, s)}\n\n## CHAPTER PLAN\nWhere: {plan['where']}\nFollowing: {', '.join(plan['focus'])}\nScene: {plan['scene']}\nIntent: {plan['intent']}\nOpposition (show its effect): {plan.get('opposition', '')}\nTime passes: {plan['time_passes']}\n"
             + ("\n## HOW EACH RISKY ACT ENDS (fixed)\n" + "\n".join(f"- {r['who']}: {r['act']} -> {r['text']}" for r in rolls) if rolls else "")
             + ("\n\n## CHANGES TO SHOW\n" + "\n".join(f"- {a['text']}" + (f" ({a['why']})" if a.get("why") else "") for a in delta["applied"]) if delta["applied"] else "")
-            + ("\n\n## WHAT THE OTHERS DO\n" + "\n".join(f"- {k}: {v}" for k, v in plan.get("minds", {}).items()) if plan.get("minds") else "")
-            + (f"\n\n{architect.write_block(bible, beat)}" if beat else "")
+            + (f"\n\n{architect.write_block(bible, beat, bool(cfg.get('signposts')))}" if beat else "")
             + ("\n\n## INSTRUCTIONS HAPPENING NOW\n" + "\n".join(f"- {fence(t)}" for t in _fired_texts(pid, plan)) if plan.get("addresses") else "")
             + (f"\n\n## OWNER'S NOTE FOR THIS CHAPTER\n{fence(instruction)}" if instruction else "")
             + ("\n\n## FIX THESE PROBLEMS FROM THE LAST DRAFT\n" + "\n".join(f"- {v['rule']}: \"{v['quote']}\" -> {v['fix']}" for v in violations) if violations else "")
@@ -464,7 +450,7 @@ async def _polish(pid, backend, s, cid, cfg, flags) -> None:
     w, lo, hi = words_range(cfg)
     bible = store.bible(pid)
     beat = architect.beat_for(bible, ch["idx"])
-    voice = f"VOICE: {bible.get('voice', '')} Point of view: {bible.get('pov', 'as written')}.\n" if bible else "VOICE: keep the point of view and tense of the chapter.\n"
+    voice = f"VOICE: {bible.get('voice', '')} Point of view: {bible.get('pov', 'as written')}.\n" if architect.has_plan(bible) else "VOICE: keep the point of view and tense of the chapter.\n"
     user = voice + (f"BEAT: {beat['label']}: {beat['event']} Ends on: {beat['hook']}\n" if beat else "") + f"\nCHAPTER ({len(ch['prose'].split())} words):\n{ch['prose']}\n\nRewrite it now."
 
     def v(o: m.WriteOut, caller):

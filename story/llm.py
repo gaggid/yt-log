@@ -73,6 +73,9 @@ class ChatBackend:
     """OpenAI-compatible /chat/completions. Endpoint, model and key come from settings, never hardcoded."""
 
     def __init__(self, s: dict, api_key: str):
+        import config
+        if config.SCRATCH:
+            raise RuntimeError("this is a scratch copy of the app (SCRATCH=1): the text model is switched off so the live app keeps the gateway")
         self.s = s
         self.base = s["base_url"].rstrip("/")
         self.headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}

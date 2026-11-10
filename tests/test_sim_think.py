@@ -80,3 +80,14 @@ def test_mild_adult_romance_is_allowed_with_limits():
     for lv in ("mature", "unfiltered"):
         assert "romance" in content.TEXT[lv].lower() and "before explicit detail" in content.TEXT[lv]
     assert "Only adults (18 or older)" in content.TEXT["unfiltered"] and "romance" not in content.TEXT["clean"].lower()
+
+
+def test_a_scratch_copy_of_the_app_can_never_call_the_text_model(monkeypatch):
+    import config
+    import pytest
+    from story import llm
+    monkeypatch.setattr(config, "SCRATCH", True)
+    with pytest.raises(RuntimeError, match="scratch copy"):
+        llm.ChatBackend({"base_url": "http://127.0.0.1:8810/v1"}, "key")
+    monkeypatch.setattr(config, "SCRATCH", False)
+    assert llm.ChatBackend({"base_url": "http://127.0.0.1:8810/v1"}, "key").base.endswith("/v1")

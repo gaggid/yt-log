@@ -96,8 +96,10 @@ def _state_now(pid: str, path: list[dict]) -> dict:
 
 
 def _chapter_view(c: dict, siblings: list[dict]) -> dict:
-    return {**{k: c[k] for k in ("id", "parent_id", "idx", "branch_label", "status", "title", "prose", "story_time", "summary", "focus", "rolls", "options", "chosen", "fired", "panels", "flags")},
-            "plan": {k: c["plan"].get(k) for k in ("scene", "intent", "pressure", "beat", "where", "time_passes", "risks", "minds", "opposition", "calibration") if k in c["plan"]},
+    at = paint.placement(c["panels"], len(paint.paragraphs(c["prose"])))
+    return {**{k: c[k] for k in ("id", "parent_id", "idx", "branch_label", "status", "title", "prose", "story_time", "summary", "focus", "rolls", "options", "chosen", "fired", "flags")},
+            "panels": [{**p, "at": a} for p, a in zip(c["panels"], at)],
+            "plan": {k: c["plan"].get(k) for k in ("scene", "intent", "pressure", "beat", "where", "time_passes", "risks", "opposition", "calibration") if k in c["plan"]},
             "applied": c["delta"].get("applied", []), "dropped": c["delta"].get("dropped", []), "state_after": c["state_after"],
             "siblings": [{"id": x["id"], "label": x["branch_label"] or f"branch {i + 1}", "status": x["status"], "title": x["title"]} for i, x in enumerate(siblings)] if len(siblings) > 1 else []}
 
@@ -143,18 +145,19 @@ async def detail(pid: str):
             "run": {**jobs.status(pid), **store.run_info(pid)}, "reading_minutes": export_mod.reading_minutes(pid), "bytes": _bytes(pid),
             "branches": len([c for c in all_ch if c["id"] not in path_ids and c["status"] == "done"]), "tracker_kinds": list(store.TRACKER_KINDS),
             "carry": {"default": int(p["settings"].get("carry_limit", 0) or 0), "people": memory.carry_map(ents)}, "health": health.report(pid, path),
-            "plan": plan_view(store.bible(pid), False, len([c for c in path if c["status"] == "done"]))}
+            "plan": plan_view(store.bible(pid), False, len([c for c in path if c["status"] == "done"])), "secret_options": store.bible(pid).get("candidates", [])}
 
 
 def plan_view(bible: dict, spoilers: bool, done: int = 0) -> dict | None:
     """The story plan for the page. Without `spoilers` the hidden truth, the clues and which beat reveals it are left out, so the owner can read the story as a reader would."""
     if not bible or not bible.get("beats"):
         return None
-    out = {k: v for k, v in bible.items() if k not in ("secret", "beats")}
+    out = {k: v for k, v in bible.items() if k not in ("secret", "beats", "candidates")}
     out["done"] = done
+    out["audit"] = architect.audit(bible)
     sec = bible.get("secret", {})
     out["secret"] = sec if spoilers else {"hidden": True, "clues": len(sec.get("clues", []))}
-    out["beats"] = [{**b, "status": "done" if b["n"] <= done else "next" if b["n"] == done + 1 else "later", **({} if spoilers else {"clues": [], "purpose": "turn" if b["purpose"] == "reveal" else b["purpose"]})} for b in bible["beats"]]
+    out["beats"] = [{**b, "status": "done" if b["n"] <= done else "next" if b["n"] == done + 1 else "later", **({} if spoilers else {"clues": [], "method": "", "purpose": "turn" if b["purpose"] in ("reveal", "clue") else b["purpose"]})} for b in bible["beats"]]
     return out
 
 
@@ -200,6 +203,7 @@ async def delete(pid: str):
 
 class SeedBody(BaseModel):
     instruction: str = ""
+    secret: dict | None = None            # a secret the owner picked from the candidates (part bible only)
 
 
 @router.post("/{pid}/seed/{part}")
@@ -214,7 +218,7 @@ async def seed_part(pid: str, part: str, body: SeedBody):
             await seed.seed_all(pid, backend, s, progress, cancel)
             return "setup ready: review it, then press Start"
         progress(0, 1, f"writing the {part}")
-        await seed.seed_part(pid, part, backend, s, body.instruction)
+        await seed.seed_part(pid, part, backend, s, body.instruction, body.secret)
         return f"the {part} is ready"
     return _job(pid, "seed", make)
 
@@ -560,18 +564,23 @@ class BibleBody(BaseModel):
     motifs: list | None = None
     facts: list | None = None
     ending: dict | None = None
+    opening: dict | None = None
+    countdown: dict | None = None
+    objects: list | None = None
+    midpoint: dict | None = None
+    low_point: dict | None = None
 
 
 @router.put("/{pid}/bible")
 async def put_bible(pid: str, body: BibleBody):
     _project(pid)
     b = store.bible(pid)
-    if not b:
+    if not architect.has_plan(b):
         raise HTTPException(400, "this story has no plan yet; write it first")
     new = {k: v for k, v in body.model_dump().items() if v is not None}
     if "pov" in new and new["pov"] not in ("first", "second", "third"):
         raise HTTPException(400, "point of view must be first, second or third")
-    store.set_bible(pid, {**b, **new})
+    store.set_bible(pid, architect.decorate({**b, **new}))
     return {"ok": True}
 
 
@@ -589,6 +598,7 @@ class BeatBody(BaseModel):
     rule: str | None = None
     motif: str | None = None
     fact: str | None = None
+    solved_by: str | None = None
 
 
 @router.put("/{pid}/bible/beats/{n}")
@@ -604,8 +614,26 @@ async def put_beat(pid: str, n: int, body: BeatBody):
     if "label" in edit and "title" not in edit and ":" in edit["label"]:
         edit["time"], edit["title"] = (x.strip() for x in edit["label"].split(":", 1))
     beat.update(edit)
-    store.set_bible(pid, b)
+    store.set_bible(pid, architect.decorate(b))
     return {"ok": True}
+
+
+class SecretsBody(BaseModel):
+    instruction: str = ""
+
+
+@router.post("/{pid}/secrets")
+async def propose_secrets(pid: str, body: SecretsBody):
+    """Four different hidden truths for the idea; they are kept with the plan row until the owner picks one (or writes the plan without)."""
+    _project(pid)
+
+    async def make(backend, s, progress, cancel):
+        progress(0, 1, "thinking of four secrets")
+        found = await architect.secret_candidates(pid, backend, s, body.instruction)
+        cur = store.bible(pid)
+        store.set_bible(pid, {**cur, "candidates": found})
+        return f"{len(found)} secrets to choose from"
+    return _job(pid, "secrets", make)
 
 
 class ReplanBody(BaseModel):

@@ -373,7 +373,7 @@ def test_a_reply_that_will_not_parse_is_asked_again_without_thinking():
             self.calls.append((max_tokens, dict(params or {})))
             return LLMResult('{"ops" [') if len(self.calls) <= 3 else LLMResult(json.dumps({"ops": []}))      # three bad replies fill the first round
 
-    s = {**sm.get(), "retries": 2, "retry_backoff_s": 0}
+    s = {**sm.get(), "retries": 2, "retry_backoff_s": 0, "context_limit": 65536, "output_reserve": 10000}      # explicit: the window the test needs must not depend on the settings left by an earlier test
     be = Bad()
     assert asyncio.run(engine._json(be, s, P.DELTA, "STATE", m.DeltaOut)).ops == []
     assert be.calls[3][1]["thinking_budget"] == 0 and be.calls[3][0] > be.calls[0][0]

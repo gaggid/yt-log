@@ -225,10 +225,6 @@ class ArchiveOut(M):
     options: list[OptionIn]
 
 
-class MindsOut(M):
-    wants: dict[str, str]
-
-
 class PickOut(M):
     option: Str
     why: Str = ""
@@ -255,6 +251,7 @@ class PanelIn(M):
     action: Str
     mood: Str = ""
     caption: Str = ""
+    after: Num = 0                        # the paragraph (counting from 1) this picture illustrates; it shows right after it
 
 
 class PanelsOut(M):
@@ -272,10 +269,23 @@ class ClueIn(M):
     clue: Str = ""
 
 
+def _num_list(v):
+    if isinstance(v, (int, float, str)) and not isinstance(v, bool):
+        v = [v]
+    return [x for x in (v or []) if isinstance(x, (int, float, str)) and not isinstance(x, bool)]
+
+
+NumList = Annotated[list[Num], BeforeValidator(_num_list)]
+
+
 class RulePlanIn(M):
     name: Str = ""
     text: Str = ""
     beat: Num = 0
+    kind: Str = "stated"                  # stated (said aloud), discovered (learned from what happens) or policy (never said, shown by what happens)
+    uses: NumList = []                    # later beats where it is used again (the refrain)
+    shown: Str = ""                       # for a policy: how it shows without being said
+    broken_beat: Num = 0                  # a beat where it is broken on purpose (0 = never)
 
 
 class MotifIn(M):
@@ -296,12 +306,49 @@ class SecretIn(M):
     who: Str = ""
     reveal_beat: Num = 0
     clues: list[ClueIn] = []
+    kind: Str = ""                        # authority_lie, trap, hidden_resource, betrayal, identity or other
+    lie: Str = ""                         # what the authority publicly says (the number or rule that is not true)
+    found_by: Str = ""                    # how the person finds out (a list turned into a map, a measurement)
+    method_beat: Num = 0
+
+
+class OpeningIn(M):
+    line: Str = ""
+    action: Str = ""
+    belief: Str = ""
+
+
+class CountStepIn(M):
+    beat: Num = 0
+    value: Num = 0
+    note: Str = ""
+
+
+class CountdownIn(M):
+    name: Str = ""
+    unit: Str = ""
+    steps: list[CountStepIn] = []
+
+
+class ObjectIn(M):
+    name: Str = ""
+    what: Str = ""
+    plant_beat: Num = 0
+    payoff_beat: Num = 0
+    payoff: Str = ""
+
+
+class MarkIn(M):
+    beat: Num = 0
+    change: Str = ""
+    loss: Str = ""
 
 
 class EndingIn(M):
     outcome: Str = ""
     final_image: Str = ""
     closing_line: Str = ""
+    inversion: Str = ""                   # how the ending turns the opening action, rule or belief around
 
 
 class BibleOut(M):
@@ -313,6 +360,11 @@ class BibleOut(M):
     motifs: list[MotifIn] = []
     facts: list[FactPlanIn] = []
     ending: EndingIn = EndingIn()
+    opening: OpeningIn = OpeningIn()
+    countdown: CountdownIn = CountdownIn()
+    objects: list[ObjectIn] = []
+    midpoint: MarkIn = MarkIn()
+    low_point: MarkIn = MarkIn()
 
 
 def _clue_texts(v):
@@ -340,6 +392,20 @@ class BeatIn(M):
     rule: Str = ""
     motif: Str = ""
     fact: Str = ""
+    solved_by: Str = ""
+
+
+class SecretCandidate(M):
+    kind: Str = "other"
+    truth: Str = ""
+    who: Str = ""
+    lie: Str = ""
+    found_by: Str = ""
+    clues: StrList = []
+
+
+class SecretsOut(M):
+    candidates: list[SecretCandidate]
 
 
 class BeatsOut(M):

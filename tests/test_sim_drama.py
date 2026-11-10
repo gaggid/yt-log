@@ -72,8 +72,10 @@ def test_a_failed_or_partial_act_always_costs_something():
 
 
 def test_the_planner_gets_the_arc_and_must_name_an_opposition(client):
+    from sim import store
     c = client
     pid = new_story(c)
+    store.set_bible(pid, {})                                                                  # a story with no plan: the pacing block steers it (a planned story gets its acts from the plan)
     assert c.patch(f"/api/sim/{pid}", json={"settings": {"length": 12}}).status_code == 200 and detail(c, pid)["project"]["settings"]["length"] == 12
     assert c.patch(f"/api/sim/{pid}", json={"settings": {"length": 500}}).status_code == 200 and detail(c, pid)["project"]["settings"]["length"] == 99
     c.patch(f"/api/sim/{pid}", json={"settings": {"length": 12}})

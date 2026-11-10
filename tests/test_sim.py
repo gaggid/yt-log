@@ -261,12 +261,12 @@ def test_dice_off_makes_every_act_succeed(sm):
     assert ch["rolls"] and all(r["tier"] == "success" and r.get("dice_off") for r in ch["rolls"])
 
 
-def test_deep_mode_asks_what_the_others_want(sm):
+def test_the_cast_minds_stage_is_gone(sm):
+    from sim import engine
+    assert "minds" not in engine.STAGES and "deep" not in store.DEFAULT_SETTINGS
     pid, fake = make()
-    store.save_project(pid, settings={"deep": True})
-    ch = go(pid, fake)
-    assert fake.count("sm_minds") == 1 and ch["plan"]["minds"]
-    assert "WHAT THE OTHERS DO" in fake.last("sm_write")["user"]
+    go(pid, fake)
+    assert fake.count("sm_minds") == 0
 
 
 # ── directives ────────────────────────────────────────────────────────────────

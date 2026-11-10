@@ -192,6 +192,31 @@ def _hit(want: str, prose_kw: set[str]) -> bool:
     return not kw or len(kw & prose_kw) >= (1 if len(kw) <= 3 else 2)
 
 
+SMALL = ("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen").split()
+TENS = ("", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety")
+
+
+def _number_words(n: int) -> str:
+    if n < 20:
+        return SMALL[n]
+    t, o = divmod(n, 10)
+    return TENS[t] + (f"-{SMALL[o]}" if o else "")
+
+
+def has_number(prose: str, value) -> bool:
+    """The number on screen is in the chapter as digits (with or without commas) or, up to 99, as words."""
+    low = (prose or "").lower()
+    v = float(value)
+    if v != int(v):
+        return str(value) in low
+    n = int(v)
+    digits = {re.sub(r"[,\s]", "", x) for x in re.findall(r"\d[\d,]*", low)}
+    if str(n) in digits:
+        return True
+    w = _number_words(n) if 0 <= n < 100 else ""
+    return bool(w) and (w in low or w.replace("-", " ") in low)
+
+
 def plan_numbers(pid: str, path: list[dict]) -> dict | None:
     """For a story with a plan: did each chapter play its beat, plant its clues, show its rule and its recurring device (word overlap; a guess, but it shows a chapter that went its own way)."""
     bible = store.bible(pid)
@@ -199,6 +224,8 @@ def plan_numbers(pid: str, path: list[dict]) -> dict | None:
     if not beats:
         return None
     rows = []
+    cd = bible.get("countdown") or {}
+    signposts = bool(store.project(pid)["settings"].get("signposts"))
     for c in path:
         b = beats.get(c["idx"])
         if not b:
@@ -208,8 +235,17 @@ def plan_numbers(pid: str, path: list[dict]) -> dict | None:
         motif = next((x for x in bible.get("motifs", []) if x["name"] == b.get("motif")), None)
         rows.append({"n": b["n"], "label": b["label"], "hit": _hit(" ".join([b.get("event", ""), b.get("problem", ""), b.get("title", "")]), pk),
                      "clues_missing": [x for x in b.get("clues", []) if not _hit(x, pk)], "rule_missing": bool(rule) and not (_hit(rule["text"], pk) or rule["name"].lower() in (c.get("prose") or "").lower()),
-                     "motif_missing": bool(motif) and not (_hit(motif["name"] + " " + motif.get("what", ""), pk))})
-    return {"beats": rows, "total": len(beats), "reveal_beat": bible.get("secret", {}).get("reveal_beat"), "played": len(rows)}
+                     "motif_missing": bool(motif) and not (_hit(motif["name"] + " " + motif.get("what", ""), pk)),
+                     "count_missing": bool(cd.get("name")) and b.get("count") is not None and not has_number(c.get("prose", ""), b["count"]),
+                     "objects_missing": [o for o in (b.get("plant") or []) + (b.get("pay") or []) if not _hit(o, pk)],
+                     "signpost_missing": signposts and bool(b.get("signpost")) and (b["signpost"].split(":")[0].lower() not in (c.get("prose") or "").lower())})
+    ending = None
+    last = max(beats)
+    op = bible.get("opening") or {}
+    done_last = next((c for c in path if c["idx"] == last and c.get("prose")), None)
+    if done_last and (op.get("line") or op.get("action") or op.get("belief")):
+        ending = {"echo": _hit(" ".join([op.get("line", ""), op.get("action", ""), op.get("belief", "")]), keywords(done_last["prose"]))}
+    return {"beats": rows, "total": len(beats), "reveal_beat": bible.get("secret", {}).get("reveal_beat"), "played": len(rows), "ending": ending}
 
 
 def verdicts(r: dict, chs: list[dict], alive: list[dict], n: int) -> list[dict]:
@@ -267,6 +303,14 @@ def verdicts(r: dict, chs: list[dict], alive: list[dict], n: int) -> list[dict]:
                 add("warn", f"Chapter {row['n']} does not show the rule it should teach.")
             if row["motif_missing"]:
                 add("warn", f"Chapter {row['n']} leaves out its recurring device.")
+            if row["count_missing"]:
+                add("warn", f"Chapter {row['n']} never says the number on screen.")
+            for o in row["objects_missing"][:1]:
+                add("warn", f"Chapter {row['n']} leaves out the planted object: {o}.")
+            if row["signpost_missing"]:
+                add("warn", f"Chapter {row['n']} does not announce its problem aloud.")
+        if pl.get("ending") and not pl["ending"]["echo"]:
+            add("warn", "The last chapter does not echo the opening, so the ending does not turn the beginning around.")
     if not v:
         add("ok", "Nothing stands out: the story has costs, movement and variety so far.")
     return v

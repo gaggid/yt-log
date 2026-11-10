@@ -5,8 +5,8 @@ from contextvars import ContextVar
 
 MODES = ("off", "balanced", "deep")
 BUDGET = {"sm_world": 1024, "sm_cast": 2048, "sm_trackers": 2048, "sm_rules": 1024, "sm_suggest": 512, "sm_items": 0,
-          "sm_plan": 2048, "sm_minds": 0, "sm_delta": 1536, "sm_write": 512, "sm_referee": 2048, "sm_archive": 1024,
-          "sm_polish": 512, "sm_bible": 3072, "sm_beats": 3072, "sm_pick": 256, "sm_condition": 256, "sm_rollup": 0, "sm_reread": 1024, "sm_panels": 512}
+          "sm_plan": 2048, "sm_delta": 1536, "sm_write": 512, "sm_referee": 2048, "sm_archive": 1024,
+          "sm_polish": 512, "sm_secrets": 2048, "sm_bible": 3072, "sm_beats": 3072, "sm_pick": 256, "sm_condition": 256, "sm_rollup": 0, "sm_reread": 1024, "sm_panels": 512}
 DEEP_FACTOR, DEEP_MAX = 2, 8192
 
 mode: ContextVar[str] = ContextVar("sim_thinking", default="balanced")      # set by the job runner from the story's setting
