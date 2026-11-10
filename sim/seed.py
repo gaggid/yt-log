@@ -10,7 +10,8 @@ PARTS = ("world", "cast", "trackers", "rules", "bible")
 def _idea_block(pid: str) -> str:
     p = store.project(pid)
     t = templates.get(p["settings"].get("template_id", ""))
-    return f"CONTENT: {content.text(p['settings'])}\n\nIDEA: {fence(p['idea'])}\n" + (templates.hint_text(t) + "\n" if templates.hint_text(t) else "")
+    wild = p["settings"].get("wildness", "standard") == "wild"
+    return f"CONTENT: {content.text(p['settings'])}\n\nIDEA: {fence(p['idea'])}\n" + (templates.hint_text(t) + "\n" if templates.hint_text(t) else "") + (P.WILDNESS_SEED + "\n" if wild else "")
 
 
 def _cast_text(pid: str) -> str:

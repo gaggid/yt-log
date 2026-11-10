@@ -61,6 +61,9 @@ class WorldOut(M):
     start_scene: Str = ""
     start_time: Str = ""
     title: Str = ""
+    pov: Str = ""                    # first / third-close / omniscient
+    voice: Str = ""                  # 2-3 sentences on prose style (tense, sentence length, register)
+    ending_shape: Str = ""           # open / bittersweet / triumph / tragedy
 
 
 class EntityOut(M):
