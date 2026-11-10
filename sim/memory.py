@@ -65,7 +65,7 @@ def rules_text(pid: str) -> tuple[str, dict[str, str]]:
 
 def world_text(world: dict) -> str:
     keys = (("goal", "THE STORY IS ABOUT"), ("place", "Place"), ("period", "Period"), ("tone", "Tone"), ("pacing", "Pacing"), ("exists", "What exists here"), ("craft", "Making and finding here"),
-            ("start_scene", "Opening situation"))
+            ("start_scene", "Opening situation"), ("pov", "Point of view"), ("voice", "Narrator voice"), ("ending_shape", "Ending shape"))
     return "\n".join(f"{label}: {world[k]}" for k, label in keys if world.get(k))
 
 

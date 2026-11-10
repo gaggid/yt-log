@@ -6,25 +6,37 @@ import re
 from . import health, state as S
 
 PHASE_TEXT = {
-    "setup": "Set up: show what the people want, what stands in their way and what is at stake. Plant one question the reader wants answered. Pressure starts low but is already present.",
-    "rising": "Rising: complications. Each choice costs something, plans meet resistance, a small thing goes wrong, the opposition grows. Nobody gets what they want cleanly.",
-    "midpoint": "Midpoint: a reveal or a reversal that changes what the people believe, want or fear. After it the story cannot go back to how it was.",
-    "crisis": "Crisis: the pressure peaks. Failures hurt and last, allies are lost or divided, time runs short, a hard choice between two things the people care about.",
-    "climax": "Climax: the decisive confrontation or decision. Everything planted before is used. The people win, lose or change.",
-    "resolution": "Resolution: the consequences, shown. Close the main question; end on a final image, not a cliffhanger.",
-    "release": "Release: a pause after the peak, with a cost counted and a new question opened.",
+    "setup":        "Set up: show what the people want, what stands in their way and what is at stake. Plant one question the reader wants answered. Pressure starts low but is already present.",
+    "rising":       "Rising: complications. Each choice costs something, plans meet resistance, a small thing goes wrong, the opposition grows. Nobody gets what they want cleanly.",
+    "midpoint":     "Midpoint: a reveal or a reversal that changes what the people believe, want or fear. After it the story cannot go back to how it was.",
+    "crisis":       "Crisis: the pressure peaks. Failures hurt and last, allies are lost or divided, time runs short, a hard choice between two things the people care about.",
+    "all_is_lost":  "All is lost: the protagonist loses the main tool, plan or advantage they have been relying on. The situation is worse than when the story began. This is the low point before the final push — do not resolve the pressure, deepen it.",
+    "climax":       "Climax: the decisive confrontation or decision. Everything planted before is used. The people win, lose or change.",
+    "resolution":   "Resolution: the consequences, shown. Close the main question; end on a final image, not a cliffhanger.",
+    "release":      "Release: a pause after the peak, with a cost counted and a new question opened.",
     "complication": "A new complication: the situation changes or a new pressure arrives that the people did not expect.",
 }
-TARGET = {"setup": 3, "rising": 5, "midpoint": 6, "crisis": 8, "climax": 9, "resolution": 4, "release": 4, "complication": 5}
+
+# Tension targets per phase per ending shape. The all-is-lost valley before the climax is the most
+# important structural law: tension briefly drops before the highest peak so the climax feels earned.
+TARGET = {"setup": 3, "rising": 5, "midpoint": 6, "crisis": 8, "all_is_lost": 4, "climax": 9, "resolution": 4, "release": 4, "complication": 5}
+CURVES = {
+    "triumph":     {"setup": 3, "rising": 5, "midpoint": 6, "crisis": 8, "all_is_lost": 4, "climax": 10, "resolution": 3, "release": 4, "complication": 5},
+    "tragedy":     {"setup": 4, "rising": 7, "midpoint": 10, "crisis": 7, "all_is_lost": 5, "climax": 5, "resolution": 1, "release": 5, "complication": 6},
+    "bittersweet": {"setup": 3, "rising": 5, "midpoint": 8, "crisis": 6, "all_is_lost": 4, "climax": 9, "resolution": 5, "release": 4, "complication": 5},
+    "open":        {"setup": 3, "rising": 5, "midpoint": 6, "crisis": 7, "all_is_lost": 5, "climax": 8, "resolution": 6, "release": 4, "complication": 5},
+}
+
 LENGTHS = (0, 6, 8, 12, 16, 24, 36, 48)
 WAVE = 6
+FINALE_AFTER = WAVE * 2          # open-ended stories enter a one-time finale arc after this many chapters
 NEGLECT_AFTER = 3
 THREAD_AFTER = 4
 MAX_NEGLECTED = 4
 
 
 def phase(idx: int, length: int) -> str:
-    """The part of the arc chapter `idx` (1-based) belongs to. A planned length gives one arc; an open-ended story repeats a wave of six chapters."""
+    """The part of the arc chapter `idx` (1-based) belongs to. A planned length gives one arc; an open-ended story repeats a wave of six chapters then enters a finale arc."""
     if length and length > 0:
         if idx >= length:
             return "resolution"
@@ -35,24 +47,32 @@ def phase(idx: int, length: int) -> str:
         if idx == max(2, round(length * 0.5)):
             return "midpoint"
         r = idx / length
-        return "setup" if r <= 0.2 else "rising" if r <= 0.5 else "crisis" if r <= 0.8 else "climax"
+        if r <= 0.2:   return "setup"
+        if r <= 0.5:   return "rising"
+        if r <= 0.72:  return "crisis"
+        if r <= 0.82:  return "all_is_lost"
+        return "climax"
+    # open-ended: wave-based until FINALE_AFTER, then one closing arc
+    if idx > FINALE_AFTER:
+        return {1: "crisis", 2: "all_is_lost", 3: "climax"}.get(idx - FINALE_AFTER, "resolution")
     pos = (idx - 1) % WAVE + 1
     if pos == 1:
         return "setup" if idx == 1 else "complication"
     return {2: "rising", 3: "rising", 4: "midpoint", 5: "crisis", 6: "release"}[pos]
 
 
-def target(idx: int, length: int) -> int:
+def target(idx: int, length: int, ending_shape: str = "") -> int:
+    curve = CURVES.get(ending_shape, TARGET)
     ph = phase(idx, length)
-    t = TARGET[ph]
+    t = curve.get(ph, 5)
     if length and ph in ("rising", "crisis"):                                  # climbs a little inside a phase
         t += min(1, idx % 2)
     return t
 
 
-def arc(idx: int, length: int, intensities: list[int]) -> dict:
+def arc(idx: int, length: int, intensities: list[int], ending_shape: str = "") -> dict:
     ph = phase(idx, length)
-    tgt = target(idx, length)
+    tgt = target(idx, length, ending_shape)
     last = intensities[-3:]
     note = ""
     if last and tgt > max(last):
@@ -63,9 +83,47 @@ def arc(idx: int, length: int, intensities: list[int]) -> dict:
     return {"phase": ph, "target": tgt, "text": PHASE_TEXT[ph], "note": note, "last": last, "chapters_left": left}
 
 
-def arc_block(a: dict, idx: int, length: int) -> str:
+_ENDING_NOTES = {
+    "tragedy":    "This story ends in tragedy: costs must not reverse; each chapter from here deepens the loss rather than offering hope.",
+    "triumph":    "This story ends in triumph: the people must earn it through real setbacks; the climax needs a genuine reversal before the win.",
+    "bittersweet":"This story ends bittersweet: something must be won and something lost — both must land with equal weight.",
+    "open":       "This story ends open: close the immediate pressure but leave the larger question unanswered.",
+}
+
+
+def arc_block(a: dict, idx: int, length: int, ending_shape: str = "") -> str:
     where = f"chapter {idx} of {length}" if length else f"chapter {idx} (an open-ended story)"
-    return f"## ARC AND PACING\n{where}, phase: {a['phase'].upper()}. {a['text']}\nTarget tension for this chapter: {a['target']} out of 10. {a['note']}".strip()
+    shape_note = ""
+    if ending_shape in _ENDING_NOTES and a["phase"] in ("crisis", "all_is_lost", "climax", "resolution"):
+        shape_note = " " + _ENDING_NOTES[ending_shape]
+    return f"## ARC AND PACING\n{where}, phase: {a['phase'].upper()}. {a['text']}\nTarget tension for this chapter: {a['target']} out of 10. {a['note']}{shape_note}".strip()
+
+
+def all_is_lost_block() -> str:
+    return ("## ALL IS LOST\n"
+            "This chapter is the story's lowest point. The focus character must lose the main tool, plan or "
+            "advantage they have been relying on. Their situation at the end of this chapter must be concretely "
+            "worse than it was at the opening. Do not resolve the pressure — deepen it. The next chapter is the climax.")
+
+
+def archive_phase_block(arc_phase: str, pressure: list[dict]) -> str:
+    """Injected into the archive user message; narrows option count and forces finality at key phases."""
+    clock_full = any(p.get("kind") == "clock_full" for p in pressure)
+    if arc_phase == "climax" or clock_full:
+        suffix = " and the deadline has passed" if clock_full else ""
+        return (f"## OPTIONS RULE\nThis is the climax{suffix}. Write 1 or 2 options only. "
+                "Each is a final, irreversible decision — no information-gathering, no waiting, no safe path. "
+                "The story cannot continue without committing to one of them.")
+    if arc_phase == "all_is_lost":
+        return ("## OPTIONS RULE\nThe protagonist has just lost their main advantage. Write 1 or 2 options only. "
+                "Both start from a position of loss. The person must decide what to try with nothing left.")
+    if arc_phase == "resolution":
+        return ("## OPTIONS RULE\nThe climax is past. Write 1 or 2 options that close the story: show the "
+                "consequence, pay off a planted detail, or deliver the final image. Do not open new threads.")
+    if arc_phase == "crisis":
+        return ("## OPTIONS RULE\nThe pressure is peaking. Write 2 or 3 options. Each has a real cost; "
+                "at least one burns something permanently — a resource, a relationship, an advantage. No safe path.")
+    return ""
 
 
 # ── what has been neglected ───────────────────────────────────────────────────

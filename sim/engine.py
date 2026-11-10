@@ -296,7 +296,7 @@ async def run_chapter(pid: str, backend, s: dict, progress=None, *, parent_id: s
             by_name = {e["name"].lower(): e["name"] for e in chars}
             rep = health.report(pid, path)
             length = int(cfg.get("length", 0) or 0)
-            arc = drama.arc(ch["idx"], length, rep.get("intensity", []))
+            arc = drama.arc(ch["idx"], length, rep.get("intensity", []), world.get("ending_shape", ""))
             neg = drama.neglected(rep)
             flags["arc"] = {"phase": arc["phase"], "target": arc["target"], "length": length}
             flags["neglected"] = [x["text"] for x in neg]
@@ -336,14 +336,16 @@ async def run_chapter(pid: str, backend, s: dict, progress=None, *, parent_id: s
             )
             user = (f"{memory.render(pk0, s)}"
                     + (f"\n\n## WHAT EACH CHARACTER INTENDS THIS CHAPTER\n{actor_lines}" if actor_lines else "")
-                    + ("" if beat else f"\n\n{drama.arc_block(arc, ch['idx'], length)}")
+                    + ("" if beat else f"\n\n{drama.arc_block(arc, ch['idx'], length, world.get('ending_shape', ''))}")
                     + (f"\n\n{architect.plan_block(bible, beat, ch['idx'])}" if beat else "")
+                    + (f"\n\n{drama.all_is_lost_block()}" if arc["phase"] == "all_is_lost" and not beat else "")
                     + (f"\n\n{drama.neglected_block(neg)}" if neg else "")
                     + f"\n\n## PLAYER'S ACTION\n{act}\n\n## DUE INSTRUCTIONS\n"
                     + ("\n".join(f"{d['label']} (id {d['id']}) [{d['kind']}] {'MUST' if d['must'] else 'MAY WAIT'}: {fence(d['text'])}" for d in due) or "(none)")
                     + "\n\n## UNDER PRESSURE\n" + ("\n".join(p["text"] for p in flags.get("pressure", [])) or "(nothing at its limit)")
                     + "\n\n## BEATS OF THE LAST CHAPTERS\n" + (", ".join(b for b in last_beats if b) or "(none yet)")
-                    + (f"\n\n## OWNER'S NOTE FOR THIS CHAPTER\n{fence(instruction)}" if instruction else "") + "\n\nPlan the chapter now.")
+                    + (f"\n\n## OWNER'S NOTE FOR THIS CHAPTER\n{fence(instruction)}" if instruction else "")
+                    + (f"\n\n{P.WILDNESS_PLAN}" if cfg.get("wildness") == "wild" else "") + "\n\nPlan the chapter now.")
             p = await _json(backend, s, P.PLAN, user, m.ChapterPlan, v)
             plan = p.model_dump()
             plan["due_ids"] = [d["id"] for d in due]
@@ -356,7 +358,7 @@ async def run_chapter(pid: str, backend, s: dict, progress=None, *, parent_id: s
             begin("resolve", "rolling the dice")
             if cfg["dice"]:
                 rep = health.report(pid, path)
-                plan["calibration"] = drama.calibrate(plan["risks"], rep, drama.target(ch["idx"], int(cfg.get("length", 0) or 0)))
+                plan["calibration"] = drama.calibrate(plan["risks"], rep, drama.target(ch["idx"], int(cfg.get("length", 0) or 0), world.get("ending_shape", "")))
                 rolls = [dice.roll(r, st0, trackers, cfg["seed"], ch["idx"], i + 1, cfg["difficulty"], salt) for i, r in enumerate(plan["risks"])]
             else:
                 rolls = [dice.free(r, i + 1) for i, r in enumerate(plan["risks"])]
@@ -604,6 +606,9 @@ async def _archive(pid, backend, s, cid, path, st1, plan, flags) -> None:
     pk = memory.build(pid, path, ch["state_after"], plan["focus"], plan["scene"], s)
     alive = [n for n, e in ch["state_after"]["entities"].items() if e["alive"]]
     foc = plan["focus"]
+    arc_phase = flags.get("arc", {}).get("phase", "")
+    min_opts = 1 if arc_phase in ("climax", "all_is_lost", "resolution") else 3
+    phase_block = drama.archive_phase_block(arc_phase, flags.get("pressure", []))
 
     def v(o: m.ArchiveOut, caller):
         opts = []
@@ -623,11 +628,13 @@ async def _archive(pid, backend, s, cid, path, st1, plan, flags) -> None:
                     if seen:
                         y["risk"] = "medium"
                     seen = True
-        if len(opts) < 3 and not caller.last_attempt:
-            raise ValueError("write 3 or 4 different options, each for a living character")
+        if len(opts) < min_opts and not caller.last_attempt:
+            raise ValueError(f"write {'1 or 2' if min_opts == 1 else '3 or 4'} options, each for a living character")
         o.options = opts[:4]
 
-    user = (f"{memory.render(pk, s)}\n\n## THE CHAPTER\n{ch['title']} ({ch['story_time']})\n{ch['prose']}\n\nAlive: {', '.join(alive)}\nFollowed: {', '.join(foc)}\n\n{architect.next_block(store.bible(pid), ch['idx'])}\n\nWrite the archive and the options now.")
+    user = (f"{memory.render(pk, s)}\n\n## THE CHAPTER\n{ch['title']} ({ch['story_time']})\n{ch['prose']}\n\nAlive: {', '.join(alive)}\nFollowed: {', '.join(foc)}\n\n{architect.next_block(store.bible(pid), ch['idx'])}\n\n"
+            + (f"{phase_block}\n\n" if phase_block else "")
+            + "Write the archive and the options now.")
     o = await _json(backend, s, P.ARCHIVE, user, m.ArchiveOut, v)
     options = [{"id": f"o{i}", **x} if isinstance(x, dict) else {"id": f"o{i}", **x.model_dump()} for i, x in enumerate(o.options, 1)]
     if not options:                                                           # the last attempt may have none: a story must never dead-end
