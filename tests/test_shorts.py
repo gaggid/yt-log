@@ -1428,3 +1428,9 @@ def test_the_ideas_config_keeps_the_word_range_for_autopilot_shorts(client):
     ideas_mod.save_config({"run": {"words_lo": "", "words_hi": "", "tempo_max": ""}})
     st = shorts_api._run_settings(ideas_mod.get_config()["run"])
     assert (st["words_lo"], st["words_hi"], st["tempo_max"]) == (0, 0, 0.0)
+
+
+def test_the_words_suggestion_follows_the_length(client):
+    a = client.get("/api/shorts/words", params={"target_s": 30}).json()
+    b = client.get("/api/shorts/words", params={"target_s": 60}).json()
+    assert (a["lo"], a["hi"]) == planner.word_limits(30)[:2] and b["hi"] > a["hi"] and a["tempo_default"] == timeline.TEMPO_MAX

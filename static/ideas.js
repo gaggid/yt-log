@@ -100,6 +100,7 @@ let _minScore = 7;
 let _job      = null, _seen = new Set(), _pollGen = 0;
 let _auto     = {autopilot:false, auto_generate:false, auto_approve:false, auto_condition:false, gen_every_h:1, gen_n:5, approve_min:7.8, make_every_h:2, pending_cap:30, planning_cap:3, styles:[]};
 const BRIGHT_STYLES = ['realism', 'pixar3d', 'anime', 'ghibli', 'tinyworld'];
+let _sugg     = {};                    // the system's suggested words for the chosen length (GET /shorts/words)
 let _ap       = null, _apAt = 0, _apTimer = null;      // /ideas/autopilot (queues and schedule) and when it was read
 const _CFG_DEFAULTS = {pipeline:'keyframe', voice:'taksh_hn', language:'hi', target_s:30, tone_id:'bigbro', edge:'clean', upscale:'2k', speed_lora:'1', words_lo:'', words_hi:'', tempo_max:''};
 
@@ -226,9 +227,9 @@ function _cfgHtml() {
         <option value="spicy"${_cfg.edge==='spicy'?' selected':''}>Spicy</option>
         <option value="savage"${_cfg.edge==='savage'?' selected':''}>Savage</option>
       </select>`)}
-      ${cell('cfg-wlo','Fewest words (empty = suggested)',`<input type="number" id="cfg-wlo" min="3" max="1000" value="${_cfg.words_lo || ''}" placeholder="auto">`)}
-      ${cell('cfg-whi','Most words (empty = suggested)',`<input type="number" id="cfg-whi" min="3" max="1000" value="${_cfg.words_hi || ''}" placeholder="auto">`)}
-      ${cell('cfg-tempo','Voice sped up to at most (1.0 to 1.6)',`<input type="number" id="cfg-tempo" min="1" max="1.6" step="0.05" value="${_cfg.tempo_max || ''}" placeholder="1.45">`)}
+      ${cell('cfg-wlo',`Fewest words (suggested ${_sugg.lo || '…'})`,`<input type="number" id="cfg-wlo" min="3" max="1000" value="${_cfg.words_lo || _sugg.lo || ''}">`)}
+      ${cell('cfg-whi',`Most words (suggested ${_sugg.hi || '…'})`,`<input type="number" id="cfg-whi" min="3" max="1000" value="${_cfg.words_hi || _sugg.hi || ''}">`)}
+      ${cell('cfg-tempo',`Voice sped up to at most (suggested ${_sugg.tempo_default || 1.45}x)`,`<input type="number" id="cfg-tempo" min="1" max="1.6" step="0.05" value="${_cfg.tempo_max || _sugg.tempo_default || 1.45}">`)}
       ${cell('cfg-fast','Clip speed',`<select id="cfg-fast">
         <option value="1"${_cfg.speed_lora!==''?' selected':''}>Fast LoRA (about 5x quicker)</option>
         <option value=""${_cfg.speed_lora===''?' selected':''}>Full steps (slower)</option>
@@ -243,6 +244,14 @@ function _cfgHtml() {
         <button class="small link" id="st-bright" type="button">Bright set</button><button class="small link" id="st-any" type="button">Any style</button></div>
       <div class="id-chips" id="id-styles">${_stylesHtml()}</div>
     </div>`;
+}
+
+async function _loadSugg() {             // the system's suggested words for the chosen length, shown in the settings next to the person's own numbers
+  try {
+    _sugg = await api('/shorts/words?target_s=' + (Number(_cfg.target_s) || 30));
+    const el = document.getElementById('id-cfg');
+    if (el) { el.innerHTML = _cfgHtml(); _wireCfg(); _wireStyles(); }
+  } catch (e) { /* the boxes stay empty: the suggestion is only shown */ }
 }
 
 function _stylesHtml() {
@@ -691,13 +700,15 @@ function _wireCfg() {
   bind('cfg-voice',    'voice');
   bind('cfg-language', 'language');
   bind('cfg-target-s', 'target_s', v => Math.max(5, Math.min(180, parseInt(v) || 30)));
+  const tl = document.getElementById('cfg-target-s'); if (tl) tl.addEventListener('change', () => setTimeout(_loadSugg, 50));      // the suggested words follow the length
   bind('cfg-tone',     'tone_id');
   bind('cfg-edge',     'edge');
   bind('cfg-upscale',  'upscale');
   bind('cfg-fast',     'speed_lora');
-  bind('cfg-wlo',      'words_lo');
-  bind('cfg-whi',      'words_hi');
-  bind('cfg-tempo',    'tempo_max');
+  const same = (v, s) => (!s || +v === s ? '' : v);           // a number equal to the suggestion is saved as 'follow the system', so it moves when the length changes
+  bind('cfg-wlo',      'words_lo',  v => same(v, _sugg.lo));
+  bind('cfg-whi',      'words_hi',  v => same(v, _sugg.hi));
+  bind('cfg-tempo',    'tempo_max', v => same(v, _sugg.tempo_default));
   _syncCfgLock();
 }
 
@@ -767,6 +778,7 @@ window.viewIdeas = async function() {
   // Re-render config panel now that we have live voices/languages
   const cfgEl = document.getElementById('id-cfg');
   if (cfgEl) { cfgEl.innerHTML = _cfgHtml(); _wireCfg(); _wireStyles(); }
+  _loadSugg();
   _drawAuto();
   _refreshAuto();
   _seen = new Set(_ideas.map(i => i.id));

@@ -230,6 +230,14 @@ def _words_info(short: dict) -> dict:
     return {"suggested": {"lo": s_lo, "hi": s_hi, "ask_lo": s_a, "ask_hi": s_b}, "used": {"lo": lo, "hi": hi, "ask_lo": a, "ask_hi": b}, "tempo_max": timeline.tempo_max(short), "tempo_default": timeline.TEMPO_MAX}
 
 
+@router.get("/words")                     # before "/{short_id}"
+async def words_suggestion(target_s: float = models.TARGET_S, speed: float = 1.0):
+    """The system's suggested range of spoken words for a length (the Ideas settings show it next to the producer's own numbers)."""
+    t = min(models.MAX_TARGET_S, max(models.MIN_TARGET_S, target_s))
+    lo, hi, a, b = planner.word_limits(t, min(1.3, max(0.8, speed)), {"settings": {}})
+    return {"target_s": t, "lo": lo, "hi": hi, "ask_lo": a, "ask_hi": b, "tempo_default": timeline.TEMPO_MAX}
+
+
 @router.get("/{short_id}")
 async def state(short_id: str):
     short = _get(short_id)
