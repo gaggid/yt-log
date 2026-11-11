@@ -222,20 +222,55 @@ def _add_short_info(i: dict) -> None:
     i["short_status"], i["publish"] = sh.get("status", "new"), publish.view(sh)
 
 
+def _words_calc(st: dict) -> dict:
+    """Words, length, narration speed and the voice speed-up limit are one relation: the voice needs words / (pace x speed) seconds; the speed-up is that divided by the room the length leaves
+    (minus the pauses between beats); it must stay under the limit or the video runs long. `st` holds target_s, voice_speed (or tone_id), words_lo, words_hi, tempo_max (0 = the system's value).
+    Returns the suggestion, what is in force and what each end of the range would do, so the settings screens show the outcome of a change before it is made."""
+    t_s = min(models.MAX_TARGET_S, max(models.MIN_TARGET_S, float(st.get("target_s") or models.TARGET_S)))
+    speed = float(st.get("voice_speed") or 0) or tones.speed_of(st)
+    speed = min(1.3, max(0.8, speed))
+    own = {"settings": {**st, "target_s": t_s}}
+    s_lo, s_hi, s_a, s_b = planner.word_limits(t_s, speed, {"settings": {}})
+    lo, hi, a, b = planner.word_limits(t_s, speed, own)
+    cap = timeline.tempo_max(own)
+    beats = sum(planner.beat_range(t_s)) / 2
+    room = max(1.0, t_s - (timeline.GAP_S * max(0, round(beats) - 1) + timeline.END_HOLD_S))
+    pace = timeline.PACE_WPS * speed
+
+    def outcome(label: str, words: int) -> dict:
+        voice_s = words / pace
+        need = voice_s / room
+        if need > cap + 1e-6:
+            verdict, over = "long", round(voice_s / cap + (t_s - room) - t_s, 1)
+        elif need > 1.0:
+            verdict, over = "faster", 0.0
+        elif need >= timeline.TEMPO_MIN:
+            verdict, over = "fits", 0.0
+        else:
+            verdict, over = "slower", 0.0
+        tempo = round(max(need, timeline.TEMPO_MIN) if verdict != "long" else need, 2)
+        said = {"long": f"the voice needs {voice_s:.1f} s, too long even at {cap:g}x: the video would run about {over:g} s past the length",
+                "faster": f"{voice_s:.1f} s of speech, sped up to {tempo:g}x to fit", "slower": f"{voice_s:.1f} s of speech, slowed to {tempo:g}x with a short pause filling the rest",
+                "fits": f"{voice_s:.1f} s of speech, fits at normal speed"}[verdict]
+        return {"label": label, "words": words, "voice_s": round(voice_s, 1), "tempo": tempo, "verdict": verdict, "over_s": over, "text": f"{label.capitalize()} ({words} words): {said}"}
+
+    return {"target_s": t_s, "speed": speed, "suggested": {"lo": s_lo, "hi": s_hi, "ask_lo": s_a, "ask_hi": s_b}, "used": {"lo": lo, "hi": hi, "ask_lo": a, "ask_hi": b},
+            "tempo_max": cap, "tempo_default": timeline.TEMPO_MAX, "fit_max": int(room * cap * pace),
+            "summary": f"For {t_s:g} seconds at {speed:g}x narration, up to {int(room * cap * pace)} words fit without the video running long (voice sped up to {cap:g}x at most).", "outcome": [outcome("fewest", lo), outcome("most", hi)],
+            "lo": s_lo, "hi": s_hi, "ask_lo": s_a, "ask_hi": s_b}
+
+
 def _words_info(short: dict) -> dict:
-    """What the system suggests for this length and what is in force (the producer's own numbers win), so the settings panel can show both."""
-    t_s, sp = planner.target_s(short), svoice.speed(short)
-    s_lo, s_hi, s_a, s_b = planner.word_limits(t_s, sp, {"settings": {}})
-    lo, hi, a, b = planner.word_limits(t_s, sp, short)
-    return {"suggested": {"lo": s_lo, "hi": s_hi, "ask_lo": s_a, "ask_hi": s_b}, "used": {"lo": lo, "hi": hi, "ask_lo": a, "ask_hi": b}, "tempo_max": timeline.tempo_max(short), "tempo_default": timeline.TEMPO_MAX}
+    return _words_calc(short["settings"])
 
 
 @router.get("/words")                     # before "/{short_id}"
-async def words_suggestion(target_s: float = models.TARGET_S, speed: float = 1.0):
-    """The system's suggested range of spoken words for a length (the Ideas settings show it next to the producer's own numbers)."""
-    t = min(models.MAX_TARGET_S, max(models.MIN_TARGET_S, target_s))
-    lo, hi, a, b = planner.word_limits(t, min(1.3, max(0.8, speed)), {"settings": {}})
-    return {"target_s": t, "lo": lo, "hi": hi, "ask_lo": a, "ask_hi": b, "tempo_default": timeline.TEMPO_MAX}
+async def words_suggestion(target_s: float = models.TARGET_S, speed: float = 0.0, tone_id: str = "", words_lo: int = 0, words_hi: int = 0, tempo_max: float = 0.0):
+    """The same calculation for settings that are not saved yet (the screens call it while the person types)."""
+    st = {"target_s": target_s, "voice_speed": speed, "tone_id": tone_id if tone_id in tones.TONES else tones.DEFAULT, "words_lo": words_lo, "words_hi": words_hi, "tempo_max": tempo_max}
+    if st["words_lo"] and st["words_hi"] and st["words_lo"] >= st["words_hi"]:
+        st["words_hi"] = 0
+    return _words_calc(st)
 
 
 @router.get("/{short_id}")

@@ -220,16 +220,11 @@ function _cfgHtml() {
       </select>`)}
       ${cell('cfg-voice','Voice',`<select id="cfg-voice">${voiceOpts}</select>`)}
       ${cell('cfg-language','Language',`<select id="cfg-language">${langOpts}</select>`)}
-      ${cell('cfg-target-s','Length (seconds)',`<input type="number" id="cfg-target-s" min="5" max="180" value="${_cfg.target_s}">`)}
-      ${cell('cfg-tone','Tone',`<select id="cfg-tone">${toneOpts}</select>`)}
       ${cell('cfg-edge','Edge',`<select id="cfg-edge">
         <option value="clean"${_cfg.edge==='clean'?' selected':''}>Clean</option>
         <option value="spicy"${_cfg.edge==='spicy'?' selected':''}>Spicy</option>
         <option value="savage"${_cfg.edge==='savage'?' selected':''}>Savage</option>
       </select>`)}
-      ${cell('cfg-wlo',`Fewest words (suggested ${_sugg.lo || '…'})`,`<input type="number" id="cfg-wlo" min="3" max="1000" value="${_cfg.words_lo || _sugg.lo || ''}">`)}
-      ${cell('cfg-whi',`Most words (suggested ${_sugg.hi || '…'})`,`<input type="number" id="cfg-whi" min="3" max="1000" value="${_cfg.words_hi || _sugg.hi || ''}">`)}
-      ${cell('cfg-tempo',`Voice sped up to at most (suggested ${_sugg.tempo_default || 1.45}x)`,`<input type="number" id="cfg-tempo" min="1" max="1.6" step="0.05" value="${_cfg.tempo_max || _sugg.tempo_default || 1.45}">`)}
       ${cell('cfg-fast','Clip speed',`<select id="cfg-fast">
         <option value="1"${_cfg.speed_lora!==''?' selected':''}>Fast LoRA (about 5x quicker)</option>
         <option value=""${_cfg.speed_lora===''?' selected':''}>Full steps (slower)</option>
@@ -239,6 +234,17 @@ function _cfgHtml() {
         <option value=""${_cfg.upscale===''?' selected':''}>1080p (1080×1920)</option>
       </select>`)}
     </div>
+    <div class="id-cfg-group" style="border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:10px">
+      <div class="small" style="font-weight:600;margin-bottom:6px">Length, words and speed <span class="mute" style="font-weight:400">— linked: change one and the others and the outcome below update</span> <button class="small link" id="cfg-wreset" type="button">Use the suggestion</button></div>
+      <div class="id-cfg-grid">
+      ${cell('cfg-target-s','Length (seconds)',`<input type="number" id="cfg-target-s" min="5" max="180" value="${_cfg.target_s}">`)}
+      ${cell('cfg-tone','Tone',`<select id="cfg-tone">${toneOpts}</select>`)}
+      ${cell('cfg-wlo',`Fewest words <span class="mute" id="lb-wlo">(suggested ${(_sugg.suggested||{}).lo || '…'})</span>`,`<input type="number" id="cfg-wlo" min="3" max="1000" value="${_cfg.words_lo || (_sugg.used||{}).lo || ''}" data-own="${_cfg.words_lo ? '1' : ''}">`)}
+      ${cell('cfg-whi',`Most words <span class="mute" id="lb-whi">(suggested ${(_sugg.suggested||{}).hi || '…'})</span>`,`<input type="number" id="cfg-whi" min="3" max="1000" value="${_cfg.words_hi || (_sugg.used||{}).hi || ''}" data-own="${_cfg.words_hi ? '1' : ''}">`)}
+      ${cell('cfg-tempo',`Voice sped up to at most <span class="mute" id="lb-tempo">(suggested ${_sugg.tempo_default || 1.45}x)</span>`,`<input type="number" id="cfg-tempo" min="1" max="1.6" step="0.05" value="${_cfg.tempo_max || _sugg.tempo_max || _sugg.tempo_default || 1.45}" data-own="${_cfg.tempo_max ? '1' : ''}">`)}
+      </div>
+      <div class="small" id="cfg-wout" style="margin-top:8px"></div>
+    </div>
     <div class="id-cfg-foot" style="display:block">
       <div class="small mute" style="margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:.05em">Picture styles <span style="text-transform:none;font-weight:400">— ideas and shorts use only the ticked styles, rotating; none ticked = any</span>
         <button class="small link" id="st-bright" type="button">Bright set</button><button class="small link" id="st-any" type="button">Any style</button></div>
@@ -246,13 +252,21 @@ function _cfgHtml() {
     </div>`;
 }
 
-async function _loadSugg() {             // the system's suggested words for the chosen length, shown in the settings next to the person's own numbers
+async function _wordsLive() {             // the server calculates words, length, speed and speed-up together; the boxes that are not the person's own follow it, and the outcome is shown before anything is made
+  const g = id => document.getElementById(id);
+  if (!g('cfg-wout')) return;
+  const own = id => { const e = g(id); return e && e.dataset.own === '1' ? e.value : 0; };
   try {
-    _sugg = await api('/shorts/words?target_s=' + (Number(_cfg.target_s) || 30));
-    const el = document.getElementById('id-cfg');
-    if (el) { el.innerHTML = _cfgHtml(); _wireCfg(); _wireStyles(); }
-  } catch (e) { /* the boxes stay empty: the suggestion is only shown */ }
+    const W = await api('/shorts/words?' + new URLSearchParams({target_s: (g('cfg-target-s') || {}).value || _cfg.target_s || 30, tone_id: (g('cfg-tone') || {}).value || _cfg.tone_id || '', words_lo: own('cfg-wlo'), words_hi: own('cfg-whi'), tempo_max: own('cfg-tempo')}));
+    _sugg = W;
+    const setv = (id, v) => { const e = g(id); if (e && e.dataset.own !== '1') e.value = v; };
+    setv('cfg-wlo', W.used.lo); setv('cfg-whi', W.used.hi); setv('cfg-tempo', W.tempo_max);
+    const lb = (id, t) => { const e = g(id); if (e) e.textContent = t; };
+    lb('lb-wlo', `(suggested ${W.suggested.lo})`); lb('lb-whi', `(suggested ${W.suggested.hi})`); lb('lb-tempo', `(suggested ${W.tempo_default}x)`);
+    g('cfg-wout').innerHTML = W.outcome.map(o => o.verdict === 'long' ? `<span class="bad">${esc(o.text)}</span>` : esc(o.text)).join('<br>') + `<br><span class="mute">${esc(W.summary)}</span>`;
+  } catch (e) { /* the old outcome stays */ }
 }
+const _loadSugg = _wordsLive;
 
 function _stylesHtml() {
   const list = ((_options && _options.visual_styles) || []).filter(m => m.id);
@@ -700,15 +714,19 @@ function _wireCfg() {
   bind('cfg-voice',    'voice');
   bind('cfg-language', 'language');
   bind('cfg-target-s', 'target_s', v => Math.max(5, Math.min(180, parseInt(v) || 30)));
-  const tl = document.getElementById('cfg-target-s'); if (tl) tl.addEventListener('change', () => setTimeout(_loadSugg, 50));      // the suggested words follow the length
   bind('cfg-tone',     'tone_id');
   bind('cfg-edge',     'edge');
   bind('cfg-upscale',  'upscale');
   bind('cfg-fast',     'speed_lora');
-  const same = (v, s) => (!s || +v === s ? '' : v);           // a number equal to the suggestion is saved as 'follow the system', so it moves when the length changes
-  bind('cfg-wlo',      'words_lo',  v => same(v, _sugg.lo));
-  bind('cfg-whi',      'words_hi',  v => same(v, _sugg.hi));
+  const sg = () => _sugg.suggested || {};
+  const same = (v, x) => (!x || +v === x ? '' : v);           // a number equal to the suggestion is saved as 'follow the system', so it moves when the length changes
+  bind('cfg-wlo',      'words_lo',  v => same(v, sg().lo));
+  bind('cfg-whi',      'words_hi',  v => same(v, sg().hi));
   bind('cfg-tempo',    'tempo_max', v => same(v, _sugg.tempo_default));
+  ['cfg-wlo', 'cfg-whi', 'cfg-tempo'].forEach(id => { const e = document.getElementById(id); if (e) e.addEventListener('input', () => { e.dataset.own = '1'; _wordsLive(); }); });
+  ['cfg-target-s', 'cfg-tone'].forEach(id => { const e = document.getElementById(id); if (e) e.addEventListener('input', _wordsLive); });
+  const wr = document.getElementById('cfg-wreset');
+  if (wr) wr.onclick = () => { _cfg.words_lo = ''; _cfg.words_hi = ''; _cfg.tempo_max = ''; ['cfg-wlo', 'cfg-whi', 'cfg-tempo'].forEach(id => { const e = document.getElementById(id); if (e) e.dataset.own = ''; }); _saveCfg(); _wordsLive(); };
   _syncCfgLock();
 }
 

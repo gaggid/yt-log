@@ -185,20 +185,13 @@ function sideView() {
     <label class="f mt-s">Format<select id="st-format">${[['auto', 'Detect from the story (recommended)'], ['story', 'Story: dramatised, follows a person'], ['documentary', 'Documentary: real subjects, narrator'], ['explainer', 'Explainer: facts and numbers'], ['comparison', 'Comparison: sides against each other']].map(([k, t]) => `<option value="${k}" ${(st.format || 'auto') === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
       <span class="small mute">Only the next plan uses it.${(s.plan || {}).format ? ` This plan is a <b>${esc(s.plan.format)}</b>.` : ''}</span></label>
     <label class="f mt-s">Tone (optional)<input id="st-tone" value="${esc(st.tone || '')}" placeholder="funny, tense, warm..."></label>`}
-    <label class="f mt-s">Length (seconds, 5 to 180)<input type="number" id="st-target" value="${st.target_s || 30}" min="5" max="180" step="1" style="width:80px">
-      <span class="small mute">Only the next plan is written to this length.</span></label>
+    ${speechBlock()}
     <label class="f mt-s">Script writer<select id="st-script"><option value="room" ${(st.script_engine || 'room') === 'room' ? 'selected' : ''}>Writers' room (story bible, retention map, beat drafts, punch-up)</option><option value="single" ${st.script_engine === 'single' ? 'selected' : ''}>One call (old, fast)</option></select></label>
     <label class="f mt-s">Audio<select id="st-vmode"><option value="narration" ${(st.voice_mode || 'narration') === 'narration' ? 'selected' : ''}>Narration voice (generated)</option><option value="none" ${st.voice_mode === 'none' ? 'selected' : ''}>No voice — video only (silent or background music)</option></select></label>
     ${(st.voice_mode || 'narration') !== 'none' ? `<label class="f mt-s">Voice<select id="st-voice">${voiceOptions(st.voice)}</select></label>
 <label class="f mt-s">Narration tone or persona<select id="st-toneid">${toneOptions(v.tones, st.tone_id)}</select>
         <span class="small mute">Only the next plan writes in it. Change the speed below to match if you want.</span></label>
       <label class="f mt-s">Language edge<select id="st-edge">${edgeOptions(v.tones, st.edge)}</select></label>
-      <label class="f mt-s">Narration speed<select id="st-vspeed">${[[0.85, 'Slower (0.85x)'], [0.92, 'A little slower (0.92x)'], [1, 'Normal (1x)'], [1.08, 'A little faster (1.08x)'], [1.15, 'Faster (1.15x)']].map(([k, t]) => `<option value="${k}" ${Math.abs((st.voice_speed || 1) - k) < 0.01 ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
-      <div class="mt-s"><div class="small" style="font-weight:600">Words in the whole video</div>
-        <div class="row"><label class="f">Fewest<input type="number" id="st-wlo" min="3" max="1000" value="${(W.used || {}).lo || st.words_lo || ''}" style="width:80px"></label>
-        <label class="f">Most<input type="number" id="st-whi" min="3" max="1000" value="${(W.used || {}).hi || st.words_hi || ''}" style="width:80px"></label>
-        <label class="f">Voice may be sped up to<input type="number" id="st-tempo" min="1" max="1.6" step="0.05" value="${W.tempo_max || st.tempo_max || W.tempo_default || 1.45}" style="width:80px"></label></div>
-        <span class="small mute">The system suggests ${W.suggested ? W.suggested.lo + ' to ' + W.suggested.hi : 'a range'} words and a speed-up of ${W.tempo_default || 1.45}x for ${st.target_s || 30} seconds at this narration speed; the boxes show what is in force now. Type your own numbers to change it for this short${(st.words_lo || st.words_hi || st.tempo_max) ? ' <button class="small" id="st-wreset" type="button">Use the suggestion again</button>' : ''}. More words than the voice can say in the time makes the voice faster, up to the limit on the right (1.0 to 1.6x); past that the video runs longer than the length. Applies the next time the script is written.</span></div>
       <label class="f mt-s">Narration language<select id="st-lang">${(v.languages || []).map(m => `<option value="${esc(m.id)}" ${(st.language || 'hinglish') === m.id ? 'selected' : ''}>${esc(m.label)}${m.maya_only ? ' (Maya voice only)' : ''}</option>`).join('')}</select>
         <span class="small mute">Only the next plan writes in it. Voices made in another language are made again.</span></label>` : ''}
     ${s.pipeline === 'quick' ? `<label class="f mt-s">Picture size<select id="st-size"><option value="480x832" ${st.size === '480x832' ? 'selected' : ''}>480x832 (about 20 min)</option><option value="704x1280" ${st.size === '704x1280' ? 'selected' : ''}>704x1280 sharper (about an hour)</option></select></label>
@@ -219,6 +212,32 @@ function sideView() {
   <div class="card pad mt"><h2>Steps</h2>${s.auto.steps.map((x, i) => `<div class="sh-step ${x.done ? 'done' : (!s.auto.steps.slice(0, i).some(y => !y.done) ? 'next' : '')}"><span class="n">${x.done ? '✓' : i + 1}</span>${esc(x.label)}</div>`).join('')}
     <div class="mute small mt-s">Every shot is under ${(S.limits || {}).max_shot_s || 3} seconds on screen; the short is ${S.settings.target_s || 30} seconds. All clips are made at full quality, one request at a time.</div></div>`;
 }
+/* Length, narration speed, words and the voice speed-up are one relation: the boxes sit together and the outcome line is recalculated (by the server) while the person types. */
+function speechBlock() {
+  const s = S, st = s.settings, W = s.words || {}, talk = (st.voice_mode || 'narration') !== 'none';
+  const used = W.used || {}, own = k => (st[k] ? ' data-own="1"' : '');
+  return `<div class="mt-s" id="st-speech" style="border:1px solid var(--line);border-radius:8px;padding:10px">
+    <div class="small" style="font-weight:600;margin-bottom:4px">Length, words and speed</div>
+    <div class="row" style="flex-wrap:wrap;gap:10px;align-items:flex-end">
+      <label class="f">Length (seconds)<input type="number" id="st-target" value="${st.target_s || 30}" min="5" max="180" step="1" style="width:80px"></label>
+      ${talk ? `<label class="f">Narration speed<select id="st-vspeed">${[[0.8, 'Slowest (0.8x)'], [0.85, 'Slower (0.85x)'], [0.92, 'A little slower (0.92x)'], [1, 'Normal (1x)'], [1.08, 'A little faster (1.08x)'], [1.15, 'Faster (1.15x)'], [1.22, 'Fast (1.22x)'], [1.3, 'Fastest (1.3x)']].map(([k, t]) => `<option value="${k}" ${Math.abs((st.voice_speed || 1) - k) < 0.01 ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+      <label class="f">Fewest words<input type="number" id="st-wlo" min="3" max="1000" value="${used.lo || ''}"${own('words_lo')} style="width:80px"></label>
+      <label class="f">Most words<input type="number" id="st-whi" min="3" max="1000" value="${used.hi || ''}"${own('words_hi')} style="width:80px"></label>
+      <label class="f">Voice sped up to at most<input type="number" id="st-tempo" min="1" max="1.6" step="0.05" value="${W.tempo_max || ''}"${own('tempo_max')} style="width:80px"></label>` : ''}
+    </div>
+    ${talk ? `<div class="small mt-s" id="st-wout">${wordsOutcome(W)}</div>
+    <div class="small mute" id="st-whelp">${wordsHelp(W, st)}</div>` : '<div class="small mute mt-s">No voice, so only the length matters. Only the next plan is written to this length.</div>'}
+  </div>`;
+}
+function wordsOutcome(W) {
+  if (!W.outcome) return '';
+  return W.outcome.map(o => o.verdict === 'long' ? `<span class="bad">${esc(o.text)}</span>` : esc(o.text)).join('<br>') + `<br><span class="mute">${esc(W.summary)}</span>`;
+}
+function wordsHelp(W, st) {
+  const sg = W.suggested || {};
+  return `System suggestion: ${sg.lo} to ${sg.hi} words and up to ${W.tempo_default}x. Boxes you have not changed follow the length and speed by themselves. A number you type stays until you press ` + `<button class="small" id="st-wreset" type="button">Use the suggestion</button>. Applies the next time the script is written.`;
+}
+
 function toneOptions(tones, cur) {
   const T = (tones || {}).tones || [];
   return ['Tones', 'Story personas', 'Personas'].map(g => `<optgroup label="${g}">${T.filter(t => t.group === g).map(t => `<option value="${esc(t.id)}" title="${esc(t.sound + ' - best for: ' + t.best)}" ${(cur || tones.default) === t.id ? 'selected' : ''}>${esc(t.label)} - energy ${t.energy}/5</option>`).join('')}</optgroup>`).join('');
@@ -547,7 +566,25 @@ function wire() {
   const st = (id, key, conv = v => v) => { const e = q(id); if (e) e.onchange = () => patch('/settings', {[key]: conv(e.type === 'checkbox' ? e.checked : e.value)}); };
   st('#st-target', 'target_s', v => +v); const sg = () => (S.words || {}).suggested || {}, td = () => (S.words || {}).tempo_default || 1.45;      // a number equal to the suggestion is saved as 'follow the system', so a later change of length moves it
   st('#st-wlo', 'words_lo', v => (+v === sg().lo ? 0 : +v || 0)); st('#st-whi', 'words_hi', v => (+v === sg().hi ? 0 : +v || 0)); st('#st-tempo', 'tempo_max', v => (+v === td() ? 0 : +v || 0));
-  on('#st-wreset', () => patch('/settings', {words_lo: 0, words_hi: 0, tempo_max: 0})); st('#st-script', 'script_engine'); st('#st-mode', 'image_mode'); st('#st-imodel', 'image_model'); st('#st-style', 'visual_style'); st('#st-char', 'character_text'); st('#st-tone', 'tone'); st('#st-format', 'format'); st('#st-size', 'size'); st('#st-chain', 'chain'); st('#st-fast', 'speed_lora'); st('#st-lang', 'language'); st('#st-toneid', 'tone_id'); st('#st-edge', 'edge'); st('#st-vspeed', 'voice_speed', v => +v); st('#st-size14', 'size_14b'); st('#st-review', 'review_keyframes');
+  on('#st-wreset', () => patch('/settings', {words_lo: 0, words_hi: 0, tempo_max: 0}));
+  {                                         // length, narration speed, words and speed-up limit: recalculated by the server while the person types, so the outcome is seen before it is saved
+    let wt = null;
+    const val = id => { const e = q(id); return e ? e.value : ''; };
+    const ownv = id => { const e = q(id); return e && e.dataset.own === '1' ? e.value : 0; };
+    const live = () => { clearTimeout(wt); wt = setTimeout(async () => {
+      if (!q('#st-wout')) return;
+      try {
+        const W = await call('/words?' + new URLSearchParams({target_s: val('#st-target') || 30, speed: val('#st-vspeed') || 0, words_lo: ownv('#st-wlo'), words_hi: ownv('#st-whi'), tempo_max: ownv('#st-tempo')}));
+        const setv = (id, v) => { const e = q(id); if (e && e.dataset.own !== '1') e.value = v; };      // a box the person has not typed in follows the calculation
+        setv('#st-wlo', W.used.lo); setv('#st-whi', W.used.hi); setv('#st-tempo', W.tempo_max);
+        q('#st-wout').innerHTML = wordsOutcome(W);
+        q('#st-whelp').innerHTML = wordsHelp(W, S.settings);
+        on('#st-wreset', () => patch('/settings', {words_lo: 0, words_hi: 0, tempo_max: 0}));
+      } catch (e) { /* the old outcome stays */ }
+    }, 250); };
+    ['#st-wlo', '#st-whi', '#st-tempo'].forEach(id => { const e = q(id); if (e) e.addEventListener('input', () => { e.dataset.own = '1'; live(); }); });
+    ['#st-target', '#st-vspeed'].forEach(id => { const e = q(id); if (e) e.addEventListener('input', live); });
+  } st('#st-script', 'script_engine'); st('#st-mode', 'image_mode'); st('#st-imodel', 'image_model'); st('#st-style', 'visual_style'); st('#st-char', 'character_text'); st('#st-tone', 'tone'); st('#st-format', 'format'); st('#st-size', 'size'); st('#st-chain', 'chain'); st('#st-fast', 'speed_lora'); st('#st-lang', 'language'); st('#st-toneid', 'tone_id'); st('#st-edge', 'edge'); st('#st-vspeed', 'voice_speed', v => +v); st('#st-size14', 'size_14b'); st('#st-review', 'review_keyframes');
   st('#st-up', 'upscale'); st('#st-cap', 'captions'); st('#st-bed', 'bed'); st('#st-music', 'music'); st('#st-music-tags', 'music_caption'); st('#st-music-level', 'music_level', v => +v);
   on('#b-music-plan', b => post(b, '/music/plan', {}, 'Planning the music')); on('#b-music-make', b => post(b, '/music', {}, 'Making the music')); st('#st-steps', 'steps', v => v === '' ? null : +v); st('#st-seed', 'seed', v => +v || 0);
   const vm = q('#st-vmode'); if (vm) vm.onchange = () => patch('/settings', {voice_mode: vm.value});

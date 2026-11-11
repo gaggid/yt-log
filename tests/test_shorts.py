@@ -1434,3 +1434,18 @@ def test_the_words_suggestion_follows_the_length(client):
     a = client.get("/api/shorts/words", params={"target_s": 30}).json()
     b = client.get("/api/shorts/words", params={"target_s": 60}).json()
     assert (a["lo"], a["hi"]) == planner.word_limits(30)[:2] and b["hi"] > a["hi"] and a["tempo_default"] == timeline.TEMPO_MAX
+
+
+def test_length_words_and_speed_are_calculated_together(client):
+    base = client.get("/api/shorts/words", params={"target_s": 30, "speed": 1.0}).json()
+    assert base["outcome"][0]["verdict"] in ("slower", "fits") and base["outcome"][1]["verdict"] == "faster" and base["fit_max"] >= base["hi"] - 2
+    more = client.get("/api/shorts/words", params={"target_s": 30, "speed": 1.0, "words_lo": 90, "words_hi": 140}).json()
+    assert more["outcome"][1]["verdict"] == "long" and more["outcome"][1]["over_s"] > 0 and "too long" in more["outcome"][1]["text"], "140 words cannot be said in 30 s even at the top speed-up"
+    assert more["used"]["lo"] == 90 and more["suggested"] == base["suggested"], "the suggestion does not move with the person's own numbers"
+    faster = client.get("/api/shorts/words", params={"target_s": 30, "speed": 1.0, "words_lo": 90, "words_hi": 140, "tempo_max": 1.6}).json()
+    assert faster["fit_max"] > more["fit_max"] and faster["outcome"][1]["over_s"] < more["outcome"][1]["over_s"], "a higher speed-up limit lets more words fit"
+    longer = client.get("/api/shorts/words", params={"target_s": 60, "speed": 1.0}).json()
+    assert longer["suggested"]["hi"] > base["suggested"]["hi"] and longer["fit_max"] > base["fit_max"]
+    slow = client.get("/api/shorts/words", params={"target_s": 30, "speed": 0.8}).json()
+    assert slow["suggested"]["hi"] < base["suggested"]["hi"], "a slower voice says fewer words in the same time"
+    assert client.get("/api/shorts/words", params={"target_s": 30, "tone_id": "bigbro"}).json()["speed"] > 0
