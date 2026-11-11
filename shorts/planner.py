@@ -83,22 +83,29 @@ def target_s(short: dict) -> float:
     return float(short.get("settings", {}).get("target_s") or models.TARGET_S)
 
 
-def word_limits(t_s: float, speed: float = 1.0) -> tuple[int, int, int, int]:
-    """Scaled by the narration speed: a slower voice says fewer words in the same seconds."""
-    lo, hi, a, b = _word_limits(t_s)
-    return round(lo * speed), round(hi * speed), round(a * speed), round(b * speed)
+def word_limits(t_s: float, speed: float = 1.0, short: dict | None = None) -> tuple[int, int, int, int]:
+    """Scaled by the narration speed: a slower voice says fewer words in the same seconds. With `short`, the producer's own numbers for this short win over the suggestion:
+    `words_lo` / `words_hi` (the accepted range of spoken words in the whole short) and `tempo_max` (the fastest the voice may be sped up to fit)."""
+    st = (short or {}).get("settings") or {}
+    lo, hi, a, b = _word_limits(t_s, timeline.tempo_max(short))
+    lo, hi, a, b = round(lo * speed), round(hi * speed), round(a * speed), round(b * speed)
+    wl, wh = int(st.get("words_lo") or 0), int(st.get("words_hi") or 0)
+    if wl or wh:
+        lo, hi = wl or min(lo, wh - 1), wh or max(hi, wl + 1)
+        a, b = lo + (hi - lo) // 4, hi - (hi - lo) // 8                 # ask for the upper-middle of the producer's range; the whole range is accepted
+    return lo, hi, a, b
 
 
-def _word_limits(t_s: float) -> tuple[int, int, int, int]:
+def _word_limits(t_s: float, tempo_max: float = timeline.TEMPO_MAX) -> tuple[int, int, int, int]:
     """(accepted low, accepted high, asked low, asked high) spoken words for a short of `t_s` seconds. Scaled from the 30-second figures; a shorter short is also capped by what the voice can say
     (the fastest the timeline lets it speak), so words that pass here can fit."""
     if t_s == models.TARGET_S:
         return WORDS_LO, WORDS_HI, REC_LO, REC_HI
     if t_s > models.TARGET_S:                                        # longer: scaled, and capped by what the voice can say with the gaps between beats
         k = t_s / models.TARGET_S
-        hi = min(round(WORDS_HI * k), int((t_s * 0.97 - 0.9) * timeline.TEMPO_MAX * timeline.PACE_WPS))
+        hi = min(round(WORDS_HI * k), int((t_s * 0.97 - 0.9) * tempo_max * timeline.PACE_WPS))
         return round(WORDS_LO * k), hi, round(REC_LO * k), min(round(REC_HI * k), hi - 1)
-    hi = min(round(WORDS_HI * t_s / models.TARGET_S), int((t_s - 0.9) * timeline.TEMPO_MAX * timeline.PACE_WPS))
+    hi = min(round(WORDS_HI * t_s / models.TARGET_S), int((t_s - 0.9) * tempo_max * timeline.PACE_WPS))
     lo = max(6, round(WORDS_LO * t_s / models.TARGET_S))
     return lo, hi, max(lo, round(REC_LO * t_s / models.TARGET_S)), max(lo, min(round(REC_HI * t_s / models.TARGET_S), hi - 1))
 
@@ -116,14 +123,14 @@ def beat_range(t_s: float) -> tuple[int, int]:
     return lo, max(lo + 1, round(t_s / 5))
 
 
-def narration_problems(beats: list[dict], profile=None, t_s: float = models.TARGET_S, language: str = languages.DEFAULT, speed: float = 1.0) -> list[str]:
+def narration_problems(beats: list[dict], profile=None, t_s: float = models.TARGET_S, language: str = languages.DEFAULT, speed: float = 1.0, short: dict | None = None) -> list[str]:
     """What is wrong with the words, in plain terms. Used while the model writes (it is sent back) and by the checks."""
     out: list[str] = []
     sentences = [s["text"] for b in beats for s in b["sentences"]]
     n = sum(len(t.split()) for t in sentences)
     if not sentences:
         return ["there is no narration"]
-    lo, hi = word_limits(t_s, speed)[:2]
+    lo, hi = word_limits(t_s, speed, short)[:2]
     if n < lo or n > hi:
         out.append(f"the narration is {n} words; it must be between {lo} and {hi} so that it fills about {t_s:g} seconds")
     if len(sentences[0].split()) > MAX_HOOK_WORDS:
@@ -183,7 +190,7 @@ async def _plan_call(short: dict, backend, s: dict, note: str = "", written: lis
 
     t_s = target_s(short)
     b_lo, b_hi = beat_range(t_s)
-    _, _, ask_lo, ask_hi = word_limits(t_s, svoice.speed(short))
+    _, _, ask_lo, ask_hi = word_limits(t_s, svoice.speed(short), short)
 
     def check(out: PlanOut) -> None:
         if written is not None:
@@ -197,7 +204,7 @@ async def _plan_call(short: dict, backend, s: dict, note: str = "", written: lis
         n_sent = sum(len([t for t in b.narration if t.strip()]) for b in out.beats)
         if n_sent < min_sentences(t_s):
             raise ValueError(f"write at least {min_sentences(t_s)} sentences in all (one fact per sentence); you wrote {n_sent}")
-        probs = narration_problems(_beats_from(out, cur["engine"]), prof, t_s, languages.of(short["settings"]), svoice.speed(short))
+        probs = narration_problems(_beats_from(out, cur["engine"]), prof, t_s, languages.of(short["settings"]), svoice.speed(short), short)
         if probs:
             raise ValueError("; ".join(probs[:4]))
 
@@ -307,7 +314,7 @@ async def make_plan(short_id: str, backend, s: dict | None = None, progress=None
     if written:
         short["script"] = {"bible": written["bible"], "map": written["map"], "report": written["report"]}
     short.update(plan=plan, beats=beats, shots=[], title=plan["title"] or short["title"])
-    counts = timeline.plan_counts(beats, target_s(short), timeline.silent(short))
+    counts = timeline.plan_counts(beats, target_s(short), timeline.silent(short), timeline.tempo_max(short))
     all_shots: list[dict] = []
     short["shots"] = all_shots                                               # the shots written so far, so a beat sees what the earlier beats drew
     before = None
@@ -467,7 +474,7 @@ async def trim_narration(short_id: str, backend, s: dict | None = None) -> str:
     t_s = target_s(short)
     from story2 import voices as v2
     speed = v2.current({"tts": short.get("settings", {}).get("voice", {})}).get("speed", 1.0)
-    _, hi, _, _ = word_limits(t_s, speed)
+    _, hi, _, _ = word_limits(t_s, speed, short)
     total = sum(len(s_["text"].split()) for b in short["beats"] for s_ in b["sentences"])
     if total <= hi:
         return "narration is already within the word budget"

@@ -25,7 +25,7 @@ DEFAULT_SETTINGS = {
     "tone_id": "bigbro",              # narration tone or persona (shorts/tones.py)
     "edge": "clean",                  # clean | spicy | savage: how rough the language may get when the script calls for it
     "voice_speed": 1.0,               # narration speed sent to the voice (0.8 - 1.3); the words asked for scale with it
-    "speed_lora": False,              # keyframe pipeline: Wan 14B speed LoRA (4 steps, about 5x faster, less fine detail); off = full quality ("always final")
+    "speed_lora": True,               # keyframe pipeline: Wan 14B speed LoRA (4 steps, about 5x faster); ON by default (owner decision 2026-11-11), untick for full-step quality
     "chain": True,                    # quick pipeline: a shot marked "continues" starts from the last frame of the one before
     "seed": 7,
     "voice": {"engine": "maya-tts", "voice": "Siddhant"},
@@ -40,6 +40,9 @@ DEFAULT_SETTINGS = {
     "cast": [],                       # characters from the Character Studio library: [{"character_id", "look_id"}], at most two people (shorts/cast.py)
     "place_id": "",                   # a place from the library
     "target_s": 30,                   # desired video length in seconds: 5 to 180, default 30 (models.MIN_TARGET_S, MAX_TARGET_S)
+    "words_lo": 0,                    # the producer's own range of spoken words in the whole short; 0 = the system's suggestion for the length (planner.word_limits)
+    "words_hi": 0,
+    "tempo_max": 0,                   # the fastest the voice may be sped up to fit the length (1.0 to 1.6); 0 = default (timeline.TEMPO_MAX)
     "upscale": "",                    # "" = 1080x1920 | "2k" = 1440x2560: each clip is upscaled by the gateway before the short is put together (shorts/upscale.py)
     "script_engine": "room",          # room = the writers' room (shorts/script.py: bible, retention map, beat drafts, punch-up) | single = the old one-call plan
 }

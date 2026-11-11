@@ -45,11 +45,11 @@ CONFIG_DEFAULTS = {
     "autopilot": False,                              # the master switch: OFF = nothing runs by itself, whatever the switches below say
     "styles": list(BRIGHT_STYLES),                                   # picture styles the ideas may use (empty = any); the queue picks from these only
     "auto_generate": False, "auto_approve": False, "auto_condition": False,
-    "gen_every_h": 1.0, "gen_n": 5, "approve_min": 7.8, "make_every_h": 2.0, "pending_cap": 30, "review_cap": 3,
+    "gen_every_h": 1.0, "gen_n": 5, "approve_min": 7.8, "make_every_h": 2.0, "pending_cap": 30, "planning_cap": 3,
     "next_gen_at": 0.0, "next_make_at": 0.0,         # when the next hourly batch and the next short are due (kept here so a restart keeps the schedule)
     "use_playbook": True, "explore": 0.35, "auto_feedback": False, "playbook_min_new": 3,       # the channel's results steer the factory only through an APPROVED Playbook (docs/PLAN_feedback_loop.md)
     "tone_arms": ["bigbro", "explorer", "storyteller", "viral", "thriller"],
-    "run": {"pipeline": "keyframe", "voice": "taksh_hn", "language": "hi", "target_s": 29, "tone_id": "bigbro", "edge": "clean", "upscale": "2k"},
+    "run": {"pipeline": "keyframe", "voice": "taksh_hn", "language": "hi", "target_s": 30, "tone_id": "bigbro", "edge": "clean", "upscale": "2k", "speed_lora": "1", "words_lo": "", "words_hi": "", "tempo_max": ""},
 }
 
 MECHANISMS = [
@@ -459,7 +459,7 @@ def save_config(patch: dict) -> dict:
     for k, lo, hi in (("gen_every_h", 0.25, 48), ("make_every_h", 0.25, 48), ("approve_min", 0, 10)):
         if k in patch:
             cur[k] = max(lo, min(hi, float(patch[k] or lo)))
-    for k, lo, hi in (("gen_n", 1, 15), ("pending_cap", 1, 500), ("review_cap", 0, 100)):
+    for k, lo, hi in (("gen_n", 1, 15), ("pending_cap", 1, 500), ("planning_cap", 1, 50)):
         if k in patch:
             cur[k] = max(lo, min(hi, int(patch[k] if patch[k] not in (None, "") else lo)))
     if "explore" in patch:
@@ -474,7 +474,16 @@ def save_config(patch: dict) -> dict:
         cur["styles"] = [x for x in dict.fromkeys(patch["styles"] or []) if x in looks.presets()]
     for k, v in (patch.get("run") or {}).items():
         if k in CONFIG_DEFAULTS["run"]:
-            cur["run"][k] = max(5, min(180, int(v or 29))) if k == "target_s" else ("" if v is None else str(v))
+            if k == "target_s":
+                cur["run"][k] = max(5, min(180, int(float(v or 30))))
+            elif k in ("words_lo", "words_hi"):
+                cur["run"][k] = str(max(3, min(1000, int(float(v)))) ) if str(v or "").strip() not in ("", "0") else ""
+            elif k == "tempo_max":
+                cur["run"][k] = f"{max(1.0, min(1.6, float(v))):g}" if str(v or "").strip() not in ("", "0") else ""
+            elif k == "speed_lora":
+                cur["run"][k] = "1" if str(v).lower() in ("1", "true", "on", "yes") else ""
+            else:
+                cur["run"][k] = "" if v is None else str(v)
     with db.tx() as c:
         c.execute("INSERT INTO idea_config(id,data) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data", (db.jdump(cur),))
     return cur
@@ -491,7 +500,6 @@ def set_state(**kw) -> None:
 def counts() -> dict:
     ensure()
     out = {r["status"]: r["n"] for r in db.q("SELECT status, COUNT(*) n FROM short_ideas GROUP BY status")}
-    out["waiting_review"] = (db.one("SELECT COUNT(*) n FROM short_ideas WHERE status IN ('queued','done') AND COALESCE(reviewed,0)=0") or {}).get("n", 0)
     return out
 
 
@@ -1005,6 +1013,9 @@ async def condition(idea_id: str, s: dict, key: str, styles: list[str] | None = 
     backend = llm_mod.ChatBackend(s, key)
     caller  = llm_mod.JsonCaller(backend, s)
     caller.last_attempt = True
+    # The picture style is chosen here, in code (the Playbook's bandit, else the least used ticked style), never by the model: left to choose, it named the same style (filmic) every time.
+    pick = style_choice([x for x in (styles or []) if x], "")[0] if styles else ""
+    one_style = [pick] if pick else []
 
     user = (
         f"Sharpen this approved short video idea into a concept for the writers' room.\n\n"
@@ -1019,7 +1030,7 @@ async def condition(idea_id: str, s: dict, key: str, styles: list[str] | None = 
             f"ANALYST REASONING: {idea['score_breakdown'].get('reasoning', '')}\n"
             if idea.get("engagement_score") else ""
         )
-        + (_styles_text(styles) if styles else "") +
+        + (_styles_text(one_style) if one_style else "") +
         "\nRemember: SHARPEN, never sanitise. The concept must be MORE psychologically "
         "powerful than the input idea. Do not plan beats, timings, emotions or lines.\n\n"
         f'Return JSON exactly: {{"conditioning": {{...}}}}'
@@ -1027,12 +1038,17 @@ async def condition(idea_id: str, s: dict, key: str, styles: list[str] | None = 
 
     result = await caller.call(_CONDITION_SYSTEM, user, _ConditionResult)
     c = result.value.conditioning
-    direction, style_src = direction_choice(c.visual_direction, styles or [])
+    direction, style_src = direction_choice(c.visual_direction, one_style)
     brief = {
         "refined_hook":      c.refined_hook,
         "key_facts":         c.key_facts,
         "visual_direction":  direction,
         "suggested_tone":    c.suggested_tone,
         "style_src":         style_src,
+        "style":             pick,
     }
-    return save_conditioning(idea_id, brief)
+    out = save_conditioning(idea_id, brief)
+    if pick:                                                                  # counted by the rotation from now on, so the next brief gets another style
+        db.ex("UPDATE short_ideas SET style=? WHERE id=?", (pick, idea_id))
+        out = get(idea_id)
+    return out

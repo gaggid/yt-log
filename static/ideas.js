@@ -98,10 +98,10 @@ let _cfg      = {};
 let _n        = 7;
 let _minScore = 7;
 let _job      = null, _seen = new Set(), _pollGen = 0;
-let _auto     = {autopilot:false, auto_generate:false, auto_approve:false, auto_condition:false, gen_every_h:1, gen_n:5, approve_min:7.8, make_every_h:2, pending_cap:30, review_cap:3, styles:[]};
+let _auto     = {autopilot:false, auto_generate:false, auto_approve:false, auto_condition:false, gen_every_h:1, gen_n:5, approve_min:7.8, make_every_h:2, pending_cap:30, planning_cap:3, styles:[]};
 const BRIGHT_STYLES = ['realism', 'pixar3d', 'anime', 'ghibli', 'tinyworld'];
 let _ap       = null, _apAt = 0, _apTimer = null;      // /ideas/autopilot (queues and schedule) and when it was read
-const _CFG_DEFAULTS = {pipeline:'keyframe', voice:'taksh_hn', language:'hi', target_s:29, tone_id:'bigbro', edge:'clean', upscale:'2k'};
+const _CFG_DEFAULTS = {pipeline:'keyframe', voice:'taksh_hn', language:'hi', target_s:30, tone_id:'bigbro', edge:'clean', upscale:'2k', speed_lora:'1', words_lo:'', words_hi:'', tempo_max:''};
 
 function _loadState() {                     // the browser's copy: shown at once; the server's copy (saved config) replaces it when it arrives
   _diverse  = LS.get('ideas:diverse', false);
@@ -161,10 +161,8 @@ function _saveCfg() { _persist(); }
 function _syncCfgLock() {
   const panel = document.getElementById('id-cfg');
   if (!panel) return;
-  panel.classList.toggle('id-cfg-locked', _auto.autopilot);
-  document.querySelectorAll('.id-cfg-cell select, .id-cfg-cell input').forEach(el => {
-    el.disabled = _auto.autopilot;
-  });
+  panel.classList.remove('id-cfg-locked');          // settings stay editable while Autopilot runs: the next short uses whatever is saved
+  document.querySelectorAll('.id-cfg-cell select, .id-cfg-cell input').forEach(el => { el.disabled = false; });
 }
 
 function _cfgHtml() {
@@ -228,6 +226,13 @@ function _cfgHtml() {
         <option value="spicy"${_cfg.edge==='spicy'?' selected':''}>Spicy</option>
         <option value="savage"${_cfg.edge==='savage'?' selected':''}>Savage</option>
       </select>`)}
+      ${cell('cfg-wlo','Fewest words (empty = suggested)',`<input type="number" id="cfg-wlo" min="3" max="1000" value="${_cfg.words_lo || ''}" placeholder="auto">`)}
+      ${cell('cfg-whi','Most words (empty = suggested)',`<input type="number" id="cfg-whi" min="3" max="1000" value="${_cfg.words_hi || ''}" placeholder="auto">`)}
+      ${cell('cfg-tempo','Voice sped up to at most (1.0 to 1.6)',`<input type="number" id="cfg-tempo" min="1" max="1.6" step="0.05" value="${_cfg.tempo_max || ''}" placeholder="1.45">`)}
+      ${cell('cfg-fast','Clip speed',`<select id="cfg-fast">
+        <option value="1"${_cfg.speed_lora!==''?' selected':''}>Fast LoRA (about 5x quicker)</option>
+        <option value=""${_cfg.speed_lora===''?' selected':''}>Full steps (slower)</option>
+      </select>`)}
       ${cell('cfg-upscale','Upscale',`<select id="cfg-upscale">
         <option value="2k"${_cfg.upscale==='2k'?' selected':''}>2K (1440×2560)</option>
         <option value=""${_cfg.upscale===''?' selected':''}>1080p (1080×1920)</option>
@@ -245,7 +250,7 @@ function _stylesHtml() {
   if (!list.length) return '<span class="mute small">Loading styles…</span>';
   return list.map(m => {
     const on = _auto.styles.includes(m.id);
-    return `<label class="id-chip ${on ? 'on' : ''}" title="${esc(m.description || '')}"><input type="checkbox" data-style="${esc(m.id)}" ${on ? 'checked' : ''} ${_auto.autopilot ? 'disabled' : ''}>${esc(m.label)}</label>`;
+    return `<label class="id-chip ${on ? 'on' : ''}" title="${esc(m.description || '')}"><input type="checkbox" data-style="${esc(m.id)}" ${on ? 'checked' : ''} ${esc(m.label)}</label>`;
   }).join('');
 }
 
@@ -284,13 +289,13 @@ function _autoHtml() {
       ${sw('ap-appr', 'Auto-approve scoring at least', a.auto_approve, num('ap-appr-min', a.approve_min, 0, 10, 0.1))}
       ${sw('ap-cond', 'Write the brief (condition) for approved ideas, best first', a.auto_condition)}
       ${sw('id-autorun', 'Make a short every', _autoRun, `${num('ap-make-h', a.make_every_h, 0.25, 48, 0.25)} h, scoring at least ${num('id-minscore', _minScore, 0, 10, 0.5)}`, nextMake)}
-      <div class="it"><span>Pause making when</span>${num('ap-review', a.review_cap, 0, 100)}<span>finished shorts wait for your review (0 = no limit)</span></div>
+      <div class="it"><span>Keep at most</span>${num('ap-planning', a.planning_cap, 1, 50)}<span>videos in planning (briefs written, waiting to be made); the next is planned when one moves to production</span></div>
       <div class="it"><span>Keep at most</span>${num('ap-pending', a.pending_cap, 1, 500)}<span>ideas waiting for approval</span></div>
     </div>
     <div class="id-q">
       ${q('To approve', c.pending)}${q('To condition', c.approved)}${q('To make', c.conditioned)}
       ${run.busy && run.kind === 'short' ? `<span class="run">Making now: <a href="#/short/${esc(run.short_id)}">${esc(run.short_id)}</a></span>` : q('Making', 0)}
-      ${q('Done', c.done)}${q('Waiting for review', c.waiting_review + (a.review_cap ? ' / ' + a.review_cap : ''))}${q('Rejected', c.rejected)}
+      ${q('Done', c.done)}${q('Rejected', c.rejected)}
       <span class="sp"></span>
       <button class="small" id="ap-run-gen" title="Run one batch now">Generate now</button>
       <button class="small" id="ap-run-cond" title="Write the brief of the best approved idea now">Condition next</button>
@@ -318,7 +323,7 @@ function _queueItem(i, stage) {
   const act = stage === 'approved' ? `<button class="small" data-now="condition" data-id="${i.id}">Condition now</button>`
     : stage === 'conditioned' ? `<button class="small primary" data-now="make" data-id="${i.id}">Make now</button>`
     : stage === 'queued' ? `${i.short_id ? `<a class="btn small" href="#/short/${i.short_id}">Open</a>` : ''}`
-    : `${i.short_id ? `<a class="btn small" href="#/short/${i.short_id}">Open</a>` : ''}<button class="small" onclick="idReviewed('${i.id}', ${i.reviewed ? 'false' : 'true'})">${i.reviewed ? 'Reviewed ✓' : 'Mark reviewed'}</button>`;
+    : `${i.short_id ? `<a class="btn small" href="#/short/${i.short_id}">Open</a>` : ''}`;
   let stat = '';
   if (stage === 'approved') stat = i.hold ? '' : `<span title="Time since this idea was approved">approved ${_since(i, 'approved_at')} ago</span>`;
   else if (stage === 'conditioned') {
@@ -326,11 +331,11 @@ function _queueItem(i, stage) {
     if (i.rank) {                           // when the schedule reaches it: the next slot, then one more every "make every" hours
       const on = _auto.autopilot && _autoRun;
       const at = Math.max(a.next_make_at || 0, _serverNow()) + (i.rank - 1) * (a.make_every_h || 2) * 3600;
-      stat += on ? `<span title="Estimated: the next slot, then one short every ${a.make_every_h || 2} h (waits if reviews pile up)">starts ${_until(at)}</span>` : '<span>autopilot is not making shorts</span>';
+      stat += on ? `<span title="Estimated: the next slot, then one short every ${a.make_every_h || 2} h ">starts ${_until(at)}</span>` : '<span>autopilot is not making shorts</span>';
     }
   }
   else if (stage === 'queued') stat = `<span>${esc(i.short_status === 'deleted' ? 'short deleted' : 'being made')}</span>`;
-  else stat = `<span>finished ${_since(i, 'done_at')} ago</span>${i.yt ? `<span title="Views on YouTube">▶ ${i.yt.views.toLocaleString()} views · ${i.yt.likes} likes</span>` : ''}${i.reviewed ? '' : '<span>not reviewed</span>'}`;
+  else stat = `<span>finished ${_since(i, 'done_at')} ago</span>${i.yt ? `<span title="Views on YouTube">▶ ${i.yt.views.toLocaleString()} views · ${i.yt.likes} likes</span>` : ''}`;
   return `<div class="id-qi"><div class="t">${rank}${esc((i.hook || '').slice(0, 110))}</div><div class="m">${sc}${stat}${hold}<span class="sp"></span>${act}</div></div>`;
 }
 
@@ -338,8 +343,8 @@ function _boardHtml() {
   const q = (_ap && _ap.queues) || {approved: [], conditioned: [], queued: [], done: []};
   const col = (title, list, stage, note, sub) => `<div class="id-col"><h4>${title}<span class="badge">${list.length}</span></h4>${sub ? `<div class="id-sub">${sub}</div>` : ''}${list.length ? list.map(i => _queueItem(i, stage)).join('') : `<div class="none">${note}</div>`}</div>`;
   return col('1 · To condition (approved)', q.approved, 'approved', 'No approved idea waits for a brief.', 'Best score first. #1 gets its brief next.')
-       + col('2 · To make (conditioned)', q.conditioned, 'conditioned', 'No conditioned idea is waiting to be made into a short.', `Best score first, only scoring ${(_ap && _ap.min_score) || _minScore}+. #1 is made next.`)
-       + col('3 · Being made', q.queued || [], 'queued', 'No short is being made.', '')
+       + col('2 · Planning (brief written)', q.conditioned, 'conditioned', 'No video is in planning.', `Best score first, only scoring ${(_ap && _ap.min_score) || _minScore}+. #1 is made next.`)
+       + col('3 · Production (being made)', q.queued || [], 'queued', 'No short is being made.', '')
        + col('4 · Done (video ready)', q.done || [], 'done', 'No finished short yet.', 'An idea moves here by itself when its video is ready.');
 }
 
@@ -361,7 +366,7 @@ function _wireAuto() {
   if (ar) ar.onchange = () => { _autoRun = ar.checked; _persist(); _drawAuto(); _render(); };
   numf('ap-gen-h', 'gen_every_h', 0.25, 48); numf('ap-gen-n', 'gen_n', 1, 15); numf('ap-appr-min', 'approve_min', 0, 10);
   numf('ap-make-h', 'make_every_h', 0.25, 48); numf('id-minscore', '', 0, 10, v => { _minScore = v; });
-  numf('ap-review', 'review_cap', 0, 100); numf('ap-pending', 'pending_cap', 1, 500);
+  numf('ap-planning', 'planning_cap', 1, 50); numf('ap-pending', 'pending_cap', 1, 500);
   const run = async (btn, stage) => {
     await act(btn, async () => { _ap = await call('/autopilot/run', {method:'POST', json:{stage}}); _apAt = Date.now() / 1000; _poll(); }, stage === 'make' ? 'Short queued and started' : 'Started');
     _drawAuto();
@@ -382,14 +387,14 @@ function _drawAuto() {
   if (bd) { bd.innerHTML = _boardHtml(); _wireBoard(); }
   _syncCfgLock();
   const st = document.getElementById('id-styles');
-  if (st) st.innerHTML = _stylesHtml(), _wireStyles();
+  if (st) { st.innerHTML = _stylesHtml(); _wireStyles(); }
 }
 
 function _wireStyles() {
   const setStyles = list => { _auto.styles = list; _persist(); const st = document.getElementById('id-styles'); if (st) { st.innerHTML = _stylesHtml(); _wireStyles(); } };
   const b = document.getElementById('st-bright'), a = document.getElementById('st-any');
-  if (b) b.onclick = () => { if (!_auto.autopilot) setStyles([...BRIGHT_STYLES]); };
-  if (a) a.onclick = () => { if (!_auto.autopilot) setStyles([]); };
+  if (b) b.onclick = () => { setStyles([...BRIGHT_STYLES]); };
+  if (a) a.onclick = () => { setStyles([]); };
   document.querySelectorAll('#id-styles input[data-style]').forEach(e => e.onchange = () => {
     _auto.styles = [...document.querySelectorAll('#id-styles input[data-style]:checked')].map(x => x.dataset.style);
     e.closest('.id-chip').classList.toggle('on', e.checked);
@@ -500,8 +505,6 @@ function renderCard(idea) {
     actions.push(`<button class="primary small" ${busy?'disabled':''} onclick="idQueue('${idea.id}')">${busy?'<span class="spin"></span> Queuing…': (_autoRun ? '→ Queue + Auto-run' : '→ Queue')}</button>`);
   if ((idea.status === 'queued' || idea.status === 'done') && idea.short_id)
     actions.push(`<a class="btn small" href="#/short/${idea.short_id}">Open short →</a>`);
-  if (idea.status === 'done')
-    actions.push(`<button class="small ${idea.reviewed ? '' : 'primary'}" onclick="idReviewed('${idea.id}', ${idea.reviewed ? 'false' : 'true'})">${idea.reviewed ? 'Reviewed ✓ (undo)' : 'Mark reviewed'}</button>`);
   if (idea.status !== 'queued')
     actions.push(`<button class="small bad" onclick="idDelete('${idea.id}')">Delete</button>`);
   if (idea.yt)
@@ -633,10 +636,12 @@ window.idQueue = async id => {
     const settings = {
       voice:      {engine: 'maya-tts', voice: _cfg.voice},
       language:   _cfg.language,
-      target_s:   Number(_cfg.target_s) || 29,
+      target_s:   Number(_cfg.target_s) || 30,
       tone_id:    _cfg.tone_id,
       edge:       _cfg.edge,
       upscale:    _cfg.upscale,
+      speed_lora: _cfg.speed_lora !== '',
+      words_lo: +_cfg.words_lo || 0, words_hi: +_cfg.words_hi || 0, tempo_max: +_cfg.tempo_max || 0,
       image_mode: 'qwen',
       review_keyframes: false,
     };
@@ -685,10 +690,14 @@ function _wireCfg() {
   bind('cfg-pipeline', 'pipeline');
   bind('cfg-voice',    'voice');
   bind('cfg-language', 'language');
-  bind('cfg-target-s', 'target_s', v => Math.max(5, Math.min(180, parseInt(v) || 29)));
+  bind('cfg-target-s', 'target_s', v => Math.max(5, Math.min(180, parseInt(v) || 30)));
   bind('cfg-tone',     'tone_id');
   bind('cfg-edge',     'edge');
   bind('cfg-upscale',  'upscale');
+  bind('cfg-fast',     'speed_lora');
+  bind('cfg-wlo',      'words_lo');
+  bind('cfg-whi',      'words_hi');
+  bind('cfg-tempo',    'tempo_max');
   _syncCfgLock();
 }
 

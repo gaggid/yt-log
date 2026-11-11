@@ -222,6 +222,14 @@ def _add_short_info(i: dict) -> None:
     i["short_status"], i["publish"] = sh.get("status", "new"), publish.view(sh)
 
 
+def _words_info(short: dict) -> dict:
+    """What the system suggests for this length and what is in force (the producer's own numbers win), so the settings panel can show both."""
+    t_s, sp = planner.target_s(short), svoice.speed(short)
+    s_lo, s_hi, s_a, s_b = planner.word_limits(t_s, sp, {"settings": {}})
+    lo, hi, a, b = planner.word_limits(t_s, sp, short)
+    return {"suggested": {"lo": s_lo, "hi": s_hi, "ask_lo": s_a, "ask_hi": s_b}, "used": {"lo": lo, "hi": hi, "ask_lo": a, "ask_hi": b}, "tempo_max": timeline.tempo_max(short), "tempo_default": timeline.TEMPO_MAX}
+
+
 @router.get("/{short_id}")
 async def state(short_id: str):
     short = _get(short_id)
@@ -230,6 +238,7 @@ async def state(short_id: str):
     out = {"id": short["id"], "title": short["title"], "pipeline": short["pipeline"], "pipeline_label": P.pipeline(short)["label"], "status": short["status"], "source": short["source"],
            "settings": short["settings"], "plan": short["plan"], "script": short.get("script"), "beats": short["beats"], "images": short["images"], "keyframes_confirmed": short.get("keyframes_confirmed", False), "keyframes_on": P.keyframes_on(short),
            "job": jobs.status(short_id), "estimate_s": P.estimate_s(short) if (short["shots"] or short["pipeline"] == "remix") else 0,
+           "words": _words_info(short),
            "voice": svoice.state(short), "voice_gate": checks.voice_gate(short), "auto": auto.state(short), "final": stitch.final_state(short_id), "publish": publish.view(short)}
     if short["pipeline"] == "remix":
         r = remix.data(short)
@@ -332,6 +341,9 @@ class SettingsReq(BaseModel):
     character_text: str | None = None
     tone: str | None = None
     target_s: float | None = None
+    words_lo: int | None = None          # the producer's own range of spoken words in the whole short (0 or empty = the system's suggestion for the length)
+    words_hi: int | None = None
+    tempo_max: float | None = None       # the fastest the voice may be sped up to fit the length (1.0 to 1.6; empty = default)
     script_engine: str | None = None
     upscale: str | None = None           # '' (1080x1920) | 2k (1440x2560, shorts/upscale.py)
 
@@ -375,6 +387,18 @@ async def patch_settings(short_id: str, body: SettingsReq):
         raise HTTPException(400, f"the length is between {models.MIN_TARGET_S:g} seconds and {models.MAX_TARGET_S:g} seconds")
     if "script_engine" in patch and patch["script_engine"] not in ("room", "single"):
         raise HTTPException(400, "script_engine is room or single")
+    for k in ("words_lo", "words_hi"):
+        if k in patch:
+            patch[k] = int(patch[k] or 0)
+            if patch[k] and not 3 <= patch[k] <= 1000:
+                raise HTTPException(400, "words are between 3 and 1000")
+    lo_w, hi_w = patch.get("words_lo", short["settings"].get("words_lo") or 0), patch.get("words_hi", short["settings"].get("words_hi") or 0)
+    if lo_w and hi_w and lo_w >= hi_w:
+        raise HTTPException(400, "the fewest words must be less than the most words")
+    if "tempo_max" in patch:
+        patch["tempo_max"] = float(patch["tempo_max"] or 0)
+        if patch["tempo_max"] and not 1.0 <= patch["tempo_max"] <= 1.6:
+            raise HTTPException(400, "the voice speed-up limit is between 1.0 and 1.6")
     if "upscale" in patch and patch["upscale"] not in models.UPSCALE_SIZES:
         raise HTTPException(400, "upscale is empty (1080x1920) or 2k")
     if "voice_mode" in patch and patch["voice_mode"] not in ("narration", "none"):
@@ -1206,9 +1230,13 @@ def _queue_idea(idea_id: str, pipeline: str, settings: dict | None, auto_run: bo
     tone_id, tone_src = _feedback_tone(tone_id)
 
     vd = (c.get("visual_direction") or "").lower()
-    style, style_src = ideas_mod.style_choice(ideas_mod.get_config()["styles"], vd)         # only from the styles ticked in the Ideas config
-    if style_src == "idea" and c.get("style_src"):
-        style_src = c["style_src"]                                              # the brief named it, but the bandit may have chosen it
+    allowed = ideas_mod.get_config()["styles"]
+    if c.get("style") and (c["style"] in allowed or not allowed):               # chosen in code when the brief was written (ideas.condition)
+        style, style_src = c["style"], c.get("style_src") or "rotation"
+    else:
+        style, style_src = ideas_mod.style_choice(allowed, vd)                   # older briefs: only from the styles ticked in the Ideas config
+        if style_src == "idea" and c.get("style_src"):
+            style_src = c["style_src"]                                          # the brief named it, but the bandit may have chosen it
     if not style and not ideas_mod.get_config()["styles"]:
         for pid in looks.presets():
             if pid in vd:
@@ -1243,8 +1271,10 @@ def _queue_idea(idea_id: str, pipeline: str, settings: dict | None, auto_run: bo
 
 def _run_settings(run: dict) -> dict:
     """The short's settings from the saved Ideas config (the same shape the screen sends)."""
-    return {"voice": {"engine": "maya-tts", "voice": run.get("voice")}, "language": run.get("language"), "target_s": int(run.get("target_s") or 29),
-            "tone_id": run.get("tone_id"), "edge": run.get("edge"), "upscale": run.get("upscale"), "image_mode": "qwen", "review_keyframes": False}
+    return {"voice": {"engine": "maya-tts", "voice": run.get("voice")}, "language": run.get("language"), "target_s": int(float(run.get("target_s") or 30)),
+            "tone_id": run.get("tone_id"), "edge": run.get("edge"), "upscale": run.get("upscale"), "image_mode": "qwen", "review_keyframes": False,
+            "speed_lora": str(run.get("speed_lora", "1")).lower() in ("1", "true", "on", "yes"),
+            "words_lo": int(float(run.get("words_lo") or 0)), "words_hi": int(float(run.get("words_hi") or 0)), "tempo_max": float(run.get("tempo_max") or 0)}
 
 
 @router.post("/ideas/{idea_id}/queue")
@@ -1332,15 +1362,12 @@ async def conductor_tick(now: float | None = None) -> str | None:
         if ideas_mod.counts().get("pending", 0) < cfg["pending_cap"]:
             _start_generate(cfg)
             return "generate"
-    if cfg["auto_condition"] and _start_condition(cfg):
-        return "condition"
+    if cfg["auto_condition"] and ideas_mod.counts().get("conditioned", 0) < int(cfg["planning_cap"]) and _start_condition(cfg):
+        return "condition"                                                         # at most `planning_cap` briefs wait to be made; the next is written when one moves into production
     if cfg.get("auto_feedback") and _start_feedback(cfg, now):
         return "feedback"
     if cfg["autorun"] and now >= cfg["next_make_at"]:
-        cap = int(cfg["review_cap"])
-        if cap and ideas_mod.counts()["waiting_review"] >= cap:
-            return None                                                            # enough finished shorts are waiting for a person
-        if _start_make(cfg):
+        if _start_make(cfg):                                                       # a finished short never waits for a review click
             ideas_mod.set_state(next_make_at=now + cfg["make_every_h"] * 3600)
             return "make"
     return None
@@ -1380,7 +1407,7 @@ async def ideas_autopilot():
     _add_youtube(qs["done"])
     return {"now": time.time(), "on": cfg["autopilot"], "counts": ideas_mod.counts(), "queues": qs, "next_gen_at": cfg["next_gen_at"], "next_make_at": cfg["next_make_at"],
             "running": {"busy": bool(running), "kind": "ideas" if who == _IDEAS_JOB else ("short" if who else ""), "short_id": who if who and who != _IDEAS_JOB else ""},
-            "review_cap": cfg["review_cap"], "make_every_h": cfg["make_every_h"], "autorun": cfg["autorun"], "min_score": cfg["min_score"], "playbook": _playbook_info()}
+            "planning_cap": cfg["planning_cap"], "make_every_h": cfg["make_every_h"], "autorun": cfg["autorun"], "min_score": cfg["min_score"], "playbook": _playbook_info()}
 
 
 class _PublishReq(BaseModel):

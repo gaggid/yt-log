@@ -9,6 +9,15 @@ TEMPO_MIN, TEMPO_MAX = 0.9, 1.45       # how much the voice may be slowed or spe
 SAFE_SHOT_S = 2.5                      # the planner aims at this, so real voice that runs a little long still fits under the 3-second rule
 
 
+def tempo_max(short: dict | None = None) -> float:
+    """The fastest the voice may be sped up to fit this short: the producer's own number (setting `tempo_max`, 1.0 to 1.6) or the default."""
+    try:
+        v = float(((short or {}).get("settings") or {}).get("tempo_max") or 0)
+    except (TypeError, ValueError):
+        v = 0.0
+    return min(1.6, max(1.0, v)) if v else TEMPO_MAX
+
+
 def words(beat: dict) -> int:
     return sum(len(str(s.get("text", "")).split()) for s in beat.get("sentences", []))
 
@@ -43,20 +52,20 @@ def silent(short: dict) -> bool:
     return (short.get("settings") or {}).get("voice_mode") == "none"
 
 
-def plan_counts(beats: list[dict], target_s: float = models.TARGET_S, mute: bool = False) -> list[int]:
+def plan_counts(beats: list[dict], target_s: float = models.TARGET_S, mute: bool = False, tempo_cap: float = TEMPO_MAX) -> list[int]:
     """Shots per beat before any voice exists: from the estimated spoken length, scaled to the whole target seconds."""
-    tl = _spans([estimate_voice(b) for b in beats], target_s, mute)
+    tl = _spans([estimate_voice(b) for b in beats], target_s, mute, tempo_cap)
     counts = [shots_needed(sp) for sp in tl["spans"]]
     if counts and tl["spans"][0] / counts[0] > models.HOOK_MAX_S:      # the first shot is short; a first beat of one long shot gets a second
         counts[0] = max(counts[0], 1 + shots_needed(tl["spans"][0] - models.HOOK_MAX_S))
     return counts
 
 
-def _spans(voice: list[float], target_s: float = models.TARGET_S, mute: bool = False) -> dict:
+def _spans(voice: list[float], target_s: float = models.TARGET_S, mute: bool = False, tempo_cap: float = TEMPO_MAX) -> dict:
     """`mute`: no voice will be made, so the beats share the target in proportion to their words and the total is always the target (nothing can run long)."""
     n = len(voice)
     gaps = GAP_S * max(0, n - 1) + END_HOLD_S
-    tempo = 1.0 if mute else min(TEMPO_MAX, max(TEMPO_MIN, sum(voice) / max(1.0, target_s - gaps)))
+    tempo = 1.0 if mute else min(tempo_cap, max(TEMPO_MIN, sum(voice) / max(1.0, target_s - gaps)))
     speech = [d / tempo for d in voice]
     raw = [s + (GAP_S if i < n - 1 else END_HOLD_S) for i, s in enumerate(speech)]
     total = sum(raw)
@@ -71,7 +80,7 @@ def build(short: dict, voice: dict[str, float] | None = None) -> dict:
     voice = voice or {}
     estimated = any(not voice.get(b["id"]) for b in beats)
     ds = [float(voice.get(b["id"]) or estimate_voice(b)) for b in beats]
-    sp = _spans(ds, target_s, silent(short))
+    sp = _spans(ds, target_s, silent(short), tempo_max(short))
     out_beats, out_shots, problems = [], [], []
     t = 0.0
     cut_at = 0

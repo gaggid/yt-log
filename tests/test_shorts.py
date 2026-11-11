@@ -134,11 +134,11 @@ def test_checks_warn_about_a_missing_anchor_and_text_in_pictures(gw):
 
 
 def test_a_shorter_short_asks_for_fewer_words_and_beats(gw):
-    assert planner.word_limits(30) == (64, 96, 80, 90) and planner.beat_range(30) == (4, 6)
+    assert planner.word_limits(30) == (64, 104, 85, 100) and planner.beat_range(30) == (4, 6)
     lo, hi, ask_lo, ask_hi = planner.word_limits(10)
-    assert (lo, hi) == (21, 30) and lo <= ask_lo <= ask_hi < hi and planner.beat_range(10) == (2, 3)
+    assert (lo, hi) == (21, 32) and lo <= ask_lo <= ask_hi < hi and planner.beat_range(10) == (2, 3)
     fat = [{"sentences": [{"text": " ".join(["shabd"] * 80)}]}]                       # a 30-second narration is far too long for 10 seconds
-    assert any("21 and 30" in p for p in planner.narration_problems(fat, None, 10))
+    assert any("21 and 32" in p for p in planner.narration_problems(fat, None, 10))
     assert not any("words; it must be" in p for p in planner.narration_problems(fat, None, 30))
     from shorts import prompts
     p = prompts.plan_system("maya-tts", 10, "2 to 3", 21, 24)
@@ -203,7 +203,7 @@ def test_keyframe_pipeline_makes_stills_first_then_animates_each(gw, env):
     res = run(clips.make_clips(sid, s=S, key="k"))
     assert res["made"] == n
     i2v = [r for r in gw.requests if r["model"] == models.I2V]
-    assert len(i2v) == n and all(r["speed_lora"] is False and r["image"].startswith("data:image/jpeg") and (r["num_frames"] - 1) % 4 == 0 for r in i2v)
+    assert len(i2v) == n and all(r["speed_lora"] is True and r["image"].startswith("data:image/jpeg") and (r["num_frames"] - 1) % 4 == 0 for r in i2v)
     assert stitch.checklist(store.get(sid))["ready"]
     final = stitch.build(sid)
     assert abs(frames.info(store.media_dir(sid) / final["file"])["duration_s"] - 30.0) < 0.2
@@ -461,14 +461,14 @@ def test_make_clips_draws_a_missing_or_old_start_picture_first_instead_of_skippi
     assert note["message"].startswith("1 start picture drawn first")
 
 
-def test_speed_lora_is_off_unless_the_person_turns_it_on():
+def test_speed_lora_is_on_by_default_and_the_person_can_turn_it_off():
     short = planned("keyframe")
     sh = short["shots"][0]
-    off = P.animate_request(short, sh, 1, "data:image/jpeg;base64,x")
-    assert off["speed_lora"] is False and off["steps"] == P.DEFAULT_STEPS[models.I2V]
-    short["settings"]["speed_lora"] = True
     on = P.animate_request(short, sh, 1, "data:image/jpeg;base64,x")
     assert on["speed_lora"] is True and "steps" not in on, "the gateway's own 4 steps and guidance 1 go with the LoRA"
+    short["settings"]["speed_lora"] = False
+    off = P.animate_request(short, sh, 1, "data:image/jpeg;base64,x")
+    assert off["speed_lora"] is False and off["steps"] == P.DEFAULT_STEPS[models.I2V]
 
 
 def test_the_14b_size_is_480p_or_720p_and_the_picture_follows_it():
@@ -734,7 +734,7 @@ def test_word_budget_and_beats_scale_from_five_seconds_to_three_minutes():
     lo5, hi5 = planner.word_limits(5)[:2]
     lo30, hi30 = planner.word_limits(30)[:2]
     lo180, hi180, ask_lo, ask_hi = planner.word_limits(180)
-    assert (lo30, hi30) == (64, 96) and 6 <= lo5 < hi5 <= 14 and lo180 > 5 * lo30 and hi180 <= (180 * 0.97 - 0.9) * timeline.TEMPO_MAX * timeline.PACE_WPS and ask_lo < ask_hi < hi180
+    assert (lo30, hi30) == (64, 104) and 6 <= lo5 < hi5 <= 14 and lo180 > 5 * lo30 and hi180 <= (180 * 0.97 - 0.9) * timeline.TEMPO_MAX * timeline.PACE_WPS and ask_lo < ask_hi < hi180
     assert planner.beat_range(30) == (4, 6) and planner.beat_range(180) == (18, 26) and planner.beat_range(5)[0] == 2
     assert planner.word_limits(60)[0] < planner.word_limits(90)[0] < planner.word_limits(120)[0]
 
@@ -1155,7 +1155,7 @@ def test_the_autopilot_starts_one_job_at_a_time_on_its_schedule(client, monkeypa
     monkeypatch.setattr(shorts_api, "_start_condition", lambda cfg: bool(started.append("condition")) or True)
     monkeypatch.setattr(shorts_api, "_start_make", lambda cfg: started.append("make") or "sh-x")
     tick = lambda now: asyncio.run(shorts_api.conductor_tick(now))
-    ideas_mod.save_config({"autopilot": True, "auto_generate": True, "auto_condition": True, "autorun": True, "review_cap": 1, "gen_every_h": 1, "make_every_h": 2})
+    ideas_mod.save_config({"autopilot": True, "auto_generate": True, "auto_condition": True, "autorun": True, "planning_cap": 2, "gen_every_h": 1, "make_every_h": 2})
     monkeypatch.setattr(jobs, "busy", lambda: True)
     assert tick(1000.0) is None, "never while another job runs"
     monkeypatch.setattr(jobs, "busy", lambda: False)
@@ -1163,12 +1163,25 @@ def test_the_autopilot_starts_one_job_at_a_time_on_its_schedule(client, monkeypa
     assert tick(1010.0) == "condition", "the batch is not due again; an approved idea waits for its brief"
     monkeypatch.setattr(shorts_api, "_start_condition", lambda cfg: False)
     done = ideas_mod.add("t", "hook one two three", [], "p", "w")
-    ideas_mod.set_status(done["id"], "queued", "sh-1")                                      # one finished short waits for review: the cap is 1
-    assert tick(1020.0) is None
-    ideas_mod.mark_reviewed(done["id"])
+    ideas_mod.set_status(done["id"], "queued", "sh-1")                                      # a short that was made needs no review click: it never blocks the next one
     assert tick(1030.0) == "make" and ideas_mod.get_config()["next_make_at"] == 1030.0 + 7200
     assert tick(1040.0) is None, "the next short is two hours away"
     assert started == ["generate", "condition", "make"]
+
+
+def test_at_most_planning_cap_briefs_wait_to_be_made(client, monkeypatch):
+    from shorts import api as shorts_api, ideas as ideas_mod
+    from story2 import jobs
+    started = []
+    monkeypatch.setattr(shorts_api, "_start_condition", lambda cfg: bool(started.append("condition")) or True)
+    monkeypatch.setattr(jobs, "busy", lambda: False)
+    ideas_mod.save_config({"autopilot": True, "auto_condition": True, "planning_cap": 2})
+    for n in range(2):
+        i = ideas_mod.add(f"t{n}", f"hook {n} two three", [], "p", "w")
+        ideas_mod.save_conditioning(i["id"], {"refined_hook": "h"})
+    assert asyncio.run(shorts_api.conductor_tick(1000.0)) is None and not started, "two briefs are in planning: no third"
+    ideas_mod.set_status(ideas_mod.listing("conditioned")[0]["id"], "queued", "sh-1")        # one moved into production
+    assert asyncio.run(shorts_api.conductor_tick(1010.0)) == "condition"
 
 
 def test_the_master_switch_turns_the_whole_autopilot_off(client, monkeypatch):
@@ -1377,4 +1390,41 @@ def test_a_finished_short_marks_its_idea_done_and_the_queue_shows_the_order(clie
     assert client.get("/api/shorts/ideas/autopilot").status_code == 200
     assert ideas_mod.get(hi["id"])["status"] == "done" and ideas_mod.get(hi["id"])["done_at"] > 0 and ideas_mod.get(hi["id"])["reviewed"] in (0, None), "done needs no review click"
     assert ideas_mod.get(lo["id"])["status"] == "queued", "a deleted short never finishes an idea"
-    assert ideas_mod.counts()["waiting_review"] == 2
+    assert "waiting_review" not in ideas_mod.counts()
+
+
+def test_the_producer_can_set_the_word_range_and_the_speed_up_limit_per_short():
+    short = planned("keyframe")
+    base = planner.word_limits(30, 1.0, short)
+    assert base == planner.word_limits(30) and timeline.tempo_max(short) == timeline.TEMPO_MAX, "no own numbers: the system's suggestion"
+    short["settings"].update({"words_lo": 90, "words_hi": 130})
+    lo, hi, a, b = planner.word_limits(30, 1.0, short)
+    assert (lo, hi) == (90, 130) and lo <= a <= b <= hi, "the producer's range is the accepted range"
+    assert not any("words; it must be" in p for p in planner.narration_problems([{"sentences": [{"text": " ".join(["shabd"] * 110)}]}], None, 30, "en", 1.0, short))
+    assert any("words; it must be" in p for p in planner.narration_problems([{"sentences": [{"text": " ".join(["shabd"] * 110)}]}], None, 30, "en", 1.0, {"settings": {}}))
+    short["settings"]["tempo_max"] = 1.3
+    assert timeline.tempo_max(short) == 1.3
+    short["settings"]["tempo_max"] = 9
+    assert timeline.tempo_max(short) == 1.6, "never above 1.6"
+
+
+def test_word_range_and_speed_up_limit_are_saved_checked_and_shown(client):
+    sid = client.post("/api/shorts", json={"pipeline": "keyframe", "kind": "idea", "text": "A courier finds a wallet with a lakh rupees."}).json()["id"]
+    ok = client.patch(f"/api/shorts/{sid}/settings", json={"words_lo": 90, "words_hi": 120, "tempo_max": 1.3})
+    assert ok.status_code == 200
+    w = client.get(f"/api/shorts/{sid}").json()["words"]
+    assert w["used"]["lo"] == 90 and w["used"]["hi"] == 120 and w["tempo_max"] == 1.3 and w["suggested"]["hi"] > w["suggested"]["lo"]
+    assert client.patch(f"/api/shorts/{sid}/settings", json={"words_lo": 130}).status_code == 400, "fewest must be under most"
+    assert client.patch(f"/api/shorts/{sid}/settings", json={"tempo_max": 2.5}).status_code == 400
+    assert client.patch(f"/api/shorts/{sid}/settings", json={"words_lo": 0, "words_hi": 0, "tempo_max": 0}).status_code == 200
+    assert client.get(f"/api/shorts/{sid}").json()["words"]["used"] == client.get(f"/api/shorts/{sid}").json()["words"]["suggested"]
+
+
+def test_the_ideas_config_keeps_the_word_range_for_autopilot_shorts(client):
+    from shorts import api as shorts_api, ideas as ideas_mod
+    ideas_mod.save_config({"run": {"words_lo": "90", "words_hi": "125", "tempo_max": "1.3"}})
+    st = shorts_api._run_settings(ideas_mod.get_config()["run"])
+    assert (st["words_lo"], st["words_hi"], st["tempo_max"]) == (90, 125, 1.3)
+    ideas_mod.save_config({"run": {"words_lo": "", "words_hi": "", "tempo_max": ""}})
+    st = shorts_api._run_settings(ideas_mod.get_config()["run"])
+    assert (st["words_lo"], st["words_hi"], st["tempo_max"]) == (0, 0, 0.0)

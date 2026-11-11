@@ -41,7 +41,7 @@ def run(short: dict, tolerance_s: float = 0) -> dict:
     else:
         eff_t_s = t_s
     if not no_voice:
-        for p in planner.narration_problems(short["beats"], prof, eff_t_s, languages.of(short["settings"]), svoice.speed(short)):
+        for p in planner.narration_problems(short["beats"], prof, eff_t_s, languages.of(short["settings"]), svoice.speed(short), short):
             soft = p.startswith(("stock phrases", "a sentence is", "the first sentence"))
             issues.append(_issue("warn" if soft else "block", "narration", p))
     for p in tl["problems"]:

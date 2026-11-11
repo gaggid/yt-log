@@ -72,7 +72,7 @@ async function newShort() {
       <label class="f mt-s">Narration voice<select id="sh-voice">${(() => { window._shVoices = opts.voices; return voiceOptions({engine: 'maya-tts', voice: 'Siddhant'}); })()}</select></label>
 <label class="f mt-s">Narration tone or persona<select id="sh-tone">${toneOptions(opts.tones, '')}</select></label>
       <label class="f mt-s">Language edge (only when the script calls for it)<select id="sh-edge">${edgeOptions(opts.tones, 'clean')}</select></label>
-      <label class="f mt-s">Narration speed<select id="sh-vspeed">${[[0.85, 'Slower (0.85x)'], [0.92, 'A little slower (0.92x)'], [1, 'Normal (1x)'], [1.08, 'A little faster (1.08x)'], [1.15, 'Faster (1.15x)']].map(([k, t]) => `<option value="${k}" ${Math.abs((1 || 1) - k) < 0.01 ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+      <label class="f mt-s">Narration speed<select id="sh-vspeed">${[[0.8, 'Slowest (0.8x)'], [0.85, 'Slower (0.85x)'], [0.92, 'A little slower (0.92x)'], [1, 'Normal (1x)'], [1.08, 'A little faster (1.08x)'], [1.15, 'Faster (1.15x)'], [1.22, 'Fast (1.22x)'], [1.3, 'Fastest (1.3x)']].map(([k, t]) => `<option value="${k}" ${Math.abs((1 || 1) - k) < 0.01 ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
       <label class="f mt-s">Narration language<select id="sh-lang">${(opts.languages || []).map(m => `<option value="${esc(m.id)}">${esc(m.label)}${m.maya_only ? ' (Maya voice only)' : ''}</option>`).join('')}</select></label></div>
     <div id="sh-dur-l"><h4>Length</h4>
     <div class="f">Video length
@@ -173,7 +173,7 @@ window.shAgent = btn => post(btn, '/agent_run', {}, 'Agent run started');
 /* side panel: settings */
 function sideView() {
   const s = S, st = s.settings, remix = s.pipeline === 'remix';
-  const v = window._shOpts || {};
+  const v = window._shOpts || {}, W = s.words || {};
   return `<div class="card pad"><h2>Settings</h2>
     ${remix ? '' : `<label class="f">Start pictures<select id="st-mode">${[['qwen', 'The image model draws a picture for every shot'], ['anchor', 'My picture of the main character, the rest drawn'], ['per_shot', 'My pictures for chosen shots, the rest drawn'], ['wan', 'No pictures: Wan decides (fast, rougher)']].map(([k, t]) => `<option value="${k}" ${st.image_mode === k ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
     ${castBlock()}
@@ -194,6 +194,11 @@ function sideView() {
         <span class="small mute">Only the next plan writes in it. Change the speed below to match if you want.</span></label>
       <label class="f mt-s">Language edge<select id="st-edge">${edgeOptions(v.tones, st.edge)}</select></label>
       <label class="f mt-s">Narration speed<select id="st-vspeed">${[[0.85, 'Slower (0.85x)'], [0.92, 'A little slower (0.92x)'], [1, 'Normal (1x)'], [1.08, 'A little faster (1.08x)'], [1.15, 'Faster (1.15x)']].map(([k, t]) => `<option value="${k}" ${Math.abs((st.voice_speed || 1) - k) < 0.01 ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+      <div class="mt-s"><div class="small" style="font-weight:600">Words in the whole video</div>
+        <div class="row"><label class="f">Fewest<input type="number" id="st-wlo" min="3" max="1000" value="${st.words_lo || ''}" placeholder="${W.suggested ? W.suggested.lo : ''}" style="width:80px"></label>
+        <label class="f">Most<input type="number" id="st-whi" min="3" max="1000" value="${st.words_hi || ''}" placeholder="${W.suggested ? W.suggested.hi : ''}" style="width:80px"></label>
+        <label class="f">Voice may be sped up to<input type="number" id="st-tempo" min="1" max="1.6" step="0.05" value="${st.tempo_max || ''}" placeholder="${W.tempo_default || 1.45}" style="width:80px"></label></div>
+        <span class="small mute">The system suggests ${W.suggested ? W.suggested.lo + ' to ' + W.suggested.hi : 'a range'} words for ${st.target_s || 30} seconds at this narration speed. Type your own numbers to change it for this short (empty = the suggestion). More words than the voice can say in the time makes the voice faster, up to the limit on the right (1.0 to 1.6x); past that the video runs longer than the length. Applies the next time the script is written.</span></div>
       <label class="f mt-s">Narration language<select id="st-lang">${(v.languages || []).map(m => `<option value="${esc(m.id)}" ${(st.language || 'hinglish') === m.id ? 'selected' : ''}>${esc(m.label)}${m.maya_only ? ' (Maya voice only)' : ''}</option>`).join('')}</select>
         <span class="small mute">Only the next plan writes in it. Voices made in another language are made again.</span></label>` : ''}
     ${s.pipeline === 'quick' ? `<label class="f mt-s">Picture size<select id="st-size"><option value="480x832" ${st.size === '480x832' ? 'selected' : ''}>480x832 (about 20 min)</option><option value="704x1280" ${st.size === '704x1280' ? 'selected' : ''}>704x1280 sharper (about an hour)</option></select></label>
@@ -540,7 +545,7 @@ function wire() {
   const q = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)];
   const on = (sel, fn) => { const e = q(sel); if (e) e.onclick = () => fn(e); };
   const st = (id, key, conv = v => v) => { const e = q(id); if (e) e.onchange = () => patch('/settings', {[key]: conv(e.type === 'checkbox' ? e.checked : e.value)}); };
-  st('#st-target', 'target_s', v => +v); st('#st-script', 'script_engine'); st('#st-mode', 'image_mode'); st('#st-imodel', 'image_model'); st('#st-style', 'visual_style'); st('#st-char', 'character_text'); st('#st-tone', 'tone'); st('#st-format', 'format'); st('#st-size', 'size'); st('#st-chain', 'chain'); st('#st-fast', 'speed_lora'); st('#st-lang', 'language'); st('#st-toneid', 'tone_id'); st('#st-edge', 'edge'); st('#st-vspeed', 'voice_speed', v => +v); st('#st-size14', 'size_14b'); st('#st-review', 'review_keyframes');
+  st('#st-target', 'target_s', v => +v); st('#st-wlo', 'words_lo', v => +v || 0); st('#st-whi', 'words_hi', v => +v || 0); st('#st-tempo', 'tempo_max', v => +v || 0); st('#st-script', 'script_engine'); st('#st-mode', 'image_mode'); st('#st-imodel', 'image_model'); st('#st-style', 'visual_style'); st('#st-char', 'character_text'); st('#st-tone', 'tone'); st('#st-format', 'format'); st('#st-size', 'size'); st('#st-chain', 'chain'); st('#st-fast', 'speed_lora'); st('#st-lang', 'language'); st('#st-toneid', 'tone_id'); st('#st-edge', 'edge'); st('#st-vspeed', 'voice_speed', v => +v); st('#st-size14', 'size_14b'); st('#st-review', 'review_keyframes');
   st('#st-up', 'upscale'); st('#st-cap', 'captions'); st('#st-bed', 'bed'); st('#st-music', 'music'); st('#st-music-tags', 'music_caption'); st('#st-music-level', 'music_level', v => +v);
   on('#b-music-plan', b => post(b, '/music/plan', {}, 'Planning the music')); on('#b-music-make', b => post(b, '/music', {}, 'Making the music')); st('#st-steps', 'steps', v => v === '' ? null : +v); st('#st-seed', 'seed', v => +v || 0);
   const vm = q('#st-vmode'); if (vm) vm.onchange = () => patch('/settings', {voice_mode: vm.value});

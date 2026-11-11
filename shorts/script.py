@@ -184,10 +184,10 @@ def _source(short: dict) -> str:
     return out
 
 
-def seconds_to_words(seconds: float, t_s: float, speed: float = 1.0) -> int:
+def seconds_to_words(seconds: float, t_s: float, speed: float = 1.0, short: dict | None = None) -> int:
     """Words for `seconds` of speech: the share of the whole short's asked words that these seconds are."""
     from . import planner
-    b = planner.word_limits(t_s, speed)[3]
+    b = planner.word_limits(t_s, speed, short)[3]
     return max(3, round(seconds * b / max(1.0, t_s)))                        # aim at the asked top: drama needs the room, and the accepted top is left for a beat that runs over
 
 
@@ -325,7 +325,7 @@ async def draft_beat(short: dict, bible: BibleOut, plan: list[dict], done: list[
                      budget: tuple[int, int] | None = None, note: str = "", current: list[dict] | None = None, after: list[dict] | None = None) -> list[dict]:
     """Write beat `i`. A rewrite also gets `budget` (its words), the producer's `note`, the beat's `current` text and the beats that come `after` it."""
     b = plan[i]
-    words = seconds_to_words(b["seconds"], t_s, speed)
+    words = seconds_to_words(b["seconds"], t_s, speed, short)
     lo, hi = budget or (max(3, round(words * 0.8)), max(5, round(words * 1.2)))
     language = languages.of(short["settings"])
     prev_last = done[-1]["sentences"][-1]["text"] if done and done[-1]["sentences"] else ""
@@ -389,7 +389,7 @@ def _floor(lo: int, hi: int, before: dict) -> int:
 async def punch_up(short: dict, bible: BibleOut, beats: list[dict], t_s: float, engine: str, speed: float, backend, s: dict) -> tuple[list[dict], dict]:
     """Up to MAX_ROUNDS critic passes. Returns the best script and a report {"score", "problems", "rounds"}. A reply that breaks the beat ids or the word budget is ignored."""
     from . import planner
-    lo, hi = planner.word_limits(t_s, speed)[:2]
+    lo, hi = planner.word_limits(t_s, speed, short)[:2]
     report = {"score": 0.0, "problems": [], "rounds": 0}
     ids = [b["id"] for b in beats]
     for _ in range(MAX_ROUNDS):
@@ -573,7 +573,7 @@ async def rewrite_beat(short: dict, beat_id: str, instruction: str, backend, s: 
     speed = float(short["settings"].get("voice_speed") or 1.0)
     engine = voices.current({"tts": short["settings"].get("voice")})["engine"]
     plan, _ = stored_plan(short)
-    w, total, hi = words_of(beats[i]["sentences"]), sum(words_of(b["sentences"]) for b in beats), planner.word_limits(t_s, speed)[1]
+    w, total, hi = words_of(beats[i]["sentences"]), sum(words_of(b["sentences"]) for b in beats), planner.word_limits(t_s, speed, short)[1]
     budget = (max(3, round(0.6 * w)), max(w + 2, min(round(1.6 * w), w + max(0, hi - total))))
     return await draft_beat(short, stored_bible(short), plan, beats[:i], i, t_s, engine, speed, backend, s, budget=budget, note=instruction.strip() or DEFAULT_NOTE, current=beats[i]["sentences"], after=beats[i + 1:])
 
