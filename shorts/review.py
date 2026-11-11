@@ -169,9 +169,14 @@ def defects(short: dict, shot: dict, seen: dict) -> tuple[list[dict], list[str]]
             if tokens and any(t in " ".join(lint._stem(w) for w in lint._words(objects)).split() for t in tokens):
                 found.append({"kind": "extra_object", "text": f"\"{sub['name']}\" is in the picture but its text never names it"})
     place = lint.place_of(f"{seen.get('place', '')} {seen.get('background', '')}")
-    asked_place = lint.scene_place(shot.get("still") or "") or lint.place_of(shot.get("setting") or "") or lint.place_of((short.get("plan") or {}).get("place") or "")
+    own = lint.scene_place(shot.get("still") or "") or lint.place_of(shot.get("setting") or "")                  # a place THE SHOT names
+    plan_place = lint.place_of((short.get("plan") or {}).get("place") or "")                                    # the short's one backdrop: only a fallback
+    asked_place = own or plan_place
     if place and asked_place and not lint.same_place(place[0], asked_place[0]):
-        found.append({"kind": "wrong_place", "text": f"it shows {place[1].strip()} but the shot is set in {asked_place[1].strip()}"})
+        if own or not (place[0] in lint.HOME_ROOMS and asked_place[0] in lint.HOME_ROOMS):
+            found.append({"kind": "wrong_place", "text": f"it shows {place[1].strip()} but the shot is set in {asked_place[1].strip()}"})
+        else:                                           # a desk scene in a short whose backdrop is a living room: the shot never asked for the living room, so it is a note and nothing is redrawn
+            notes.append(f"it shows {place[1].strip()}; the short's place is {asked_place[1].strip()}, but this shot names no place, so nothing is changed")
     asked_n = sum({"one": 1, "two": 2, "three": 3, "four": 4, "five": 5}.get(m.group(1).lower(), 0) or int(m.group(1)) for m in re.finditer(
         r"\b(one|two|three|four|five|\d+)\s+(?:[\w-]+\s+){0,2}?(?:people|persons?)\b", shot.get("still") or "", re.I))
     got = int(seen.get("people_count") or 0)

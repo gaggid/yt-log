@@ -71,6 +71,19 @@ def test_a_crowd_or_a_near_count_is_a_note_never_a_defect():
     assert [d["kind"] for d in found] == ["wrong_count"], "five people where two were asked, in a kitchen"
 
 
+def test_a_room_the_shot_never_asked_for_is_a_note_not_a_defect():
+    short = audit_short()
+    short["plan"]["place"] = "A modern, bright Indian living room with warm wooden furniture and soft daylight."
+    desk = {"id": "s8", "still": "Wide shot of one young Indian office worker sitting at one wooden desk. She looks at one clock on the wall.", "setting": "", "must_show": []}
+    seen = {"place": "office", "background": "a wall with a clock", "people_count": 1, "objects": ["desk", "clock"], "readable_text": "none", "style": "painted"}
+    found, notes = review.defects(short, desk, seen)
+    assert not [d for d in found if d["kind"] == "wrong_place"] and any("names no place" in n for n in notes), "an office for a desk scene in a living-room short"
+    market = {**seen, "place": "market", "background": "a crowded market"}
+    assert [d["kind"] for d in review.defects(short, desk, market)[0] if d["kind"] == "wrong_place"], "a market is still wrong: it is not a room of the home"
+    named = {**desk, "still": "Wide shot of one worker in one bright living room."}
+    assert [d["kind"] for d in review.defects(short, named, seen)[0] if d["kind"] == "wrong_place"], "when the shot names the living room itself an office is wrong"
+
+
 def test_the_shot_label_of_the_contact_sheet_is_not_text_in_the_picture():
     short = audit_short()
     s15 = next(sh for sh in short["shots"] if sh["id"] == "s15")

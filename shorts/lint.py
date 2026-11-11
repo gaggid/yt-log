@@ -50,6 +50,7 @@ PLACES = [
     ("space", r"outer space|in space|\borbit\b"),
 ]
 SAME_PLACE = [{"market", "street", "shop"}, {"cottage", "village"}]
+HOME_ROOMS = {"living room", "bedroom", "kitchen", "office", "classroom"}          # rooms a short can move between without leaving its one indoor backdrop
 ARTICLE_AN = {"office", "empty"}
 
 NO_TEXT = re.compile(r"\b(text|letters?|words?|numbers?|numerals?|digits?|labels?|logos?|captions?|headlines?|price tags?|writing|written|printed|inscri\w+|slogans?|barcodes?|qr codes?)\b"
