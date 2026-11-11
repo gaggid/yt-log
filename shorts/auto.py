@@ -5,7 +5,7 @@ Order, quick and keyframe: plan, voice, fit the shots to the voice, [start pictu
 Order, remix: (link, window and the rights boxes are done by hand) voice-over, animate, put together."""
 from story3 import music, store as media
 
-from . import checks, clips, pipelines as P, planner, remix, stitch, store, upscale, voice as svoice
+from . import checks, clips, motionwriter, pipelines as P, planner, remix, stitch, store, upscale, voice as svoice
 
 
 def changed_since(short: dict, final: dict) -> bool:
@@ -42,6 +42,8 @@ def steps(short: dict) -> list[dict]:
     if P.keyframes_on(short):
         add("keyframes", "Make the start pictures", short["shots"] and all(clips.chosen_keyframe(short, sh) for sh in short["shots"]))
         add("review", "Look at the start pictures", short.get("keyframes_confirmed") or not short["settings"].get("review_keyframes", True), optional=not short["settings"].get("review_keyframes", True))
+    if P.keyframes_on(short) and short["shots"] and all(clips.chosen_keyframe(short, sh) for sh in short["shots"]):
+        add("motion", "Write the motion from the real pictures", not motionwriter.unseen(short), optional=True)
     add("clips", "Make the clips", short["shots"] and all(clips.chosen_clip(short, sh) for sh in short["shots"]))
     if upscale.wanted(short):
         add("upscale", "Upscale the clips to 2K", short["shots"] and not upscale.missing(short))
@@ -106,6 +108,15 @@ async def run(short_id: str, backend, s: dict, progress, key: str = "") -> str:
             short = store.get(short_id)
         if short["settings"].get("review_keyframes", True) and not short.get("keyframes_confirmed"):
             return "Done so far: " + ", ".join(did or ["nothing new"]) + ". Look at the start pictures, redo or replace any you do not like, press 'Pictures are good', then press Auto-run again."
+    if P.keyframes_on(short) and motionwriter.unseen(short):
+        try:                                                        # the writer looks at each real start picture before its clip is made; a failure keeps the motion written from the text
+            n = await motionwriter.write_seen(short, backend, s, sub("motion"))
+            store.save(short)
+            if n:
+                did.append(f"motion from the pictures ({n})")
+        except Exception as e:  # noqa: BLE001
+            did.append(f"motion not looked over ({str(e)[:80]})")
+        short = store.get(short_id)
     if not all(clips.chosen_clip(short, sh) for sh in short["shots"]):
         res = await clips.make_clips(short_id, progress=sub("clips"), s=s, key=key)
         did.append(f"clips ({res['made']} made)")

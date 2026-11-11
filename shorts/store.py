@@ -25,7 +25,7 @@ DEFAULT_SETTINGS = {
     "tone_id": "bigbro",              # narration tone or persona (shorts/tones.py)
     "edge": "clean",                  # clean | spicy | savage: how rough the language may get when the script calls for it
     "voice_speed": 1.0,               # narration speed sent to the voice (0.8 - 1.3); the words asked for scale with it
-    "speed_lora": True,               # keyframe pipeline: Wan 14B speed LoRA (4 steps, about 5x faster); ON by default (owner decision 2026-11-11), untick for full-step quality
+    "clip_quality": "opening",        # keyframe pipeline (shorts/pipelines.py clip_quality): opening = the first 3 seconds at full steps, the rest with the Wan speed LoRA (about 3.4x quicker) | full = every clip at full steps | fast = every clip fast
     "chain": True,                    # quick pipeline: a shot marked "continues" starts from the last frame of the one before
     "seed": 7,
     "voice": {"engine": "maya-tts", "voice": "Siddhant"},

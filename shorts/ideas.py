@@ -49,7 +49,7 @@ CONFIG_DEFAULTS = {
     "next_gen_at": 0.0, "next_make_at": 0.0,         # when the next hourly batch and the next short are due (kept here so a restart keeps the schedule)
     "use_playbook": True, "explore": 0.35, "auto_feedback": False, "playbook_min_new": 3,       # the channel's results steer the factory only through an APPROVED Playbook (docs/PLAN_feedback_loop.md)
     "tone_arms": ["bigbro", "explorer", "storyteller", "viral", "thriller"],
-    "run": {"pipeline": "keyframe", "voice": "taksh_hn", "language": "hi", "target_s": 30, "tone_id": "bigbro", "edge": "clean", "upscale": "2k", "speed_lora": "1", "words_lo": "", "words_hi": "", "tempo_max": ""},
+    "run": {"pipeline": "keyframe", "voice": "taksh_hn", "language": "hi", "target_s": 30, "tone_id": "bigbro", "edge": "clean", "upscale": "2k", "clip_quality": "opening", "words_lo": "", "words_hi": "", "tempo_max": ""},
 }
 
 MECHANISMS = [
@@ -480,8 +480,8 @@ def save_config(patch: dict) -> dict:
                 cur["run"][k] = str(max(3, min(1000, int(float(v)))) ) if str(v or "").strip() not in ("", "0") else ""
             elif k == "tempo_max":
                 cur["run"][k] = f"{max(1.0, min(1.6, float(v))):g}" if str(v or "").strip() not in ("", "0") else ""
-            elif k == "speed_lora":
-                cur["run"][k] = "1" if str(v).lower() in ("1", "true", "on", "yes") else ""
+            elif k == "clip_quality":
+                cur["run"][k] = v if v in ("opening", "full", "fast") else "opening"
             else:
                 cur["run"][k] = "" if v is None else str(v)
     with db.tx() as c:

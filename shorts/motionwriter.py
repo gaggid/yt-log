@@ -12,7 +12,12 @@ from . import looks
 from .stillwriter import NEGATION
 
 MIN_WORDS, MAX_WORDS = 12, 60
+LOOK_SIZE = "360x640"                    # the start pictures the writer looks at are shown small
 LOOKS = re.compile(r"\b(wearing|dressed in|dressed|looks like|appearance|features|complexion|hairstyle|outfit|photograph|illustration|painting|style|aesthetic|noir|cinematic|dramatic)\b", re.I)
+WEAK = re.compile(r"\b(slightly|subtly|barely|a little|a bit)\b", re.I)
+AMBIENT = re.compile(r"\b(dust|particles?|motes?|breeze|wind|pollen)\b", re.I)
+KINDS = (("static", r"\bstatic\b|\blocked\b|remains (still|steady|fixed)|does not move|stays (still|fixed)"), ("push", r"\bpush|zoom(s)? in|dolly in|moves? in|closer"), ("pull", r"\bpull|zoom(s)? out|dolly out|back(s)? away|retreat"),
+         ("pan", r"\bpan"), ("tilt", r"\btilt|\brises\b|\bdescends\b|\bcrane"), ("orbit", r"\borbit|\barcs?\b|sweeps around|circles"), ("track", r"\btrack|\bfollows?\b"), ("handheld", r"handheld|\bsway"))
 CAMERA = re.compile(r"\b(camera|static|locked|pan|pans|panning|tilt|tilts|push|pushes|pull|pulls|dolly|orbit|orbits|arc|arcs|track|tracks|tracking|handheld|zoom|zooms|rack focus|crane|rises|descends)\b", re.I)
 
 
@@ -31,11 +36,12 @@ So you write ONLY WHAT MOVES, and you refer to the things that move by their sho
 
 Return ONLY a JSON object: {"shots": [{"id": "s1", "move": "..."}]}  (one entry for each shot, same ids, same order)
 
-HOW TO WRITE A "move" (20 to 45 words, plain present-tense sentences, English):
+HOW TO WRITE A "move" (15 to 45 words, plain present-tense sentences, English):
 1. THE SUBJECT'S ACTION first: one clear verb with the part of the body or object that moves and where it goes ("the man slowly lifts the phone toward his face", "both hands tighten on the steering wheel", "the right jet banks away to the left"). One action, or two steps in order ("first ... then ..."), never more.
-2. THE CAMERA, in plain words, with direction and speed: "the camera slowly pushes in toward the man's face", "the camera pans left to follow the jets", "static camera", "slow handheld sway", "the camera tilts down from the door to the floor". Pick a move that fits the shot and differs from the shots next to it; use the planner's camera as a hint, not a rule.
-3. ONE small motion in the surroundings if it fits what is in the picture: dust drifting, a light flickering, rain falling, cloth moving, smoke curling, a screen glowing brighter. Only things the picture has.
-4. SPEED AND SIZE fit the seconds: the shot lasts only the given seconds. Under 2 seconds: one small movement. 2 to 3 seconds: one clear movement. Use "slowly", "steadily" or "quickly". Never an action that needs more time than the shot has (no walking across a room in 2 seconds).
+2. THE CAMERA, in plain words, with a direction and how far it goes, so the model really moves it: "the camera pushes in until the man's face fills the frame", "the camera pans left across the whole group", "the camera rises from the boots up to the face", "the camera sweeps around the jet to its other side", "slow handheld sway". Pick a move that differs from the shot before it and the shot after it (never the same move twice in a row). A static camera is for at most one shot in five, and only when the subject's own movement is the whole shot. Use the planner's camera as a hint, not a rule.
+3. A MOTION IN THE SURROUNDINGS only when the picture description names something that can move there (smoke, flags, rain, water, snow, cloth, leaves, lights, a screen). Never add dust, particles, motes, a breeze or wind unless the picture description names them.
+4. SPEED AND SIZE fit the seconds: the shot lasts only the given seconds. Under 2 seconds: exactly two sentences, the subject's action and the camera, nothing else. 2 to 3 seconds: up to three sentences. Use "slowly", "steadily" or "quickly". Never an action that needs more time than the shot has (no walking across a room in 2 seconds).
+4b. MAKE THE MOVEMENT BIG ENOUGH TO SEE: say how far and what moves ("turns his whole head to the left", "steps forward two paces", "the hand closes into a fist"). Never use "slightly", "subtly", "barely" or "a little": the model then hardly moves anything.
 5. TIME IT TO THE NARRATION: the viewer hears the beat's line while the shot plays. The key movement is what the line is about (a start at "the phone pings", a turn at "the door"). If the shot's job is only a pause, the subject holds still with one tiny movement (breathing, a blink, a finger tightening) and the camera carries the shot.
 6. Keep what is in the picture: no new person, object or place appears, nothing leaves the frame unless the picture shows how (a door that is in frame can swing open). No cuts, no scene change, no text.
 7. ONLY POSITIVE WORDS: never no, not, without, never, nothing. Say what moves, not what stays.
@@ -44,10 +50,28 @@ HOW TO WRITE A "move" (20 to 45 words, plain present-tense sentences, English):
 
 10. If a line "MOTION FEEL" is given, shape every move to that rhythm and kind of movement, in plain movement words. Never name the style or the medium itself.
 
+If PICTURES are attached, they are the real start pictures of the shots, in the order given. LOOK at each one: write the motion for what is really in it (who and what is there, where they are, which way they face, what is in reach), and when the picture differs from the text description, trust the picture. Move only things you can see.
+
 Test every move before you answer: could Wan draw a different clip from these words (which subject? how far? how fast? what does the camera do)? Then fix it. Does the motion fit the seconds?"""
 
 
-def problems(item: MoveOut) -> list[str]:
+def camera_kind(text: str) -> str:
+    """The kind of camera move a motion line asks for (static, push, pull, pan, tilt, orbit, track, handheld), '' when it names none. The sentence about the camera is looked at first."""
+    sents = [x for x in re.split(r"(?<=[.!?])\s+", text) if re.search(r"\bcamera\b|\bhandheld\b", x, re.I)] or [text]
+    for sentence in sents:
+        for name, rx in KINDS:
+            if re.search(rx, sentence, re.I):
+                return name
+    return ""
+
+
+def sentences(text: str) -> int:
+    return len([x for x in re.split(r"(?<=[.!?])\s+", text.strip()) if x])
+
+
+def problems(item: MoveOut, seconds: float | None = None, picture: str = "", before_kind: str = "", static_budget_left: bool = True) -> list[str]:
+    """What is wrong with one motion line. `seconds` (the shot's length), `picture` (the picture description), `before_kind` (the camera move of the shot before) and `static_budget_left` switch on the
+    checks that need them."""
     out: list[str] = []
     n = len(item.move.split())
     if n < MIN_WORDS or n > MAX_WORDS:
@@ -58,6 +82,24 @@ def problems(item: MoveOut) -> list[str]:
             out.append(f"{item.id}: \"{m.group(0)}\" is {what}")
     if not CAMERA.search(item.move):
         out.append(f"{item.id}: say what the camera does (for example \"the camera slowly pushes in\" or \"static camera\")")
+    m = WEAK.search(item.move)
+    if m:
+        out.append(f"{item.id}: \"{m.group(0)}\" makes the model barely move; say how far and what moves")
+    if seconds is not None:
+        n = sentences(item.move)
+        if seconds < 2.0 and n > 2:
+            out.append(f"{item.id}: the shot is {seconds:.1f} s, so write exactly two sentences (the action and the camera), not {n}")
+        elif n > 3:
+            out.append(f"{item.id}: at most three sentences, not {n}")
+    for m in AMBIENT.finditer(item.move):
+        if picture and not re.search(rf"\b{re.escape(m.group(0))}", picture, re.I):
+            out.append(f"{item.id}: \"{m.group(0)}\" is not in the picture description; move only things it names (or leave the surroundings still)")
+            break
+    kind = camera_kind(item.move)
+    if kind and before_kind and kind == before_kind:
+        out.append(f"{item.id}: the camera move ({kind}) repeats the shot before; choose a different one")
+    elif kind == "static" and not static_budget_left:
+        out.append(f"{item.id}: too many static cameras in this short; give this shot a camera move with a direction")
     return out
 
 
@@ -92,28 +134,76 @@ def _context(short: dict, beat: dict, shots: list[dict], only: set[str] | None) 
     return "\n\n".join(lines)
 
 
-async def write_beat(short: dict, beat: dict, shots: list[dict], backend, s: dict | None = None, only: set[str] | None = None, note: str = "") -> int:
-    """Write `move` for the shots of one beat in place (all, or the ids in `only`). Returns how many were written; 0 when the call failed (the shots keep what they had)."""
+def picture_of(short: dict, shot: dict) -> tuple[dict, str] | None:
+    """(the chosen start picture's media row, a small data URL of it) for a shot that has one, else None."""
+    from . import clips, frames, wan                                  # imported here: clips imports the planner, which imports this module
+    from story3 import store as media
+    kf = clips.chosen_keyframe(short, shot)
+    if not kf:
+        return None
+    try:
+        return kf, wan.data_url(frames.crop_916(media.path_of(kf).read_bytes(), LOOK_SIZE, 82), "image/jpeg")
+    except Exception:  # noqa: BLE001 - a picture that cannot be read is simply not shown to the writer
+        return None
+
+
+def unseen(short: dict) -> list[dict]:
+    """The shots whose start picture exists but whose motion was not written while looking at it (the picture is new or was redone). A shot whose look failed once for this picture is left alone."""
+    from . import clips
+    out = []
+    for sh in short["shots"]:
+        if not eligible(sh):
+            continue
+        kf = clips.chosen_keyframe(short, sh)
+        if kf and kf["id"] not in (sh.get("move_pic"), sh.get("move_pic_fail")) and not clips.chosen_clip(short, sh):      # a clip already made stays valid: its motion is not rewritten under it
+            out.append(sh)
+    return out
+
+
+async def write_beat(short: dict, beat: dict, shots: list[dict], backend, s: dict | None = None, only: set[str] | None = None, note: str = "", look: bool = True) -> int:
+    """Write `move` for the shots of one beat in place (all, or the ids in `only`). A shot that already has its start picture is written while LOOKING at it (the picture is sent with the question) and
+    remembers which picture it was written for (`move_pic`); `look=False` writes from the text only. Returns how many were written; 0 when the call failed (the shots keep what they had)."""
     s = s or settings_mod.get()
     todo = [sh for sh in shots if eligible(sh) and (only is None or sh["id"] in only)]
     if not todo:
         return 0
+    seen = {sh["id"]: p for sh in todo if (p := picture_of(short, sh))} if look else {}
     caller = llm.JsonCaller(backend, s)
     ids = [sh["id"] for sh in todo]
+
+    by_id = {sh["id"]: sh for sh in shots}
+    placed = [camera_kind(sh.get("move", "")) for sh in short["shots"] if sh["id"] not in ids and sh.get("move")]
+    i = next((k for k, b in enumerate(short["beats"]) if b["id"] == beat["id"]), 0)
+    prev = [sh for b in short["beats"][max(0, i - 1):i] for sid in b["shot_ids"] for sh in short["shots"] if sh["id"] == sid]
+    kind_before = camera_kind(prev[-1].get("move", "")) if prev and prev[-1].get("move") else ""
 
     def check(out: MovesOut) -> None:
         if caller.last_attempt:
             return
         if [x.id for x in out.shots] != ids:
             raise ValueError("write exactly these shots, in this order: " + ", ".join(ids))
-        bad = [p for x in out.shots for p in problems(x)]
+        bad, last, statics, total = [], kind_before, sum(k == "static" for k in placed), len(placed)
+        for x in out.shots:
+            sh = by_id.get(x.id) or {}
+            k = camera_kind(x.move)
+            total += 1
+            budget = (statics + (k == "static")) <= max(1, round(0.2 * total))
+            bad += problems(x, float(sh.get("seconds") or 2), f"{sh.get('still', '')} {sh.get('prompt', '')}", last, budget)
+            statics += k == "static"
+            last = k or last
         if bad:
             raise ValueError("; ".join(bad[:5]))
 
-    user = _context(short, beat, shots, only) + (f"\n\nTHE PRODUCER'S INSTRUCTION (follow it; it wins over the planner's idea): {note.strip()}" if note.strip() else "") + f"\n\nWrite the motion of: {', '.join(ids)}."
+    user = _context(short, beat, shots, only) + (f"\n\nTHE PRODUCER'S INSTRUCTION (follow it; it wins over the planner's idea): {note.strip()}" if note.strip() else "")
+    shown = [i for i in ids if i in seen]
+    if shown:
+        user += f"\n\nPICTURES attached, in this order: {', '.join(shown)}. Look at them before you write." + ("" if len(shown) == len(ids) else f" The other shots have no picture yet: {', '.join(i for i in ids if i not in seen)}.")
+    user += f"\n\nWrite the motion of: {', '.join(ids)}."
     try:
-        res = await caller.call(SYSTEM, user, MovesOut, validate=check)
+        res = await caller.call(SYSTEM, user, MovesOut, validate=check, images=[seen[i][1] for i in shown] or None)
     except llm.LLMError:
+        for i in shown:
+            by_id[i]["move_pic_fail"] = seen[i][0]["id"]                   # the picture could not be looked at: the written motion stands and the step does not ask again
         return 0
     by = {x.id: x for x in res.value.shots}
     n = 0
@@ -122,8 +212,26 @@ async def write_beat(short: dict, beat: dict, shots: list[dict], backend, s: dic
         if x and x.move.strip():
             sh["move"] = re.sub(r"\s+", " ", x.move).strip()
             sh["move_by"] = "writer"
+            if sh["id"] in seen:
+                sh["move_pic"] = seen[sh["id"]][0]["id"]
+                sh.pop("move_pic_fail", None)
             n += 1
     return n
+
+
+async def write_seen(short: dict, backend, s: dict | None = None, progress=None) -> int:
+    """Write the motion again for every shot whose start picture has not been looked at yet (the auto-run step after the start pictures). Beat by beat, so each call has the neighbours' moves."""
+    todo = {sh["id"] for sh in unseen(short)}
+    total = 0
+    for i, b in enumerate(short["beats"]):
+        shots = [sh for sid in b["shot_ids"] for sh in short["shots"] if sh["id"] == sid]
+        ids = {sh["id"] for sh in shots} & todo
+        if not ids:
+            continue
+        if progress:
+            progress(i, len(short["beats"]), f"looking at the pictures of beat {i + 1} of {len(short['beats'])}")
+        total += await write_beat(short, b, shots, backend, s, only=ids)
+    return total
 
 
 async def write_all(short: dict, backend, s: dict | None = None, progress=None, note: str = "") -> int:

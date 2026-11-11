@@ -126,6 +126,8 @@ async def create(body: CreateReq):
     st = {k: v for k, v in (body.settings or {}).items() if k in store.DEFAULT_SETTINGS or k in ("character_text", "tone")}
     if st.get("visual_style") not in (None, "", *looks.presets()):
         raise HTTPException(400, "unknown picture style")
+    if st.get("clip_quality") not in (None, *P.QUALITIES):
+        raise HTTPException(400, f"clip_quality is one of: {', '.join(P.QUALITIES)}")
     if st.get("tone_id", tones.DEFAULT) not in tones.TONES or st.get("edge", tones.DEFAULT_EDGE) not in tones.EDGES:
         raise HTTPException(400, "unknown narration tone or edge")
     if "voice_speed" not in st and "tone_id" in st:
@@ -384,7 +386,8 @@ class SettingsReq(BaseModel):
     steps: int | None = None
     size_14b: str | None = None
     chain: bool | None = None
-    speed_lora: bool | None = None
+    speed_lora: bool | None = None       # old name: true = opening, false = full
+    clip_quality: str | None = None      # opening | full | fast (shorts/pipelines.py)
     seed: int | None = None
     voice: dict | None = None
     voice_mode: str | None = None
@@ -446,6 +449,12 @@ async def patch_settings(short_id: str, body: SettingsReq):
         raise HTTPException(400, f"format is one of: {', '.join((formats.AUTO, *formats.FORMATS))}")
     if "target_s" in patch and not models.MIN_TARGET_S <= (patch["target_s"] or 0) <= models.MAX_TARGET_S:
         raise HTTPException(400, f"the length is between {models.MIN_TARGET_S:g} seconds and {models.MAX_TARGET_S:g} seconds")
+    if "speed_lora" in patch:
+        legacy = patch.pop("speed_lora")
+        if "clip_quality" not in patch and legacy is not None:
+            patch["clip_quality"] = "opening" if legacy else "full"
+    if "clip_quality" in patch and patch["clip_quality"] not in P.QUALITIES:
+        raise HTTPException(400, f"clip_quality is one of: {', '.join(P.QUALITIES)}")
     if "script_engine" in patch and patch["script_engine"] not in ("room", "single"):
         raise HTTPException(400, "script_engine is room or single")
     for k in ("words_lo", "words_hi"):
@@ -1334,7 +1343,7 @@ def _run_settings(run: dict) -> dict:
     """The short's settings from the saved Ideas config (the same shape the screen sends)."""
     return {"voice": {"engine": "maya-tts", "voice": run.get("voice")}, "language": run.get("language"), "target_s": int(float(run.get("target_s") or 30)),
             "tone_id": run.get("tone_id"), "edge": run.get("edge"), "upscale": run.get("upscale"), "image_mode": "qwen", "review_keyframes": False,
-            "speed_lora": str(run.get("speed_lora", "1")).lower() in ("1", "true", "on", "yes"),
+            "clip_quality": run.get("clip_quality") if run.get("clip_quality") in P.QUALITIES else "opening",
             "words_lo": int(float(run.get("words_lo") or 0)), "words_hi": int(float(run.get("words_hi") or 0)), "tempo_max": float(run.get("tempo_max") or 0)}
 
 

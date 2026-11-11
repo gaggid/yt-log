@@ -89,8 +89,19 @@ TRENDING = {
 }
 
 
+# How things move in the styles that had no note (the shorts the autopilot makes most): plain movement words, no look words (the motion writer is checked for those).
+MOTION = {
+    "realism": "Natural, believable movement: people move at an everyday pace with small weight shifts and blinks; the camera moves like a steady handheld or a slow gimbal move.",
+    "filmic": "Deliberate, weighty film movement: slow purposeful actions, cloth and hair following through, a smooth camera move that has a clear direction.",
+    "gta": "Confident, punchy game-cutscene movement: quick decisive actions with a clear start and stop, a camera that sweeps or pushes in with energy.",
+    "noir": "Slow, tense movement: small deliberate actions, smoke and rain drifting, a camera that creeps or tracks slowly.",
+    "concept": "Slow, grand movement: wide slow camera sweeps and glides over the place, small steady actions of the figures, clouds, mist and flags drifting.",
+}
+
+
 def presets() -> dict[str, dict]:
-    return {"realism": REALISM, **TRENDING, **{k: {"label": p["label"], "description": p["description"], "look": p["look"]} for k, p in styles.PRESETS.items()}}
+    return {"realism": {**REALISM, "motion": MOTION["realism"]}, **TRENDING,
+            **{k: {"label": p["label"], "description": p["description"], "look": p["look"], **({"motion": MOTION[k]} if k in MOTION else {})} for k, p in styles.PRESETS.items()}}
 
 
 def lead(short: dict) -> str:

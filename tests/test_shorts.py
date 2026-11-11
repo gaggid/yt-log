@@ -203,7 +203,9 @@ def test_keyframe_pipeline_makes_stills_first_then_animates_each(gw, env):
     res = run(clips.make_clips(sid, s=S, key="k"))
     assert res["made"] == n
     i2v = [r for r in gw.requests if r["model"] == models.I2V]
-    assert len(i2v) == n and all(r["speed_lora"] is True and r["image"].startswith("data:image/jpeg") and (r["num_frames"] - 1) % 4 == 0 for r in i2v)
+    assert len(i2v) == n and all(r["image"].startswith("data:image/jpeg") and (r["num_frames"] - 1) % 4 == 0 for r in i2v)
+    assert i2v[0]["speed_lora"] is False and "negative_prompt" in i2v[0], "the opening is made at full steps, with the negative list"
+    assert i2v[-1]["speed_lora"] is True and "negative_prompt" not in i2v[-1], "after the opening the speed LoRA is used, and it ignores the negative list so it is not sent"
     assert stitch.checklist(store.get(sid))["ready"]
     final = stitch.build(sid)
     assert abs(frames.info(store.media_dir(sid) / final["file"])["duration_s"] - 30.0) < 0.2
@@ -461,14 +463,42 @@ def test_make_clips_draws_a_missing_or_old_start_picture_first_instead_of_skippi
     assert note["message"].startswith("1 start picture drawn first")
 
 
-def test_speed_lora_is_on_by_default_and_the_person_can_turn_it_off():
+def test_the_opening_three_seconds_are_full_quality_and_the_rest_fast_unless_the_person_chooses_otherwise():
     short = planned("keyframe")
-    sh = short["shots"][0]
-    on = P.animate_request(short, sh, 1, "data:image/jpeg;base64,x")
-    assert on["speed_lora"] is True and "steps" not in on, "the gateway's own 4 steps and guidance 1 go with the LoRA"
-    short["settings"]["speed_lora"] = False
-    off = P.animate_request(short, sh, 1, "data:image/jpeg;base64,x")
-    assert off["speed_lora"] is False and off["steps"] == P.DEFAULT_STEPS[models.I2V]
+    assert P.clip_quality(short) == "opening"
+    shots = short["shots"]
+    starts, t = [], 0.0
+    for sh in shots:
+        starts.append(t)
+        t += sh["seconds"]
+    for sh, st in zip(shots, starts):
+        req = P.animate_request(short, sh, 1, "data:image/jpeg;base64,x")
+        assert req["speed_lora"] is (st >= P.OPENING_FULL_S), (sh["id"], st)
+        assert ("negative_prompt" in req) is (not req["speed_lora"]), "full steps send the negative list; the speed LoRA ignores it"
+        assert req["speed_lora"] is False or "steps" not in req, "the gateway's own 4 steps and guidance 1 go with the LoRA"
+        assert "no cut" not in req["prompt"], "positive words only"
+    short["settings"]["clip_quality"] = "full"
+    assert all(P.animate_request(short, sh, 1, "data:image/jpeg;base64,x")["speed_lora"] is False and P.animate_request(short, sh, 1, "data:image/jpeg;base64,x")["steps"] == P.DEFAULT_STEPS[models.I2V] for sh in shots)
+    short["settings"]["clip_quality"] = "fast"
+    assert all(P.animate_request(short, sh, 1, "data:image/jpeg;base64,x")["speed_lora"] is True for sh in shots)
+    old = {**short, "settings": {k: v for k, v in short["settings"].items() if k != "clip_quality"}}
+    old["settings"]["speed_lora"] = False
+    assert P.clip_quality(old) == "full", "a short made before the setting keeps its old choice"
+    old["settings"]["speed_lora"] = True
+    assert P.clip_quality(old) == "opening"
+
+
+def test_clip_quality_is_saved_checked_and_kept_in_the_ideas_run_settings(client):
+    from shorts import api as shorts_api, ideas as ideas_mod
+    sid = client.post("/api/shorts", json={"pipeline": "keyframe", "kind": "idea", "text": "A courier finds a wallet with a lakh rupees."}).json()["id"]
+    assert client.get(f"/api/shorts/{sid}").json()["settings"]["clip_quality"] == "opening"
+    assert client.patch(f"/api/shorts/{sid}/settings", json={"clip_quality": "full"}).status_code == 200
+    assert client.patch(f"/api/shorts/{sid}/settings", json={"clip_quality": "turbo"}).status_code == 400
+    assert client.patch(f"/api/shorts/{sid}/settings", json={"speed_lora": True}).status_code == 200 and client.get(f"/api/shorts/{sid}").json()["settings"]["clip_quality"] == "opening", "the old checkbox maps on"
+    ideas_mod.save_config({"run": {"clip_quality": "full"}})
+    assert shorts_api._run_settings(ideas_mod.get_config()["run"])["clip_quality"] == "full"
+    ideas_mod.save_config({"run": {"clip_quality": "bogus"}})
+    assert shorts_api._run_settings(ideas_mod.get_config()["run"])["clip_quality"] == "opening"
 
 
 def test_the_14b_size_is_480p_or_720p_and_the_picture_follows_it():
@@ -506,9 +536,9 @@ def test_language_needs_the_maya_voice_and_reaches_the_prompt_and_the_voice_requ
 
 def test_create_takes_style_language_voice_and_sizes_and_refuses_a_voice_that_cannot_speak_the_language(client):
     base = {"pipeline": "keyframe", "kind": "idea", "text": "A courier finds a wallet with a lakh rupees in it."}
-    ok = client.post("/api/shorts", json={**base, "settings": {"visual_style": "realism", "language": "ta", "voice": {"engine": "maya-tts", "voice": "Kayal"}, "size_14b": "720x1280", "speed_lora": True}})
+    ok = client.post("/api/shorts", json={**base, "settings": {"visual_style": "realism", "language": "ta", "voice": {"engine": "maya-tts", "voice": "Kayal"}, "size_14b": "720x1280", "clip_quality": "fast"}})
     st = ok.json()["settings"]
-    assert ok.status_code == 200 and st["visual_style"] == "realism" and st["language"] == "ta" and st["voice"]["voice"] == "Kayal" and st["size_14b"] == "720x1280" and st["speed_lora"] is True
+    assert ok.status_code == 200 and st["visual_style"] == "realism" and st["language"] == "ta" and st["voice"]["voice"] == "Kayal" and st["size_14b"] == "720x1280" and st["clip_quality"] == "fast"
     bad = client.post("/api/shorts", json={**base, "settings": {"language": "ta", "voice": {"engine": "veena-tts", "voice": "agastya"}}})
     assert bad.status_code == 400 and "Maya" in bad.json()["detail"]
     assert client.post("/api/shorts", json={**base, "settings": {"visual_style": "nope"}}).status_code == 400
@@ -571,7 +601,7 @@ def test_every_choice_made_when_creating_a_short_reaches_the_prompts_and_the_req
     chat = FakeChat()
     body = {"pipeline": "keyframe", "kind": "idea", "text": "A courier finds a wallet with a lakh rupees in it.",
             "settings": {"visual_style": "noir", "language": "ta", "voice": {"engine": "maya-tts", "voice": "Kayal"}, "voice_speed": 1.15, "tone_id": "osint", "edge": "spicy",
-                         "size_14b": "720x1280", "speed_lora": True}}
+                         "size_14b": "720x1280", "clip_quality": "fast"}}
     sid = client.post("/api/shorts", json=body).json()["id"]
     short = run(planner.make_plan(sid, chat, S))
     plan_prompt = next(c for c in chat.calls if c["task"] == "p4_plan")
@@ -585,7 +615,7 @@ def test_every_choice_made_when_creating_a_short_reaches_the_prompts_and_the_req
     assert "graphic-novel" in P.compose(short, short["shots"][0], False), "the text-to-video prompt follows the style"
     assert "graphic-novel" not in P.compose(short, short["shots"][0], True), "a prompt for a picture does not repeat the style: the picture has it"
     req = P.animate_request(short, short["shots"][0], 1, "data:image/jpeg;base64,x")
-    assert req["size"] == "720x1280" and req["speed_lora"] is True and "steps" not in req
+    assert req["size"] == "720x1280" and req["speed_lora"] is True and "steps" not in req and "negative_prompt" not in req
     sent = []
 
     async def spy(client, base, key, bodies):
@@ -994,11 +1024,12 @@ def test_style_motion_hint_reaches_motion_writer_and_negative_keeps_what_the_sty
     tiny = {"settings": {"visual_style": "tinyworld"}}
     assert "blurry" not in looks.negative(tiny, P.NEGATIVE).split(", ")
     assert "flicker" not in looks.negative({"settings": {"visual_style": "cyberpunk"}}, P.NEGATIVE_MOVE).split(", ")
-    plain = {**short, "settings": {"visual_style": "realism"}}
+    plain = {**short, "settings": {"visual_style": ""}}
     assert looks.motion_hint(plain) == "" and looks.negative(plain, P.NEGATIVE) == P.NEGATIVE
     assert "MOTION FEEL" not in motionwriter._context(plain, short["beats"][0], [], None)
-    for k, v in looks.TRENDING.items():
+    for k, v in {**looks.TRENDING, **{k: {"motion": m} for k, m in looks.MOTION.items()}}.items():
         assert v["motion"] and not motionwriter.LOOKS.search(v["motion"]), k
+    assert all(looks.presets()[k].get("motion") for k in ("realism", "filmic", "gta", "noir", "concept")), "the styles the autopilot uses most have a motion note too"
 
 
 def test_trending_looks_name_no_content_so_they_cannot_add_people_buildings_or_sky():
@@ -1460,3 +1491,68 @@ def test_more_words_than_fit_say_what_to_change(client):
     assert g["target_s"] == 30 and 1.45 < g["tempo_max"] <= 1.5 and "Speed-up limit raised" in g["note"], "a little over: the speed-up limit rises"
     ok = get(words_lo=64, words_hi=120, target_s=f["target_s"])
     assert ok["outcome"][1]["verdict"] in ("faster", "fits") and ok["fit"]["note"] == "", "at the new length they fit"
+
+
+def test_the_motion_writer_is_sent_back_for_samey_weak_or_invented_motion():
+    from shorts.motionwriter import MoveOut, camera_kind, problems
+    ok = MoveOut(id="s1", move="The man turns his whole head to the left. The camera pushes in until his face fills the frame.")
+    assert problems(ok, 1.5, "Close-up of a man", "") == []
+    assert camera_kind(ok.move) == "push" and camera_kind("The camera remains static.") == "static" and camera_kind("A slow handheld sway.") == "handheld"
+    msgs = " ".join(problems(MoveOut(id="s1", move="The man turns his head slightly. The camera pushes in. Dust motes drift in the air."), 1.5, "Close-up of a man", "push"))
+    assert "slightly" in msgs and "exactly two sentences" in msgs and "Dust" in msgs and "repeats the shot before" in msgs
+    assert not any("Dust" in p for p in problems(MoveOut(id="s1", move="The man turns his whole head. The camera pans left. Dust drifts down."), 3.0, "A man in a dusty room", ""))
+    assert any("too many static" in p for p in problems(MoveOut(id="s1", move="The man turns his whole head to the left. The camera remains static."), 2.5, "A man", "", False))
+
+
+def test_the_motion_writer_sends_a_beat_back_when_neighbouring_shots_repeat_the_camera(client):
+    short = planned("keyframe")
+    chat = FakeChat(moves=True, stills=True)
+    same = "The courier turns his whole body to the left. The camera pushes in until his face fills the frame."
+    chat.move_text = same
+    beat = short["beats"][0]
+    shots = [sh for sid in beat["shot_ids"] for sh in short["shots"] if sh["id"] == sid]
+    if len(shots) > 1:
+        run(motionwriter.write_beat(short, beat, shots, chat, S))
+        sent = [c for c in chat.calls if c["task"] == "p4_move"]
+        assert len(sent) > 1, "two shots in a row with the same camera move are sent back"
+
+
+def test_the_motion_writer_looks_at_the_real_start_pictures_once_they_exist(gw):
+    from shorts import clips, motionwriter
+    short = planned("keyframe")
+    sid = short["id"]
+    chat = FakeChat(moves=True, stills=True)
+    assert not motionwriter.unseen(short), "no start pictures yet: nothing to look at"
+    run(clips.make_keyframes(sid, s=S, key="k"))
+    short = store.get(sid)
+    todo = motionwriter.unseen(short)
+    assert len(todo) == len(short["shots"]), "every shot has a new picture the writer has not seen"
+    n = run(motionwriter.write_seen(short, chat, S))
+    assert n == len(todo) and not motionwriter.unseen(short)
+    calls = [c for c in chat.calls if c["task"] == "p4_move"]
+    assert calls and all(c["images"] >= 1 and "PICTURES attached" in c["user"] for c in calls), "the pictures went with the question"
+    assert all(sh.get("move_pic") == clips.chosen_keyframe(short, sh)["id"] for sh in short["shots"] if motionwriter.eligible(sh))
+    again = len(chat.calls)
+    assert run(motionwriter.write_seen(short, chat, S)) == 0 and len(chat.calls) == again, "a picture already looked at is not looked at again"
+    redone = short["shots"][0]
+    redone["move_pic"] = "an older picture"
+    assert [x["id"] for x in motionwriter.unseen(short)] == [redone["id"]], "a redone picture is looked at again"
+    run(clips.make_clips(sid, s=S, key="k"))
+    short = store.get(sid)
+    short["shots"][0]["move_pic"] = "an older picture"
+    assert not motionwriter.unseen(short), "a clip already made keeps the motion it was made with"
+
+
+def test_the_motion_step_is_listed_after_the_pictures_and_a_failed_look_is_not_asked_again(gw):
+    from shorts import auto, clips, motionwriter
+    short = planned("keyframe")
+    sid = short["id"]
+    assert "motion" not in [x["id"] for x in auto.steps(short)], "no pictures yet"
+    run(clips.make_keyframes(sid, s=S, key="k"))
+    short = store.get(sid)
+    ids = [x["id"] for x in auto.steps(short)]
+    assert "motion" in ids and ids.index("motion") < ids.index("clips")
+    chat = FakeChat(moves=False)                                                    # the writer fails
+    assert run(motionwriter.write_seen(short, chat, S)) == 0
+    assert not motionwriter.unseen(short), "a picture whose look failed once is left alone, so the run goes on to the clips"
+    assert next(x for x in auto.steps(short) if x["id"] == "motion")["done"]

@@ -170,6 +170,14 @@ def _takes_params(backend) -> bool:
         return False
 
 
+IMAGE_TOKENS = 1500                     # what one small picture is counted as in the context budget
+
+
+def _text(content) -> str:
+    """The words of a message whose content is a string or a list of parts (text and pictures)."""
+    return content if isinstance(content, str) else " ".join(p.get("text", "") for p in content if isinstance(p, dict))
+
+
 class JsonCaller:
     def __init__(self, backend, s: dict | None = None):
         self.backend = backend
@@ -178,10 +186,12 @@ class JsonCaller:
         self.last_attempt = False
         self.sampling: dict = {}                      # the fields sent with the last call (for tests and logs)
 
-    async def call(self, system: str, user: str, model_cls: type[BaseModel], validate=None) -> CallResult:
+    async def call(self, system: str, user: str, model_cls: type[BaseModel], validate=None, images: list[str] | None = None) -> CallResult:
+        """`images` are data URLs the vision model looks at together with `user` (each is counted as IMAGE_TOKENS of the context)."""
         est = self.budget.est
-        base = [{"role": "system", "content": system}, {"role": "user", "content": user}]
-        self.budget.check(est(system) + est(user))          # raises BudgetExceeded: never silently truncate
+        content = [{"type": "text", "text": user}] + [{"type": "image_url", "image_url": {"url": u}} for u in images] if images else user
+        base = [{"role": "system", "content": system}, {"role": "user", "content": content}]
+        self.budget.check(est(system) + est(user) + IMAGE_TOKENS * len(images or []))          # raises BudgetExceeded: never silently truncate
         messages = list(base)
         m = _TASK_RE.match(system)
         self.sampling = settings_mod.sampling(m.group(1), self.s) if m else {}
@@ -192,7 +202,7 @@ class JsonCaller:
         for attempt in range(int(self.s["retries"]) + 1):
             self.last_attempt = attempt >= int(self.s["retries"])           # a validator may stop insisting on its last attempt
             res = await self.backend.complete(messages, self.budget.output_reserve, **extra)
-            tin += res.prompt_tokens or sum(est(m["content"]) for m in messages)
+            tin += res.prompt_tokens or sum(est(_text(m["content"])) for m in messages)
             tout += res.completion_tokens or est(res.text)
             if res.finish_reason == "length":
                 raws.append({"response": res.text[:20000], "error": "reply cut off at the output limit"})
@@ -209,7 +219,7 @@ class JsonCaller:
                     {"role": "user", "content": f"That reply was invalid: {str(e)[:700]}\n"
                                                 "Reply again with ONLY the corrected JSON object."}]
                 try:
-                    self.budget.check(sum(est(m["content"]) for m in messages))
+                    self.budget.check(sum(est(_text(m["content"])) for m in messages) + IMAGE_TOKENS * len(images or []))
                 except BudgetExceeded:
                     break
         raise ValidationFailed(f"no valid reply after {len(raws)} attempts: {raws[-1]['error'][:300]}", raws)

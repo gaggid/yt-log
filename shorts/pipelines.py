@@ -23,7 +23,9 @@ PIPELINES = {
 }
 NEGATIVE = "grainy, noisy, film grain, noise, pixelated, blurry, low quality, static, deformed, disfigured, extra fingers, poorly drawn hands, jpeg artifacts, text, watermark, logo, subtitles, signature"
 NEGATIVE_MOVE = NEGATIVE + ", morphing face, changing face, face distortion, warping, flicker, sudden lighting change, scene cut, jump cut, duplicate people, extra limbs, new objects appearing"   # picture-to-video: keep the picture as it is
-HOLD = "Same people, place, style and light as the first frame throughout; one continuous shot, no cut."
+HOLD = "The faces, clothes, place, style and light stay exactly as in the first frame; one continuous shot."   # fast clips ignore the negative list, so the picture is protected in words
+OPENING_FULL_S = 3.0                      # clip quality "opening": every shot that starts in the first 3 seconds of the short is made at full steps
+QUALITIES = ("opening", "full", "fast")
 KEYFRAME_FRAMES = 5
 DEFAULT_STEPS = {models.TI2V: 20, models.T2V: 20, models.I2V: 10, models.ANIMATE: 10, models.TALK: 6}
 # seconds of work per generated frame at 480x832, from the docs' timings (RTX 4060 Ti 16 GB); shorts/probe.py writes measured values over these
@@ -86,6 +88,32 @@ def compose(short: dict, shot: dict, with_picture: bool = False) -> str:
     return " ".join(parts)[:3900]
 
 
+def clip_quality(short: dict) -> str:
+    """How the picture-to-video clips are made: `opening` (default: the first 3 seconds at full steps, the rest with the speed LoRA), `full` (every clip at full steps, the slowest) or `fast` (every clip with the
+    speed LoRA). A short made before the setting existed keeps its old `speed_lora` choice."""
+    st = short["settings"]
+    if st.get("clip_quality") in QUALITIES:
+        return st["clip_quality"]
+    return "opening" if st.get("speed_lora") else "full"
+
+
+def shot_start(short: dict, shot: dict) -> float:
+    t = 0.0
+    for s in short["shots"]:
+        if s["id"] == shot["id"]:
+            break
+        t += float(s.get("seconds") or 0)
+    return t
+
+
+def is_fast(short: dict, shot: dict) -> bool:
+    """Whether this shot's clip is made with the speed LoRA."""
+    q = clip_quality(short)
+    if q != "opening":
+        return q == "fast"
+    return shot_start(short, shot) >= OPENING_FULL_S - 1e-6
+
+
 def seed_for(short: dict, shot: dict, attempt: int) -> int:
     idx = next((i for i, s in enumerate(short["shots"]) if s["id"] == shot["id"]), 0)
     return (int(short["settings"].get("seed", 7)) + 17 * idx + 101 * (attempt - 1)) % (2 ** 32)
@@ -119,14 +147,16 @@ def keyframe_request(short: dict, shot: dict, attempt: int) -> dict:
 
 
 def animate_request(short: dict, shot: dict, attempt: int, image: str) -> dict:
-    """Picture to video at full quality (speed LoRA off), or a fast draft when the person turned `speed_lora` on (the gateway then uses its own 4 steps and guidance 1, so no
-    steps are sent unless the person set them). The prompt describes the motion; the picture already shows the subject."""
-    fast = bool(short["settings"].get("speed_lora"))
+    """Picture to video at full steps, or with the speed LoRA (`is_fast`: the gateway then uses its own 4 steps and guidance 1, so no steps are sent unless the person set them, and the negative list does
+    nothing, tested 2026-11-11, so it is not sent). The prompt describes the motion; the picture already shows the subject."""
+    fast = is_fast(short, shot)
     body = {"model": models.I2V, "prompt": compose(short, shot, True), "negative_prompt": looks.negative(short, NEGATIVE_MOVE), "image": image, "size": size_14b(short),
             "num_frames": models.gen_frames(shot["seconds"], models.I2V), "fps": models.MODELS[models.I2V]["fps"], "speed_lora": fast, "steps": steps_of(short, models.I2V),
             "seed": seed_for(short, shot, attempt), "response_format": "mp4"}
-    if fast and not short["settings"].get("steps"):
-        body.pop("steps")
+    if fast:
+        body.pop("negative_prompt")
+        if not short["settings"].get("steps"):
+            body.pop("steps")
     return body
 
 

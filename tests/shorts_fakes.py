@@ -52,6 +52,9 @@ def png_bytes(w: int = 90, h: int = 160, color=(180, 90, 40)) -> bytes:
     return buf.getvalue()
 
 
+CAMERAS = ["pushes in until his face fills the frame", "pans left across the wet street", "tilts down from his face to the wallet", "pulls back to show the whole road", "sweeps around him to the other side"]   # a different camera move for neighbouring shots
+
+
 class VideoGateway:
     """The video endpoint: POST /video/generations answers 202 with a job, GET /jobs/{id} says running once then succeeded, GET /video/{id}.mp4 returns a tiny real clip."""
 
@@ -173,7 +176,10 @@ class FakeChat:
             from story.llm import LLMError
             self.room_refused = getattr(self, "room_refused", 0) + 1
             raise LLMError("the writers' room is off in this test")
-        self.calls.append({"task": task, "user": messages[-1]["content"], "system": system})
+        user_msg = messages[1]["content"]
+        n_images = 0 if isinstance(user_msg, str) else sum(1 for p in user_msg if p.get("type") == "image_url")
+        messages = [{**m, "content": m["content"] if isinstance(m["content"], str) else " ".join(p.get("text", "") for p in m["content"])} for m in messages]      # a question with pictures: the words are what the fake reads
+        self.calls.append({"task": task, "user": messages[-1]["content"], "system": system, "images": n_images})
         if task in ("p4_bible", "p4_map", "p4_draft", "p4_punch"):
             return LLMResult(json.dumps(self._room(task, system, messages[1]["content"]), ensure_ascii=False))
         if task == "p4_plan":
@@ -186,7 +192,7 @@ class FakeChat:
                                "continues": i % 3 == 1, "setting": "", **self.shot_extra} for i in range(n)]}
         elif task == "p4_move":
             ids = re.search(r"Write the motion of: ([^.]+)\.", messages[1]["content"]).group(1).split(", ")
-            body = {"shots": [{"id": i, "move": self.move_text or f"The courier slowly lifts the wallet toward his chest while the camera slowly pushes in, rain falling steadily behind him, shot {i}."} for i in ids]}
+            body = {"shots": [{"id": i, "move": self.move_text or f"The courier lifts the wallet toward his chest in shot {i}. The camera {CAMERAS[int(re.sub(r'[^0-9]', '', i) or 0) % len(CAMERAS)]}."} for i in ids]}
         elif task == "p4_still":
             ids = re.search(r"Write the pictures of: ([^.]+)\.", messages[1]["content"]).group(1).split(", ")
             body = {"shots": [{"id": i, "still": self.still_text or f"Close-up of one courier holding one wallet beside a rusty bus stop, picture {i}, a single streetlight behind him.", "must_show": ["exactly 1 courier", "wallet in his hand"]} for i in ids]}
