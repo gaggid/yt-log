@@ -1449,3 +1449,14 @@ def test_length_words_and_speed_are_calculated_together(client):
     slow = client.get("/api/shorts/words", params={"target_s": 30, "speed": 0.8}).json()
     assert slow["suggested"]["hi"] < base["suggested"]["hi"], "a slower voice says fewer words in the same time"
     assert client.get("/api/shorts/words", params={"target_s": 30, "tone_id": "bigbro"}).json()["speed"] > 0
+
+
+def test_more_words_than_fit_say_what_to_change(client):
+    get = lambda **p: client.get("/api/shorts/words", params={"target_s": 30, "speed": 1.0, **p}).json()
+    assert get(words_hi=90)["fit"]["note"] == "", "words that already fit change nothing"
+    f = get(words_lo=64, words_hi=120)["fit"]
+    assert f["target_s"] > 30 and f["tempo_max"] == 1.45 and "length is now" in f["note"], "too many for a speed-up: the length grows"
+    g = get(words_hi=106)["fit"]
+    assert g["target_s"] == 30 and 1.45 < g["tempo_max"] <= 1.5 and "Speed-up limit raised" in g["note"], "a little over: the speed-up limit rises"
+    ok = get(words_lo=64, words_hi=120, target_s=f["target_s"])
+    assert ok["outcome"][1]["verdict"] in ("faster", "fits") and ok["fit"]["note"] == "", "at the new length they fit"

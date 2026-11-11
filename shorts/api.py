@@ -2,6 +2,7 @@
 long-form steps (story2/jobs.py), keyed by the short's id."""
 import asyncio
 import io
+import math
 import time
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -237,6 +238,23 @@ def _words_calc(st: dict) -> dict:
     room = max(1.0, t_s - (timeline.GAP_S * max(0, round(beats) - 1) + timeline.END_HOLD_S))
     pace = timeline.PACE_WPS * speed
 
+    def room_at(t: float) -> float:
+        return max(1.0, t - (timeline.GAP_S * max(0, round(sum(planner.beat_range(t)) / 2) - 1) + timeline.END_HOLD_S))
+
+    # What to change so the most words fit: first a higher speed-up limit (up to 1.5x, still natural), else a longer video at the default limit. Nothing changes when they already fit.
+    fit = {"tempo_max": cap, "target_s": t_s, "note": ""}
+    need_hi = hi / pace / room
+    if need_hi > cap + 1e-6:
+        if need_hi <= 1.5:
+            fit["tempo_max"] = min(1.5, math.ceil(need_hi * 20) / 20)
+            fit["note"] = f"Speed-up limit raised to {fit['tempo_max']:g}x so {hi} words fit in {t_s:g} seconds."
+        else:
+            lim, t = max(cap, timeline.TEMPO_MAX), math.ceil(t_s)
+            while t < models.MAX_TARGET_S and hi / pace / room_at(t) > lim + 1e-6:
+                t += 1
+            fit["tempo_max"], fit["target_s"] = lim, float(t)
+            fit["note"] = f"{hi} words need about {t} seconds at {speed:g}x narration with the voice sped up to {lim:g}x at most, so the length is now {t} seconds."
+
     def outcome(label: str, words: int) -> dict:
         voice_s = words / pace
         need = voice_s / room
@@ -255,7 +273,7 @@ def _words_calc(st: dict) -> dict:
         return {"label": label, "words": words, "voice_s": round(voice_s, 1), "tempo": tempo, "verdict": verdict, "over_s": over, "text": f"{label.capitalize()} ({words} words): {said}"}
 
     return {"target_s": t_s, "speed": speed, "suggested": {"lo": s_lo, "hi": s_hi, "ask_lo": s_a, "ask_hi": s_b}, "used": {"lo": lo, "hi": hi, "ask_lo": a, "ask_hi": b},
-            "tempo_max": cap, "tempo_default": timeline.TEMPO_MAX, "fit_max": int(room * cap * pace),
+            "tempo_max": cap, "tempo_default": timeline.TEMPO_MAX, "fit_max": int(room * cap * pace), "fit": fit,
             "summary": f"For {t_s:g} seconds at {speed:g}x narration, up to {int(room * cap * pace)} words fit without the video running long (voice sped up to {cap:g}x at most).", "outcome": [outcome("fewest", lo), outcome("most", hi)],
             "lo": s_lo, "hi": s_hi, "ask_lo": s_a, "ask_hi": s_b}
 

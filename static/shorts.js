@@ -582,6 +582,18 @@ function wire() {
         on('#st-wreset', () => patch('/settings', {words_lo: 0, words_hi: 0, tempo_max: 0}));
       } catch (e) { /* the old outcome stays */ }
     }, 250); };
+    const whi = q('#st-whi');                // raising the most words changes what else must change for them to fit: the speed-up limit first, then the length
+    if (whi) whi.addEventListener('change', async () => {
+      try {
+        const W = await call('/words?' + new URLSearchParams({target_s: val('#st-target') || 30, speed: val('#st-vspeed') || 0, words_lo: ownv('#st-wlo'), words_hi: ownv('#st-whi'), tempo_max: ownv('#st-tempo')}));
+        const f = W.fit || {}; if (!f.note) return;
+        const sg = (W.suggested || {}).hi, body = {words_hi: +whi.value === sg ? 0 : +whi.value || 0};
+        if (f.tempo_max !== W.tempo_max) body.tempo_max = f.tempo_max;
+        if (f.target_s !== W.target_s) body.target_s = f.target_s;
+        toast(f.note);
+        patch('/settings', body);
+      } catch (e) { /* the numbers stay as typed */ }
+    });
     ['#st-wlo', '#st-whi', '#st-tempo'].forEach(id => { const e = q(id); if (e) e.addEventListener('input', () => { e.dataset.own = '1'; live(); }); });
     ['#st-target', '#st-vspeed'].forEach(id => { const e = q(id); if (e) e.addEventListener('input', live); });
   } st('#st-script', 'script_engine'); st('#st-mode', 'image_mode'); st('#st-imodel', 'image_model'); st('#st-style', 'visual_style'); st('#st-char', 'character_text'); st('#st-tone', 'tone'); st('#st-format', 'format'); st('#st-size', 'size'); st('#st-chain', 'chain'); st('#st-fast', 'speed_lora'); st('#st-lang', 'language'); st('#st-toneid', 'tone_id'); st('#st-edge', 'edge'); st('#st-vspeed', 'voice_speed', v => +v); st('#st-size14', 'size_14b'); st('#st-review', 'review_keyframes');

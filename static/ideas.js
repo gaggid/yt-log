@@ -725,6 +725,17 @@ function _wireCfg() {
   bind('cfg-tempo',    'tempo_max', v => same(v, _sugg.tempo_default));
   ['cfg-wlo', 'cfg-whi', 'cfg-tempo'].forEach(id => { const e = document.getElementById(id); if (e) e.addEventListener('input', () => { e.dataset.own = '1'; _wordsLive(); }); });
   ['cfg-target-s', 'cfg-tone'].forEach(id => { const e = document.getElementById(id); if (e) e.addEventListener('input', _wordsLive); });
+  const wh = document.getElementById('cfg-whi');       // raising the most words changes what else must change for them to fit: the speed-up limit first, then the length
+  if (wh) wh.addEventListener('change', async () => {
+    const g = id => document.getElementById(id), own = id => { const e = g(id); return e && e.dataset.own === '1' ? e.value : 0; };
+    try {
+      const W = await api('/shorts/words?' + new URLSearchParams({target_s: g('cfg-target-s').value || _cfg.target_s || 30, tone_id: g('cfg-tone').value || '', words_lo: own('cfg-wlo'), words_hi: own('cfg-whi'), tempo_max: own('cfg-tempo')}));
+      const f = W.fit || {}; if (!f.note) return;
+      if (f.tempo_max !== W.tempo_max) { _cfg.tempo_max = String(f.tempo_max); g('cfg-tempo').value = f.tempo_max; g('cfg-tempo').dataset.own = '1'; }
+      if (f.target_s !== W.target_s) { _cfg.target_s = f.target_s; g('cfg-target-s').value = f.target_s; }
+      toast(f.note); _saveCfg(); _wordsLive();
+    } catch (e) { /* the numbers stay as typed */ }
+  });
   const wr = document.getElementById('cfg-wreset');
   if (wr) wr.onclick = () => { _cfg.words_lo = ''; _cfg.words_hi = ''; _cfg.tempo_max = ''; ['cfg-wlo', 'cfg-whi', 'cfg-tempo'].forEach(id => { const e = document.getElementById(id); if (e) e.dataset.own = ''; }); _saveCfg(); _wordsLive(); };
   _syncCfgLock();
