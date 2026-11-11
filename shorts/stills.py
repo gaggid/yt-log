@@ -10,7 +10,7 @@ from story2 import providers
 from story3 import scenes
 from story3.voice import MediaError
 
-from . import cast, looks, pipelines as P, subjects
+from . import cast, lint, looks, pipelines as P, subjects
 
 SIZE = "720x1280"                         # 9:16, multiples of 16, well inside the image model's pixel budget; cropped to the video size when it is animated
 DEFAULT_MODEL = providers.DEFAULT_MODEL
@@ -83,10 +83,15 @@ def looks_line(short: dict, shot: dict, character: str) -> tuple[str, str]:
     still_lower = (shot.get("still") or shot.get("prompt") or "").lower()
     listed = {s["name"] for s in subs}
     _ARTICLES = {"the", "a", "an"}
+    checked = lint.enabled(short)                      # the storyboard check: a plan subject is added only when the picture text names it (its whole name, or a word only that subject has)
     for ps in (short.get("plan") or {}).get("subjects") or []:
         name = ps.get("name", "")
         if not name or name in listed:
             continue
+        if checked:
+            if lint.mentioned(short, ps, shot.get("still") or shot.get("prompt") or ""):
+                subs = subs + [ps]
+            continue                                   # a short made before the check keeps the old rule below, so its drawn pictures stay valid
         name_lower = name.lower()
         # Skip leading articles so "The Human"→"human", "Ant Army"→"ant".
         words = name_lower.split()
@@ -122,9 +127,14 @@ def prompt(short: dict, shot: dict) -> str:
     # Tell Qwen exactly what fills the scene so it does not invent extra animals or figures.
     # Positive wording only — Qwen ignores "no x" but follows exhaustive "contains only".
     all_subs = subjects.in_shot(short, shot)
-    subject_names = [s["name"] for s in all_subs if s.get("kind") != "place"]
-    if character:
-        subject_names = [character.split(":")[0].strip()] + [n for n in subject_names if n.lower() not in character.lower()]
+    if lint.enabled(short):                            # the storyboard check: the main character is said once (a short made before it keeps the old list, so its pictures stay valid)
+        subject_names = [s["name"] for s in all_subs if s.get("kind") != "place" and not (character and _same(character, s["visual"]))]
+        if character:
+            subject_names = [character.split(":")[0].strip() if ":" in character else "the main character"] + subject_names
+    else:
+        subject_names = [s["name"] for s in all_subs if s.get("kind") != "place"]
+        if character:
+            subject_names = [character.split(":")[0].strip()] + [n for n in subject_names if n.lower() not in character.lower()]
     place_names = [s["name"] for s in all_subs if s.get("kind") == "place"]
     all_visible = subject_names + place_names
     if all_visible:

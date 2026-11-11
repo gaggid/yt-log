@@ -10,6 +10,14 @@ import config  # noqa: E402
 from story import db, settings as settings_mod  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def isolated_database(tmp_path, monkeypatch):
+    """No test may touch the owner's live database or data folder. A test that does not ask for `env` used to create its shorts ("Audit", "The wallet", "Remix") in the live
+    data/story.db, where they showed up on the Shorts screen. Every test now starts on its own empty database in its own temporary folder."""
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    db.init(tmp_path / "isolated.db")
+
+
 @pytest.fixture
 def env(tmp_path, monkeypatch):
     """Fresh data dir + DB per test; fast retries."""

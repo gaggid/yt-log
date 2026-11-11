@@ -9,7 +9,7 @@ from story import llm, settings as settings_mod
 from story.schemas import Str, StrList
 from story2.schemas import M
 
-from . import cast, subjects as subj
+from . import cast, lint, subjects as subj
 
 MIN_WORDS, MAX_WORDS = 15, 70
 VAGUE = re.compile(r"\b(many|several|multiple|numerous|dozens?|hundreds?|thousands?|crowds?|crowded|group of|groups of|swarm|army of|lots of|a number of|some|few|bunch(?:es)? of|handful)\b", re.I)
@@ -38,7 +38,7 @@ You write the PICTURE PROMPT of each shot of a vertical video short, for Qwen Im
 Return ONLY a JSON object: {"shots": [{"id": "s1", "still": "...", "must_show": ["...", "..."]}]}  (one entry for each shot to write, same ids, same order)
 
 HOW TO WRITE A "still" (25 to 55 words, plain present-tense sentences, English):
-1. START with the shot size and angle, then the subject: "Low-angle wide shot of three fighter jets ...", "Close-up of one man's face ...". The first words matter most.
+1. START with the shot size, then the subject: "Wide shot of three fighter jets ...", "Close-up of one man's face ...". The first words matter most. Say a camera angle as its own sentence, never as two words in front: "The camera is placed low and looks up at the jets from below." or "The camera is placed high and looks down at the street from above."
 2. THE PICTURE PROVES THE LINE. Read the narration of the beat and the shot idea: show the claim itself (the proof, the object, the moment), not a topic or a mood. If the narration says the missiles hang under the wings, the picture is the missiles under the wings.
 3. EXACT COUNTS in every sentence: "one", "two", "three" ... Never many, several, some, a group, a crowd, a swarm, dozens, formation without a number. Choose the smallest number that tells the story (usually one to three; at most five).
 4. SAY WHERE PARTS ARE, in words an artist could follow: under, above, behind, in front of, at the rear of, at the front of, left of, right of, in the foreground, on the roof of, beneath each wing. For a machine or vehicle name the part and its place ("the exhaust pipe at the rear bumper, the headlights at the front", "one missile on a pylon beneath each wing, the top of the wings bare"). For two people or things say who stands on which side and which way they face.
@@ -46,15 +46,17 @@ HOW TO WRITE A "still" (25 to 55 words, plain present-tense sentences, English):
 6. ONE MOMENT: one action, one expression, at most three subjects in frame, the background in five words or fewer. No second scene, no split screen, no collage.
 7. ONLY POSITIVE WORDS: never no, not, without, never, instead of, nothing. State what is there instead ("the top of the wings bare" not "no missiles on top").
 8. DO NOT REPEAT what code adds: the looks of the people and the named subjects (their faces, hair, clothes, markings), the place's colours, the style, the lighting mood and the "no text" rule. A CAST member is drawn from reference pictures: call them by their cast name and say only what they do, where they stand and which way they face; never describe their face, hair, skin or clothes, and with two cast members say who is on the left and who on the right. Refer to a subject by its short name ("the man", "the Ghostly Woman", "the J-20") and say only what it DOES and WHERE. A person who is not a listed subject is described by role and age only.
-9. NO text, signs, screens with words or numbers to read; show a screen only as a glow or a shape.
+9. NO readable text of any kind in the picture: no words, letters, numbers, labels, logos, signs with writing, prices or amounts. A screen is a soft glow or colour shapes, a banknote is plain coloured paper, a sign or board is blank. Never ask a screen to show a number or a message. The video model cannot handle text.
 10. Each shot differs from the shots next to it in subject, place or framing.
-11. LIGHT BY DEFAULT: set every shot in bright daylight or a bright, well-lit room with a real, recognisable background. Go dark (night, dim room, deep shadow) only when the beat's feeling is fear, dread, threat or grief, or its narration says night or darkness. Never a black void, empty dark space or cosmic background.
+11. A GROUP ("a family", "a team", "friends") always says exactly how many people it has and where each one is: "a family of three people: a man on the left, a woman in the middle, a child on the right".
+12. LIGHT BY DEFAULT: set every shot in bright daylight or a bright, well-lit room with a real, recognisable background. Go dark (night, dim room, deep shadow) only when the beat's feeling is fear, dread, threat or grief, or its narration says night or darkness. Never a black void, empty dark space or cosmic background.
 
 TEST every prompt before you answer: read it as the image model would, one word at a time. Could a different picture also fit the words (a count left open, a part with no place, a left-right left open)? Then fix the prompt. Also check it against the narration: does a viewer hearing the line see its proof?
 "must_show": 2 to 4 short facts the finished picture must satisfy, each checkable at a glance ("exactly 3 jets", "missiles under the wings", "exhaust at the back of the car"). Written positively."""
 
 
-def problems(item: StillOut) -> list[str]:
+def problems(item: StillOut, strict: bool = False) -> list[str]:
+    """What is wrong with one picture prompt. `strict` (the storyboard check is on) also sends back text in the picture and a group with no exact head count."""
     out: list[str] = []
     t = item.still
     n = len(t.split())
@@ -69,6 +71,13 @@ def problems(item: StillOut) -> list[str]:
         out.append(f"{item.id}: \"{big.group(0)}\" is too many to draw (the image model cannot count above five): show at most five and let the picture suggest the rest")
     if re.search(r"\bsplit screen|collage|diptych|side by side\b", t, re.I):
         out.append(f"{item.id}: one picture only, no split screen or collage")
+    if strict:
+        m = lint.NO_TEXT.search(t) or next((x for x in (lint.NO_TEXT.search(f) for f in item.must_show) if x), None)
+        if m:
+            out.append(f"{item.id}: \"{m.group(0)}\" asks for text or a number in the picture (the video model cannot handle text): show a screen as a soft glow, a banknote as plain coloured paper, a sign as a blank board")
+        g = lint.GROUP_NOUN.search(t)
+        if g and not lint.COUNT_OK.search(t):
+            out.append(f"{item.id}: \"{g.group(0)}\" has no exact head count: say how many people it has and where each one stands")
     return out
 
 
@@ -114,13 +123,14 @@ async def write_beat(short: dict, beat: dict, shots: list[dict], backend, s: dic
         return 0
     caller = llm.JsonCaller(backend, s)
     ids = [sh["id"] for sh in todo]
+    strict = lint.enabled(short)
 
     def check(out: StillsOut) -> None:
         if caller.last_attempt:
             return
         if [x.id for x in out.shots] != ids:
             raise ValueError("write exactly these shots, in this order: " + ", ".join(ids))
-        bad = [p for x in out.shots for p in problems(x)]
+        bad = [p for x in out.shots for p in problems(x, strict)]
         if bad:
             raise ValueError("; ".join(bad[:5]))
 
@@ -137,6 +147,8 @@ async def write_beat(short: dict, beat: dict, shots: list[dict], backend, s: dic
             sh["still"] = re.sub(r"\s+", " ", x.still).strip()
             sh["must_show"] = [m.strip() for m in x.must_show if m.strip()][:4]
             sh["still_by"] = "writer"
+            if strict:
+                lint.tidy_shot(short, sh)                              # the angle as a sentence, no stray props, the setting that agrees with the picture
             n += 1
     return n
 

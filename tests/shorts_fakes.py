@@ -147,10 +147,11 @@ class VideoGateway:
 class FakeChat:
     """Answers [TASK:p4_plan] with five beats of Hinglish and [TASK:p4_shots] with exactly the number of shots asked for."""
 
-    def __init__(self, narration=None, extra_shots=0, plan_extra=None, shot_extra=None, no_director=False, room=False, scores=(9,), punch_words=None, long=0, stills=False, still_text=None, moves=False, move_text=None):
+    def __init__(self, narration=None, extra_shots=0, plan_extra=None, shot_extra=None, no_director=False, room=False, scores=(9,), punch_words=None, long=0, stills=False, still_text=None, moves=False, move_text=None, review=False, review_overrides=None):
         self.calls, self.narration, self.extra_shots, self.plan_extra, self.shot_extra = [], narration or HINDI, extra_shots, plan_extra or {}, shot_extra or {}
         self.no_director = no_director
         self.moves, self.move_text = moves, move_text                                       # moves: answers the motion writer (otherwise it fails and the shots keep the planner's prompt)
+        self.review, self.review_overrides = review, review_overrides or {}                    # review: answers the picture review (otherwise it fails and the pictures are simply not reviewed); overrides: shot id -> fields
         self.stills, self.still_text = stills, still_text                                    # stills: answers the picture writer (otherwise it fails and the shots keep the planner's stills)
         self.room, self.scores, self.punch_words = room, list(scores), punch_words          # room: answers the writers' room tasks; otherwise they fail and the planner uses the one-call plan
         self.script: dict[str, list[dict]] = {}
@@ -169,6 +170,9 @@ class FakeChat:
         if task == "p4_move" and not self.moves:
             from story.llm import LLMError
             raise LLMError("the motion writer is off in this test")
+        if task == "p4_review" and not self.review:
+            from story.llm import LLMError
+            raise LLMError("the picture review is off in this test")
         if task == "p4_still" and not self.stills:
             from story.llm import LLMError
             raise LLMError("the picture writer is off in this test")
@@ -193,6 +197,10 @@ class FakeChat:
         elif task == "p4_move":
             ids = re.search(r"Write the motion of: ([^.]+)\.", messages[1]["content"]).group(1).split(", ")
             body = {"shots": [{"id": i, "move": self.move_text or f"The courier lifts the wallet toward his chest in shot {i}. The camera {CAMERAS[int(re.sub(r'[^0-9]', '', i) or 0) % len(CAMERAS)]}."} for i in ids]}
+        elif task == "p4_review":
+            ids = [x.strip() for x in re.search(r"left to right and top row first: (.+)", messages[1]["content"]).group(1).split(",")]
+            body = {"shots": [{"id": i, "place": "street", "setting_type": "outdoor", "people_count": 1, "objects": ["wallet"], "readable_text": "none", "style": "painted", "background": "a wet road at night",
+                               "shot_size": "close-up", "arrangement": "one man in the centre", "face_visible": True, "read": n % 3, "pull": (n + 1) % 3, **self.review_overrides.get(i, {})} for n, i in enumerate(ids)]}
         elif task == "p4_still":
             ids = re.search(r"Write the pictures of: ([^.]+)\.", messages[1]["content"]).group(1).split(", ")
             body = {"shots": [{"id": i, "still": self.still_text or f"Close-up of one courier holding one wallet beside a rusty bus stop, picture {i}, a single streetlight behind him.", "must_show": ["exactly 1 courier", "wallet in his hand"]} for i in ids]}

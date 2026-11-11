@@ -157,7 +157,7 @@ def _people_rules(short: dict) -> tuple[str, str]:
     if short["source"].get("kind") == "story":
         return ("The facts are real: put every person the facts name in the cast with exactly that name and role, and never invent a person, a name or a nickname.",
                 "Default to third. A real person is never made to say words the facts do not give; quote only what the facts quote.")
-    fmt = (short.get("plan") or {}).get("format") or short["settings"].get("format", "auto")
+    fmt = (short.get("plan") or {}).get("format") or (short.get("settings") or {}).get("format", "auto")
     if fmt in ("documentary", "comparison"):
         return ("The subjects are real entities (countries, armies, organisations, people). The cast name of each entity must be exactly the name stated in the brief — never give a real country, army, organisation or person a dramatic nickname, codename or alias.",
                 "Default to third. The narrator observes and compares; never put words in a real entity's mouth.")
@@ -188,7 +188,7 @@ def seconds_to_words(seconds: float, t_s: float, speed: float = 1.0, short: dict
     """Words for `seconds` of speech: the share of the whole short's asked words that these seconds are."""
     from . import planner
     b = planner.word_limits(t_s, speed, short)[3]
-    return max(3, round(seconds * b / max(1.0, t_s)))                        # aim at the asked top: drama needs the room, and the accepted top is left for a beat that runs over
+    return max(3, int(seconds * b / max(1.0, t_s) + 1e-9))                   # aim at the asked top (rounded down, so the beats together never ask for more than it): drama needs the room, and the accepted top is left for a beat that runs over
 
 
 def beat_count(t_s: float) -> tuple[int, int]:

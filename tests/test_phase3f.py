@@ -9,7 +9,7 @@ from PIL import Image, ImageDraw
 
 from story import db
 from story2 import editorial, imgplan, planner, storyboard
-from story3 import refs, refscore, store, voice
+from story3 import refs, refscore, scenes, store, voice
 from test_phase2b import boarded
 from test_phase3e import exported
 
@@ -189,6 +189,7 @@ def test_unreachable_server_stops_with_a_clear_reason(env, monkeypatch, fast):
 
 def test_approving_writes_the_asset_and_switches_later_scenes_to_edit_mode(env, monkeypatch, fast):
     plan_id = planned(env)
+    scenes.set_settings(plan_id, {"mode": "auto"})                                                # edit mode is opt-in: the default draws from the text only
     run(plan_id, Gateway(), monkeypatch, candidates=1)
     row = refs.state(plan_id)["assets"][0]
     cand = row["candidates"][0]
@@ -347,6 +348,7 @@ def test_new_pictures_are_scored_after_drawing_and_the_best_is_marked(env, monke
 
 def test_bulk_approve_takes_the_best_of_each_and_leaves_problems_for_a_person(env, monkeypatch, fast):
     plan_id = planned(env)
+    scenes.set_settings(plan_id, {"mode": "auto"})
     n = len(refs.targets(plan_id))
     looks = [{"text_visible": True, "defects": ["a caption"]}] * 2 + [{}, {"defects": ["a fold looks odd"]}] * (n - 1)    # the first item has text on both pictures
     run(plan_id, Gateway(looks=looks), monkeypatch, candidates=2)

@@ -83,7 +83,7 @@ class ChatBackend:
     async def complete(self, messages: list[dict], max_tokens: int, params: dict | None = None) -> LLMResult:
         payload = {**model_field(self.s), "messages": messages, "max_tokens": max_tokens,
                    "temperature": self.s["temperature"], "stream": False, **(params or {})}
-        if self.s.get("json_mode") == "on":
+        if self.s.get("json_mode") == "on" and "response_format" not in payload:
             payload["response_format"] = {"type": "json_object"}
         tries = max(1, int(self.s["transport_retries"]))
         err: Exception | None = None
@@ -186,8 +186,9 @@ class JsonCaller:
         self.last_attempt = False
         self.sampling: dict = {}                      # the fields sent with the last call (for tests and logs)
 
-    async def call(self, system: str, user: str, model_cls: type[BaseModel], validate=None, images: list[str] | None = None) -> CallResult:
-        """`images` are data URLs the vision model looks at together with `user` (each is counted as IMAGE_TOKENS of the context)."""
+    async def call(self, system: str, user: str, model_cls: type[BaseModel], validate=None, images: list[str] | None = None, response_format: dict | None = None) -> CallResult:
+        """`images` are data URLs the vision model looks at together with `user` (each is counted as IMAGE_TOKENS of the context). `response_format` is sent to the gateway as it is
+        (for example a strict `json_schema`: the reply is then always valid JSON of that shape)."""
         est = self.budget.est
         content = [{"type": "text", "text": user}] + [{"type": "image_url", "image_url": {"url": u}} for u in images] if images else user
         base = [{"role": "system", "content": system}, {"role": "user", "content": content}]
@@ -195,7 +196,8 @@ class JsonCaller:
         messages = list(base)
         m = _TASK_RE.match(system)
         self.sampling = settings_mod.sampling(m.group(1), self.s) if m else {}
-        extra = {"params": self.sampling} if self.sampling and _takes_params(self.backend) else {}      # test doubles that do not take params are called as before
+        fields = {**self.sampling, **({"response_format": response_format} if response_format else {})}
+        extra = {"params": fields} if fields and _takes_params(self.backend) else {}      # test doubles that do not take params are called as before
         raws: list[dict] = []
         tin = tout = 0
         t0 = time.time()

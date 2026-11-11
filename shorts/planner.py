@@ -9,7 +9,7 @@ from story2.schemas import M
 from story3 import music
 
 from . import voice as svoice
-from . import cast, formats, languages, looks, models, motionwriter, script as scriptmod, shotlist, stillwriter, tones, prompts as P, store, subjects as subj, timeline
+from . import cast, formats, languages, lint, looks, models, motionwriter, script as scriptmod, shotlist, stillwriter, tones, prompts as P, store, subjects as subj, timeline
 
 WORDS_LO, WORDS_HI = 64, 104             # spoken words in the whole short (the prompt asks for 85 to 100; this is what is accepted). The voice speeds up to x1.45 to land on 30 s
 REC_LO, REC_HI = 85, 100                 # what the prompt asks for at the full 30 seconds
@@ -338,6 +338,7 @@ async def make_plan(short_id: str, backend, s: dict | None = None, progress=None
         for b in beats:
             b["sentences"] = []
     short["shots"] = all_shots
+    await lint.apply_to(short, backend, s, protect=False)                   # the storyboard check (shorts/lint.py): contradictions in the picture prompts, before any picture is drawn
     short["status"] = "planned"
     short["keyframes_confirmed"] = False
     refit(short)

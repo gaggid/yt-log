@@ -337,7 +337,7 @@ def client(tmp_path, monkeypatch):
     from shorts import api as shorts_api
     g = VideoGateway(tmp_path).install(monkeypatch)
     monkeypatch.setattr(voice3, "_speak_all", fake_speak_all)
-    chat = FakeChat()
+    chat = FakeChat(review=True)
     monkeypatch.setattr(shorts_api, "_backend", lambda: ({**settings_mod.get(), "retry_backoff_s": 0}, chat))
 
     async def models_stub(base, key):
@@ -394,6 +394,7 @@ def test_api_auto_run_stops_at_the_keyframe_checkpoint(client):
     assert j["state"] == "done" and "Look at the start pictures" in j["note"], j
     st = client.get(f"/api/shorts/{sid}").json()
     assert st["auto"]["next"] == "review" and all(s["keyframe"] for s in st["shots"])
+    assert st["review"]["current"] is True and "picture review" in j["note"], "the pictures were reviewed before the person was asked to look"
     assert not any(r["model"] == models.I2V for r in client.gw.requests), "nothing is animated before the keyframes are confirmed"
     assert client.post(f"/api/shorts/{sid}/keyframes/confirm").json()["keyframes_confirmed"] is True
     assert st["voice"]["have"] == 5
@@ -679,7 +680,7 @@ def test_variety_check_flags_one_subject_everywhere_and_the_same_picture_twice(g
     probs = shotlist.problems(short)
     assert any(p["code"] == "similar_shots" and {a["id"], b["id"]} <= set(p["shots"]) for p in probs)
     warn = [i for i in checks.run(short)["issues"] if i["code"] in ("one_subject", "similar_shots")]
-    assert warn and all(i["level"] == "warn" and i["fix"] == "reshoot_all" for i in warn)
+    assert warn and all(i["level"] == "warn" and i["fix"] == ("fix_similar" if i["code"] == "similar_shots" else "reshoot_all") for i in warn)
 
 
 def test_api_rethink_endpoint_runs_the_job(client):
@@ -875,7 +876,7 @@ def test_the_picture_writer_sends_back_vague_counts_negatives_and_filler():
     good = stillwriter.StillOut(id="s1", still="Low-angle wide shot of three fighter jets flying left to right over a ridge, one missile on a pylon beneath each wing, the top of the wings bare")
     assert stillwriter.problems(good) == []
     chat = FakeChat(stills=True, still_text=bad.still)
-    run(planner.make_plan(new_short()["id"], chat, {**S, "retries": 1}))
+    run(planner.make_plan(new_short(storyboard_lint=False)["id"], chat, {**S, "retries": 1}))        # the storyboard check adds its own single rewrite (tests/test_lint.py)
     assert chat.count("p4_still") == 2 * 5, "each beat is sent back once, then the last attempt is accepted"
 
 

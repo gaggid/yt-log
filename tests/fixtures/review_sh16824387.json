@@ -1,0 +1,722 @@
+{
+ "note": "The shots of sh-16824387 as the storyboard check leaves them are NOT used here: these are the shots as stored on 11 Nov 2026 (before the check), with the descriptions the vision model really gave of the 17 drawn pictures, blind, with a strict JSON schema (docs/RUN_LOG.md).",
+ "plan": {
+  "place": "A modern, bright Indian living room with warm wooden furniture and soft daylight.",
+  "look": "Painterly video-game concept art illustration, detailed semi-realistic characters, soft bright cinematic lighting, rich atmospheric depth, visible brush texture, in the manner of story-driven AAA game key art. Hand-painted, not a photograph and not a 3D render. Lit bright and clear in high-key daylight with a light, airy colour palette, unless the scene is set at night.",
+  "subjects": [
+   {
+    "name": "Middle-class Indian family",
+    "kind": "group",
+    "visual": "A young Indian couple in their 30s, dressed in casual cotton clothes, sitting on a sofa in a cozy, sunlit living room, looking at a mobile screen."
+   },
+   {
+    "name": "Smartphone",
+    "kind": "product",
+    "visual": "A sleek, modern premium smartphone with a vibrant glowing screen, held in a hand, showcasing a high-resolution wallpaper."
+   },
+   {
+    "name": "Treadmill",
+    "kind": "machine",
+    "visual": "A modern electronic treadmill in a bright room, with a person running steadily on it while the background remains static."
+   },
+   {
+    "name": "Indian Rupees",
+    "kind": "object",
+    "visual": "A large pile of 500 and 2000 Rupee notes and shiny gold coins scattered on a polished wooden table."
+   },
+   {
+    "name": "Wealthy Indian man",
+    "kind": "person",
+    "visual": "A man in his 40s wearing a rich silk kurta and a gold watch, sitting in a plush chair, looking satisfied."
+   },
+   {
+    "name": "Poor Indian man",
+    "kind": "person",
+    "visual": "A man in his 40s wearing a simple, slightly worn cotton shirt, smiling warmly while holding a piece of bread."
+   },
+   {
+    "name": "Young Indian office worker",
+    "kind": "people at work",
+    "visual": "A woman in her late 20s wearing a crisp white formal shirt, sitting at a wooden desk with a notebook."
+   },
+   {
+    "name": "Indian street market",
+    "kind": "place",
+    "visual": "A vibrant, crowded Indian market with colorful cloth stalls and people moving in different directions."
+   },
+   {
+    "name": "Luxury car key",
+    "kind": "object",
+    "visual": "A shiny silver car key with a leather fob resting on a marble countertop next to a simple clay cup."
+   },
+   {
+    "name": "Pair of shoes",
+    "kind": "object",
+    "visual": "A pair of worn-out brown leather sandals placed next to a pair of brand-new, polished white sneakers."
+   }
+  ]
+ },
+ "shots": [
+  {
+   "id": "s1",
+   "beat": "b1",
+   "prompt": "A hand holds a sleek, modern premium smartphone with a vibrant glowing screen showing a high bank balance, in a modern Indian living room during the day, soft daylight, neutral mood.",
+   "still": "Close-up of one hand holding one premium smartphone in the center. The screen of the smartphone displays a large number for a bank balance. One person's face is visible behind the smartphone, looking neutral.",
+   "must_show": [
+    "one hand holding one smartphone",
+    "large number on the screen",
+    "one face in the background"
+   ],
+   "setting": "",
+   "subjects": [
+    "Smartphone"
+   ],
+   "seconds": 1.7,
+   "camera": "close-up",
+   "move": "The hand tilts the smartphone forward. The camera pushes in toward the screen.",
+   "character": false,
+   "cast": []
+  },
+  {
+   "id": "s2",
+   "beat": "b1",
+   "prompt": "A middle-class Indian family sits on a sofa, looking at a smartphone with a mix of joy and confusion, in a modern Indian living room during the day, soft daylight, surprised mood.",
+   "still": "Wide shot of one middle-class Indian family of three people sitting on one sofa in a bright living room. One person holds one smartphone in the center. The three people look at the smartphone with joy and confusion.",
+   "must_show": [
+    "three people on one sofa",
+    "one smartphone in the center",
+    "joy and confusion expressions"
+   ],
+   "setting": "",
+   "subjects": [
+    "Middle-class Indian family (group)"
+   ],
+   "seconds": 1.7,
+   "camera": "wide",
+   "move": "The three people lean forward toward the smartphone. The camera pans slowly across the family.",
+   "character": false,
+   "cast": []
+  },
+  {
+   "id": "s3",
+   "beat": "b2",
+   "prompt": "A bustling Indian street market filled with colorful cloth stalls and vibrant goods. People walk through the wide aisles during a sunny day. The light is bright and warm, capturing a sense of abundance and variety. The mood is lively and energetic.",
+   "still": "Wide shot of one Indian street market. One stall on the left displays colorful cloth. One stall on the right displays fruit. One person walks in the center. One person walks on the left. One person walks on the right. One row of buildings is in the background.",
+   "must_show": [
+    "one Indian street market",
+    "colorful cloth on the left stall",
+    "fruit on the right stall",
+    "three people walking"
+   ],
+   "setting": "Indian street market",
+   "subjects": [
+    "Indian street market"
+   ],
+   "seconds": 2.033,
+   "camera": "slow push in",
+   "move": "The three people walk forward through the market. The camera pushes in toward the center of the market.",
+   "character": false,
+   "cast": []
+  },
+  {
+   "id": "s4",
+   "beat": "b2",
+   "prompt": "A shiny silver car key with a leather fob rests on a polished marble countertop. The light catches the metallic surface during a bright day, creating a sophisticated and calm mood as the key sits still.",
+   "still": "Close-up of one luxury car key with one leather fob. The key sits on one marble countertop. One simple clay cup is to the right of the key.",
+   "must_show": [
+    "one luxury car key",
+    "one leather fob",
+    "one marble countertop",
+    "one clay cup to the right of the key"
+   ],
+   "setting": "marble countertop",
+   "subjects": [
+    "Luxury car key"
+   ],
+   "seconds": 2.067,
+   "camera": "static",
+   "move": "The leather fob on the key shifts forward. The camera stays still.",
+   "character": false,
+   "cast": []
+  },
+  {
+   "id": "s5",
+   "beat": "b2",
+   "prompt": "A pair of worn-out brown leather sandals sits next to a pair of brand-new, polished white sneakers on a wooden floor. The light is soft and clear, creating a contemplative mood of evolution from basic to luxury.",
+   "still": "Low-angle close-up of one pair of worn-out brown leather sandals. One pair of brand-new, polished white sneakers is to the right of the sandals. They sit on one wooden floor.",
+   "must_show": [
+    "one pair of brown sandals",
+    "one pair of white sneakers",
+    "sneakers to the right of the sandals"
+   ],
+   "setting": "wooden floor",
+   "subjects": [
+    "Pair of shoes"
+   ],
+   "seconds": 2.033,
+   "camera": "low angle",
+   "move": "The sneakers shift forward. The camera rises slowly from the sandals toward the sneakers.",
+   "character": false,
+   "cast": []
+  },
+  {
+   "id": "s6",
+   "beat": "b3",
+   "prompt": "A sleek, modern premium smartphone is pulled out of a minimalist cardboard box, revealing its vibrant glowing screen. The scene is set in a bright living room during the day with soft cinematic light, capturing a mood of immediate joy and excitement.",
+   "still": "Close-up of one hand holding one smartphone. The smartphone is partially out of one cardboard box. One finger touches the glowing screen. The background is one wooden table.",
+   "must_show": [
+    "one smartphone",
+    "one cardboard box",
+    "one finger touching the screen"
+   ],
+   "setting": "",
+   "subjects": [
+    "Smartphone"
+   ],
+   "seconds": 2.233,
+   "camera": "static",
+   "move": "The hand pulls the smartphone out of the cardboard box while the finger presses the glowing screen. The camera pushes in toward the screen.",
+   "character": false,
+   "cast": []
+  },
+  {
+   "id": "s7",
+   "beat": "b3",
+   "prompt": "A person runs steadily on a modern electronic treadmill in a bright room, while the background remains perfectly still. The high-key daylight creates a clear, airy atmosphere, emphasizing the sarcastic mood of constant motion without progress.",
+   "still": "Wide shot of one person running on one treadmill. The treadmill is in the center of the bright living room. One wooden sofa is in the background.",
+   "must_show": [
+    "one person running",
+    "one treadmill",
+    "one wooden sofa in the background"
+   ],
+   "setting": "",
+   "subjects": [
+    "Treadmill"
+   ],
+   "seconds": 2.233,
+   "camera": "static",
+   "move": "The person runs steadily on the treadmill. The camera pans slowly across the room from left to right.",
+   "character": false,
+   "cast": []
+  },
+  {
+   "id": "s8",
+   "beat": "b3",
+   "prompt": "A young Indian office worker sits at a wooden desk and looks up at a large wall clock. The scene takes place in a sunlit room during the day with soft light, conveying a mood of a repetitive daily cycle.",
+   "still": "Wide shot of one young Indian office worker sitting at one wooden desk. The worker faces forward. One round wall clock is on the wall in front of the worker. One notebook is on the desk.",
+   "must_show": [
+    "one young Indian office worker",
+    "one wooden desk",
+    "one round wall clock"
+   ],
+   "setting": "",
+   "subjects": [
+    "Young Indian office worker"
+   ],
+   "seconds": 2.2,
+   "camera": "slow push in",
+   "move": "The worker lifts their head to look at the wall clock. The camera pushes in toward the worker's face.",
+   "character": false,
+   "cast": []
+  },
+  {
+   "id": "s9",
+   "beat": "b4",
+   "prompt": "A wealthy Indian man in a rich silk kurta reclines in a plush velvet chair, looking satisfied and content. The scene is set in an opulent hall during the day with soft cinematic light, conveying a mood of abundance and luxury.",
+   "still": "Wide shot of one wealthy Indian man reclining in one plush velvet chair. The man sits in the center of the frame. One gold watch is on his left wrist. The man faces forward with a satisfied expression.",
+   "must_show": [
+    "one wealthy Indian man",
+    "one plush velvet chair",
+    "one gold watch on left wrist"
+   ],
+   "setting": "an opulent hall",
+   "subjects": [
+    "Wealthy Indian man"
+   ],
+   "seconds": 2.367,
+   "camera": "static",
+   "move": "The man's chest rises and falls as he breathes. The camera stays still.",
+   "character": false,
+   "cast": []
+  },
+  {
+   "id": "s10",
+   "beat": "b4",
+   "prompt": "A poor Indian man in a simple cotton shirt smiles warmly while holding a single piece of bread in his hands. The scene takes place in a humble cottage during the day with soft light, conveying a mood of simple contentment.",
+   "still": "Low-angle close-up of one poor Indian man. The man holds one piece of bread in both hands in front of his chest. The man faces forward with a warm smile.",
+   "must_show": [
+    "one poor Indian man",
+    "one piece of bread in both hands",
+    "low-angle"
+   ],
+   "setting": "a humble cottage",
+   "subjects": [
+    "Poor Indian man"
+   ],
+   "seconds": 2.333,
+   "camera": "low angle",
+   "move": "The man's hands tighten on the bread. The camera rises from the bread to the man's face.",
+   "character": false,
+   "cast": []
+  },
+  {
+   "id": "s11",
+   "beat": "b4",
+   "prompt": "A middle-class Indian family looks at a large pile of Indian Rupees scattered on a polished wooden table. The scene takes place in a bright living room during the day with soft light, conveying a mood of contemplation and slight confusion.",
+   "still": "Wide shot of one middle-class Indian family standing behind one polished wooden table. The family faces forward. One large pile of Indian Rupees and gold coins is on the table in front of them.",
+   "must_show": [
+    "one middle-class Indian family",
+    "one polished wooden table",
+    "one large pile of Indian Rupees and gold coins"
+   ],
+   "setting": "",
+   "subjects": [
+    "Middle-class Indian family",
+    "Indian Rupees"
+   ],
+   "seconds": 2.333,
+   "camera": "slow push in",
+   "move": "The family members lean forward toward the table. The camera pushes in toward the pile of coins.",
+   "character": false,
+   "cast": []
+  },
+  {
+   "id": "s12",
+   "beat": "b5",
+   "prompt": "The Indian street market displays a vast array of colorful cloth stalls and diverse goods under the bright daylight. The scene captures the overwhelming variety of choices available to a shopper in this bustling space. The mood is vibrant and full of life.",
+   "still": "High-angle wide shot of one Indian street market. Five colorful cloth stalls are arranged in rows. Five people walk between the stalls. Five different goods are displayed on the stalls.",
+   "must_show": [
+    "high angle",
+    "five cloth stalls",
+    "five people walking"
+   ],
+   "setting": "Indian street market",
+   "subjects": [
+    "Indian street market"
+   ],
+   "seconds": 1.6,
+   "camera": "high angle",
+   "move": "The five people walk steadily between the stalls. The camera glides slowly across the market to reveal the variety of goods.",
+   "character": false,
+   "cast": []
+  },
+  {
+   "id": "s13",
+   "beat": "b5",
+   "prompt": "The young Indian office worker closes her eyes and takes a deep breath in the bright living room during the day. The soft daylight illuminates her face as she finds a moment of inner peace. The mood is calm and serene.",
+   "still": "Close-up of one young Indian office worker. The woman has her eyes closed and her head tilted slightly up. One wooden desk is in front of her. One notebook sits on the desk.",
+   "must_show": [
+    "eyes closed",
+    "one wooden desk",
+    "one notebook"
+   ],
+   "setting": "",
+   "subjects": [
+    "Young Indian office worker"
+   ],
+   "seconds": 1.6,
+   "camera": "static",
+   "move": "The woman's chest rises and falls as she breathes. The camera tilts down toward her face.",
+   "character": false,
+   "cast": []
+  },
+  {
+   "id": "s14",
+   "beat": "b6",
+   "prompt": "The wealthy Indian man looks at a large pile of Indian Rupees scattered on a polished wooden table with a pensive, questioning expression during the day. Soft daylight fills the modern living room, creating a thoughtful and reflective mood.",
+   "still": "Wide shot of one wealthy Indian man sitting in one plush chair. One large pile of Indian Rupees sits on one polished wooden table in front of him. The wealthy Indian man looks at the pile of Indian Rupees with one hand on his chin.",
+   "must_show": [
+    "one wealthy Indian man",
+    "one pile of Indian Rupees",
+    "one hand on chin"
+   ],
+   "setting": "",
+   "subjects": [
+    "Wealthy Indian man",
+    "Indian Rupees"
+   ],
+   "seconds": 2.133,
+   "camera": "static",
+   "move": "The wealthy Indian man slowly tilts his head to the side. The camera pushes in steadily toward his face.",
+   "character": false,
+   "cast": []
+  },
+  {
+   "id": "s15",
+   "beat": "b6",
+   "prompt": "A sleek premium smartphone held in a hand displays a simple, beautiful nature wallpaper with a vibrant green forest in the bright Indian living room during the day. The screen glows softly, reflecting a focused and managed mood.",
+   "still": "Close-up of one smartphone held in one hand. The screen of the smartphone shows one green forest with one blue lake. The background is the soft daylight of the living room.",
+   "must_show": [
+    "one smartphone",
+    "one green forest",
+    "one blue lake"
+   ],
+   "setting": "",
+   "subjects": [
+    "Smartphone"
+   ],
+   "seconds": 2.167,
+   "camera": "close-up",
+   "move": "The hand holding the smartphone lifts upward. The camera pans slowly across the screen to show the forest.",
+   "character": false,
+   "cast": []
+  },
+  {
+   "id": "s16",
+   "beat": "b6",
+   "prompt": "The middle-class Indian family holds hands and looks toward the camera with peaceful, content smiles in the sunlit Indian living room during the day. Soft daylight illuminates the scene, creating a serene and happy mood.",
+   "still": "Wide shot of one middle-class Indian family sitting on one sofa in the living room. Two people sit on the left and one person sits on the right. They hold hands and look at the camera with one peaceful smile on each face.",
+   "must_show": [
+    "one middle-class Indian family",
+    "one sofa",
+    "holding hands"
+   ],
+   "setting": "",
+   "subjects": [
+    "Middle-class Indian family"
+   ],
+   "seconds": 2.133,
+   "camera": "wide",
+   "move": "The family members lean toward each other while holding hands. The camera sweeps slowly across the sofa from left to right.",
+   "character": false,
+   "cast": []
+  },
+  {
+   "id": "s17",
+   "beat": "b6",
+   "prompt": "The poor Indian man shows a look of pure contentment while holding a simple piece of bread in his hands in a humble cottage during the day. Soft light highlights his warm smile in a serene and humble mood.",
+   "still": "Close-up of one poor Indian man's face. He holds one piece of bread in two hands. One warm smile is on his face.",
+   "must_show": [
+    "one poor Indian man",
+    "one piece of bread",
+    "one warm smile"
+   ],
+   "setting": "a humble cottage",
+   "subjects": [
+    "Poor Indian man"
+   ],
+   "seconds": 2.133,
+   "camera": "close-up",
+   "move": "The poor Indian man's eyes widen as his smile grows. The camera rises from the bread up to his face.",
+   "character": false,
+   "cast": []
+  }
+ ],
+ "seen": {
+  "s1": {
+   "id": "s1",
+   "place": "living room",
+   "setting_type": "indoor",
+   "people_count": 1,
+   "objects": [
+    "smartphone",
+    "hand",
+    "chair",
+    "table",
+    "plant",
+    "painting",
+    "window",
+    "curtain",
+    "ceiling fan"
+   ],
+   "readable_text": "3, AGIDAHNEVO",
+   "style": "painted",
+   "background": "a room with a window and furniture"
+  },
+  "s2": {
+   "id": "s2",
+   "place": "street market",
+   "setting_type": "outdoor",
+   "people_count": 8,
+   "objects": [
+    "smartphone",
+    "table",
+    "coins",
+    "banknotes",
+    "stalls",
+    "clothes",
+    "buildings"
+   ],
+   "readable_text": "100, 500, 1000",
+   "style": "painted",
+   "background": "a busy market street"
+  },
+  "s3": {
+   "id": "s3",
+   "place": "street market",
+   "setting_type": "outdoor",
+   "people_count": 5,
+   "objects": [
+    "table",
+    "banknotes",
+    "coins",
+    "stalls",
+    "clothes",
+    "buildings",
+    "fruit"
+   ],
+   "readable_text": "100, 500, 1000",
+   "style": "painted",
+   "background": "a market street"
+  },
+  "s4": {
+   "id": "s4",
+   "place": "table",
+   "setting_type": "indoor",
+   "people_count": 0,
+   "objects": [
+    "car key fob",
+    "leather keychain",
+    "cup",
+    "table surface"
+   ],
+   "readable_text": "S1, S2, S3, S4",
+   "style": "painted",
+   "background": "a textured table surface"
+  },
+  "s5": {
+   "id": "s5",
+   "place": "floor",
+   "setting_type": "indoor",
+   "people_count": 0,
+   "objects": [
+    "brown sandals",
+    "white sneakers",
+    "wooden floor"
+   ],
+   "readable_text": "none",
+   "style": "painted",
+   "background": "a wooden floor"
+  },
+  "s6": {
+   "id": "s6",
+   "place": "living room",
+   "setting_type": "indoor",
+   "people_count": 1,
+   "objects": [
+    "smartphone",
+    "hand",
+    "box",
+    "table",
+    "chair",
+    "vase",
+    "candle"
+   ],
+   "readable_text": "none",
+   "style": "painted",
+   "background": "a room with a table and chair"
+  },
+  "s7": {
+   "id": "s7",
+   "place": "living room",
+   "setting_type": "indoor",
+   "people_count": 1,
+   "objects": [
+    "treadmill",
+    "sofa",
+    "pillows",
+    "lamp",
+    "plant",
+    "picture frame",
+    "window",
+    "curtains"
+   ],
+   "readable_text": "none",
+   "style": "painted",
+   "background": "a wall with a picture frame and a window"
+  },
+  "s8": {
+   "id": "s8",
+   "place": "street market",
+   "setting_type": "outdoor",
+   "people_count": 6,
+   "objects": [
+    "table",
+    "notebook",
+    "pen",
+    "coins",
+    "banknotes",
+    "clock",
+    "clothes racks",
+    "stalls"
+   ],
+   "readable_text": "numbers on clock and banknotes",
+   "style": "painted",
+   "background": "a busy market street with stalls and hanging clothes"
+  },
+  "s9": {
+   "id": "s9",
+   "place": "palace",
+   "setting_type": "indoor",
+   "people_count": 1,
+   "objects": [
+    "throne",
+    "table",
+    "coins",
+    "banknotes",
+    "watch"
+   ],
+   "readable_text": "numbers on banknotes",
+   "style": "painted",
+   "background": "a grand archway and pillars"
+  },
+  "s10": {
+   "id": "s10",
+   "place": "none",
+   "setting_type": "none",
+   "people_count": 1,
+   "objects": [
+    "piece of bread",
+    "table",
+    "coins",
+    "banknotes"
+   ],
+   "readable_text": "numbers on banknotes",
+   "style": "painted",
+   "background": "blank white"
+  },
+  "s11": {
+   "id": "s11",
+   "place": "street market",
+   "setting_type": "outdoor",
+   "people_count": 10,
+   "objects": [
+    "table",
+    "coins",
+    "banknotes",
+    "smartphone",
+    "clothes racks",
+    "stalls"
+   ],
+   "readable_text": "numbers on banknotes",
+   "style": "painted",
+   "background": "a busy market street with stalls and hanging clothes"
+  },
+  "s12": {
+   "id": "s12",
+   "place": "street market",
+   "setting_type": "outdoor",
+   "people_count": 8,
+   "objects": [
+    "stalls",
+    "tents",
+    "table",
+    "coins",
+    "banknotes",
+    "boxes",
+    "baskets"
+   ],
+   "readable_text": "numbers on banknotes",
+   "style": "isometric diorama",
+   "background": "blank white"
+  },
+  "s13": {
+   "id": "s13",
+   "place": "street market",
+   "setting_type": "outdoor",
+   "people_count": 1,
+   "objects": [
+    "table",
+    "book",
+    "coins",
+    "paper money",
+    "hanging fabrics",
+    "stalls"
+   ],
+   "readable_text": "2000",
+   "style": "painted",
+   "background": "a bustling market with colorful hanging fabrics"
+  },
+  "s14": {
+   "id": "s14",
+   "place": "street market",
+   "setting_type": "outdoor",
+   "people_count": 1,
+   "objects": [
+    "chair",
+    "table",
+    "coins",
+    "paper money",
+    "hanging fabrics",
+    "stalls"
+   ],
+   "readable_text": "2000",
+   "style": "painted",
+   "background": "a bustling market with colorful hanging fabrics"
+  },
+  "s15": {
+   "id": "s15",
+   "place": "living room",
+   "setting_type": "indoor",
+   "people_count": 1,
+   "objects": [
+    "smartphone",
+    "hand",
+    "picture frame",
+    "shelf"
+   ],
+   "readable_text": "none",
+   "style": "painted",
+   "background": "a room with a shelf and a picture on the wall"
+  },
+  "s16": {
+   "id": "s16",
+   "place": "street market",
+   "setting_type": "outdoor",
+   "people_count": 3,
+   "objects": [
+    "table",
+    "coins",
+    "paper money",
+    "hanging fabrics",
+    "stalls"
+   ],
+   "readable_text": "2000",
+   "style": "painted",
+   "background": "a bustling market with colorful hanging fabrics"
+  },
+  "s17": {
+   "id": "s17",
+   "place": "kitchen",
+   "setting_type": "indoor",
+   "people_count": 1,
+   "objects": [
+    "table",
+    "coins",
+    "paper money",
+    "bread"
+   ],
+   "readable_text": "2000",
+   "style": "painted",
+   "background": "a room with a wall and hanging items"
+  }
+ },
+ "gold": {
+  "extra_object": [
+   "s2",
+   "s3",
+   "s8",
+   "s9",
+   "s10",
+   "s12",
+   "s13",
+   "s16",
+   "s17"
+  ],
+  "wrong_place": [
+   "s2",
+   "s8",
+   "s11",
+   "s13",
+   "s14",
+   "s16"
+  ],
+  "blank_or_style": [
+   "s10",
+   "s12"
+  ],
+  "text": [
+   "s1"
+  ]
+ }
+}

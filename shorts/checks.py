@@ -2,7 +2,7 @@
 app can mend it, which fix applies."""
 import re
 
-from . import avatar, cast, languages, models, motion, pipelines as P, planner, shotlist, store, timeline, voice as svoice
+from . import avatar, cast, languages, lint, models, motion, pipelines as P, planner, shotlist, store, timeline, voice as svoice
 
 TEXT_WORDS = re.compile(r"\b(?:text|writing|written|words?|letters?|caption|subtitles?|sign (?:saying|reading)|reads|newspaper|headline|logo|poster|banner|screen showing)\b", re.I)
 
@@ -78,6 +78,9 @@ def run(short: dict, tolerance_s: float = 0) -> dict:
     for p in shotlist.problems(short):
         fix = "fix_similar" if p["code"] == "similar_shots" else "reshoot_all"
         issues.append(_issue("warn", p["code"], p["text"], fix=fix, shots=p["shots"]))
+    if lint.enabled(short):                                              # the storyboard check (shorts/lint.py): contradictions still in the picture prompts (never a blocker)
+        for f in lint.findings(short):
+            issues.append(_issue("warn", "lint_" + f["rule"], f["text"], fix="lint", shots=[f["shot"]]))
     chars = sum(1 for sh in short["shots"] if sh.get("character"))
     if chars > planner.MAX_CHARACTER_SHOTS:
         issues.append(_issue("warn", "many_character_shots", f"{chars} shots show the main character; the same face over many shots drifts. Four or fewer holds up best"))

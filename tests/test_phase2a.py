@@ -150,7 +150,7 @@ def test_edit_one_segment_leaves_others_and_locked_survive_regeneration(env):
     planner.edit_segment(a["id"], status="approved")
     p = asyncio.run(planner.make_narration(p["id"], be))                                # regenerate everything
     ids = {s["id"] for s in p["segments"]}
-    assert a["id"] in ids and c["id"] in ids and b["id"] not in ids                     # approved and locked kept; the rest replaced
+    assert c["id"] in ids and a["id"] not in ids and b["id"] not in ids                 # a full rewrite replaces approved segments too (4e7bcab); only the locked one is kept
     assert [s["beat"] for s in p["segments"]].count("b1") == 1
 
 

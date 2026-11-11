@@ -33,11 +33,11 @@ def test_the_instruction_asks_for_reel_worthy_realistic_work_styled_for_the_decl
     run(studio.suggest_slots("a reel creator", "person", chat, S, None, DECL))
     system = chat.systems[-1]
     assert "Instagram-reel-worthy" in system and "FIXED BY THE PRODUCER" in system and "ethnicity: Tamil" in system and "gender (male or female): female" in system and "skin tone: wheatish" in system
-    assert "culturally authentic styling for this ethnicity" in system and "No caricature" in system and "Realistic, not fantasy" in system
+    assert "STYLE OF THE PERSON" in system and "2024–2026 urban contemporary" in system and "Everything must suit the fixed facts above" in system and "No caricature" in system
     chat2 = SlotsChat()
     run(studio.suggest_slots("a rooftop", "place", chat2, S, None, {"ethnicity": "Mumbai"}))
     s2 = chat2.systems[-1]
-    assert "real, lived-in, photographable location" in s2 and "ethnicity: Mumbai" in s2 and "No fantasy" in s2
+    assert "STYLE OF THE PLACE" in s2 and "ethnicity: Mumbai" in s2 and "photogenic without being fantasy" in s2
 
 
 def test_a_place_draws_in_its_declared_region(gw):

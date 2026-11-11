@@ -129,7 +129,7 @@ def test_edit_mode_sends_the_reference_sheets_in_order_as_multipart(env, monkeyp
     gw = Gateway()
     run(plan_id, gw, monkeypatch, mode="edit", score=False)
     edits = gw.count("/images/edits")
-    assert edits and all(len(r["files"]) <= 3 and all(f[0] == "image" for f in r["files"]) for r in edits)
+    assert edits and all(len(r["files"]) <= 3 and all(f[0] == "image[]" for f in r["files"]) for r in edits)
     one = edits[0]
     sc = next(s_ for s_ in storyboard.get_scenes(plan_id) if s_["data"]["prompts"]["qwen"]["prompt"] == one["body"]["prompt"])
     want = [r["name"] for r in sc["data"]["prompts"]["qwen"]["references"]]

@@ -5,7 +5,7 @@ Order, quick and keyframe: plan, voice, fit the shots to the voice, [start pictu
 Order, remix: (link, window and the rights boxes are done by hand) voice-over, animate, put together."""
 from story3 import music, store as media
 
-from . import checks, clips, motionwriter, pipelines as P, planner, remix, stitch, store, upscale, voice as svoice
+from . import checks, clips, lint, motionwriter, pipelines as P, planner, remix, review, stitch, store, upscale, voice as svoice
 
 
 def changed_since(short: dict, final: dict) -> bool:
@@ -35,12 +35,16 @@ def steps(short: dict) -> list[dict]:
         add("final", "Put the short together", short.get("status") == "made" and _final_ok(short))
         return out
     add("plan", "Plan the short", short["shots"])
+    if lint.enabled(short) and short["shots"]:
+        add("lint", "Check the storyboard", lint.current(short), optional=True)
     if short.get("settings", {}).get("voice_mode") != "none":
         add("voice", "Make the voice", short["beats"] and not svoice.missing(short))
     tl_ok = bool(short["shots"]) and not [p for p in checks.run(short)["issues"] if p["code"] == "shot_too_long"]
     add("fit", "Fit the shots to the voice", tl_ok and short["beats"] and not svoice.missing(short))
     if P.keyframes_on(short):
         add("keyframes", "Make the start pictures", short["shots"] and all(clips.chosen_keyframe(short, sh) for sh in short["shots"]))
+        if review.enabled(short) and review.ready(short):
+            add("scenes", "Review the pictures", review.current(short), optional=True)
         add("review", "Look at the start pictures", short.get("keyframes_confirmed") or not short["settings"].get("review_keyframes", True), optional=not short["settings"].get("review_keyframes", True))
     if P.keyframes_on(short) and short["shots"] and all(clips.chosen_keyframe(short, sh) for sh in short["shots"]):
         add("motion", "Write the motion from the real pictures", not motionwriter.unseen(short), optional=True)
@@ -82,6 +86,13 @@ async def run(short_id: str, backend, s: dict, progress, key: str = "") -> str:
         await planner.make_plan(short_id, backend, s, sub("plan"))
         did.append("planned")
         short = store.get(short_id)
+    if lint.enabled(short) and not lint.current(short):
+        try:                                                        # the storyboard check: contradictions in the picture prompts; shots whose pictures are already drawn are left alone; it never stops a run
+            rep = await lint.apply(short_id, backend, s, protect=True)
+            did.append(f"storyboard check ({sum(len(v) for v in rep['changed'].values())} changes)")
+        except Exception as e:  # noqa: BLE001
+            did.append(f"storyboard check skipped ({str(e)[:80]})")
+        short = store.get(short_id)
     if short.get("settings", {}).get("voice_mode") != "none" and svoice.missing(short):
         res = await svoice.make(short_id, progress=sub("voice"), s=s, key=key)
         did.append(f"voice ({res['made']} made)")
@@ -105,6 +116,13 @@ async def run(short_id: str, backend, s: dict, progress, key: str = "") -> str:
             did.append(f"start pictures ({res['made']} made)")
             if res["failed"]:
                 return f"Stopped at the start pictures: shot {res['failed'][0]['shot']}: {res['failed'][0]['error']}"
+            short = store.get(short_id)
+        if review.enabled(short) and review.ready(short) and not review.current(short):
+            try:                                                    # the scene review reads the pictures and changes nothing; it never stops a run
+                await review.run(short_id, backend, s)
+                did.append("picture review")
+            except Exception as e:  # noqa: BLE001
+                did.append(f"picture review skipped ({str(e)[:80]})")
             short = store.get(short_id)
         if short["settings"].get("review_keyframes", True) and not short.get("keyframes_confirmed"):
             return "Done so far: " + ", ".join(did or ["nothing new"]) + ". Look at the start pictures, redo or replace any you do not like, press 'Pictures are good', then press Auto-run again."

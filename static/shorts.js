@@ -182,6 +182,8 @@ function sideView() {
       <span class="small mute">${esc(((v.visual_styles || []).find(m => m.id === (st.visual_style || '')) || {}).description || '')} Re-plan to apply to the story; pictures and clips redraw with it.</span></label>
     <div class="mt-s small">${s.images.anchor ? `<img src="/api/shorts/file/${s.id}/${esc(s.images.anchor)}" style="width:70px;border-radius:6px;vertical-align:middle"> <button class="small" id="st-anchor">Change</button> <button class="small bad" id="st-anchor-x">Remove</button>` : `<button class="small" id="st-anchor">Upload the main character's picture</button>`}</div>
     <label class="f mt-s">Describe that character in a line (used in the shots that show them)<textarea id="st-char" style="min-height:48px">${esc(st.character_text || '')}</textarea></label>
+    <label class="row mt-s"><input type="checkbox" id="st-lint" ${st.storyboard_lint ? 'checked' : ''}> Storyboard check: remove things nobody asked for, make the place agree, fix camera angles, text and group counts in the picture prompts</label>
+    <label class="row mt-s"><input type="checkbox" id="st-scenes" ${st.scene_review ? 'checked' : ''}> Scene review: after the pictures are drawn, a model describes each one and code scores it (nothing is changed)</label>
     <label class="f mt-s">Format<select id="st-format">${[['auto', 'Detect from the story (recommended)'], ['story', 'Story: dramatised, follows a person'], ['documentary', 'Documentary: real subjects, narrator'], ['explainer', 'Explainer: facts and numbers'], ['comparison', 'Comparison: sides against each other']].map(([k, t]) => `<option value="${k}" ${(st.format || 'auto') === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
       <span class="small mute">Only the next plan uses it.${(s.plan || {}).format ? ` This plan is a <b>${esc(s.plan.format)}</b>.` : ''}</span></label>
     <label class="f mt-s">Tone (optional)<input id="st-tone" value="${esc(st.tone || '')}" placeholder="funny, tense, warm..."></label>`}
@@ -265,7 +267,7 @@ function planView() {
       <label class="f mt-s">The look (added to every shot)<input data-plan="look" value="${esc(p.look || '')}"></label>
       <label class="f mt-s">The subjects${p.format ? ` (${esc(p.format)})` : ''}: who and what the story is about, one per line as Name: how it looks<textarea data-plan="subjects" style="min-height:90px" placeholder="Chinese J-20 stealth fighter: twin-engine, dark grey, canards, red and yellow star roundel">${esc((p.subjects || []).map(x => x.name + ': ' + x.visual).join('\n'))}</textarea></label>
       <div class="row mt-s"><button class="small" id="b-subjects" title="Read the story again and write the subject list. The shots stay as they are; write the shots of a beat again to use it.">Find the subjects</button><span class="mute small">Every shot that shows one gets its look added to the picture prompt.</span></div>` : `<p class="mute">The model writes a hook, four to six beats of Hinglish narration and the shots. It takes a minute or two.</p>`}</div>
-    ${has ? checksView() + voiceView() + (s.keyframes_on ? keyframesView() : '') + beatsView() : ''}`;
+    ${has ? checksView() + lintView() + voiceView() + (s.keyframes_on ? reviewView() + keyframesView() : '') + beatsView() : ''}`;
 }
 
 /* step 1 after the plan: the voice. Start pictures, clips and the final video wait for it, because the shot lengths follow the real voice */
@@ -283,13 +285,61 @@ function checksView() {
   if (!c) return '';
   const fix = c.issues.find(i => i.fix === 'fit_shots');
   const rethink = c.issues.some(i => i.fix === 'reshoot_all');
+  const lintFix = c.issues.some(i => i.fix === 'lint');
   const fixSimilar = c.issues.some(i => i.fix === 'fix_similar');
   const wordBlock = c.issues.some(i => i.code === 'narration' && i.level === 'block' && i.text && i.text.includes('words'));
   const busy = S.job.state === 'running';
   return `<div class="card pad mt"><div class="row"><h2 style="margin:0">Checks</h2>${c.ok ? badge('good', 'ready to make') : badge('problem', c.blockers + ' to fix')}<span class="sp"></span>
-    ${fix ? `<button id="b-fit" class="small">Write the shots again to fit</button>` : ''}${rethink ? `<button id="b-rethink" class="small">Plan all the pictures again</button>` : ''}${fixSimilar ? `<button id="b-fix-similar" class="small" ${busy ? 'disabled' : ''}>Fix similar pictures</button>` : ''}${wordBlock ? `<button id="b-trim" class="small" ${busy ? 'disabled' : ''} title="Rewrites the longest beat(s) to bring the word count within budget — no full replan needed">Trim narration</button>` : ''}${c.issues.some(i => i.fix === 'make_voice') ? `<button id="b-voice-chk" class="small primary" ${busy ? 'disabled' : ''}>Make the voice</button>` : ''}</div>
+    ${fix ? `<button id="b-fit" class="small">Write the shots again to fit</button>` : ''}${lintFix ? `<button id="b-lint-fix" class="small" title="Fix the contradictions in the picture prompts. Shots that already have a picture are drawn again.">Fix the picture prompts</button>` : ''}${rethink ? `<button id="b-rethink" class="small">Plan all the pictures again</button>` : ''}${fixSimilar ? `<button id="b-fix-similar" class="small" ${busy ? 'disabled' : ''}>Fix similar pictures</button>` : ''}${wordBlock ? `<button id="b-trim" class="small" ${busy ? 'disabled' : ''} title="Rewrites the longest beat(s) to bring the word count within budget — no full replan needed">Trim narration</button>` : ''}${c.issues.some(i => i.fix === 'make_voice') ? `<button id="b-voice-chk" class="small primary" ${busy ? 'disabled' : ''}>Make the voice</button>` : ''}</div>
     ${c.issues.length ? c.issues.map(i => `<div class="${i.level === 'block' ? 'errbox' : 'warnbox'}">${esc(i.text)}</div>`).join('') : '<div class="mute small mt-s">Every shot is under three seconds, the short is ${S.settings.target_s || 30} seconds, and the words pass.</div>'}
     ${S.timeline ? `<div class="mute small mt-s">${S.timeline.estimated ? 'Timing is an estimate until the voice is made.' : 'Timing follows the real voice.'} ${S.timeline.shots.length} shots, ${S.timeline.total_s}s, voice speed x${S.timeline.tempo}.</div>` : ''}</div>`;
+}
+
+/* the storyboard check (shorts/lint.py): contradictions in the picture prompts, found and fixed before pictures are drawn */
+function lintView() {
+  const L = S.lint;
+  if (!L) return '';
+  const busy = S.job.state === 'running';
+  const n = o => Object.values(o || {}).reduce((t, v) => t + v.length, 0);
+  const rows = o => Object.entries(o || {}).map(([k, v]) => `<div class="small"><b>${k === 'plan' ? 'The subjects' : 'Shot ' + esc(k)}</b>: ${v.map(esc).join('; ')}</div>`).join('');
+  const state = !L.enabled ? badge('info', 'off') : (L.unresolved.length ? badge('problem', L.unresolved.length + ' to fix') : badge('good', L.current ? 'checked' : 'not checked yet'));
+  return `<div class="card pad mt"><div class="row"><h2 style="margin:0">Storyboard check</h2>${state}<span class="sp"></span>
+    <button class="small" id="b-lint" ${busy ? 'disabled' : ''}>${L.enabled ? 'Check the storyboard' : 'Turn on and check'}</button>
+    ${L.enabled && Object.keys(L.skipped || {}).length ? `<button class="small" id="b-lint-all" ${busy ? 'disabled' : ''} title="Change these shots too. Their pictures are drawn again.">Fix shots that already have pictures</button>` : ''}</div>
+    <div class="mute small mt-s">Removes things the picture text never asks for (a pile of money in a living room), makes the place agree with the picture, writes a camera angle as a sentence, and sends back text in a picture or a group with no head count. Places and looks that repeat are only notes.${L.enabled ? '' : ' Turning it on changes the prompts of this short; pictures whose prompt changes are drawn again.'}</div>
+    ${n(L.changed) ? `<div class="mt-s"><b class="small">Changed (${n(L.changed)})</b>${rows(L.changed)}</div>` : ''}
+    ${n(L.skipped) ? `<div class="mt-s"><b class="small">Left alone because the picture is already drawn (${n(L.skipped)})</b>${rows(L.skipped)}</div>` : ''}
+    ${(L.unresolved || []).map(f => `<div class="warnbox">${esc(f.text)}</div>`).join('')}
+    ${(L.notes || []).length ? `<div class="mt-s"><b class="small">Notes (nothing was changed for these)</b>${L.notes.map(x => `<div class="mute small">${esc(x.text)}</div>`).join('')}</div>` : ''}
+  </div>`;
+}
+
+/* the scene review (shorts/review.py): the pictures are looked at and every scene is scored; it changes nothing */
+function reviewBadge(id) {
+  const R = S.review, sc = R && R.scenes && R.scenes[id];
+  if (!sc) return '';
+  const e = sc.engagement, rp = sc.repeat || {};
+  const tone = e == null ? 'info' : e >= 7 ? 'good' : e >= 5 ? 'warn' : 'problem';
+  return `<div class="small row" style="gap:6px;flex-wrap:wrap;margin:3px 0">${badge(tone, 'engagement ' + (e == null ? '-' : e))}${badge(rp.score >= 7 ? 'warn' : 'info', 'repeat ' + rp.score + (rp.closest ? ' of ' + rp.closest : ''))}${(sc.defects || []).map(d => `<span class="badge b-problem" title="${esc(d.text)}">${esc(d.kind.replace(/_/g, ' '))}</span>`).join('')}</div>`;
+}
+
+function reviewView() {
+  const R = S.review;
+  if (!R) return '';
+  const busy = S.job.state === 'running';
+  const sm = R.summary || {};
+  const state = !R.enabled ? badge('info', 'off') : !R.ready ? badge('queued', 'waiting for the pictures') : !R.at ? badge('queued', 'not reviewed yet') : R.current ? badge('good', 'reviewed') : badge('warn', 'pictures changed since');
+  const rows = (R.order || []).filter(id => R.scenes[id]).map(id => { const sc = R.scenes[id], rp = sc.repeat || {}, p = sc.parts || {};
+    return `<tr><td>${esc(id)}</td><td>${sc.engagement == null ? '-' : sc.engagement}</td><td class="mute small">${['read', 'pull', 'proof', 'clean', 'move'].map(k => k + ' ' + (p[k] == null ? '-' : p[k])).join(' · ')}</td><td>${rp.score}${rp.closest ? ' <span class="mute small">of ' + esc(rp.closest) + ' (' + Math.round(100 * (0.6 * rp.measured + 0.4 * rp.tags)) + '% alike)</span>' : ''}</td>
+      <td class="small">${(sc.defects || []).map(d => esc(d.text)).join('<br>') || '<span class="mute">none</span>'}${(sc.notes || []).map(n => `<br><span class="mute">${esc(n)}</span>`).join('')}</td></tr>`; }).join('');
+  return `<div class="card pad mt"><div class="row"><h2 style="margin:0">Scene review</h2>${state}<span class="sp"></span>
+    <button class="small" id="b-review" ${busy || !R.ready ? 'disabled' : ''} title="Look at the drawn pictures and score every scene. It changes nothing.">${R.enabled ? (R.at ? 'Review the pictures again' : 'Review the pictures') : 'Turn on and review'}</button></div>
+    <div class="mute small mt-s">A model describes each picture without being told what it should show; code compares that with the picture prompt and scores every scene. Engagement 0 to 10 (read, pull, proof, clean, move), repeat 0 (new) to 10 (a copy of an earlier scene). It only reports; nothing is changed.</div>
+    ${R.at ? `<div class="row small mt-s" style="gap:10px;flex-wrap:wrap"><span><b>Engagement</b> ${sm.engagement == null ? '-' : sm.engagement} <span class="mute">(first 3 s count double)</span></span><span><b>Repeat</b> ${sm.repeat == null ? '-' : sm.repeat} <span class="mute">first half ${sm.repeat_first_half ?? '-'}, second half ${sm.repeat_second_half ?? '-'}</span></span><span><b>Defects</b> ${sm.defects}</span>${sm.weakest_stretch ? `<span class="warnbox" style="margin:0">weakest stretch: ${esc(sm.weakest_stretch.shots.join(', '))} (average ${sm.weakest_stretch.mean})</span>` : ''}</div>
+      ${R.soft_scores_flat ? '<div class="mute small mt-s">The model gave every picture the same read and pull score, so those two parts are left out.</div>' : ''}
+      ${(R.floors || []).length ? `<div class="mt-s"><b class="small">Floors not met (a person should look)</b>${R.floors.map(f => `<div class="warnbox">${esc(f.text)}: ${esc((f.shots || []).join(', '))}</div>`).join('')}</div>` : '<div class="mute small mt-s">The three low floors are met: a hook, no run of three weak scenes, no near-duplicate.</div>'}
+      <table class="mt-s small" style="width:100%"><tr class="mute"><td>Shot</td><td>Engagement</td><td>Parts (0 to 2)</td><td>Repeat</td><td>Defects and notes</td></tr>${rows}</table>` : ''}
+  </div>`;
 }
 
 function castBlock() {
@@ -399,7 +449,7 @@ function keyframesView() {
     <p class="mute small">One picture per shot, drawn from the picture prompt under it (edit the prompt, then press Again). Your own pictures are used as they are. Look at them now: animating is the long wait.</p>
     <div class="sh-keys">${s.shots.map(x => { const k = x.keyframes.find(y => y.id === x.keyframe) || x.keyframes.filter(y => y.status === 'done').pop();
       const kb = making(x.keyframes);
-      return `<div class="sh-key"><div class="mute row">${esc(x.id)} · ${x.seconds}s · ${esc(x.begins)}<span class="sp"></span>${busyTxt(kb, 'drawing')}</div><div class="sh-wrap">${busyDot(kb, 'This picture')}${k && k.url ? `<img src="${esc(k.url)}" loading="lazy" ${x.keyframe ? '' : 'style="opacity:.55"'}>${x.keyframe ? '' : '<div class="warn small">old picture: the prompt changed after it was drawn. Press Again, or Make clips will draw it first.</div>'}` : `<div class="sh-thumb" style="width:100%">${x.keyframes.some(y => y.status === 'failed') ? 'failed' : 'not made'}</div>`}</div>
+      return `<div class="sh-key"><div class="mute row">${esc(x.id)} · ${x.seconds}s · ${esc(x.begins)}<span class="sp"></span>${busyTxt(kb, 'drawing')}</div>${reviewBadge(x.id)}<div class="sh-wrap">${busyDot(kb, 'This picture')}${k && k.url ? `<img src="${esc(k.url)}" loading="lazy" ${x.keyframe ? '' : 'style="opacity:.55"'}>${x.keyframe ? '' : '<div class="warn small">old picture: the prompt changed after it was drawn. Press Again, or Make clips will draw it first.</div>'}` : `<div class="sh-thumb" style="width:100%">${x.keyframes.some(y => y.status === 'failed') ? 'failed' : 'not made'}</div>`}</div>
         <textarea data-still="${x.id}" style="min-height:70px;font-size:12px;width:100%" ${x.begins === 'upload' || x.begins === 'anchor' ? 'disabled title="This shot uses your own picture"' : ''}>${esc(x.still || x.prompt)}</textarea>
         ${(x.must_show || []).length ? `<div class="mute small" style="margin-top:3px" title="What the picture has to show. Check these when you look at it.">✔ ${esc(x.must_show.join(' · '))}</div>` : ''}
         <div class="row" style="margin-top:4px"><button class="small" data-rewrite-pic="${x.id}" title="The model writes this picture prompt again; you say what should change">Rewrite prompt…</button></div>
@@ -565,7 +615,11 @@ function wire() {
   const q = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)];
   const on = (sel, fn) => { const e = q(sel); if (e) e.onclick = () => fn(e); };
   const st = (id, key, conv = v => v) => { const e = q(id); if (e) e.onchange = () => patch('/settings', {[key]: conv(e.type === 'checkbox' ? e.checked : e.value)}); };
-  st('#st-target', 'target_s', v => +v); const sg = () => (S.words || {}).suggested || {}, td = () => (S.words || {}).tempo_default || 1.45;      // a number equal to the suggestion is saved as 'follow the system', so a later change of length moves it
+  st('#st-target', 'target_s', v => +v); st('#st-lint', 'storyboard_lint'); st('#st-scenes', 'scene_review');
+  on('#b-review', b => post(b, '/review', {enable: !(S.review && S.review.enabled)}, 'Reviewing the pictures'));
+  on('#b-lint', b => post(b, '/lint', {protect: true, enable: !(S.lint && S.lint.enabled)}, 'Checking the storyboard'));
+  on('#b-lint-all', b => { if (confirm('The pictures of the shots that change are drawn again. Continue?')) post(b, '/lint', {protect: false}, 'Fixing the storyboard'); });
+  on('#b-lint-fix', b => { if (confirm('Shots that already have a picture are drawn again. Continue?')) post(b, '/lint', {protect: false}, 'Fixing the picture prompts'); }); const sg = () => (S.words || {}).suggested || {}, td = () => (S.words || {}).tempo_default || 1.45;      // a number equal to the suggestion is saved as 'follow the system', so a later change of length moves it
   st('#st-wlo', 'words_lo', v => (+v === sg().lo ? 0 : +v || 0)); st('#st-whi', 'words_hi', v => (+v === sg().hi ? 0 : +v || 0)); st('#st-tempo', 'tempo_max', v => (+v === td() ? 0 : +v || 0));
   on('#st-wreset', () => patch('/settings', {words_lo: 0, words_hi: 0, tempo_max: 0}));
   {                                         // length, narration speed, words and speed-up limit: recalculated by the server while the person types, so the outcome is seen before it is saved

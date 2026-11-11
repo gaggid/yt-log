@@ -20,7 +20,7 @@ from characters import store as cstore, studio_edit
 from story.agent_store import for_plan as agent_decisions_for_plan
 
 from story3 import music
-from . import publish, agent, auto, cast, checks, clips, formats, frames, ideas as ideas_mod, languages, looks, tones, models, motion, pipelines as P, planner, remix, stitch, store, subjects as subj, timeline, upscale, voice as svoice, wan
+from . import publish, agent, auto, cast, checks, clips, formats, frames, ideas as ideas_mod, languages, lint, looks, tones, review, models, motion, pipelines as P, planner, remix, stitch, store, subjects as subj, timeline, upscale, voice as svoice, wan
 
 router = APIRouter(prefix="/api/shorts")
 MAX_UPLOAD = 12 * 1024 * 1024
@@ -301,7 +301,7 @@ async def state(short_id: str):
     out = {"id": short["id"], "title": short["title"], "pipeline": short["pipeline"], "pipeline_label": P.pipeline(short)["label"], "status": short["status"], "source": short["source"],
            "settings": short["settings"], "plan": short["plan"], "script": short.get("script"), "beats": short["beats"], "images": short["images"], "keyframes_confirmed": short.get("keyframes_confirmed", False), "keyframes_on": P.keyframes_on(short),
            "job": jobs.status(short_id), "estimate_s": P.estimate_s(short) if (short["shots"] or short["pipeline"] == "remix") else 0,
-           "words": _words_info(short),
+           "words": _words_info(short), "lint": lint.report(short), "review": review.report(short),
            "voice": svoice.state(short), "voice_gate": checks.voice_gate(short), "auto": auto.state(short), "final": stitch.final_state(short_id), "publish": publish.view(short)}
     if short["pipeline"] == "remix":
         r = remix.data(short)
@@ -409,6 +409,8 @@ class SettingsReq(BaseModel):
     words_hi: int | None = None
     tempo_max: float | None = None       # the fastest the voice may be sped up to fit the length (1.0 to 1.6; empty = default)
     script_engine: str | None = None
+    storyboard_lint: bool | None = None   # the storyboard check (shorts/lint.py)
+    scene_review: bool | None = None      # the scene review (shorts/review.py)
     upscale: str | None = None           # '' (1080x1920) | 2k (1440x2560, shorts/upscale.py)
 
 
@@ -455,6 +457,9 @@ async def patch_settings(short_id: str, body: SettingsReq):
             patch["clip_quality"] = "opening" if legacy else "full"
     if "clip_quality" in patch and patch["clip_quality"] not in P.QUALITIES:
         raise HTTPException(400, f"clip_quality is one of: {', '.join(P.QUALITIES)}")
+    for flag in ("storyboard_lint", "scene_review"):
+        if flag in patch and patch[flag] is None:
+            patch.pop(flag)
     if "script_engine" in patch and patch["script_engine"] not in ("room", "single"):
         raise HTTPException(400, "script_engine is room or single")
     for k in ("words_lo", "words_hi"):
@@ -657,6 +662,56 @@ async def delete_shot_image(short_id: str, shot_id: str):
 async def make_plan(short_id: str):
     s, be = _backend()
     return _start(short_id, "short_plan", lambda progress: planner.make_plan(short_id, be, s, progress))
+
+
+class _LintReq(BaseModel):
+    protect: bool = True                 # leave shots whose start pictures are already drawn as they are (false: change them too, and their pictures are drawn again)
+    enable: bool = False                 # switch the check on for a short made before it existed
+
+
+@router.post("/{short_id}/lint")
+async def storyboard_lint(short_id: str, body: _LintReq):
+    """Run the storyboard check (shorts/lint.py): fix the contradictions in the picture prompts, write down what was left alone and the notes."""
+    short = _get(short_id)
+    if not short["shots"]:
+        raise HTTPException(400, "plan the short first")
+    if not lint.enabled(short) and not body.enable:
+        raise HTTPException(400, "the storyboard check is off for this short; switch it on first")
+    if body.enable and not lint.enabled(short):
+        short["settings"][lint.SETTING] = True
+        store.save(short)
+    s, be = _backend()
+
+    async def work(progress):
+        rep = await lint.apply(short_id, be, s, body.protect)
+        n = sum(len(v) for v in rep["changed"].values())
+        left = len(rep["unresolved"])
+        return f"Storyboard checked: {n} change(s), {len(rep['skipped'])} left alone because their pictures are drawn, {left} still to fix"
+    return _start(short_id, "short_lint", work)
+
+
+class _ReviewReq(BaseModel):
+    enable: bool = False                 # switch the review on for a short made before it existed
+
+
+@router.post("/{short_id}/review")
+async def scene_review(short_id: str, body: _ReviewReq):
+    """Run the scene review (shorts/review.py): look at the drawn start pictures and score every scene. It changes nothing."""
+    short = _get(short_id)
+    if not review.enabled(short) and not body.enable:
+        raise HTTPException(400, "the scene review is off for this short; switch it on first")
+    if not review.ready(short):
+        raise HTTPException(400, "draw the start pictures of every shot first")
+    if body.enable and not review.enabled(short):
+        short["settings"][review.SETTING] = True
+        store.save(short)
+    s, be = _backend()
+
+    async def work(progress):
+        rep = await review.run(short_id, be, s)
+        sm = rep["summary"] or {}
+        return f"Pictures reviewed: engagement {sm.get('engagement')}, repeat {sm.get('repeat')}, {sm.get('defects')} defect(s), {len(rep['floors'])} floor(s) not met"
+    return _start(short_id, "short_review", work)
 
 
 @router.post("/{short_id}/fit")

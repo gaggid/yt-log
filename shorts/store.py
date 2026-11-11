@@ -27,6 +27,8 @@ DEFAULT_SETTINGS = {
     "voice_speed": 1.0,               # narration speed sent to the voice (0.8 - 1.3); the words asked for scale with it
     "clip_quality": "opening",        # keyframe pipeline (shorts/pipelines.py clip_quality): opening = the first 3 seconds at full steps, the rest with the Wan speed LoRA (about 3.4x quicker) | full = every clip at full steps | fast = every clip fast
     "chain": True,                    # quick pipeline: a shot marked "continues" starts from the last frame of the one before
+    "scene_review": True,             # the scene review (shorts/review.py): looks at the drawn start pictures and scores every scene; it changes nothing. A short made before it existed has no such key
+    "storyboard_lint": True,          # the storyboard check (shorts/lint.py): on for every new short; a short made before it existed has no such key and keeps its old prompts
     "seed": 7,
     "voice": {"engine": "maya-tts", "voice": "Siddhant"},
     "captions": True,
