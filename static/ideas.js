@@ -102,7 +102,7 @@ let _auto     = {autopilot:false, auto_generate:false, auto_approve:false, auto_
 const BRIGHT_STYLES = ['realism', 'pixar3d', 'anime', 'ghibli', 'tinyworld'];
 let _sugg     = {};                    // the system's suggested words for the chosen length (GET /shorts/words)
 let _ap       = null, _apAt = 0, _apTimer = null;      // /ideas/autopilot (queues and schedule) and when it was read
-const _CFG_DEFAULTS = {pipeline:'keyframe', voice:'taksh_hn', language:'hi', target_s:30, tone_id:'bigbro', edge:'clean', upscale:'2k', clip_quality:'opening', words_lo:'', words_hi:'', tempo_max:''};
+const _CFG_DEFAULTS = {pipeline:'keyframe', voice:'taksh_hn', language:'hi', target_s:30, tone_id:'bigbro', edge:'clean', upscale:'2k', clip_quality:'opening', director:'shadow', words_lo:'', words_hi:'', tempo_max:''};
 
 function _loadState() {                     // the browser's copy: shown at once; the server's copy (saved config) replaces it when it arrives
   _diverse  = LS.get('ideas:diverse', false);
@@ -224,6 +224,11 @@ function _cfgHtml() {
         <option value="clean"${_cfg.edge==='clean'?' selected':''}>Clean</option>
         <option value="spicy"${_cfg.edge==='spicy'?' selected':''}>Spicy</option>
         <option value="savage"${_cfg.edge==='savage'?' selected':''}>Savage</option>
+      </select>`)}
+      ${cell('cfg-director','Director (fixes pictures)',`<select id="cfg-director">
+        <option value="shadow"${(_cfg.director||'shadow')==='shadow'?' selected':''}>Shadow: write down what it would fix</option>
+        <option value="defects"${_cfg.director==='defects'?' selected':''}>Fix objective defects</option>
+        <option value="off"${_cfg.director==='off'?' selected':''}>Off</option>
       </select>`)}
       ${cell('cfg-quality','Clip quality',`<select id="cfg-quality">
         <option value="opening"${(_cfg.clip_quality||'opening')==='opening'?' selected':''}>Full opening (3 s), fast rest</option>
@@ -665,6 +670,7 @@ window.idQueue = async id => {
       edge:       _cfg.edge,
       upscale:    _cfg.upscale,
       clip_quality: _cfg.clip_quality || 'opening',
+      director: _cfg.director || 'shadow',
       words_lo: +_cfg.words_lo || 0, words_hi: +_cfg.words_hi || 0, tempo_max: +_cfg.tempo_max || 0,
       image_mode: 'qwen',
       review_keyframes: false,
@@ -719,6 +725,7 @@ function _wireCfg() {
   bind('cfg-edge',     'edge');
   bind('cfg-upscale',  'upscale');
   bind('cfg-quality',  'clip_quality');
+  bind('cfg-director', 'director');
   const sg = () => _sugg.suggested || {};
   const same = (v, x) => (!x || +v === x ? '' : v);           // a number equal to the suggestion is saved as 'follow the system', so it moves when the length changes
   bind('cfg-wlo',      'words_lo',  v => same(v, sg().lo));

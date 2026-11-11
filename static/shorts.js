@@ -184,6 +184,7 @@ function sideView() {
     <label class="f mt-s">Describe that character in a line (used in the shots that show them)<textarea id="st-char" style="min-height:48px">${esc(st.character_text || '')}</textarea></label>
     <label class="row mt-s"><input type="checkbox" id="st-lint" ${st.storyboard_lint ? 'checked' : ''}> Storyboard check: remove things nobody asked for, make the place agree, fix camera angles, text and group counts in the picture prompts</label>
     <label class="row mt-s"><input type="checkbox" id="st-scenes" ${st.scene_review ? 'checked' : ''}> Scene review: after the pictures are drawn, a model describes each one and code scores it (nothing is changed)</label>
+    <label class="f mt-s">Director<select id="st-director">${[['off', 'Off'], ['shadow', 'Shadow: write down what it would fix, change nothing (recommended at first)'], ['defects', 'Fix objective defects in the pictures']].map(([k, t]) => `<option value="${k}" ${(st.director || 'off') === k ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
     <label class="f mt-s">Format<select id="st-format">${[['auto', 'Detect from the story (recommended)'], ['story', 'Story: dramatised, follows a person'], ['documentary', 'Documentary: real subjects, narrator'], ['explainer', 'Explainer: facts and numbers'], ['comparison', 'Comparison: sides against each other']].map(([k, t]) => `<option value="${k}" ${(st.format || 'auto') === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
       <span class="small mute">Only the next plan uses it.${(s.plan || {}).format ? ` This plan is a <b>${esc(s.plan.format)}</b>.` : ''}</span></label>
     <label class="f mt-s">Tone (optional)<input id="st-tone" value="${esc(st.tone || '')}" placeholder="funny, tense, warm..."></label>`}
@@ -267,7 +268,7 @@ function planView() {
       <label class="f mt-s">The look (added to every shot)<input data-plan="look" value="${esc(p.look || '')}"></label>
       <label class="f mt-s">The subjects${p.format ? ` (${esc(p.format)})` : ''}: who and what the story is about, one per line as Name: how it looks<textarea data-plan="subjects" style="min-height:90px" placeholder="Chinese J-20 stealth fighter: twin-engine, dark grey, canards, red and yellow star roundel">${esc((p.subjects || []).map(x => x.name + ': ' + x.visual).join('\n'))}</textarea></label>
       <div class="row mt-s"><button class="small" id="b-subjects" title="Read the story again and write the subject list. The shots stay as they are; write the shots of a beat again to use it.">Find the subjects</button><span class="mute small">Every shot that shows one gets its look added to the picture prompt.</span></div>` : `<p class="mute">The model writes a hook, four to six beats of Hinglish narration and the shots. It takes a minute or two.</p>`}</div>
-    ${has ? checksView() + lintView() + voiceView() + (s.keyframes_on ? reviewView() + keyframesView() : '') + beatsView() : ''}`;
+    ${has ? checksView() + lintView() + voiceView() + (s.keyframes_on ? reviewView() + directorView() + keyframesView() : '') + beatsView() : ''}`;
 }
 
 /* step 1 after the plan: the voice. Start pictures, clips and the final video wait for it, because the shot lengths follow the real voice */
@@ -339,6 +340,25 @@ function reviewView() {
       ${R.soft_scores_flat ? '<div class="mute small mt-s">The model gave every picture the same read and pull score, so those two parts are left out.</div>' : ''}
       ${(R.floors || []).length ? `<div class="mt-s"><b class="small">Floors not met (a person should look)</b>${R.floors.map(f => `<div class="warnbox">${esc(f.text)}: ${esc((f.shots || []).join(', '))}</div>`).join('')}</div>` : '<div class="mute small mt-s">The three low floors are met: a hook, no run of three weak scenes, no near-duplicate.</div>'}
       <table class="mt-s small" style="width:100%"><tr class="mute"><td>Shot</td><td>Engagement</td><td>Parts (0 to 2)</td><td>Repeat</td><td>Defects and notes</td></tr>${rows}</table>` : ''}
+  </div>`;
+}
+
+/* the Director (shorts/director.py): fixes objective defects in the pictures, one trial at a time; in shadow mode it only writes down what it would fix */
+function directorView() {
+  const D = S.director;
+  if (!D || D.mode === 'off') return '';
+  const ran = D.ran || D.mode;
+  const busy = S.job.state === 'running';
+  const state = !D.at ? badge('queued', 'not run yet') : ran === 'shadow' ? badge('info', 'shadow: nothing was changed') : badge(D.after === 0 ? 'good' : 'warn', 'defects ' + (D.before ?? '-') + ' to ' + (D.after ?? '-'));
+  const planned = (D.planned || []).map(a => `<tr><td>${esc(a.shot)}</td><td class="small">${esc(a.kinds.map(k => k.replace(/_/g, ' ')).join(', '))}</td><td class="small">${a.skip ? '<span class="mute">left alone: ' + esc(a.skip) + '</span>' : esc(a.defects.join('; '))}</td></tr>`).join('');
+  const log = (D.log || []).map(e => `<tr><td>${esc(e.shot)}</td><td>${e.result === 'kept' ? badge('good', 'kept') : badge(e.result === 'failed' ? 'problem' : 'warn', e.result === 'failed' ? 'failed' : 'set aside')}</td><td class="small">${esc((e.how || []).join(' + ') || 'redrawn')} (round ${e.round})</td><td class="small mute">${esc(e.why || '')}</td></tr>`).join('');
+  return `<div class="card pad mt"><div class="row"><h2 style="margin:0">Director</h2>${state}${D.needs_look ? badge('problem', 'needs your look') : ''}<span class="sp"></span>
+    <button class="small" id="b-director-shadow" ${busy || !D.ready ? 'disabled' : ''} title="Write down what it would fix. Nothing is changed.">Show what it would fix</button>
+    <button class="small primary" id="b-director-fix" ${busy || !D.ready ? 'disabled' : ''} title="Fix the objective defects: a picture is drawn again, and the change is kept only if the defect is gone.">Fix the defects now</button></div>
+    <div class="mute small mt-s">It acts only on objective defects (an object nobody asked for, the wrong place, text in the picture, a different look, a blank background, a wrong head count, a near-copy). Each fix is a trial: the picture is drawn again and described again, and the change is kept only when the defect is gone and nothing new appeared; otherwise the old picture is back. A shot with your own picture, an approved picture or a clip already made is never touched. Taste (engagement, repeat) is never changed.</div>
+    ${D.needs_look ? `<div class="mt-s">${(D.needs_look.floors || []).map(f => `<div class="warnbox">${esc(f.text)}: ${esc((f.shots || []).join(', '))}</div>`).join('')}</div>` : ''}
+    ${planned ? `<div class="mt-s"><b class="small">${ran === 'shadow' || !D.at ? 'What it would fix' : 'Still to fix'}</b><table class="small" style="width:100%"><tr class="mute"><td>Shot</td><td>Defects</td><td>What</td></tr>${planned}</table></div>` : (D.at ? '<div class="mute small mt-s">Nothing to fix.</div>' : '')}
+    ${log ? `<div class="mt-s"><b class="small">Trials</b><table class="small" style="width:100%">${log}</table></div>` : ''}
   </div>`;
 }
 
@@ -615,7 +635,9 @@ function wire() {
   const q = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)];
   const on = (sel, fn) => { const e = q(sel); if (e) e.onclick = () => fn(e); };
   const st = (id, key, conv = v => v) => { const e = q(id); if (e) e.onchange = () => patch('/settings', {[key]: conv(e.type === 'checkbox' ? e.checked : e.value)}); };
-  st('#st-target', 'target_s', v => +v); st('#st-lint', 'storyboard_lint'); st('#st-scenes', 'scene_review');
+  st('#st-target', 'target_s', v => +v); st('#st-lint', 'storyboard_lint'); st('#st-scenes', 'scene_review'); st('#st-director', 'director');
+  on('#b-director-shadow', b => post(b, '/director', {mode: 'shadow'}, 'Checking what could be fixed'));
+  on('#b-director-fix', b => { if (confirm('Pictures with a defect are drawn again; a change is kept only if the defect is gone. Continue?')) post(b, '/director', {mode: 'defects'}, 'Fixing the pictures'); });
   on('#b-review', b => post(b, '/review', {enable: !(S.review && S.review.enabled)}, 'Reviewing the pictures'));
   on('#b-lint', b => post(b, '/lint', {protect: true, enable: !(S.lint && S.lint.enabled)}, 'Checking the storyboard'));
   on('#b-lint-all', b => { if (confirm('The pictures of the shots that change are drawn again. Continue?')) post(b, '/lint', {protect: false}, 'Fixing the storyboard'); });

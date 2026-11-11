@@ -20,7 +20,7 @@ from characters import store as cstore, studio_edit
 from story.agent_store import for_plan as agent_decisions_for_plan
 
 from story3 import music
-from . import publish, agent, auto, cast, checks, clips, formats, frames, ideas as ideas_mod, languages, lint, looks, tones, review, models, motion, pipelines as P, planner, remix, stitch, store, subjects as subj, timeline, upscale, voice as svoice, wan
+from . import publish, agent, auto, cast, checks, clips, director, formats, frames, ideas as ideas_mod, languages, lint, looks, tones, review, models, motion, pipelines as P, planner, remix, stitch, store, subjects as subj, timeline, upscale, voice as svoice, wan
 
 router = APIRouter(prefix="/api/shorts")
 MAX_UPLOAD = 12 * 1024 * 1024
@@ -301,7 +301,7 @@ async def state(short_id: str):
     out = {"id": short["id"], "title": short["title"], "pipeline": short["pipeline"], "pipeline_label": P.pipeline(short)["label"], "status": short["status"], "source": short["source"],
            "settings": short["settings"], "plan": short["plan"], "script": short.get("script"), "beats": short["beats"], "images": short["images"], "keyframes_confirmed": short.get("keyframes_confirmed", False), "keyframes_on": P.keyframes_on(short),
            "job": jobs.status(short_id), "estimate_s": P.estimate_s(short) if (short["shots"] or short["pipeline"] == "remix") else 0,
-           "words": _words_info(short), "lint": lint.report(short), "review": review.report(short),
+           "words": _words_info(short), "lint": lint.report(short), "review": review.report(short), "director": director.report(short),
            "voice": svoice.state(short), "voice_gate": checks.voice_gate(short), "auto": auto.state(short), "final": stitch.final_state(short_id), "publish": publish.view(short)}
     if short["pipeline"] == "remix":
         r = remix.data(short)
@@ -411,6 +411,7 @@ class SettingsReq(BaseModel):
     script_engine: str | None = None
     storyboard_lint: bool | None = None   # the storyboard check (shorts/lint.py)
     scene_review: bool | None = None      # the scene review (shorts/review.py)
+    director: str | None = None           # off | shadow | defects (shorts/director.py)
     upscale: str | None = None           # '' (1080x1920) | 2k (1440x2560, shorts/upscale.py)
 
 
@@ -457,6 +458,8 @@ async def patch_settings(short_id: str, body: SettingsReq):
             patch["clip_quality"] = "opening" if legacy else "full"
     if "clip_quality" in patch and patch["clip_quality"] not in P.QUALITIES:
         raise HTTPException(400, f"clip_quality is one of: {', '.join(P.QUALITIES)}")
+    if "director" in patch and patch["director"] not in director.MODES:
+        raise HTTPException(400, f"director is one of: {', '.join(director.MODES)}")
     for flag in ("storyboard_lint", "scene_review"):
         if flag in patch and patch[flag] is None:
             patch.pop(flag)
@@ -712,6 +715,38 @@ async def scene_review(short_id: str, body: _ReviewReq):
         sm = rep["summary"] or {}
         return f"Pictures reviewed: engagement {sm.get('engagement')}, repeat {sm.get('repeat')}, {sm.get('defects')} defect(s), {len(rep['floors'])} floor(s) not met"
     return _start(short_id, "short_review", work)
+
+
+class _DirectorReq(BaseModel):
+    mode: str = ""                       # shadow or defects for this run (empty: the short's own setting)
+
+
+@router.post("/{short_id}/director")
+async def run_director(short_id: str, body: _DirectorReq):
+    """Run the Director (shorts/director.py) on a short whose pictures are drawn: shadow writes down what it would fix, defects fixes the objective defects."""
+    short = _get(short_id)
+    if body.mode and body.mode not in ("shadow", "defects"):
+        raise HTTPException(400, "mode is shadow or defects")
+    if director.mode(short) == "off" and not body.mode:
+        raise HTTPException(400, "the Director is off for this short; choose shadow or defects")
+    if not review.enabled(short) and not body.mode:
+        raise HTTPException(400, "the scene review is off for this short")
+    if not review.ready(short):
+        raise HTTPException(400, "draw the start pictures of every shot first")
+    if body.mode and not review.enabled(short):
+        short["settings"][review.SETTING] = True
+        store.save(short)
+    s, be = _backend()
+    key = settings_mod.api_key()
+
+    async def work(progress):
+        rep = await director.run(short_id, be, s, key, body.mode, progress)
+        kept = sum(1 for e in rep["log"] if e["result"] == "kept")
+        reverted = sum(1 for e in rep["log"] if e["result"] != "kept")
+        if rep["ran"] == "shadow":
+            return f"Director (shadow, nothing changed): it would fix {len([a for a in rep['planned'] if not a['skip']])} picture(s)"
+        return f"Director: {kept} fix(es) kept, {reverted} set aside, defects {rep['before']} -> {rep['after']}"
+    return _start(short_id, "short_director", work)
 
 
 @router.post("/{short_id}/fit")
@@ -1398,7 +1433,7 @@ def _run_settings(run: dict) -> dict:
     """The short's settings from the saved Ideas config (the same shape the screen sends)."""
     return {"voice": {"engine": "maya-tts", "voice": run.get("voice")}, "language": run.get("language"), "target_s": int(float(run.get("target_s") or 30)),
             "tone_id": run.get("tone_id"), "edge": run.get("edge"), "upscale": run.get("upscale"), "image_mode": "qwen", "review_keyframes": False,
-            "clip_quality": run.get("clip_quality") if run.get("clip_quality") in P.QUALITIES else "opening",
+            "clip_quality": run.get("clip_quality") if run.get("clip_quality") in P.QUALITIES else "opening", "director": run.get("director") if run.get("director") in director.MODES else "shadow",
             "words_lo": int(float(run.get("words_lo") or 0)), "words_hi": int(float(run.get("words_hi") or 0)), "tempo_max": float(run.get("tempo_max") or 0)}
 
 

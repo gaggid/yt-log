@@ -5,7 +5,7 @@ Order, quick and keyframe: plan, voice, fit the shots to the voice, [start pictu
 Order, remix: (link, window and the rights boxes are done by hand) voice-over, animate, put together."""
 from story3 import music, store as media
 
-from . import checks, clips, lint, motionwriter, pipelines as P, planner, remix, review, stitch, store, upscale, voice as svoice
+from . import checks, clips, director, lint, motionwriter, pipelines as P, planner, remix, review, stitch, store, upscale, voice as svoice
 
 
 def changed_since(short: dict, final: dict) -> bool:
@@ -45,6 +45,8 @@ def steps(short: dict) -> list[dict]:
         add("keyframes", "Make the start pictures", short["shots"] and all(clips.chosen_keyframe(short, sh) for sh in short["shots"]))
         if review.enabled(short) and review.ready(short):
             add("scenes", "Review the pictures", review.current(short), optional=True)
+            if director.mode(short) != "off" and review.current(short):
+                add("director", "Fix the pictures" if director.mode(short) == "defects" else "Check what could be fixed", director.current(short), optional=True)
         add("review", "Look at the start pictures", short.get("keyframes_confirmed") or not short["settings"].get("review_keyframes", True), optional=not short["settings"].get("review_keyframes", True))
     if P.keyframes_on(short) and short["shots"] and all(clips.chosen_keyframe(short, sh) for sh in short["shots"]):
         add("motion", "Write the motion from the real pictures", not motionwriter.unseen(short), optional=True)
@@ -124,6 +126,20 @@ async def run(short_id: str, backend, s: dict, progress, key: str = "") -> str:
             except Exception as e:  # noqa: BLE001
                 did.append(f"picture review skipped ({str(e)[:80]})")
             short = store.get(short_id)
+        if director.mode(short) != "off" and review.current(short) and not director.current(short):
+            try:                                                    # the Director fixes objective defects (or, in shadow mode, only writes down what it would fix); it never stops a run
+                rep = await director.run(short_id, backend, s, key, progress=sub("director"))
+                kept = sum(1 for e in rep["log"] if e["result"] == "kept")
+                did.append(f"director ({kept} fixed)" if rep["ran"] == "defects" else f"director shadow ({len([a for a in rep['planned'] if not a['skip']])} it would fix)")
+            except Exception as e:  # noqa: BLE001
+                did.append(f"director skipped ({str(e)[:80]})")
+            short = store.get(short_id)
+        if director.mode(short) == "defects" and short.get("needs_look") and not short.get("keyframes_confirmed"):
+            if director.waiting() > 2:                              # two other shorts already wait for a look: this one goes on, with a warning, so the autopilot never jams
+                did.append("needs a look (two others are waiting, so it went on)")
+            else:
+                why = "; ".join(f["text"] + " (" + ", ".join(f["shots"]) + ")" for f in short["needs_look"]["floors"])
+                return "Done so far: " + ", ".join(did or ["nothing new"]) + f". Needs your look before the clips: {why}. Look at the pictures, redo or replace any you do not like, press 'Pictures are good', then press Auto-run again."
         if short["settings"].get("review_keyframes", True) and not short.get("keyframes_confirmed"):
             return "Done so far: " + ", ".join(did or ["nothing new"]) + ". Look at the start pictures, redo or replace any you do not like, press 'Pictures are good', then press Auto-run again."
     if P.keyframes_on(short) and motionwriter.unseen(short):
