@@ -12,6 +12,8 @@ from . import looks
 from .stillwriter import NEGATION
 
 MIN_WORDS, MAX_WORDS = 12, 60
+MAX_STATIC = 2                          # at most this many shots of a short may hold the camera still
+STILL = re.compile(r"\b(?:stands?|sits?|remains?|stays?|holds?|waits?|is)\s+(?:still|steady|motionless|frozen|fixed|in place)\b", re.I)         # a subject that "stands still" is not an action
 LOOK_SIZE = "360x640"                    # the start pictures the writer looks at are shown small
 LOOKS = re.compile(r"\b(wearing|dressed in|dressed|looks like|appearance|features|complexion|hairstyle|outfit|photograph|illustration|painting|style|aesthetic|noir|cinematic|dramatic)\b", re.I)
 WEAK = re.compile(r"\b(slightly|subtly|barely|a little|a bit)\b", re.I)
@@ -40,7 +42,7 @@ HOW TO WRITE A "move" (15 to 45 words, plain present-tense sentences, English):
 1. THE SUBJECT'S ACTION first: one clear verb with the part of the body or object that moves and where it goes ("the man slowly lifts the phone toward his face", "both hands tighten on the steering wheel", "the right jet banks away to the left"). One action, or two steps in order ("first ... then ..."), never more.
 2. THE CAMERA, in plain words, with a direction and how far it goes, so the model really moves it: "the camera pushes in until the man's face fills the frame", "the camera pans left across the whole group", "the camera rises from the boots up to the face", "the camera sweeps around the jet to its other side", "slow handheld sway". Pick a move that differs from the shot before it and the shot after it (never the same move twice in a row). A static camera is for at most one shot in five, and only when the subject's own movement is the whole shot. Use the planner's camera as a hint, not a rule.
 3. A MOTION IN THE SURROUNDINGS only when the picture description names something that can move there (smoke, flags, rain, water, snow, cloth, leaves, lights, a screen). Never add dust, particles, motes, a breeze or wind unless the picture description names them.
-4. SPEED AND SIZE fit the seconds: the shot lasts only the given seconds. Under 2 seconds: two or three short sentences, the subject's action, the camera, and (when the picture names something that can move in the surroundings, such as water, clouds, cloth, leaves, a screen) one motion of it. 2 to 3 seconds: up to three sentences. Never more than three, and never one that needs more time than the shot has. Use "slowly", "steadily" or "quickly". Never an action that needs more time than the shot has (no walking across a room in 2 seconds).
+4. SPEED AND SIZE fit the seconds: the shot lasts only the given seconds. Under 2 seconds: two or three short sentences, the subject's action, the camera, and (when the picture names something that can move in the surroundings, such as water, clouds, cloth, leaves, a screen) one motion of it. 2 to 3 seconds: up to three sentences. Never more than three, and never one that needs more time than the shot has. KEEP IT CALM AND CLEAR: one main action, one camera move, at most one motion of the surroundings; never add actions to fill the time, and never make two people do different things at once unless the picture's story is exactly that. Use "slowly", "steadily" or "quickly". Never an action that needs more time than the shot has (no walking across a room in 2 seconds).
 4b. MAKE THE MOVEMENT BIG ENOUGH TO SEE: say how far and what moves ("turns his whole head to the left", "steps forward two paces", "the hand closes into a fist"). Never use "slightly", "subtly", "barely" or "a little": the model then hardly moves anything.
 5. TIME IT TO THE NARRATION: the viewer hears the beat's line while the shot plays. The key movement is what the line is about (a start at "the phone pings", a turn at "the door"). If the shot's job is only a pause, the subject holds still with one tiny movement (breathing, a blink, a finger tightening) and the camera carries the shot.
 6. Keep what is in the picture: no new person, object or place appears, nothing leaves the frame unless the picture shows how (a door that is in frame can swing open). No cuts, no scene change, no text.
@@ -85,6 +87,11 @@ def problems(item: MoveOut, seconds: float | None = None, picture: str = "", bef
     m = WEAK.search(item.move)
     if m:
         out.append(f"{item.id}: \"{m.group(0)}\" makes the model barely move; say how far and what moves")
+    body = [x for x in re.split(r"[.!?;,]\s+|\s+(?:while|as|and)\s+", item.move.strip()) if x.strip(" .") and not re.search(r"\bcamera\b|\bhandheld\b", x, re.I)]        # clauses that are not about the camera
+    if CAMERA.search(item.move) and not body:
+        out.append(f"{item.id}: only the camera moves; say what the subject or the surroundings do too (one clear movement, not a busy one)")
+    elif body and all(STILL.search(x) for x in body):
+        out.append(f"{item.id}: \"stands still\" is not a movement; say what the subject does (one clear movement, for example a turn of the head or a step forward)")
     if seconds is not None:
         n = sentences(item.move)
         if n > 3:
@@ -185,7 +192,7 @@ async def write_beat(short: dict, beat: dict, shots: list[dict], backend, s: dic
             sh = by_id.get(x.id) or {}
             k = camera_kind(x.move)
             total += 1
-            budget = (statics + (k == "static")) <= max(1, round(0.2 * total))
+            budget = (statics + (k == "static")) <= min(MAX_STATIC, max(1, round(0.2 * total)))
             bad += problems(x, float(sh.get("seconds") or 2), f"{sh.get('still', '')} {sh.get('prompt', '')}", last, budget)
             statics += k == "static"
             last = k or last

@@ -1596,3 +1596,30 @@ def test_make_clips_says_so_when_the_motion_could_not_be_written_from_the_pictur
     assert client.post(f"/api/shorts/{sid}/clips", json={}).status_code in (200, 202)
     job = wait_job(client, sid)
     assert job["state"] == "done" and "could not be looked at" in str(job), "the failure is said, and the clips are still made"
+
+
+def test_the_motion_writer_is_sent_back_for_a_camera_only_line_and_a_subject_that_stands_still():
+    from shorts.motionwriter import MoveOut, problems
+    only_camera = MoveOut(id="s7", move="The camera pans slowly across the carving from the lion on the left to the lotus on the right.")
+    assert any("only the camera moves" in p for p in problems(only_camera, 2.2, "A carving of a lion and a lotus", ""))
+    fake = MoveOut(id="s3", move="The camera pushes in slowly toward the center of the arch. The limestone surface moves forward with the camera.")
+    assert any("only the camera moves" in p for p in problems(fake, 2.2, "A limestone arch", "")), "a thing that moves with the camera is the camera moving"
+    still = MoveOut(id="s20", move="The figures stand still on the grass. The camera pushes in slowly toward the group.")
+    assert any("stands still" in p for p in problems(still, 2.2, "Figures on grass", ""))
+    ok = MoveOut(id="s18", move="The horse's head tilts to the right. The figures stand still. The camera pushes in slowly toward the horse.")
+    assert not any("stands still" in p or "only the camera" in p for p in problems(ok, 2.2, "A horse and figures", "")), "one real movement is enough; the others may hold"
+    calm = MoveOut(id="s9", move="The water rushes through the narrow gap on the right. The camera pans slowly from the stone wall on the left to the rushing water.")
+    assert not problems(calm, 1.5, "Water rushing through a gap in a stone wall", "")
+
+
+def test_a_short_may_hold_the_camera_still_in_at_most_two_shots(gw):
+    from shorts import motionwriter
+    assert motionwriter.MAX_STATIC == 2
+    short = planned("keyframe")
+    chat = FakeChat(moves=True, stills=True)
+    chat.move_text = "The courier lifts the wallet toward his chest. The camera remains static."
+    beat = short["beats"][0]
+    shots = [sh for sid in beat["shot_ids"] for sh in short["shots"] if sh["id"] == sid]
+    run(motionwriter.write_beat(short, beat, shots, chat, S))
+    assert len([c for c in chat.calls if c["task"] == "p4_move"]) >= 1
+
