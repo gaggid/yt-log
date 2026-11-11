@@ -228,7 +228,8 @@ async def run(short_id: str, backend, s: dict | None = None, key: str = "", over
                 d["failed"][act["shot"]] = int(d["failed"].get(act["shot"], 0)) + 1
             d["rounds"] = rnd
             store.save(short)
-            changed.add(act["shot"])
+            if entry["result"] == "kept":
+                changed.add(act["shot"])                            # a set-aside shot keeps its old picture AND its old description: describing it again only adds noise (the same picture read differently) and would hide the defect that is still there
         await _refresh(short_id, backend, s, changed)
         short = store.get(short_id)
         if defect_count(short) >= start or time.monotonic() - t0 > budget:

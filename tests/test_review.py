@@ -71,6 +71,14 @@ def test_a_crowd_or_a_near_count_is_a_note_never_a_defect():
     assert [d["kind"] for d in found] == ["wrong_count"], "five people where two were asked, in a kitchen"
 
 
+def test_the_shot_label_of_the_contact_sheet_is_not_text_in_the_picture():
+    short = audit_short()
+    s15 = next(sh for sh in short["shots"] if sh["id"] == "s15")
+    for label in ("s15", "S15", " s3 "):
+        assert not [d for d in review.defects(short, s15, {**FX["seen"]["s15"], "readable_text": label})[0] if d["kind"] == "text_in_picture"], "a label printed by the sheet"
+    assert [d for d in review.defects(short, s15, {**FX["seen"]["s15"], "readable_text": "SALE s15 50%"})[0] if d["kind"] == "text_in_picture"], "real text is still a defect"
+
+
 def test_a_picture_that_matches_its_prompt_has_no_defect():
     short = audit_short()
     s15 = next(sh for sh in short["shots"] if sh["id"] == "s15")

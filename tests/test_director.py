@@ -164,6 +164,17 @@ def test_at_most_a_third_of_the_shots_are_tried_per_round_and_the_budget_stops_i
     assert rep2["log"] == [], "no time left: nothing is tried"
 
 
+def test_a_set_aside_shot_keeps_its_old_description_so_its_defect_stays_visible(gw):
+    dirty = Dirty(("s2",))
+    short, chat = reviewed(drawn(gw, director="defects"), dirty)
+    dirty.on = False                                    # the same old picture would now be described cleanly (noise); the trial picture is bad in another way
+    chat.review_overrides = {"s2": {"place": "none", "background": "blank"}}
+    rep = run(director.run(short["id"], chat, S, "k"))
+    after = store.get(short["id"])
+    assert rep["log"][0]["result"] == "reverted" and rep["after"] == 1, "the defect that was not fixed still counts"
+    assert [a["shot"] for a in director.actions(after)] == ["s2"] and "text_in_picture" in director.actions(after)[0]["kinds"]
+
+
 def test_the_two_rounds_stop_when_a_round_fixes_nothing(gw):
     short, chat = reviewed(drawn(gw, director="defects"), Dirty(("s2",)))
     rep = run(director.run(short["id"], chat, S, "k"))

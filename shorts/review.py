@@ -159,6 +159,8 @@ def defects(short: dict, shot: dict, seen: dict) -> tuple[list[dict], list[str]]
     asked, found, notes = asked_text(shot), [], []
     objects = " ".join(seen.get("objects") or [])
     text = seen.get("readable_text") or ""
+    if re.fullmatch(r"\s*s\d{1,3}\s*", text, re.I) or text.strip().lower() == str(shot.get("id") or "").lower():
+        text = ""                                        # the shot label printed on the contact sheet, read as text (seen on a one-picture sheet), is not text in the picture
     if not MONEY.search(asked) and (MONEY.search(objects) or MONEY.search(text)):
         found.append({"kind": "extra_object", "text": "paper money or coins are in the picture but its text never asks for them"})
     for sub in subj.of(short):                           # any other prop the plan lists that the picture shows without being asked

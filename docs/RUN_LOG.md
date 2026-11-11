@@ -201,3 +201,10 @@ Built from a comparison of four videos of the owner's inspiration channel ([FRAM
 - Built and wired in full (setting, auto-run step, API, screen, Ideas config); 21 tests in `tests/test_director.py` cover shadow, keep, revert, new-defect revert, two failed trials, protection, limits, budget, the look stop and its waiting cap, auto-run, API and config.
 - A new short and the autopilot start in shadow: it writes down what it would fix and changes nothing. Switching to defects waits for the owner to compare the review with their own eyes (step 3). Not yet tried on the real gateway.
 - Found while testing: the API reported the short's saved mode instead of the mode of the run (a "fix now" click on a shadow short looked like shadow); the report now carries `ran`.
+
+## 11 Nov 2026: first real Director run on sh-16824387 (fix mode)
+
+- 5 defects found (s8, s10, s13 wrong place; s16 extra object; s17 blank background). 5 trials in 545 s (about 110 s each): s8 and s17 kept, s10, s13 and s16 set aside with their old pictures back. The saved review said 0 defects at the end, which was too good: the three set-aside shots were described again from the SAME old pictures and the model read them differently (s10 "market" became "outdoors", s13 "study room"), so their defects vanished from the list.
+- Fixed: a set-aside shot keeps its old description (only kept shots are described again), so a defect that was not fixed still counts and the second round may try it again.
+- Found: on a one-picture contact sheet the model read the shot label printed on the sheet ("s10", "s13") as text in the picture, which wrongly counted as a new defect and set aside two trials (s10 and, with wrong_place still there, s13). The label is now ignored (`review.defects`).
+- Open: s8 was kept although the model still describes a study room for a shot that asks for a bright living room (the place check treats the two home rooms as the same). Left as is.
