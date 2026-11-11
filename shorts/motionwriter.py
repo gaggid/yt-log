@@ -16,7 +16,7 @@ LOOK_SIZE = "360x640"                    # the start pictures the writer looks a
 LOOKS = re.compile(r"\b(wearing|dressed in|dressed|looks like|appearance|features|complexion|hairstyle|outfit|photograph|illustration|painting|style|aesthetic|noir|cinematic|dramatic)\b", re.I)
 WEAK = re.compile(r"\b(slightly|subtly|barely|a little|a bit)\b", re.I)
 AMBIENT = re.compile(r"\b(dust|particles?|motes?|breeze|wind|pollen)\b", re.I)
-KINDS = (("static", r"\bstatic\b|\blocked\b|remains (still|steady|fixed)|does not move|stays (still|fixed)"), ("push", r"\bpush|zoom(s)? in|dolly in|moves? in|closer"), ("pull", r"\bpull|zoom(s)? out|dolly out|back(s)? away|retreat"),
+KINDS = (("static", r"\bstatic\b|\blocked\b|(?:remains|stays|holds|held|is|kept)\s+(?:a\s+)?(?:still|steady|fixed|firm)\b|steady position|does not move"), ("push", r"\bpush|zoom(s)? in|dolly in|moves? in|closer"), ("pull", r"\bpull|zoom(s)? out|dolly out|back(s)? away|retreat"),
          ("pan", r"\bpan"), ("tilt", r"\btilt|\brises\b|\bdescends\b|\bcrane"), ("orbit", r"\borbit|\barcs?\b|sweeps around|circles"), ("track", r"\btrack|\bfollows?\b"), ("handheld", r"handheld|\bsway"))
 CAMERA = re.compile(r"\b(camera|static|locked|pan|pans|panning|tilt|tilts|push|pushes|pull|pulls|dolly|orbit|orbits|arc|arcs|track|tracks|tracking|handheld|zoom|zooms|rack focus|crane|rises|descends)\b", re.I)
 
@@ -40,7 +40,7 @@ HOW TO WRITE A "move" (15 to 45 words, plain present-tense sentences, English):
 1. THE SUBJECT'S ACTION first: one clear verb with the part of the body or object that moves and where it goes ("the man slowly lifts the phone toward his face", "both hands tighten on the steering wheel", "the right jet banks away to the left"). One action, or two steps in order ("first ... then ..."), never more.
 2. THE CAMERA, in plain words, with a direction and how far it goes, so the model really moves it: "the camera pushes in until the man's face fills the frame", "the camera pans left across the whole group", "the camera rises from the boots up to the face", "the camera sweeps around the jet to its other side", "slow handheld sway". Pick a move that differs from the shot before it and the shot after it (never the same move twice in a row). A static camera is for at most one shot in five, and only when the subject's own movement is the whole shot. Use the planner's camera as a hint, not a rule.
 3. A MOTION IN THE SURROUNDINGS only when the picture description names something that can move there (smoke, flags, rain, water, snow, cloth, leaves, lights, a screen). Never add dust, particles, motes, a breeze or wind unless the picture description names them.
-4. SPEED AND SIZE fit the seconds: the shot lasts only the given seconds. Under 2 seconds: exactly two sentences, the subject's action and the camera, nothing else. 2 to 3 seconds: up to three sentences. Use "slowly", "steadily" or "quickly". Never an action that needs more time than the shot has (no walking across a room in 2 seconds).
+4. SPEED AND SIZE fit the seconds: the shot lasts only the given seconds. Under 2 seconds: two or three short sentences, the subject's action, the camera, and (when the picture names something that can move in the surroundings, such as water, clouds, cloth, leaves, a screen) one motion of it. 2 to 3 seconds: up to three sentences. Never more than three, and never one that needs more time than the shot has. Use "slowly", "steadily" or "quickly". Never an action that needs more time than the shot has (no walking across a room in 2 seconds).
 4b. MAKE THE MOVEMENT BIG ENOUGH TO SEE: say how far and what moves ("turns his whole head to the left", "steps forward two paces", "the hand closes into a fist"). Never use "slightly", "subtly", "barely" or "a little": the model then hardly moves anything.
 5. TIME IT TO THE NARRATION: the viewer hears the beat's line while the shot plays. The key movement is what the line is about (a start at "the phone pings", a turn at "the door"). If the shot's job is only a pause, the subject holds still with one tiny movement (breathing, a blink, a finger tightening) and the camera carries the shot.
 6. Keep what is in the picture: no new person, object or place appears, nothing leaves the frame unless the picture shows how (a door that is in frame can swing open). No cuts, no scene change, no text.
@@ -87,9 +87,7 @@ def problems(item: MoveOut, seconds: float | None = None, picture: str = "", bef
         out.append(f"{item.id}: \"{m.group(0)}\" makes the model barely move; say how far and what moves")
     if seconds is not None:
         n = sentences(item.move)
-        if seconds < 2.0 and n > 2:
-            out.append(f"{item.id}: the shot is {seconds:.1f} s, so write exactly two sentences (the action and the camera), not {n}")
-        elif n > 3:
+        if n > 3:
             out.append(f"{item.id}: at most three sentences, not {n}")
     for m in AMBIENT.finditer(item.move):
         if picture and not re.search(rf"\b{re.escape(m.group(0))}", picture, re.I):
@@ -219,9 +217,10 @@ async def write_beat(short: dict, beat: dict, shots: list[dict], backend, s: dic
     return n
 
 
-async def write_seen(short: dict, backend, s: dict | None = None, progress=None) -> int:
-    """Write the motion again for every shot whose start picture has not been looked at yet (the auto-run step after the start pictures). Beat by beat, so each call has the neighbours' moves."""
-    todo = {sh["id"] for sh in unseen(short)}
+async def write_seen(short: dict, backend, s: dict | None = None, progress=None, only: set[str] | None = None) -> int:
+    """Write the motion again for every shot whose start picture has not been looked at yet (the auto-run step after the start pictures, and the Make clips button). Beat by beat, so each call has the neighbours' moves.
+    `only` limits it to those shots."""
+    todo = {sh["id"] for sh in unseen(short) if only is None or sh["id"] in only}
     total = 0
     for i, b in enumerate(short["beats"]):
         shots = [sh for sid in b["shot_ids"] for sh in short["shots"] if sh["id"] == sid]
@@ -242,3 +241,24 @@ async def write_all(short: dict, backend, s: dict | None = None, progress=None, 
         shots = [sh for sid in b["shot_ids"] for sh in short["shots"] if sh["id"] == sid]
         total += await write_beat(short, b, shots, backend, s, note=note)
     return total
+
+
+async def look_first(short_id: str, backend, s: dict | None = None, progress=None, only: set[str] | None = None) -> str:
+    """Before clips are made (the Make clips button; auto-run has its own step): write the motion of every shot that has a start picture but was not written while looking at it. Returns a plain sentence
+    for the screen, or "" when there was nothing to do. A failure never stops the clips, but it is always said: the clips then use the motion written before, from the text."""
+    from . import pipelines as P, store
+    short = store.get(short_id)
+    if not P.keyframes_on(short):
+        return ""
+    todo = [sh["id"] for sh in unseen(short) if only is None or sh["id"] in only]
+    if not todo:
+        return ""
+    try:
+        n = await write_seen(short, backend, s, progress, only=set(todo))
+        store.save(short)
+    except Exception as e:  # noqa: BLE001
+        return f"The motion was NOT written from the pictures ({str(e)[:100]}); these clips use the motion written before."
+    if n == len(todo):
+        return f"Motion written while looking at {n} start picture(s)."
+    return f"Motion written from the pictures for {n} of {len(todo)} shots; the other {len(todo) - n} could not be looked at and keep the motion written before."
+

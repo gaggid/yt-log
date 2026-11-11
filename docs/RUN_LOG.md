@@ -210,3 +210,9 @@ Built from a comparison of four videos of the owner's inspiration channel ([FRAM
 - Open: s8 was kept although the model still describes a study room for a shot that asks for a bright living room (the place check treats the two home rooms as the same). Left as is.
 
 - **Wrong-place rule corrected (s8):** the "living room" of s8's defect was the short's one plan-wide place, not a place the shot named (a desk scene that looked like an office). The review now counts a wrong place only when the shot's own text or setting names a place, or when the picture is outside the home rooms of a plan-only backdrop (a market for a living-room short). An office/study for a living-room backdrop is a note ("this shot names no place, so nothing is changed") and is never redrawn. `lint.HOME_ROOMS`.
+
+## 11 Nov 2026: motion prompts gone basic (sh-ea7d5365)
+
+- Audit of the last 12 shorts: after the strict writer the motion lines average 18-22 words and 2.06 sentences (before: 24-25 words, 2.7-3.1 sentences). Cause 1: the rule "under 2 s = exactly two sentences, nothing else" (the shots average 1.9 s). Cause 2: `camera_kind` did not know "holds steady / holds a steady position", so 8 of 18 shots were effectively static and the one-in-five limit never fired. Cause 3: `p4_move` had no sampling entry (temperature 0.2), so a rewrite came back word for word.
+- Found: no shot of any recent short has `move_pic`: the writer looking at the real picture only ran as an Auto-run step, and the owner presses Make clips by hand, which skipped it. Make clips now runs `motionwriter.look_first` first and says in its message when the look failed (the clips are still made).
+- Changed: under 2 s the writer may write two or three sentences (the third for one motion of the surroundings the picture names); `p4_move` temperature 0.6; steady-camera phrases count as static. Not yet tried on the real gateway (the live app was making clips).

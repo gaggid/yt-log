@@ -1500,7 +1500,9 @@ def test_the_motion_writer_is_sent_back_for_samey_weak_or_invented_motion():
     assert problems(ok, 1.5, "Close-up of a man", "") == []
     assert camera_kind(ok.move) == "push" and camera_kind("The camera remains static.") == "static" and camera_kind("A slow handheld sway.") == "handheld"
     msgs = " ".join(problems(MoveOut(id="s1", move="The man turns his head slightly. The camera pushes in. Dust motes drift in the air."), 1.5, "Close-up of a man", "push"))
-    assert "slightly" in msgs and "exactly two sentences" in msgs and "Dust" in msgs and "repeats the shot before" in msgs
+    assert "slightly" in msgs and "Dust" in msgs and "repeats the shot before" in msgs
+    assert not any("sentences" in p for p in problems(MoveOut(id="s1", move="The man turns his whole head to the left. The camera pushes in until his face fills the frame. The curtain sways behind him."), 1.5, "Close-up of a man by a curtain", "")), "a short shot may carry a third sentence for the surroundings"
+    assert any("at most three sentences" in p for p in problems(MoveOut(id="s1", move="The man turns his whole head. The camera pushes in. The curtain sways. The door opens."), 1.5, "A man", ""))
     assert not any("Dust" in p for p in problems(MoveOut(id="s1", move="The man turns his whole head. The camera pans left. Dust drifts down."), 3.0, "A man in a dusty room", ""))
     assert any("too many static" in p for p in problems(MoveOut(id="s1", move="The man turns his whole head to the left. The camera remains static."), 2.5, "A man", "", False))
 
@@ -1557,3 +1559,40 @@ def test_the_motion_step_is_listed_after_the_pictures_and_a_failed_look_is_not_a
     assert run(motionwriter.write_seen(short, chat, S)) == 0
     assert not motionwriter.unseen(short), "a picture whose look failed once is left alone, so the run goes on to the clips"
     assert next(x for x in auto.steps(short) if x["id"] == "motion")["done"]
+
+
+def test_a_camera_that_holds_steady_counts_as_static_and_a_motion_rewrite_is_not_deterministic():
+    from shorts import motionwriter
+    for line in ("The water flows. The camera holds steady.", "The water flows. The camera holds a steady position.", "The clouds drift. The camera remains steady.", "The camera stays fixed on the arch."):
+        assert motionwriter.camera_kind(line) == "static", line
+    assert motionwriter.camera_kind("The camera pushes in toward the arch.") == "push"
+    assert settings_mod.sampling("p4_move", settings_mod.DEFAULTS)["temperature"] >= 0.5, "at 0.2 a rewrite of the same shot came back word for word"
+
+
+def test_make_clips_by_hand_writes_the_motion_from_the_real_pictures_first(client, gw=None):
+    from shorts import clips, motionwriter
+    short = planned("keyframe")
+    sid = short["id"]
+    run(svoice.make(sid, s=S, key="k"))
+    run(clips.make_keyframes(sid, s=S, key="k"))
+    assert len(motionwriter.unseen(store.get(sid))) == len(store.get(sid)["shots"])
+    client.chat.moves, client.chat.stills = True, True
+    assert client.post(f"/api/shorts/{sid}/clips", json={}).status_code in (200, 202)
+    job = wait_job(client, sid)
+    assert job["state"] == "done" and "Motion written while looking at" in str(job), job
+    after = store.get(sid)
+    assert not motionwriter.unseen(after) and all(sh.get("move_pic") for sh in after["shots"] if motionwriter.eligible(sh)), "the writer looked at the pictures before the clips"
+    calls = [c for c in client.chat.calls if c["task"] == "p4_move"]
+    assert calls and all(c["images"] >= 1 for c in calls)
+
+
+def test_make_clips_says_so_when_the_motion_could_not_be_written_from_the_pictures(client):
+    from shorts import clips
+    short = planned("keyframe")
+    sid = short["id"]
+    run(svoice.make(sid, s=S, key="k"))
+    run(clips.make_keyframes(sid, s=S, key="k"))
+    client.chat.moves = False                                                            # the writer fails
+    assert client.post(f"/api/shorts/{sid}/clips", json={}).status_code in (200, 202)
+    job = wait_job(client, sid)
+    assert job["state"] == "done" and "could not be looked at" in str(job), "the failure is said, and the clips are still made"

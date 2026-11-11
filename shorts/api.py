@@ -20,7 +20,7 @@ from characters import store as cstore, studio_edit
 from story.agent_store import for_plan as agent_decisions_for_plan
 
 from story3 import music
-from . import publish, agent, auto, cast, checks, clips, director, formats, frames, ideas as ideas_mod, languages, lint, looks, tones, review, models, motion, pipelines as P, planner, remix, stitch, store, subjects as subj, timeline, upscale, voice as svoice, wan
+from . import publish, agent, auto, cast, checks, clips, director, formats, frames, ideas as ideas_mod, languages, lint, looks, tones, review, models, motion, motionwriter, pipelines as P, planner, remix, stitch, store, subjects as subj, timeline, upscale, voice as svoice, wan
 
 router = APIRouter(prefix="/api/shorts")
 MAX_UPLOAD = 12 * 1024 * 1024
@@ -908,7 +908,13 @@ async def make_clips(short_id: str, body: ShotsReq | None = None):
     chk = checks.run(short)
     if not chk["ok"]:
         raise HTTPException(400, next(i["text"] for i in chk["issues"] if i["level"] == "block"))
-    return _start(short_id, "short_clips", lambda progress: _message(clips.make_clips(short_id, body.shot_ids, body.only_missing, progress)))
+    s, be = _backend()
+
+    async def work(progress):
+        note = await motionwriter.look_first(short_id, be, s, progress, set(body.shot_ids) if body.shot_ids else None)      # the writer looks at the real start pictures first (the same step auto-run has)
+        msg = await _message(clips.make_clips(short_id, body.shot_ids, body.only_missing, progress))
+        return f"{note} {msg}".strip()
+    return _start(short_id, "short_clips", work)
 
 
 @router.post("/{short_id}/upscale")
