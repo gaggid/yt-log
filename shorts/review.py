@@ -4,7 +4,7 @@ The model is never shown what a picture was asked to show. It only DESCRIBES wha
 reply is always valid JSON (tried on the real gateway: a model that sees the prompt agrees with it and misses defects; a model that describes blind does not). Code then compares the description with the
 prompt and decides what is a defect, and computes every score:
 
-  defects    extra_object, wrong_place, wrong_count (a note when a crowd is in the picture), text_in_picture, style_break, blank_background
+  defects    extra_object, wrong_place, wrong_count (a note when a crowd is in the picture), text_in_picture, style_break, blank_background, extra_person (people when the shot names none), object_face (a car or object with eyes)
   engagement 0 to 10 from up to five parts of 0 to 2: Read and Pull (the model's), Proof (the picture matches its prompt), Clean (no text, style break or blank background), Move (the motion line asks for a camera move)
   repeat     0 (new) to 10 (a copy of an earlier scene): the colour and layout match with every earlier picture, and the overlap of what the descriptions say is in them
   floors     the three low floors of the pass rule (hook, dead stretch, duplicate); only reported here
@@ -34,10 +34,15 @@ WEAK_ENGAGEMENT, WEAK_RUN = 5.0, 3                           # a stretch of thre
 FLOOR_HOOK, FLOOR_DEAD, DUPLICATE_MATCH = 4.0, 3.0, 0.85     # the three low floors (section 5.3 of the plan)
 MONEY = re.compile(r"\b(rupees?|money|coins?|banknotes?|notes?|cash|currency)\b", re.I)
 BREATHING = re.compile(r"\b(breath\w*|blinks?)\b", re.I)
-BAD_STYLE = {True: re.compile(r"isometric|\b3d\b|render|photo|diorama|cgi|vector|low[- ]poly", re.I),         # the short is a drawing: these are a different look
-             False: re.compile(r"painted|paint|cartoon|anime|illustration|drawn|3d|isometric|diorama", re.I)}   # the short is a photograph: these are not
+BAD_STYLE = {"drawn": re.compile(r"isometric|\b3d\b|render|photo|diorama|cgi|vector|low[- ]poly", re.I),         # the short is a drawing: these are a different look
+             "photo": re.compile(r"painted|paint|cartoon|anime|illustration|drawn|3d|isometric|diorama", re.I),   # the short is a photograph: these are not
+             "3d": re.compile(r"photo|painted|paint|watercolou?r|anime|sketch|line art|vector|flat", re.I)}      # the short is a rendered or modelled look: "3d", "diorama", "cartoon" are right, a photograph or a flat drawing is not
 BLANK = re.compile(r"\b(blank|empty|plain white|white background|nothing)\b", re.I)
 CROWD_PLACES = {"market", "street"}
+RULES = "4"        # bump when the defects or the questions to the model change: a review made under older rules is no longer current (and the director does not act on it)
+TRAFFIC = {"car", "sedan", "suv", "bus", "truck", "taxi", "auto", "rickshaw", "bicycle", "bike", "scooter", "motorcycle", "van"}          # street scenery: a car passing in a street picture is not an extra prop
+STREETY = re.compile(r"\b(street|road|city|skyline|market|lane|avenue|traffic|junction|highway)\b", re.I)
+NO_FACE = re.compile(r"^\s*(none|no|n/?a|nothing|no objects?|-|)\s*\.?\s*$", re.I)
 PROPS = {"object", "product", "other", ""}                   # a place that shows up is a wrong place (below), not an extra object
 
 
@@ -59,6 +64,7 @@ class Seen(M):
     shot_size: Str = ""
     arrangement: Str = ""
     face_visible: bool = False
+    object_faces: Str = ""
     read: int = 0
     pull: int = 0
 
@@ -70,8 +76,8 @@ class SeenOut(M):
 _STR, _INT, _BOOL, _LIST = {"type": "string"}, {"type": "integer"}, {"type": "boolean"}, {"type": "array", "items": {"type": "string"}}
 SCHEMA = {"type": "object", "properties": {"shots": {"type": "array", "items": {"type": "object", "properties": {
     "id": _STR, "place": _STR, "setting_type": _STR, "people_count": _INT, "objects": _LIST, "readable_text": _STR, "style": _STR, "background": _STR,
-    "shot_size": _STR, "arrangement": _STR, "face_visible": _BOOL, "read": _INT, "pull": _INT},
-    "required": ["id", "place", "setting_type", "people_count", "objects", "readable_text", "style", "background", "shot_size", "arrangement", "face_visible", "read", "pull"],
+    "shot_size": _STR, "arrangement": _STR, "face_visible": _BOOL, "object_faces": _STR, "read": _INT, "pull": _INT},
+    "required": ["id", "place", "setting_type", "people_count", "objects", "readable_text", "style", "background", "shot_size", "arrangement", "face_visible", "object_faces", "read", "pull"],
     "additionalProperties": False}}}, "required": ["shots"], "additionalProperties": False}
 RESPONSE_FORMAT = {"type": "json_schema", "json_schema": {"name": "picture_description", "strict": True, "schema": SCHEMA}}
 
@@ -80,7 +86,7 @@ You describe pictures plainly, like a careful assistant writing alt text. The at
 For every labelled picture return: id; place (where it is, for example living room, street market, office, kitchen, empty white background); setting_type (indoor, outdoor or none); people_count (people you can clearly see);
 objects (every clearly visible object that is not a person or the building); readable_text (any text or numbers you can see, banknote numerals and screen text included, and whether they look like real words, or "none");
 style (painted, photo, 3d, isometric diorama, other); background (one short phrase: what is behind the main subject, or "blank white" if it is empty); shot_size (close-up, medium or wide); arrangement (one short phrase of how
-things are placed); face_visible (true when a face can be seen); read (2 if a phone viewer understands the one main subject at once, 1 after a moment, 0 if unclear); pull (2 if a face, emotion, surprise or strong contrast
+things are placed); face_visible (true when a face can be seen); object_faces (name every vehicle, machine, building or other object that has eyes, a mouth or a face on it, as if it were a character; "none" when no object does); read (2 if a phone viewer understands the one main subject at once, 1 after a moment, 0 if unclear); pull (2 if a face, emotion, surprise or strong contrast
 would make a stranger keep watching, 1 if pleasant, 0 if dull).
 Describe only what you see. Do not guess what the picture was meant to show. Return ONLY the JSON."""
 
@@ -145,13 +151,71 @@ async def describe(short: dict, items: list[tuple[dict, dict, Path]], backend, s
             continue
         for x in res.value.shots:
             out[x.id] = x.model_dump()
+    await face_pass(short, items, out, backend, s)
     return out
+
+
+class FaceLook(M):
+    things: list[str] = []
+    face_on_a_thing: bool = False
+    where: Str = ""
+
+
+FACE_SCHEMA = {"type": "object", "properties": {"things": _LIST, "face_on_a_thing": _BOOL, "where": _STR}, "required": ["things", "face_on_a_thing", "where"], "additionalProperties": False}
+FACE_FORMAT = {"type": "json_schema", "json_schema": {"name": "face_check", "strict": True, "schema": FACE_SCHEMA}}
+FACE_SYSTEM = """[TASK:p4_review_face]
+You inspect one picture closely. List the vehicles and non-living objects in it. Then answer: is there a LITERAL drawn eye on any of them, that is an eyeball with an iris or a pupil, an eyelid or eyelashes,
+or a drawn mouth with lips or teeth, as if the vehicle or object were a cartoon character? Normal headlights, grilles, windows, bumpers and lamps are NOT eyes or mouths, even when the front of a car looks a little
+like a face. Answer true only for a literal eye or mouth, and say exactly where it is. Otherwise answer false and "none". Return ONLY the JSON."""
+# Measured on the three s5 pictures of sh-2bf15321 (a1 a small eyeball in a headlight, a2 a normal car, a3 a large eye on the car): "any face or eye" flagged all three (a normal car front "looks like a face"),
+# this wording flags only a3 and never a2, and looser "eye-like part" wording flagged all three again. A small eyeball in a headlight (a1) is still missed: precision first, because a flag costs a redraw.
+FACE_WIDTH = 1280          # a small eye in a headlight is missed on a sheet tile or at 640 px wide, and seen at this width (tried on the Pixar short sh-2bf15321)
+FACE_KINDS = PROPS         # a shot whose subjects include a thing (not only people and places) gets the close look
+
+
+def _wide_url(path: Path) -> str:
+    import base64
+    import io
+    im = Image.open(path).convert("RGB")
+    im = im.resize((FACE_WIDTH, max(1, round(im.height * FACE_WIDTH / im.width))))
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", quality=88)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def wants_face_look(short: dict, shot: dict, seen: dict) -> bool:
+    """A picture that shows a vehicle or a thing the shot lists: the sheet look is too small for an eye on a car, so each of these is looked at again, alone and large."""
+    objects = {lint._stem(w) for o in seen.get("objects") or [] for w in lint._words(o)}
+    return bool(objects & {lint._stem(t) for t in TRAFFIC}) or any((x.get("kind") or "") in FACE_KINDS for x in subj.in_shot(short, shot))
+
+
+async def face_pass(short: dict, items: list[tuple[dict, dict, Path]], seen: dict[str, dict], backend, s: dict) -> None:
+    """The second look for `object_face`: one picture at a time, large. A claim counts only when it says where the face is (the model sometimes answers true with "none"). A failed call leaves
+    the sheet's answer as it is."""
+    for sh, _kf, p in items:
+        sd = seen.get(sh["id"])
+        if not sd or not wants_face_look(short, sh, sd):
+            continue
+        try:
+            res = await llm.JsonCaller(backend, s).call(FACE_SYSTEM, "Inspect this picture.", FaceLook, images=[_wide_url(p)], response_format=FACE_FORMAT)
+        except llm.LLMError:
+            continue
+        where = (res.value.where or "").strip()
+        if res.value.face_on_a_thing and not NO_FACE.match(where) and where.lower() not in ("none", "no", "n/a"):
+            sd["object_faces"] = where if NO_FACE.match(sd.get("object_faces") or "") else f"{sd['object_faces']}; {where}"
 
 
 # ── the code's part: defects ────────────────────────────────────────────────────────
 
 def asked_text(shot: dict) -> str:
     return f"{shot.get('still') or shot.get('prompt') or ''} {' '.join(shot.get('must_show') or [])}".strip()
+
+
+def asks_people(short: dict, shot: dict) -> bool:
+    """Whether a shot asks for a person: its text names one, it follows the main character, or a person or group subject is in it."""
+    if shot.get("character") or shot.get("avatar") or lint.PERSON.search(asked_text(shot)):
+        return True
+    return any((s.get("kind") or "") in ("person", "group") for s in subj.in_shot(short, shot))
 
 
 def defects(short: dict, shot: dict, seen: dict) -> tuple[list[dict], list[str]]:
@@ -166,30 +230,51 @@ def defects(short: dict, shot: dict, seen: dict) -> tuple[list[dict], list[str]]
     for sub in subj.of(short):                           # any other prop the plan lists that the picture shows without being asked
         if (sub.get("kind") or "") in PROPS and subj.drawable(sub) and not lint.mentioned(short, sub, asked):
             tokens = lint.distinctive(short, sub)
-            if tokens and any(t in " ".join(lint._stem(w) for w in lint._words(objects)).split() for t in tokens):
+            have = set(" ".join(lint._stem(w) for w in lint._words(objects)).split())
+            hit = tokens & have
+            if hit and hit <= {lint._stem(t) for t in TRAFFIC} and STREETY.search(f"{seen.get('place', '')} {seen.get('background', '')}"):
+                continue                                 # a car or a bicycle in the traffic of a street picture
+            if hit:
                 found.append({"kind": "extra_object", "text": f"\"{sub['name']}\" is in the picture but its text never names it"})
     place = lint.place_of(f"{seen.get('place', '')} {seen.get('background', '')}")
     own = lint.scene_place(shot.get("still") or "") or lint.place_of(shot.get("setting") or "")                  # a place THE SHOT names
     plan_place = lint.place_of((short.get("plan") or {}).get("place") or "")                                    # the short's one backdrop: only a fallback
     asked_place = own or plan_place
     if place and asked_place and not lint.same_place(place[0], asked_place[0]):
-        if own or not (place[0] in lint.HOME_ROOMS and asked_place[0] in lint.HOME_ROOMS):
+        if own:
             found.append({"kind": "wrong_place", "text": f"it shows {place[1].strip()} but the shot is set in {asked_place[1].strip()}"})
+        elif (shot.get("setting") or "").strip():       # the shot names a place this check cannot read ("a high-tech laboratory"): the short's backdrop says nothing about it
+            pass
+        elif asked_place[0] in lint.HOME_ROOMS and place[0] not in lint.HOME_ROOMS:
+            found.append({"kind": "wrong_place", "text": f"it shows {place[1].strip()} but the short is set in {asked_place[1].strip()} and this shot names no other place"})
         else:                                           # a desk scene in a short whose backdrop is a living room: the shot never asked for the living room, so it is a note and nothing is redrawn
             notes.append(f"it shows {place[1].strip()}; the short's place is {asked_place[1].strip()}, but this shot names no place, so nothing is changed")
-    asked_n = sum({"one": 1, "two": 2, "three": 3, "four": 4, "five": 5}.get(m.group(1).lower(), 0) or int(m.group(1)) for m in re.finditer(
-        r"\b(one|two|three|four|five|\d+)\s+(?:[\w-]+\s+){0,2}?(?:people|persons?)\b", shot.get("still") or "", re.I))
+    counts = [{"one": 1, "two": 2, "three": 3, "four": 4, "five": 5}.get(m.group(1).lower(), 0) or int(m.group(1)) for m in re.finditer(
+        r"\b(one|two|three|four|five|\d+)\s+(?:[\w-]+\s+){0,2}?(?:people|persons?)\b", shot.get("still") or "", re.I)]
+    asked_n = counts[0] if counts and len(counts) > 1 and sum(counts[1:]) == counts[0] else sum(counts)         # "five people. One person stands left, one ..." is five, not ten
     got = int(seen.get("people_count") or 0)
     if asked_n and got != asked_n:
         if (place and place[0] in CROWD_PLACES) or abs(got - asked_n) < 2:
             notes.append(f"{got} people are in the picture (its text asks for {asked_n}); a crowd or a near count")
         else:
             found.append({"kind": "wrong_count", "text": f"{got} people are in the picture; its text asks for {asked_n}"})
+    want = re.search(r"close[- ]up|wide shot|medium", shot.get("still") or "", re.I)
+    drawn = re.search(r"close|medium|wide", seen.get("shot_size") or "", re.I)
+    if want and drawn:
+        w, d = ("close" if want.group(0).lower().startswith("close") else want.group(0).lower().split()[0]), drawn.group(0).lower()
+        if w in ("close", "wide") and d != w:
+            notes.append(f"the text asks for a {w} shot and the picture is {d}; the image model often ignores a close-up, so nothing is changed")
+    faces = (seen.get("object_faces") or "").strip()
+    if faces and not NO_FACE.match(faces):
+        found.append({"kind": "object_face", "text": f"an object has eyes or a face drawn on it: {faces[:60]}"})
+    got_people = int(seen.get("people_count") or 0)
+    if got_people >= 2 and not asks_people(short, shot) and not (place and place[0] in CROWD_PLACES):
+        found.append({"kind": "extra_person", "text": f"{got_people} people are in the picture but the shot names none"})
     if text.strip().lower() not in ("", "none", "n/a"):
         found.append({"kind": "text_in_picture", "text": f"readable text or numbers are in the picture: {text.strip()[:60]}"})
     style = seen.get("style") or ""
-    if style and BAD_STYLE[looks.painted(short)].search(style):
-        found.append({"kind": "style_break", "text": f"the picture looks {style.strip()}, not like the rest of the short"})
+    if style and BAD_STYLE[looks.family(short)].search(style):
+        found.append({"kind": "style_break", "text": f"the picture looks {style.strip()}, not like the rest of the short ({looks.label(short)})"})
     if BLANK.search(seen.get("background") or "") or (seen.get("place") or "").strip().lower() == "none":
         found.append({"kind": "blank_background", "text": "the background is blank or empty"})
     return found, notes
@@ -327,7 +412,7 @@ def review_scenes(short: dict, items: list[tuple[dict, dict, Path]], seen: dict[
         found, notes = defects(short, sh, seen[sid])
         kinds = [d["kind"] for d in found]
         parts = {"read": None if flat else max(0, min(2, int(seen[sid].get("read") or 0))), "pull": None if flat else max(0, min(2, int(seen[sid].get("pull") or 0))),
-                 "proof": max(0, 2 - sum(k in ("extra_object", "wrong_place", "wrong_count") for k in kinds)), "clean": max(0, 2 - sum(k in ("text_in_picture", "style_break", "blank_background") for k in kinds)),
+                 "proof": max(0, 2 - sum(k in ("extra_object", "wrong_place", "wrong_count", "extra_person") for k in kinds)), "clean": max(0, 2 - sum(k in ("text_in_picture", "style_break", "blank_background", "object_face") for k in kinds)),
                  "move": move}
         closest, best, best_m, best_t = "", -1.0, 0.0, 0.0
         for earlier in order[:order.index(sid)]:
@@ -349,7 +434,7 @@ def review_scenes(short: dict, items: list[tuple[dict, dict, Path]], seen: dict[
 def stamp(short: dict) -> str:
     """A fingerprint of what the review looked at: the chosen picture of every shot and what it was asked to show."""
     rows = [[sh["id"], kf["id"], asked_text(sh), sh.get("setting"), sh.get("move")] for sh, kf, _p in pictures(short)]
-    return hashlib.sha1(json.dumps([rows, (short.get("plan") or {}).get("place")], sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]
+    return hashlib.sha1(json.dumps([RULES, looks.style_id(short), rows, (short.get("plan") or {}).get("place")], sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]
 
 
 def current(short: dict) -> bool:

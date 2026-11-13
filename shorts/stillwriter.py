@@ -75,6 +75,8 @@ def problems(item: StillOut, strict: bool = False) -> list[str]:
         m = lint.NO_TEXT.search(t) or next((x for x in (lint.NO_TEXT.search(f) for f in item.must_show) if x), None)
         if m:
             out.append(f"{item.id}: \"{m.group(0)}\" asks for text or a number in the picture (the video model cannot handle text): show a screen as a soft glow, a banknote as plain coloured paper, a sign as a blank board")
+        if re.search(r"\b(?:one|a|the)\s+(?:[\w-]+\s+){0,3}?person\b", t, re.I) and not re.search(r"\b(?:man|woman|boy|girl|lady|gentleman|child|kid|elder|he|she)\b", t, re.I):
+            out.append(f"{item.id}: a single \"person\" has no sex or age (the image model picks one): say man, woman, boy or girl, with the age and build")
         g = lint.GROUP_NOUN.search(t)
         if g and not lint.COUNT_OK.search(t):
             out.append(f"{item.id}: \"{g.group(0)}\" has no exact head count: say how many people it has and where each one stands")

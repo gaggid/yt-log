@@ -108,6 +108,19 @@ def test_the_style_check_follows_the_short_style():
     assert any(d["kind"] == "style_break" for d in review.defects(photo, sh, anime)[0]), "a painting in a photographic short"
 
 
+def test_a_3d_short_is_not_flagged_for_looking_3d():
+    pixar = audit_short(visual_style="pixar3d")
+    sh = pixar["shots"][0]
+    for word in ("3d", "3d animation", "cartoon", "isometric diorama"):
+        seen = {**FX["seen"]["s1"], "style": word, "readable_text": "none"}
+        assert not any(d["kind"] == "style_break" for d in review.defects(pixar, sh, seen)[0]), word
+    for word in ("photo", "painted watercolour"):
+        seen = {**FX["seen"]["s1"], "style": word, "readable_text": "none"}
+        assert any(d["kind"] == "style_break" for d in review.defects(pixar, sh, seen)[0]), word
+    broken = [d for d in review.defects(pixar, sh, {**FX["seen"]["s1"], "style": "photo", "readable_text": "none"})[0] if d["kind"] == "style_break"]
+    assert "Pixar" in broken[0]["text"]
+
+
 # ── scores ──────────────────────────────────────────────────────────────────────────────
 
 def test_repeat_compares_every_earlier_picture_and_names_the_closest(tmp_path):

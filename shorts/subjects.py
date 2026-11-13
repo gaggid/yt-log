@@ -56,6 +56,19 @@ def plain_visual(text: str) -> str:
     return CAMERA_WORDS.sub("", text or "").strip(" ,")
 
 
+# A subject's look often carries its own scene: "standing on a podium", "parked on a clean paved driveway", "leaning against a brick wall", "sitting on a large wooden table in the center of a bright room".
+# In a shot that shows only part of it the shot says where it is, so these clauses would draw a podium, a driveway or a wall that the shot never asked for.
+POSE_CLAUSE = re.compile(r",?\s*\b(?:standing|sitting|sits|stands|parked|leaning|lying|resting|placed|kept|hanging|walking|running|positioned|set)\b[^.;]*?\b(?:on|in|at|against|beside|near|inside|outside|under|over|before|by|across|along)\b[^.;]*", re.I)
+
+
+def appearance(text: str) -> str:
+    """A subject's look without camera words and without where it stands or what it does ("standing on a podium", "parked on a driveway"): what it IS and looks like. Never empty: when every
+    clause is a pose the plain look is kept."""
+    t = plain_visual(text)
+    cut = re.sub(r"\s{2,}", " ", POSE_CLAUSE.sub("", t)).strip(" ,;")
+    return cut if len(cut.split()) >= 3 else t
+
+
 def of(short: dict) -> list[dict]:
     return [x for x in (short.get("plan") or {}).get("subjects") or [] if x.get("name") and x.get("visual")]
 

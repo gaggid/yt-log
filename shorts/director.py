@@ -1,6 +1,6 @@
 """The Director (plan: docs/PLAN_scene_director.md, layer 4). It reads the scene review and fixes what is OBJECTIVELY wrong in a picture, nothing else:
 
-  extra_object, wrong_place, text_in_picture, style_break, blank_background, wrong_count   (a defect the review found)
+  extra_object, wrong_place, text_in_picture, style_break, blank_background, wrong_count, extra_person, object_face   (a defect the review found)
   duplicate                                                                                   (a scene that is a near-copy of an earlier one: the duplicate floor)
 
 Taste (engagement, repeat, faces, places, composition) is never acted on. The model keeps the creative part: the Director names the problem in a note to the picture writer and never says what to draw.
@@ -20,7 +20,7 @@ import time
 from story import settings as settings_mod
 from story3 import store as media
 
-from . import clips, lint, pipelines as P, review, stillwriter, store
+from . import clips, lint, looks, pipelines as P, review, stillwriter, store
 
 SETTING = "director"
 MODES = ("off", "shadow", "defects")
@@ -28,13 +28,15 @@ MAX_ROUNDS = 2
 MAX_SHARE = 0.3
 MAX_TRIALS = 2
 BUDGET_S = 25 * 60
-FIXABLE = ("extra_object", "wrong_place", "text_in_picture", "style_break", "blank_background", "wrong_count")
+FIXABLE = ("extra_object", "wrong_place", "text_in_picture", "style_break", "blank_background", "wrong_count", "extra_person", "object_face")
 NOTES = {
     "extra_object": "The picture shows an object that this shot does not ask for. Keep the picture to the things the shot idea names, each with its place.",
     "wrong_place": "The picture is set in the wrong place. Set it in {place}, as the shot says, with a real background.",
     "text_in_picture": "The picture must show no readable text or numbers. Show a screen as a soft glow, a banknote as plain coloured paper, a sign as a blank board.",
-    "style_break": "The picture came out in a different look from the rest. Describe a real, recognisable place behind the subject and keep the same painted look as the other pictures.",
-    "blank_background": "The background came out empty. Put a real, recognisable place behind the subject, in the same painted look as the other pictures.",
+    "style_break": "The picture came out in a different look from the rest. Describe a real, recognisable place behind the subject and keep the same look as the other pictures: {look}.",
+    "blank_background": "The background came out empty. Put a real, recognisable place behind the subject, in the same look as the other pictures: {look}.",
+    "extra_person": "The picture shows people this shot does not ask for. Name only the things the shot idea shows, and show no people unless the shot line names them.",
+    "object_face": "A vehicle or object came out with eyes or a face. Describe it as an ordinary real-world object with plain glass headlights, plain windows and no face, keep the same look as the other pictures: {look}.",
     "wrong_count": "The number of people is wrong. Say exactly how many people there are and where each one stands.",
     "duplicate": "This picture repeats scene {closest}. Show a different place and a different arrangement of the same idea, and keep what the line says.",
 }
@@ -78,7 +80,7 @@ def actions(short: dict) -> list[dict]:
         why = protected(short, shot)
         left = int(failed.get(sid, 0)) >= MAX_TRIALS
         place = lint.scene_place(shot.get("still") or "") or lint.place_of(shot.get("setting") or "") or lint.place_of((short.get("plan") or {}).get("place") or "")
-        note = " ".join(NOTES[k].format(place=(place[1].strip() if place else "the place the shot names"), closest=sc["repeat"].get("closest") or "an earlier one") for k in kinds)
+        note = " ".join(NOTES[k].format(place=(place[1].strip() if place else "the place the shot names"), closest=sc["repeat"].get("closest") or "an earlier one", look=looks.label(short)) for k in kinds)
         out.append({"shot": sid, "kinds": kinds, "defects": [d["text"] for d in sc["defects"] if d["kind"] in kinds] + (["a near-duplicate of " + sc["repeat"]["closest"]] if "duplicate" in kinds else []), "note": note,
                     "skip": why or ("it failed two trials, a person should look" if left else "")})
     return sorted(out, key=lambda a: (bool(a["skip"]), -len(a["kinds"]), int(a["shot"][1:])))

@@ -100,7 +100,8 @@ def looks_line(short: dict, shot: dict, character: str) -> tuple[str, str]:
         # \bants?\b matches "ant"/"ants" but not "antenna".
         if name_lower in still_lower or re.search(r'\b' + re.escape(first) + r's?\b', still_lower):
             subs = subs + [ps]
-    shown = [f"{s['name']}: {subjects.plain_visual(s['visual']).rstrip('. ')}." for s in subs if s.get("kind") != "place" and not (character and _same(character, s["visual"]))]
+    look_of = subjects.appearance if checked else subjects.plain_visual            # the storyboard check: a look says what a thing is, not where it stands (a short made before it keeps its old text)
+    shown = [f"{s['name']}: {look_of(s['visual']).rstrip('. ')}." for s in subs if s.get("kind") != "place" and not (character and _same(character, s["visual"]))]
     places = [s for s in subs if s.get("kind") == "place"]
     setting = (shot.get("setting") or "").strip() or (places[0]["visual"].strip() if places else "") or one_place((short["plan"].get("place") or "").strip())
     return " ".join(([subjects.plain_visual(character).rstrip(". ") + "."] if character else []) + shown), setting

@@ -22,7 +22,7 @@ SETTING = "storyboard_lint"
 # ── words ────────────────────────────────────────────────────────────────────
 
 NATIONALITY = {"indian", "chinese", "american", "russian", "pakistani", "british", "japanese", "korean", "european", "african", "asian", "french", "german", "israeli", "iranian", "turkish",
-               "bangladeshi", "nepali", "global", "local", "national", "modern", "young", "old", "small", "large", "big", "new", "the", "a", "an", "of", "and", "or", "with"}
+               "bangladeshi", "nepali", "global", "local", "national", "modern", "young", "old", "small", "large", "big", "new", "the", "a", "an", "of", "and", "or", "with", "in", "on", "at", "to", "for", "by", "from", "is", "as"}
 PROP_KINDS = {"object", "product", "place", "other", ""}          # kinds that can be added to a picture by mistake; people, groups and machines are kept as the planner listed them
 
 PLACES = [
@@ -104,10 +104,21 @@ def _plan_subject(short: dict, name: str) -> dict | None:
     return next((x for x in subj.of(short) if subj._norm(x["name"]) == key), None)
 
 
+# Words that say nothing about WHICH subject a text means: a place on the frame ("the top right corner", "top of the cake"), a size or number, the "s" of "man's" / "India's".
+GENERIC = {"top", "bottom", "left", "right", "side", "front", "back", "middle", "centre", "center", "edge", "corner", "high", "low", "one", "two", "three", "four", "five",
+           "first", "last", "best", "worst", "more", "most", "other", "all", "group", "people", "person", "thing", "stuff"}
+
+
+def _tells(w: str) -> bool:
+    """A word that can tell one subject from another: at least three letters, not a number, not a position or filler word."""
+    return len(w) >= 3 and not w.isdigit() and w not in GENERIC
+
+
 def distinctive(short: dict, sub: dict) -> set[str]:
-    """The words of a subject's name that only this subject has (and that are not a nationality or a plain adjective): "Indian Rupees" is told by "rupee", never by "Indian"."""
+    """The words of a subject's name that only this subject has (and that are not a nationality, a plain adjective, a position or a number): "Indian Rupees" is told by "rupee", never by "Indian",
+    and "The Top 1%" is never told by "top" ("the top right corner") or "1". A name left with no telling word is found only by its whole name."""
     others = [{_stem(w) for w in _words(x["name"]) if w not in NATIONALITY} for x in subj.of(short) if x["name"] != sub["name"]]
-    mine = {_stem(w) for w in _words(sub["name"]) if w not in NATIONALITY}
+    mine = {_stem(w) for w in _words(sub["name"]) if w not in NATIONALITY and _tells(_stem(w))}
     return {w for w in mine if not any(w in o for o in others)}
 
 
@@ -266,6 +277,25 @@ def notes(short: dict) -> list[dict]:
             out.append({"rule": "composition_repeat", "text": f"{len(ids)} shots use the same size and place ({size}, {place}, {'with a person' if person else 'no person'}): {', '.join(ids)}", "shots": ids})
     if shots and people * 3 < len(shots):
         out.append({"rule": "few_people", "text": f"only {people} of {len(shots)} shots show a person", "shots": []})
+    for sh in shots:
+        extra = prompt_extras(short, sh)
+        if extra:
+            out.append({"rule": "prompt_leak", "text": f"{sh['id']}: the picture prompt also describes {', '.join(n for n, _w in extra)}, which the shot does not list (matched on: {', '.join(w for _n, w in extra)})", "shots": [sh["id"]]})
+    return out
+
+
+def prompt_extras(short: dict, shot: dict) -> list[tuple[str, str]]:
+    """The plan subjects the picture prompt describes although the shot does not list them: (name, what matched). The prompt adds a subject when the picture text names it (`mentioned`); a
+    subject the writer did not list is a leak when it is the shot's text that names it only by one loose word. Empty when the shot lists everything its prompt describes."""
+    text = _text_of(shot)
+    listed = {x["name"] for x in subj.in_shot(short, shot)}
+    out = []
+    for ps in subj.of(short):
+        if ps["name"] in listed or not subj.drawable(ps) or not mentioned(short, ps, text):
+            continue
+        t = " " + " ".join(_stem(w) for w in _words(text)) + " "
+        full = " " + " ".join(_stem(w) for w in _words(ps["name"])) + " "
+        out.append((ps["name"], "its full name" if full in t else ", ".join(w for w in sorted(distinctive(short, ps)) if f" {w} " in t)))
     return out
 
 

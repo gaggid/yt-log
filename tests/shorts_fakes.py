@@ -171,7 +171,7 @@ class FakeChat:
         if task == "p4_move" and not self.moves:
             from story.llm import LLMError
             raise LLMError("the motion writer is off in this test")
-        if task == "p4_review" and not self.review:
+        if task in ("p4_review", "p4_review_face") and not self.review:
             from story.llm import LLMError
             raise LLMError("the picture review is off in this test")
         if task == "p4_still" and not self.stills:
@@ -203,6 +203,8 @@ class FakeChat:
             body = {"shots": [{"id": i, "place": "street", "setting_type": "outdoor", "people_count": 1, "objects": ["wallet"], "readable_text": "none", "style": "painted", "background": "a wet road at night",
                                "shot_size": "close-up", "arrangement": "one man in the centre", "face_visible": True, "read": n % 3, "pull": (n + 1) % 3, **self.review_overrides.get(i, {}), **((self.review_fn(ids, self.review_calls) or {}).get(i, {}) if self.review_fn else {})} for n, i in enumerate(ids)]}
             self.review_calls += 1
+        elif task == "p4_review_face":
+            body = {"things": ["wallet"], "face_on_a_thing": False, "where": "none"}
         elif task == "p4_still":
             ids = re.search(r"Write the pictures of: ([^.]+)\.", messages[1]["content"]).group(1).split(", ")
             body = {"shots": [{"id": i, "still": self.still_text or f"Close-up of one courier holding one wallet beside a rusty bus stop, picture {i}, a single streetlight behind him.", "must_show": ["exactly 1 courier", "wallet in his hand"]} for i in ids]}

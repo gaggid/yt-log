@@ -17,7 +17,8 @@ TRENDING = {
     "pixar3d": {
         "label": "3D animated movie (Pixar-style)",
         "description": "Big-eyed, soft-featured characters with smooth stylised 3D shapes, warm glowing light and rich colour, like a family animated feature.",
-        "look": ("Stylised 3D animated feature-film frame, every subject modelled with smooth rounded shapes and soft subsurface-lit surfaces, any face has large expressive eyes, detailed fabric and fur, "
+        "look": ("Stylised 3D animated feature-film frame, every subject modelled with smooth rounded shapes and soft subsurface-lit surfaces, every human and animal face has large expressive eyes, "
+                 "vehicles, machines and objects keep their ordinary real-world design with plain glass headlights and windows, detailed fabric and fur, "
                  "warm cinematic lighting with glowing rim light, rich saturated colour, shallow depth of field, polished studio-render finish. Computer-animated, not a photograph, not a painting."),
         "lead": 'Stylised 3D animated film frame, every subject is a smooth, rounded animated-film model.',
         "motion": 'Springy, appealing character animation: small squash and stretch on quick actions, eyes and brows lead each expression, soft follow-through of hair and cloth, smooth camera moves.',
@@ -36,7 +37,7 @@ TRENDING = {
         "label": "Anime film",
         "description": "Hand-drawn Japanese animation look: clean line art, painted skies, soft glow and emotional lighting.",
         "look": ("Japanese animated feature film frame, clean fine line art, flat cel colour with soft gradients, hand-painted background with soft depth, "
-                 "gentle bloom and lens glow, emotional golden-hour light, any face has expressive eyes. Hand-drawn animation, not a photograph, not a 3D render."),
+                 "gentle bloom and lens glow, emotional golden-hour light, every human and animal face has expressive eyes. Hand-drawn animation, not a photograph, not a 3D render."),
         "lead": 'Hand-drawn anime film frame, every subject is drawn with clean line art.',
         "motion": 'Limited-animation rhythm: hair, cloth, leaves and clouds drift; the face and body stay mostly steady with small eye, brow and mouth changes; slow pans and push ins over the painted background.',
         "allow": [],
@@ -150,6 +151,23 @@ def of(short: dict, fallback: str = "") -> str:
         return fallback
     look = presets()[sid]["look"]
     return look if sid in DARK_STYLES else brighten(look)
+
+
+THREE_D = ("pixar3d", "tinyworld", "claymation", "lowpoly")      # looks that are made models, not drawings: a reviewer calling them "3d" or "diorama" is right
+
+
+def family(short: dict) -> str:
+    """"photo" (realism), "3d" (a rendered or modelled look) or "drawn" (every other look): the picture review checks the medium against this, not against one yes/no."""
+    sid = style_id(short)
+    if sid in (NONE, "realism"):
+        return "photo"
+    return "3d" if sid in THREE_D else "drawn"
+
+
+def label(short: dict) -> str:
+    """The look in words for a note to the picture writer, e.g. "3D animated movie (Pixar-style)"."""
+    sid = style_id(short)
+    return presets()[sid]["label"] if sid else "the same"
 
 
 def painted(short: dict) -> bool:
