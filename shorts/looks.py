@@ -17,8 +17,7 @@ TRENDING = {
     "pixar3d": {
         "label": "3D animated movie (Pixar-style)",
         "description": "Big-eyed, soft-featured characters with smooth stylised 3D shapes, warm glowing light and rich colour, like a family animated feature.",
-        "look": ("Stylised 3D animated feature-film frame, every subject modelled with smooth rounded shapes and soft subsurface-lit surfaces, every human and animal face has large expressive eyes, "
-                 "vehicles, machines and objects keep their ordinary real-world design with plain glass headlights and windows, detailed fabric and fur, "
+        "look": ("Stylised 3D animated feature-film frame, every subject modelled with smooth rounded shapes and soft subsurface-lit surfaces, people are Pixar-style animated film characters, every other subject keeps its true real-world form, detailed fabric and fur, "
                  "warm cinematic lighting with glowing rim light, rich saturated colour, shallow depth of field, polished studio-render finish. Computer-animated, not a photograph, not a painting."),
         "lead": 'Stylised 3D animated film frame, every subject is a smooth, rounded animated-film model.',
         "motion": 'Springy, appealing character animation: small squash and stretch on quick actions, eyes and brows lead each expression, soft follow-through of hair and cloth, smooth camera moves.',
@@ -37,7 +36,7 @@ TRENDING = {
         "label": "Anime film",
         "description": "Hand-drawn Japanese animation look: clean line art, painted skies, soft glow and emotional lighting.",
         "look": ("Japanese animated feature film frame, clean fine line art, flat cel colour with soft gradients, hand-painted background with soft depth, "
-                 "gentle bloom and lens glow, emotional golden-hour light, every human and animal face has expressive eyes. Hand-drawn animation, not a photograph, not a 3D render."),
+                 "gentle bloom and lens glow, emotional golden-hour light, human characters have expressive eyes. Hand-drawn animation, not a photograph, not a 3D render."),
         "lead": 'Hand-drawn anime film frame, every subject is drawn with clean line art.',
         "motion": 'Limited-animation rhythm: hair, cloth, leaves and clouds drift; the face and body stay mostly steady with small eye, brow and mouth changes; slow pans and push ins over the painted background.',
         "allow": [],

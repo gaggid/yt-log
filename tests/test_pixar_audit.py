@@ -80,12 +80,12 @@ def test_the_prompt_uses_the_appearance_only_when_the_storyboard_check_is_on():
 
 # -- the 3D style gives people eyes, not cars ---------------------------------------
 
-def test_the_pixar_style_puts_eyes_on_people_and_animals_only():
+def test_the_pixar_style_names_no_eyes_and_no_vehicles():
     short = pixar()
     text = stills.prompt(short, shot(short, "s5"))
-    assert "any face has large expressive eyes" not in text
-    assert "every human and animal face has large expressive eyes" in text
-    assert "vehicles, machines and objects keep their ordinary real-world design" in text
+    for word in ("eyes", "headlight", "vehicle", "animal face"):
+        assert word not in looks.TRENDING["pixar3d"]["look"].lower(), word
+    assert "every other subject keeps its true real-world form" in text
 
 
 # -- the review knows the style ----------------------------------------------------
