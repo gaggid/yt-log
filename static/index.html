@@ -689,7 +689,7 @@ async function viewSettings() {
       <label class="f">JSON mode<select data-s="json_mode"><option ${s.json_mode === 'off' ? 'selected' : ''}>off</option><option ${s.json_mode === 'on' ? 'selected' : ''}>on</option></select><span>Turn on only if the connection test says it is supported.</span></label></div>
       <div class="row mt-s"><button onclick="testConn(this)">Test connection</button><span class="mute small">Checks the model list, a tiny reply and JSON-mode support. Saves your settings first.</span></div><div id="conn" class="mt-s"></div></div>
     <div class="card pad mt"><h4 style="margin-top:0">Context &amp; chunking</h4>
-      <div class="grid g3">${n('context_limit', 'Context limit (tokens)', 1024, 'Window the model is configured for.')}${n('output_reserve', 'Output reserve (tokens)', 500, 'Held back for the reply.')}
+      <div class="grid g3">${n('context_limit', 'Context limit (tokens)', 1024, 'Window the model is configured for.')}${n('output_reserve', 'Output reserve (tokens)', 500, 'Held back for the reply.')}${n('model_max_output', 'Max model output (tokens)', 1000, '0 = no cap. Set to your model\'s actual output limit if replies are cut off.')}
       ${n('safety_margin', 'Safety margin (fraction)', 0.01, 'Share of the window never filled.')}${n('chunk_tokens', 'Chunk size (source tokens)', 500)}${n('chunk_overlap', 'Chunk overlap (tokens)', 50)}${n('chars_per_token', 'Characters per token', 0.1, 'Used to estimate size.')}</div>
       <div id="derived" class="mt-s small mute"></div></div>
     <div class="card pad mt"><h4 style="margin-top:0">Reliability</h4>

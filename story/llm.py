@@ -81,6 +81,9 @@ class ChatBackend:
         self.headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
     async def complete(self, messages: list[dict], max_tokens: int, params: dict | None = None) -> LLMResult:
+        cap = int(self.s.get("model_max_output") or 0)
+        if cap:
+            max_tokens = min(max_tokens, cap)
         payload = {**model_field(self.s), "messages": messages, "max_tokens": max_tokens,
                    "temperature": self.s["temperature"], "stream": False, **(params or {})}
         if self.s.get("json_mode") == "on" and "response_format" not in payload:

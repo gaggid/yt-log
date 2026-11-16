@@ -9,6 +9,7 @@ DEFAULTS: dict = {
     "model": config.CHAT_MODEL,           # "" = let the model server choose (it is never named by this app unless the owner types one in Settings)
     "context_limit": 65536,       # tokens the model is configured for (model supports more; raise after testing)
     "output_reserve": 10000,      # tokens held back for the reply (also sent as max_tokens)
+    "model_max_output": 0,        # hard cap on max_tokens sent to the model (0 = no cap; set for small models with low output limits)
     "chunk_tokens": 8000,         # source tokens per analysis chunk
     "chunk_overlap": 600,         # tokens of preceding text repeated as read-only context
     "safety_margin": 0.10,        # fraction of the window never filled
@@ -59,7 +60,7 @@ def sampling(task: str, s: dict | None = None) -> dict:
     return {k: v for k, v in out.items() if k not in OPTIONAL_SAMPLING or probe.get(k)}
 
 
-_INT = {"context_limit", "output_reserve", "chunk_tokens", "chunk_overlap", "concurrency", "retries",
+_INT = {"context_limit", "output_reserve", "model_max_output", "chunk_tokens", "chunk_overlap", "concurrency", "retries",
         "transport_retries", "timeout_s", "max_candidates", "discover_window_chapters"}
 _FLOAT = {"safety_margin", "chars_per_token", "temperature", "evidence_influence", "completeness_influence", "retry_backoff_s"}
 _STR = {"base_url", "model", "json_mode"}
@@ -117,6 +118,8 @@ def validate(patch: dict) -> dict:
         raise SettingsError("context_limit must be at least 4096")
     if not 1000 <= merged["output_reserve"] < merged["context_limit"] * 0.7:
         raise SettingsError("output_reserve must be >= 1000 and below 70% of the context limit")
+    if merged["model_max_output"] != 0 and merged["model_max_output"] < 1000:
+        raise SettingsError("model_max_output must be 0 (no cap) or at least 1000")
     if not 0 <= merged["safety_margin"] < 0.5:
         raise SettingsError("safety_margin must be between 0 and 0.5")
     if not 0 <= merged["evidence_influence"] <= 1:
