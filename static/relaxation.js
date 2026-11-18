@@ -1,5 +1,6 @@
 /* Relaxation Rain Channel — #/relaxation
    Called directly from index.html router as showRelaxation(). */
+var showRelaxation = (function () {
 
   /* ── API helpers ─────────────────────────────────────────────────────────── */
   async function api(method, path, body) {
@@ -246,3 +247,6 @@
 
     render();
   }
+
+  return showRelaxation;
+})();
