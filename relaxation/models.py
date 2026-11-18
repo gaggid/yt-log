@@ -32,59 +32,70 @@ KIND_FINAL = "rl_final"      # 3-hour MP4
 # then the window scene, then style. Positive words only — Qwen draws every word.
 SCENES: dict[str, dict] = {
     "night_city": {
-        "label": "Night City",
+        "label": "Mumbai Monsoon Night",
         "prompt": (
-            "Cozy bedroom at night, wide floor-to-ceiling window showing a wet city street below, "
-            "neon sign reflections shimmering on the rain-slicked pavement, raindrops streaking down "
-            "the glass in long silver lines, warm amber bedside lamp on, soft glow on the wooden "
-            "floor and white duvet, a small reading nook in the corner with a steaming mug, "
-            "curtains slightly open, deep navy sky outside. "
-            "Photorealistic, cinematic, cozy atmosphere, 8K detail. "
+            "Modern Mumbai apartment bedroom, high floor, wide floor-to-ceiling glass window, "
+            "heavy monsoon rain sheeting down the glass in thick silver streaks, the city far below "
+            "blurred into smeared amber and white lights through the downpour, dark navy monsoon sky, "
+            "low teak-wood bed with crisp white linen, a brass bedside lamp casting a warm amber cone, "
+            "a steaming cup of chai on the windowsill, rain rivulets merging and racing to the bottom "
+            "of the glass, distant buildings and flyovers barely visible through the curtain of rain. "
+            "Photorealistic, cinematic, intimate and warm against the storm outside, 8K detail. "
             "No people, no text, no logo."
         ),
     },
     "mountain_forest": {
-        "label": "Mountain Forest",
+        "label": "Kerala Forest Cottage",
         "prompt": (
-            "Cozy cabin living room, large panoramic window overlooking a dense pine forest and "
-            "misty mountain peaks, heavy rain falling outside, droplets racing down the cold glass, "
-            "soft green-grey light filtering through the fog, warm fireplace glow on the right, "
-            "wooden beams on the ceiling, woollen throw on the armchair, a hot drink on the "
-            "windowsill. "
-            "Photorealistic, cinematic, calm and peaceful. "
+            "Old Kerala wooden cottage bedroom, wide teak-framed open window looking out into a "
+            "dense tropical garden in heavy monsoon rain, giant banana leaves and jackfruit trees "
+            "catching the downpour, water streaming in silver ropes off every broad leaf, a moss-covered "
+            "stone path outside glistening wet, small brass oil lamp on the sill glowing amber, "
+            "carved wooden bed with a hand-woven cotton bedspread in deep indigo, old wooden floorboards, "
+            "the garden a wall of deep green and grey rain mist, smell of petrichor and wet earth. "
+            "Photorealistic, lush Kerala monsoon atmosphere, cinematic depth. "
             "No people, no text, no logo."
         ),
     },
     "ocean": {
-        "label": "Ocean",
+        "label": "Himalayan Pine Lodge",
         "prompt": (
-            "Seaside cottage living room, wide window looking out at a grey stormy ocean, waves "
-            "rolling in slowly, rain falling on the dark water and the rocks below, droplets on the "
-            "glass blurring the horizon slightly, warm cream-coloured interior, linen sofa, "
-            "driftwood shelf, a single candle on the windowsill, soft natural light from outside. "
-            "Photorealistic, moody coastal atmosphere, cinematic. "
+            "Mountain lodge bedroom in the Himalayas, thick deodar-pine walls and heavy exposed beams, "
+            "wide wood-framed window looking into a dense pine forest in monsoon mist, rain falling "
+            "in long silver threads through the dark canopy, the forest floor a mat of wet pine needles, "
+            "distant ridgelines fading into grey cloud, warm amber glow from a hanging wrought-iron "
+            "lantern inside, a woollen Kullu shawl folded on a solid-wood bed with white cotton quilts, "
+            "a tin mug of ginger tea steaming on the sill, pine branches outside catching and dripping "
+            "the rain in a steady curtain. "
+            "Photorealistic, misty Himalayan atmosphere, cinematic. "
             "No people, no text, no logo."
         ),
     },
     "countryside": {
-        "label": "Countryside",
+        "label": "Rajasthani Haveli Courtyard",
         "prompt": (
-            "Farmhouse bedroom, small-paned window showing open green fields under a heavy rain sky, "
-            "distant trees bending in the wind, rainwater running down the glass in rivulets, "
-            "patchwork quilt on the iron bed, golden lantern on the nightstand, faded wooden "
-            "floorboards, smell-of-earth atmosphere, overcast soft light outside. "
-            "Photorealistic, rustic English countryside feel, cinematic. "
+            "Old Rajasthani haveli bedroom, ornate hand-carved wooden jharokha window opening onto "
+            "an inner stone courtyard two floors below, heavy monsoon rain falling on ancient pink "
+            "sandstone, water streaming down carved columns and pooling on the cobblestones, "
+            "a neem tree in the corner with rain hammering its small leaves, marigold petals from "
+            "a broken garland floating in a puddle, a brass diya flickering inside on a low carved "
+            "wooden shelf, old embroidered cotton quilt on a wide charpai, the sandstone walls "
+            "below glistening dark in the rain, the smell of wet ancient stone. "
+            "Photorealistic, heritage Rajasthani atmosphere, warm and ancient, cinematic. "
             "No people, no text, no logo."
         ),
     },
     "forest": {
-        "label": "Forest",
+        "label": "Goa Monsoon Villa",
         "prompt": (
-            "Glass cabin treehouse bedroom, floor-to-ceiling window on three sides showing a dense "
-            "rainforest canopy, rain pouring through the leaves and running down the glass, lush "
-            "green and dark-teal tones outside, soft white fairy lights inside, minimalist bed with "
-            "linen sheets, a single fern on the shelf, calm green light. "
-            "Photorealistic, immersive forest atmosphere, cinematic. "
+            "Old Portuguese-style Goa villa bedroom, wide arched wood-frame window open to a "
+            "lush tropical garden in full monsoon rain, an ancient mango tree with broad dark "
+            "canopy shedding sheets of water, giant ferns and bougainvillea heavy with rain, "
+            "terracotta garden tiles streaming with water, a glimpse of dark grey Arabian Sea "
+            "between swaying coconut palms at the far end, warm rattan pendant lamp inside "
+            "casting soft yellow light on whitewashed walls, white cotton curtains lifting gently "
+            "in the wet breeze, four-poster bed with a thin linen coverlet, old red oxide flooring. "
+            "Photorealistic, Goan monsoon atmosphere, lush and cinematic. "
             "No people, no text, no logo."
         ),
     },
@@ -124,7 +135,7 @@ FINAL_LUFS = -14.0               # YouTube standard target for the final file
 SCENE_MUSIC: dict[str, dict] = {
     "night_city": {
         "caption": "English, ambient, sleep music, tranquil, peaceful, 60 BPM, soft piano, warm pad, instrumental, no vocals, no percussion, soft dynamics",
-        "note": "soft piano — clean, intimate, pairs with city-rain",
+        "note": "soft piano — clean, intimate, pairs with Mumbai monsoon night",
     },
     "mountain_forest": {
         "caption": "English, ambient, sleep music, tranquil, serene, 58 BPM, flute, soft strings, instrumental, no vocals, no percussion, soft dynamics",
