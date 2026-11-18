@@ -32,70 +32,77 @@ KIND_FINAL = "rl_final"      # 3-hour MP4
 # then the window scene, then style. Positive words only — Qwen draws every word.
 SCENES: dict[str, dict] = {
     "night_city": {
-        "label": "Mumbai Monsoon Night",
+        "label": "Tokyo Rain Garden",
         "prompt": (
-            "Modern Mumbai apartment bedroom, high floor, wide floor-to-ceiling glass window, "
-            "heavy monsoon rain sheeting down the glass in thick silver streaks, the city far below "
-            "blurred into smeared amber and white lights through the downpour, dark navy monsoon sky, "
-            "low teak-wood bed with crisp white linen, a brass bedside lamp casting a warm amber cone, "
-            "a steaming cup of chai on the windowsill, rain rivulets merging and racing to the bottom "
-            "of the glass, distant buildings and flyovers barely visible through the curtain of rain. "
-            "Photorealistic, cinematic, intimate and warm against the storm outside, 8K detail. "
+            "Traditional Japanese-style bedroom at night, wide sliding wooden door fully open to a "
+            "lush private garden, low platform bed with clean white linen on a dark wood frame, "
+            "a paper shoji lantern glowing warm amber inside, the garden outside lit by two stone "
+            "lanterns half-hidden in moss, a small koi pond with rain hammering its surface into "
+            "silver rings, ancient pine and maple trees with rain streaming off every branch, "
+            "hanging Spanish moss swaying slightly, large flat stones glistening wet, dense green "
+            "ferns at the base of every rock, rain falling in long silver threads through the dark "
+            "canopy, deep mist behind the trees, the wooden floor just inside catching the glow. "
+            "Photorealistic, cinematic, intimate and deeply calm, 8K detail. "
             "No people, no text, no logo."
         ),
     },
     "mountain_forest": {
-        "label": "Kerala Forest Cottage",
+        "label": "Scandinavian Forest Cabin",
         "prompt": (
-            "Old Kerala wooden cottage bedroom, wide teak-framed open window looking out into a "
-            "dense tropical garden in heavy monsoon rain, giant banana leaves and jackfruit trees "
-            "catching the downpour, water streaming in silver ropes off every broad leaf, a moss-covered "
-            "stone path outside glistening wet, small brass oil lamp on the sill glowing amber, "
-            "carved wooden bed with a hand-woven cotton bedspread in deep indigo, old wooden floorboards, "
-            "the garden a wall of deep green and grey rain mist, smell of petrichor and wet earth. "
-            "Photorealistic, lush Kerala monsoon atmosphere, cinematic depth. "
+            "Nordic pine cabin bedroom, floor-to-ceiling glass wall looking straight into a "
+            "spruce and birch forest in heavy rain, rain running in sheets down the cold glass, "
+            "the forest floor a carpet of dark wet moss and fallen needles, birch trunks white "
+            "against the grey-green depths, mist threading between the trees and softening the "
+            "distance, inside a low wooden bed with a thick cream wool blanket, a simple pine "
+            "nightstand, a single white candle burning, warm amber glow on the pale timber walls, "
+            "rain streaming off the sloped roof overhang just above the glass, pine branches dipping "
+            "and shedding water in the wind. "
+            "Photorealistic, Scandinavian minimalist, calm and cinematic. "
             "No people, no text, no logo."
         ),
     },
     "ocean": {
-        "label": "Himalayan Pine Lodge",
+        "label": "Bali Jungle Villa",
         "prompt": (
-            "Mountain lodge bedroom in the Himalayas, thick deodar-pine walls and heavy exposed beams, "
-            "wide wood-framed window looking into a dense pine forest in monsoon mist, rain falling "
-            "in long silver threads through the dark canopy, the forest floor a mat of wet pine needles, "
-            "distant ridgelines fading into grey cloud, warm amber glow from a hanging wrought-iron "
-            "lantern inside, a woollen Kullu shawl folded on a solid-wood bed with white cotton quilts, "
-            "a tin mug of ginger tea steaming on the sill, pine branches outside catching and dripping "
-            "the rain in a steady curtain. "
-            "Photorealistic, misty Himalayan atmosphere, cinematic. "
+            "Open-air Balinese villa bedroom, wide teak-wood pavilion with no wall on one side "
+            "facing a lush terraced garden in tropical rain, giant banana leaves with water "
+            "cascading off their tips in heavy silver drops, a lotus pond directly below with "
+            "rain pocking its surface, tall coconut palms swaying in the warm rain wind, "
+            "a distant misty volcanic ridge barely visible through the downpour, inside a "
+            "four-poster bed draped in white linen, a rattan lamp casting warm honey light, "
+            "dark teak floor with the rain just reaching the edge, tropical flowers on the "
+            "low side table, the air thick with the smell of wet earth and frangipani. "
+            "Photorealistic, Balinese tropical atmosphere, lush and cinematic. "
             "No people, no text, no logo."
         ),
     },
     "countryside": {
-        "label": "Rajasthani Haveli Courtyard",
+        "label": "Alpine Mountain Chalet",
         "prompt": (
-            "Old Rajasthani haveli bedroom, ornate hand-carved wooden jharokha window opening onto "
-            "an inner stone courtyard two floors below, heavy monsoon rain falling on ancient pink "
-            "sandstone, water streaming down carved columns and pooling on the cobblestones, "
-            "a neem tree in the corner with rain hammering its small leaves, marigold petals from "
-            "a broken garland floating in a puddle, a brass diya flickering inside on a low carved "
-            "wooden shelf, old embroidered cotton quilt on a wide charpai, the sandstone walls "
-            "below glistening dark in the rain, the smell of wet ancient stone. "
-            "Photorealistic, heritage Rajasthani atmosphere, warm and ancient, cinematic. "
+            "Swiss alpine chalet bedroom, wide low window with thick stone sill looking out at "
+            "a steep pine-covered mountain face in rain and low cloud, rain running in rivulets "
+            "down the aged wooden shutters, pine trees dense and dark outside with rain dripping "
+            "off every needle, a mountain stream barely audible through the glass, grey cloud "
+            "hugging the cliff face just above the treeline, inside a heavy carved-wood bed with "
+            "a thick feather duvet and checked wool blanket, an iron wall sconce with a warm "
+            "amber bulb, old wooden plank ceiling and beams, a ceramic mug on the stone sill, "
+            "the room built into the hillside like a shelter. "
+            "Photorealistic, Alpine atmosphere, cosy and cinematic. "
             "No people, no text, no logo."
         ),
     },
     "forest": {
-        "label": "Goa Monsoon Villa",
+        "label": "Glass Treehouse Forest",
         "prompt": (
-            "Old Portuguese-style Goa villa bedroom, wide arched wood-frame window open to a "
-            "lush tropical garden in full monsoon rain, an ancient mango tree with broad dark "
-            "canopy shedding sheets of water, giant ferns and bougainvillea heavy with rain, "
-            "terracotta garden tiles streaming with water, a glimpse of dark grey Arabian Sea "
-            "between swaying coconut palms at the far end, warm rattan pendant lamp inside "
-            "casting soft yellow light on whitewashed walls, white cotton curtains lifting gently "
-            "in the wet breeze, four-poster bed with a thin linen coverlet, old red oxide flooring. "
-            "Photorealistic, Goan monsoon atmosphere, lush and cinematic. "
+            "Elevated glass treehouse bedroom deep in an ancient temperate rainforest, three glass "
+            "walls looking in every direction into the forest canopy at mid-height, enormous old-growth "
+            "trees with thick twisted trunks and wide canopies, rain pouring off every leaf in "
+            "curtains of water, the forest floor far below dark and wet, long hanging moss on every "
+            "branch swaying in the warm rain, ferns at every level, the inside of the room dim "
+            "and green-lit, a low bed with linen sheets, tiny warm fairy lights strung along the "
+            "beams, the glass completely surrounded by wet leaves and rain, no sky visible — only "
+            "layers of forest in every direction. "
+            "Photorealistic, immersive ancient forest atmosphere, cinematic depth. "
             "No people, no text, no logo."
         ),
     },
@@ -135,23 +142,23 @@ FINAL_LUFS = -14.0               # YouTube standard target for the final file
 SCENE_MUSIC: dict[str, dict] = {
     "night_city": {
         "caption": "English, ambient, sleep music, tranquil, peaceful, 60 BPM, soft piano, warm pad, instrumental, no vocals, no percussion, soft dynamics",
-        "note": "soft piano — clean, intimate, pairs with Mumbai monsoon night",
+        "note": "soft piano — clean, intimate, pairs with Tokyo rain garden",
     },
     "mountain_forest": {
         "caption": "English, ambient, sleep music, tranquil, serene, 58 BPM, flute, soft strings, instrumental, no vocals, no percussion, soft dynamics",
-        "note": "flute — airy and natural, matches forest and mist",
+        "note": "flute — airy and natural, matches Scandinavian forest and mist",
     },
     "ocean": {
         "caption": "English, ambient, sleep music, tranquil, meditative, 56 BPM, cello, warm pad, instrumental, no vocals, no percussion, soft dynamics",
-        "note": "cello — deep and resonant, moves like waves",
+        "note": "cello — deep and resonant, pairs with Bali jungle warmth",
     },
     "countryside": {
         "caption": "English, ambient, sleep music, tranquil, pastoral, 60 BPM, nylon guitar, soft strings, instrumental, no vocals, no percussion, soft dynamics",
-        "note": "nylon guitar — organic warmth, suits open fields",
+        "note": "nylon guitar — organic warmth, suits Alpine mountain chalet",
     },
     "forest": {
         "caption": "English, ambient, sleep music, tranquil, ethereal, 58 BPM, harp, warm pad, instrumental, no vocals, no percussion, soft dynamics",
-        "note": "harp — crystalline and floating, matches forest canopy",
+        "note": "harp — crystalline and floating, matches glass treehouse canopy",
     },
 }
 
