@@ -17,6 +17,33 @@ _FRAMES = 4 * math.ceil((math.ceil(M.CLIP_S * M.I2V_FPS) - 1) / 4) + 1
 _FRAMES = min(_FRAMES, M.I2V_MAX_FRAMES)   # hard cap
 
 UPSCALE_LIMIT_S = 1800
+# The rain clip is a 14B image-to-video job at 720p: the estimate alone is about 33 minutes, so
+# wait for twice the estimate (never less than the gateway's usual one hour).
+RAIN_LIMIT_S = max(wan.JOB_LIMIT_S, 2 * M.estimate_rain_s(_FRAMES))
+# A resumed job that is gone or failed on the gateway starts a new one; any other error is final.
+_GONE = ("no longer has this job", "video job ")
+
+
+async def _resume_previous(session_id: str, seed: int, base: str, api_key: str) -> tuple[dict, bytes, dict] | None:
+    """The last rain attempt was sent to the gateway but never collected (the wait ran out or the app stopped):
+    if the gateway still has that job for the same frames and seed, take its result instead of making a new one."""
+    prev = media.items(session_id, M.KIND_RAIN, "rain")
+    if not prev:
+        return None
+    it = prev[-1]
+    meta = it["meta"]
+    if it["status"] == "done" or not meta.get("job_id") or meta.get("frames") != _FRAMES or meta.get("seed") != seed:
+        return None
+    media.update(it["id"], status="running", meta={"error": "", "resumed": True})
+    try:
+        data, res = await wan.resume(meta["job_id"], base, api_key, limit_s=RAIN_LIMIT_S)
+    except wan.WanError as e:
+        if any(g in str(e) for g in _GONE):
+            media.update(it["id"], status="failed", meta={"error": f"could not be picked up again: {e}"[:300]})
+            return None
+        media.update(it["id"], status="failed", meta={"error": str(e)[:300]})
+        raise MediaError(f"rain clip failed: {e}") from e
+    return it, data, res
 
 
 def _rain_body(image_data: bytes, seed: int) -> dict:
@@ -61,17 +88,21 @@ async def generate(session_id: str, s: dict | None = None, key: str = "", force:
     seed = int((session.get("settings") or {}).get("seed") or 7)
     body = _rain_body(img_data, seed)
 
-    it = media.add(session_id, M.KIND_RAIN, "rain", 0, "running", {"frames": _FRAMES, "seed": seed})
+    resumed = None if force else await _resume_previous(session_id, seed, base, api_key)
+    if resumed:
+        it, clip_data, res = resumed
+    else:
+        it = media.add(session_id, M.KIND_RAIN, "rain", 0, "running", {"frames": _FRAMES, "seed": seed})
     try:
-        ans = await wan.submit(body, base, api_key, background=True)
-        if ans.get("id") and ans.get("status") not in ("succeeded", "completed"):
-            # store job id so a restart can resume
-            media.update(it["id"], meta={"job_id": ans["id"], "frames": _FRAMES, "seed": seed})
-            res = await wan.wait(ans["id"], base, api_key, limit_s=UPSCALE_LIMIT_S)
-        else:
-            res = wan._result(ans)
-
-        clip_data = await wan.fetch(res, base, api_key)
+        if not resumed:
+            ans = await wan.submit(body, base, api_key, background=True)
+            if ans.get("id") and ans.get("status") not in ("succeeded", "completed"):
+                # store job id so a retry or a restart can resume
+                media.update(it["id"], meta={"job_id": ans["id"], "frames": _FRAMES, "seed": seed})
+                res = await wan.wait(ans["id"], base, api_key, limit_s=RAIN_LIMIT_S)
+            else:
+                res = wan._result(ans)
+            clip_data = await wan.fetch(res, base, api_key)
         out_dir = media.media_dir(session_id, "rain")
         name = f"rain-a{it['attempt']}.mp4"
         (out_dir / name).write_bytes(clip_data)
