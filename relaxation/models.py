@@ -19,6 +19,20 @@ IMAGE_STEPS = 35             # cleaner faces/details at 35 (same as characters)
 I2V_MODEL = "wan-2.2-i2v-a14b"
 I2V_FPS = 16
 I2V_MAX_FRAMES = 161         # Wan I2V hard limit
+I2V_STEPS = 10
+
+# Time estimate: 1280x720 is the native resolution for Wan I2V 14B.
+# Gateway docs give 0.59 s/frame/step at 480x832 (portrait shorts base).
+# 1280x720 = 921,600 px vs 480x832 = 399,360 px → 2.3x pixels → 2.3x time.
+# shorts/pipelines.py uses the 480p base + a 2.3x HD multiplier at call time;
+# we bake the 720p cost in directly since we never run at 480p here.
+I2V_S_PER_FRAME = 0.59 * 2.3 * I2V_STEPS   # ~13.6 s/frame at native 720p, 10 steps
+OVERHEAD_S = 25                               # per request: load, queue, decode, download
+
+
+def estimate_rain_s(frames: int) -> int:
+    """Estimated gateway seconds for one rain clip at 1280x720."""
+    return int(OVERHEAD_S + frames * I2V_S_PER_FRAME)
 
 # ── media row kinds ───────────────────────────────────────────────────────────
 KIND_SCENE = "rl_scene"      # Qwen room image
