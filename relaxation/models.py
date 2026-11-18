@@ -114,14 +114,45 @@ RAIN_LUFS = -18.0                # rain foreground target loudness
 MUSIC_LUFS = -34.0               # ambient music bed loudness (ducked well below rain)
 FINAL_LUFS = -14.0               # YouTube standard target for the final file
 
-# Fixed ambient sleep music recipe — no model call needed.
-SLEEP_MUSIC_RECIPE = {
-    "genre": "ambient",
-    "moods": ["dreamy", "calm"],
-    "bpm": 60,
-    "instruments": ["warm pad", "soft strings"],
-    "caption": "English, ambient, dreamy, calm, 60 BPM, warm pad, soft strings, instrumental, no vocals, soft dynamics, steady",
+# Per-scene YuE2 music recipes.
+# Caption rules: 8-12 comma-separated tags, language first, BPM explicit,
+# "no percussion" keeps drums out (caption-only control — no API flag exists),
+# "no vocals" + "instrumental" doubly enforce silence.
+# Instrument is the differentiator: each scene gets one that fits its mood.
+# Empty [verse]/[bridge] section tags = instrumental passage; [Instrumental]
+# is NOT a valid tag and gets sung as lyric text (see story3/music.py note).
+SCENE_MUSIC: dict[str, dict] = {
+    "night_city": {
+        "caption": "English, ambient, sleep music, tranquil, peaceful, 60 BPM, soft piano, warm pad, instrumental, no vocals, no percussion, soft dynamics",
+        "note": "soft piano — clean, intimate, pairs with city-rain",
+    },
+    "mountain_forest": {
+        "caption": "English, ambient, sleep music, tranquil, serene, 58 BPM, flute, soft strings, instrumental, no vocals, no percussion, soft dynamics",
+        "note": "flute — airy and natural, matches forest and mist",
+    },
+    "ocean": {
+        "caption": "English, ambient, sleep music, tranquil, meditative, 56 BPM, cello, warm pad, instrumental, no vocals, no percussion, soft dynamics",
+        "note": "cello — deep and resonant, moves like waves",
+    },
+    "countryside": {
+        "caption": "English, ambient, sleep music, tranquil, pastoral, 60 BPM, nylon guitar, soft strings, instrumental, no vocals, no percussion, soft dynamics",
+        "note": "nylon guitar — organic warmth, suits open fields",
+    },
+    "forest": {
+        "caption": "English, ambient, sleep music, tranquil, ethereal, 58 BPM, harp, warm pad, instrumental, no vocals, no percussion, soft dynamics",
+        "note": "harp — crystalline and floating, matches forest canopy",
+    },
 }
+
+# Fallback used when the scene has no entry above
+SLEEP_MUSIC_RECIPE = {
+    "caption": "English, ambient, sleep music, tranquil, peaceful, 60 BPM, soft piano, warm pad, instrumental, no vocals, no percussion, soft dynamics",
+}
+
+
+def music_recipe(scene: str) -> dict:
+    """Return the music recipe dict (with 'caption' key) for a given scene."""
+    return SCENE_MUSIC.get(scene) or SLEEP_MUSIC_RECIPE
 
 # ── default session settings ──────────────────────────────────────────────────
 DEFAULT_SETTINGS = {

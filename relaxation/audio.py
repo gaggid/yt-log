@@ -99,10 +99,11 @@ async def make(session_id: str, s: dict | None = None, key: str = "",
     # ── YuE2 ambient music (optional) ─────────────────────────────────────────
     music_item = None
     if settings.get("music_enabled", True):
+        scene = settings.get("scene") or M.DEFAULT_SCENE
         music_cfg = music_mod.norm({
             "enabled": True,
             "level": float(settings.get("music_level") or M.MUSIC_LUFS),
-            "plan": M.SLEEP_MUSIC_RECIPE,
+            "plan": M.music_recipe(scene),
             "seed": int(settings.get("seed") or 7),
         })
         if progress:
