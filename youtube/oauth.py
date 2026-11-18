@@ -1,7 +1,7 @@
-"""Google OAuth for the channel's read-only YouTube data (scopes: youtube.readonly, yt-analytics.readonly).
+"""Google OAuth for YouTube data and upload (scopes: youtube.readonly, yt-analytics.readonly, youtube.upload).
 
 The client id, secret and redirect address come from `.env` (YT_CLIENT_ID, YT_CLIENT_SECRET, YT_REDIRECT_URI). The refresh token is kept in the database (`yt_auth`); the short-lived access token
-is renewed from it when needed. Nothing here can change or upload anything on the channel."""
+is renewed from it when needed. Existing connections made before the youtube.upload scope was added must disconnect and reconnect to gain upload access."""
 import os
 import secrets
 import time
@@ -16,7 +16,11 @@ from . import store
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 REVOKE_URL = "https://oauth2.googleapis.com/revoke"
-SCOPES = ("https://www.googleapis.com/auth/youtube.readonly", "https://www.googleapis.com/auth/yt-analytics.readonly")
+SCOPES = (
+    "https://www.googleapis.com/auth/youtube.readonly",
+    "https://www.googleapis.com/auth/yt-analytics.readonly",
+    "https://www.googleapis.com/auth/youtube.upload",
+)
 STATE_TTL_S = 600
 
 TRANSPORT = None                                   # tests put an httpx.MockTransport here

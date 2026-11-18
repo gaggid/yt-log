@@ -28,6 +28,7 @@ from admin.api import router as storage_router
 from youtube.api import router as youtube_router
 from feedback.api import router as feedback_router
 from sim.api import router as sim_router
+from relaxation.api import router as relaxation_router
 from story.pipeline import manager
 
 STATIC = Path(__file__).with_name("static")
@@ -81,6 +82,7 @@ app.include_router(storage_router)
 app.include_router(youtube_router)
 app.include_router(feedback_router)
 app.include_router(sim_router)
+app.include_router(relaxation_router)
 
 
 NO_STORE = {"Cache-Control": "no-store"}
@@ -96,7 +98,8 @@ async def root():
         'src="/ideas.js"', f'src="/ideas.js?v={int((STATIC / "ideas.js").stat().st_mtime)}"').replace(
         'src="/youtube.js"', f'src="/youtube.js?v={int((STATIC / "youtube.js").stat().st_mtime)}"').replace(
         'src="/learn.js"', f'src="/learn.js?v={int((STATIC / "learn.js").stat().st_mtime)}"').replace(
-        'src="/sim.js"', f'src="/sim.js?v={int((STATIC / "sim.js").stat().st_mtime)}"')
+        'src="/sim.js"', f'src="/sim.js?v={int((STATIC / "sim.js").stat().st_mtime)}"').replace(
+        'src="/relaxation.js"', f'src="/relaxation.js?v={int((STATIC / "relaxation.js").stat().st_mtime)}"')
     return HTMLResponse(html, headers=NO_STORE)
 
 
@@ -128,6 +131,11 @@ async def learn_js():
 @app.get("/sim.js")
 async def sim_js():
     return FileResponse(STATIC / "sim.js", media_type="application/javascript", headers=NO_STORE)
+
+
+@app.get("/relaxation.js")
+async def relaxation_js():
+    return FileResponse(STATIC / "relaxation.js", media_type="application/javascript", headers=NO_STORE)
 
 
 @app.get("/youtube.js")

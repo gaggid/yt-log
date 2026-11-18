@@ -92,11 +92,14 @@ def test_state_is_signed_and_expires(env):
     assert not oauth.check_state(s[:-1] + ("0" if s[-1] != "0" else "1"), 1100) and not oauth.check_state("") and not oauth.check_state("a.b")
 
 
-def test_auth_url_asks_for_read_only_scopes_and_a_refresh_token(g):
+def test_auth_url_asks_for_required_scopes_and_a_refresh_token(g):
     from urllib.parse import parse_qs, urlparse
     q = parse_qs(urlparse(oauth.auth_url()).query)
     assert q["access_type"] == ["offline"] and q["prompt"] == ["consent"] and q["redirect_uri"] == ["https://app.example/api/youtube/callback"]
-    assert all(sc.endswith(".readonly") for sc in q["scope"][0].split()) and len(q["scope"][0].split()) == 2
+    scopes = set(q["scope"][0].split())
+    assert "https://www.googleapis.com/auth/youtube.readonly" in scopes
+    assert "https://www.googleapis.com/auth/yt-analytics.readonly" in scopes
+    assert "https://www.googleapis.com/auth/youtube.upload" in scopes
 
 
 def test_not_configured_is_reported(env, monkeypatch):

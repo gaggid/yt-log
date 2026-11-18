@@ -85,3 +85,72 @@ async def link(body: _LinkReq):
 async def unlink(video_id: str):
     store.remove_link(video_id)
     return {"ok": True}
+
+
+# ── upload a relaxation session video ────────────────────────────────────────
+
+class _UploadReq(BaseModel):
+    session_id: str
+
+
+@router.post("/upload-video")
+async def upload_video(body: _UploadReq):
+    """Upload a finished relaxation video to the connected YouTube channel."""
+    from story2 import jobs
+    from story.pipeline import manager
+    from story3 import store as media
+    from relaxation import models as RM, store as rstore
+    from relaxation.store import SessionError
+    from . import upload as yt_upload
+
+    st = _status()
+    if not st["connected"]:
+        raise HTTPException(400, "YouTube is not connected")
+
+    try:
+        session = rstore.get(body.session_id)
+    except SessionError as e:
+        raise HTTPException(404, str(e))
+
+    final_item = rstore.chosen(body.session_id, RM.KIND_FINAL)
+    if not final_item:
+        raise HTTPException(400, "final video not ready yet")
+
+    video_path = media.path_of(final_item)
+    if not video_path.is_file():
+        raise HTTPException(400, "video file missing on disk")
+
+    pub = session.get("publish") or {}
+    if not pub.get("title"):
+        raise HTTPException(400, "generate publish metadata first (POST /api/relaxation/{id}/publish)")
+
+    if manager.busy():
+        raise HTTPException(409, "another job is running; wait")
+
+    async def work(progress):
+        def on_uri(uri):
+            s = rstore.get(body.session_id)
+            s["upload_uri"] = uri
+            s["status"] = rstore.UPLOADING
+            rstore.save(s)
+
+        try:
+            vid_id = await yt_upload.upload_file(
+                video_path,
+                yt_upload.build_metadata(pub),
+                progress=progress,
+                resume_uri=(session.get("upload_uri") or None),
+                on_uri=on_uri,
+            )
+            s = rstore.get(body.session_id)
+            s["youtube_video_id"] = vid_id
+            s["status"] = rstore.UPLOADED
+            s["upload_uri"] = ""
+            rstore.save(s)
+            sync.start()     # pull the new video into the local stats table
+            return f"Uploaded: https://youtu.be/{vid_id}"
+        except yt_upload.UploadError as e:
+            rstore.set_error(body.session_id, str(e))
+            raise HTTPException(400, str(e))
+
+    return jobs.start(body.session_id + ":upload", "yt_upload", work)
