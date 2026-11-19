@@ -6,7 +6,7 @@ Each session generates one 3-hour ambient rain video:
 import hashlib
 
 # ── video geometry ────────────────────────────────────────────────────────────
-IMAGE_SIZE = "1280x720"      # the room picture (Qwen)
+IMAGE_SIZE = "2048x1152"     # the room picture (Qwen): the gateway allows 2359296 pixels for qwen-image-2.1, which is exactly 2048x1152 at 16:9
 CLIP_SIZE = "1280x720"       # Wan I2V 14B at its ceiling: the gateway caps wan-2.2-i2v-a14b at max_pixels 921600 (= 1280x720); the 2K upscale step follows
 OUT_W, OUT_H = 1920, 1080    # final video resolution (1080p 16:9)
 OUT_FPS = 30

@@ -12,7 +12,7 @@ from story3.voice import MediaError
 
 from . import models as M, store
 
-TIMEOUT_S = 300
+TIMEOUT_S = 900          # 2048x1152 at 35 steps takes about 2.5 times as long as 1280x720
 _NO_SEED = None     # None = omit seed from request (gateway picks randomly)
 
 

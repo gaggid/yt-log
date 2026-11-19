@@ -110,3 +110,22 @@ def test_clip_starts_and_ends_on_the_scene_picture():
 
 def test_mix_has_music_in_front_of_rain():
     assert M.MUSIC_LUFS - M.RAIN_LUFS >= 9
+
+
+def test_rain_bed_has_no_gap_at_the_restart(tmp_path, monkeypatch):
+    """The recording used to restart at its silent head every loop; the bed must hold one level."""
+    import subprocess
+    import config
+    from relaxation import audio
+    src = tmp_path / "rain.wav"
+    # 100 s of noise that is silent for the first 5 s and swells for 30 s, like the real recording
+    subprocess.run([config.FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i", "anoisesrc=d=100:c=pink:r=44100:a=0.5",
+                    "-af", "volume='min(1,max(0,(t-5)/30))':eval=frame", str(src)], check=True)
+    monkeypatch.setattr(audio, "RAIN_FILE", src)
+    out = tmp_path / "bed.wav"
+    audio._rain_loop(200, out, -31.0)
+    assert abs(audio._loudness(out) - -31.0) < 2
+    for t in (95, 100, 140, 190):                    # around where the old loop restarted and in between
+        seg = tmp_path / f"s{t}.wav"
+        subprocess.run([config.FFMPEG, "-y", "-v", "error", "-ss", str(t - 3), "-t", "6", "-i", str(out), str(seg)], check=True)
+        assert audio._loudness(seg) > -36, t

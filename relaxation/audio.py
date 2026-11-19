@@ -7,6 +7,7 @@ Music: a fixed ambient-sleep YuE2 track, made via story3/music.py using SLEEP_MU
 The YuE2 track is looped with cross-fades and mixed under the rain.
 
 Final: stereo 48kHz WAV normalised to FINAL_LUFS (-14), ready to embed in the MP4."""
+import re
 import subprocess
 from pathlib import Path
 
@@ -30,32 +31,77 @@ def _ffmpeg(args: list[str], cwd: Path | None = None) -> None:
         raise RuntimeError((last[-1] if last else str(r.returncode))[:240])
 
 
+def _rain_duration(src: Path) -> float:
+    r = subprocess.run([config.FFMPEG, "-hide_banner", "-i", str(src)], capture_output=True, text=True, encoding="utf-8", errors="replace")
+    m = re.search(r"Duration:\s*(\d+):(\d+):([\d.]+)", r.stderr or "")
+    return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3)) if m else 0.0
+
+
+def _loudness(path: Path) -> float | None:
+    """Integrated loudness (LUFS) of a file, or None."""
+    r = subprocess.run([config.FFMPEG, "-hide_banner", "-nostats", "-i", str(path), "-af", "ebur128", "-f", "null", "-"],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace")
+    found = re.findall(r"\bI:\s*(-?[\d.]+)\s*LUFS", r.stderr or "")
+    return float(found[-1]) if found else None
+
+
+XFADE_S = 4.0
+
+
+def _rain_unit(work: Path) -> Path | None:
+    """One seamless loop of the steady middle of the rain recording.
+
+    The recording starts in silence and takes about 35 s to swell and fades out at the end, so looping the
+    whole file made the rain nearly silent at the start and dipped it at every restart. Here only the steady
+    part is used, and its tail is cross-faded into its head, so the unit repeats with no gap and no change
+    of level. None when the file is too short to cut."""
+    dur = _rain_duration(RAIN_FILE)
+    start = 40.0 if dur >= 95 else min(6.0, max(0.0, dur * 0.1))
+    length = min(47.0, dur - start - 4.0)
+    if length < 14:
+        return None
+    x = XFADE_S
+    unit = work / "rain_unit.wav"
+    graph = (
+        f"[0:a]atrim=0:{x},asetpts=PTS-STARTPTS[head];"
+        f"[0:a]atrim={x}:{length - x},asetpts=PTS-STARTPTS[body];"
+        f"[0:a]atrim={length - x}:{length},asetpts=PTS-STARTPTS[tail];"
+        f"[tail][head]acrossfade=d={x}:c1=tri:c2=tri[seam];"
+        "[seam][body]concat=n=2:v=0:a=1,highpass=f=100,aresample=48000,aformat=channel_layouts=stereo[o]"
+    )
+    try:
+        _ffmpeg(["-ss", f"{start:.2f}", "-t", f"{length:.2f}", "-i", str(RAIN_FILE), "-filter_complex", graph, "-map", "[o]", "-c:a", "pcm_s16le", str(unit)])
+    except RuntimeError:
+        return None
+    return unit
+
+
 def _rain_loop(total_s: float, out: Path, level: float = M.RAIN_LUFS) -> None:
-    """Loop rain.mp3 (or pink noise fallback) to total_s, normalise to `level` (the rain is the background)."""
+    """Rain bed of `total_s` seconds at `level` LUFS (the rain is the background): the steady part of rain.mp3
+    looped seamlessly with one fixed gain (no adaptive levelling, which made the level swell and sag), or pink noise."""
     fade_out = min(5.0, total_s / 10)
-    if RAIN_FILE.is_file():
-        # loop the file, highpass to cut mud (100 Hz), normalise
+    fades = f"afade=t=in:d=3,afade=t=out:st={max(0.0, total_s - fade_out):.2f}:d={fade_out:.2f}"
+    unit = _rain_unit(out.parent) if RAIN_FILE.is_file() else None
+    if unit is not None:
+        lufs = _loudness(unit)
+        gain = (level - lufs) if lufs is not None else 0.0
+        _ffmpeg(["-stream_loop", "-1", "-i", str(unit), "-af", f"volume={gain:.2f}dB,{fades}",
+                 "-t", f"{total_s:.2f}", "-c:a", "pcm_s16le", str(out)])
+    elif RAIN_FILE.is_file():
+        # too short to cut: the whole file looped (old behaviour)
         graph = (
-            f"aloop=loop=-1:size=2e9,atrim=0:{total_s:.2f},asetpts=PTS-STARTPTS,"
-            f"highpass=f=100,"
-            f"loudnorm=I={level}:TP=-1.5:LRA=9,"
-            f"afade=t=in:d=3,afade=t=out:st={max(0.0, total_s - fade_out):.2f}:d={fade_out:.2f},"
-            f"aresample=48000,aformat=channel_layouts=stereo[o]"
+            f"aloop=loop=-1:size=2e9,atrim=0:{total_s:.2f},asetpts=PTS-STARTPTS,highpass=f=100,"
+            f"loudnorm=I={level}:TP=-1.5:LRA=9,{fades},aresample=48000,aformat=channel_layouts=stereo[o]"
         )
-        _ffmpeg(["-stream_loop", "-1", "-i", str(RAIN_FILE),
-                 "-filter_complex", graph, "-map", "[o]",
+        _ffmpeg(["-stream_loop", "-1", "-i", str(RAIN_FILE), "-filter_complex", graph, "-map", "[o]",
                  "-t", f"{total_s:.2f}", "-c:a", "pcm_s16le", str(out)])
     else:
         # pink noise fallback (owner should replace with a real rain file)
         graph = (
-            f"anoisesrc=colour=pink:r=48000:d={total_s:.2f}:a=0.25,"
-            f"highpass=f=200,lowpass=f=8000,"
-            f"loudnorm=I={level}:TP=-1.5:LRA=9,"
-            f"afade=t=in:d=3,afade=t=out:st={max(0.0, total_s - fade_out):.2f}:d={fade_out:.2f},"
-            f"aformat=channel_layouts=stereo[o]"
+            f"anoisesrc=colour=pink:r=48000:d={total_s:.2f}:a=0.25,highpass=f=200,lowpass=f=8000,"
+            f"loudnorm=I={level}:TP=-1.5:LRA=9,{fades},aformat=channel_layouts=stereo[o]"
         )
-        _ffmpeg(["-filter_complex", graph, "-map", "[o]",
-                 "-t", f"{total_s:.2f}", "-c:a", "pcm_s16le", str(out)])
+        _ffmpeg(["-filter_complex", graph, "-map", "[o]", "-t", f"{total_s:.2f}", "-c:a", "pcm_s16le", str(out)])
 
 
 def _mix(rain: Path, music: Path | None, total_s: float, out: Path) -> None:
