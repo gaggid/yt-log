@@ -661,9 +661,10 @@ def test_rainfx_renders_a_loop_that_comes_round_and_falls(tmp_path, monkeypatch)
     """A small real render: 2 s loop, rain in the view, every frame drawn; the last frame leads into the first (no jump), and the streaks move."""
     from PIL import Image
     from relaxation import motion, rainfx
-    assert not rainfx.STREAKS and not rainfx.ROCK_BURSTS and rainfx.MIST > 0            # the owner's look: glass drops, mist, bokeh, ripples; no streaks, no rock splashes
+    assert not rainfx.STREAKS and not rainfx.ROCK_BURSTS and not rainfx.RIPPLES and rainfx.MIST > 0            # the owner's look: glass drops, mist, bokeh, ripples; no streaks, no rock splashes
     monkeypatch.setattr(rainfx, "STREAKS", True)                                          # the streak code still works when switched on
     monkeypatch.setattr(rainfx, "ROCK_BURSTS", True)
+    monkeypatch.setattr(rainfx, "RIPPLES", True)
     pic = tmp_path / "p.jpg"
     Image.new("RGB", (640, 360), (40, 60, 90)).save(pic)
     out = tmp_path / "loop.mp4"

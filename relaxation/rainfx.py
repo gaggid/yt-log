@@ -96,7 +96,7 @@ class _Splashes:
         self.n, self.rng_seed = n_frames, rng.random()
         s = w / 1280
         self.ripples, self.bursts = [], []
-        for b in zones["water"]:
+        for b in (zones["water"] if RIPPLES else []):
             x0, y0, x1, y1 = _box(b, w, h)
             n = max(3, int((x1 - x0) * (y1 - y0) / (2500 * s * s)))
             for _ in range(min(n, 220)):
@@ -166,12 +166,13 @@ class _Splashes:
 GLASS = True
 SMUDGE = 0.60                # how strongly the smudged patches blur the view (0 to 1)
 BOKEH = 0.55                 # brightness of the soft discs the lights turn into inside the smudges
+RIPPLES = False              # ripples on water: off (owner, 2026-11-20: only the drops on the glass, nothing falling and no ripples)
 ROCK_BURSTS = False          # droplet bursts on stones and other hard surfaces: off (owner, 2026-11-19); ripples on water stay
 FOG = 0.38                   # how foggy the whole window glass is (0 = clear): the scene is a little soft and the drops and wiped trails show it sharp
 DRIZZLE = 240               # tiny drops standing on the glass (per view of 1280x720)
 MIST = 0.12                  # soft haze over the view, thicker in the distance (top), so the outside looks misty (0 = none)
 BEADS = (95, 14)            # small and large beads of water standing on the glass (per view of 1280x720); the first version had (380, 55), which distorted the picture too much (owner: at least 70 % fewer)
-RUNNERS = 27                 # drops that creep down the glass (per view of 1280x720): 14, then 18 (+30 %), now 27 (+50 %, owner 2026-11-19)
+RUNNERS = 45                 # drops that creep down the glass (per view of 1280x720): 14, 18, 27, now 45 (owner 2026-11-20: more, and faster)
 
 
 def _lum_peaks(base, view, limit=40):
@@ -268,7 +269,7 @@ class _Runners:
         self.items = []
         for _ in range(max(3, int(RUNNERS * (x1 - x0) * (y1 - y0) / (1280 * 720)))):
             r = rng.uniform(4.5, 8.5) * s
-            travel = rng.uniform(0.05, 0.11) * (y1 - y0)
+            travel = rng.uniform(0.09, 0.19) * (y1 - y0)                     # a longer run in the same time: faster (owner: faster)
             self.items.append({"x": rng.uniform(x0 + 10 * s, x1 - 10 * s), "y": rng.uniform(y0, y1 - travel), "travel": travel, "r": r,
                                "ph": rng.randrange(n_frames), "knots": self._knots(rng)})
 
@@ -277,9 +278,9 @@ class _Runners:
         """The journey as [(u, share of the travel done)] knots: pause, slide, pause, slide ... Times are fractions of the loop (they add up to 1),
         a slide takes about 1.5 to 3 s of a 10 s loop and each pause about 1 to 2.5 s; the slides' lengths differ."""
         moves = rng.choice((2, 3, 3, 4))
-        parts = [("hold", rng.uniform(0.04, 0.12))]
+        parts = [("hold", rng.uniform(0.02, 0.07))]
         for _ in range(moves):
-            parts += [("move", rng.uniform(0.10, 0.20), rng.uniform(0.5, 1.5)), ("hold", rng.uniform(0.06, 0.16))]
+            parts += [("move", rng.uniform(0.10, 0.20), rng.uniform(0.5, 1.5)), ("hold", rng.uniform(0.03, 0.09))]
         total = sum(p[1] for p in parts)
         dist = sum(p[2] for p in parts if p[0] == "move")
         knots, u, d = [(0.0, 0.0)], 0.0, 0.0
