@@ -35,6 +35,7 @@ async def run(session_id: str, force: bool = False, progress=None) -> str:
             sess = store.get(session_id)
             sess["step"] = name
             sess["status"] = store.RUNNING
+            sess["error"] = ""
             store.save(sess)
         except Exception:  # noqa: BLE001
             pass

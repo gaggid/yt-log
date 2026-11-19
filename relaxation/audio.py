@@ -107,6 +107,68 @@ def _rain_loop(total_s: float, out: Path, level: float = M.RAIN_LUFS) -> None:
         _ffmpeg(["-filter_complex", graph, "-map", "[o]", "-t", f"{total_s:.2f}", "-c:a", "pcm_s16le", str(out)])
 
 
+_CLEAN_TAKE = ("silenceremove=start_periods=1:start_threshold=-50dB,areverse,"
+               "silenceremove=start_periods=1:start_threshold=-50dB,areverse,aresample=48000,aformat=channel_layouts=stereo")
+
+
+def _music_unit(srcs: list[Path], work: Path, seed: int) -> Path | None:
+    """One seamless cycle of several takes: each take is cleaned (silence off both ends) and trimmed, the takes are joined in a
+    shuffled order with long equal-power cross-fades, and the end of the cycle is cross-faded into its start, so repeating the
+    cycle has no gap, no click and no intro or ending to hear. None when nothing usable."""
+    x = M.MUSIC_XFADE_S
+    order = list(srcs)
+    random.Random(seed).shuffle(order)
+    parts: list[tuple[Path, float]] = []
+    for i, p in enumerate(order):
+        a, b = work / f"take{i}a.wav", work / f"take{i}.wav"
+        try:
+            _ffmpeg(["-i", str(p), "-af", _CLEAN_TAKE, "-c:a", "pcm_s16le", str(a)])
+            d = _rain_duration(a)
+            if d < 2 * M.MUSIC_TRIM_S + 3 * x:
+                continue
+            _ffmpeg(["-i", str(a), "-af", f"atrim={M.MUSIC_TRIM_S}:{d - M.MUSIC_TRIM_S},asetpts=PTS-STARTPTS", "-c:a", "pcm_s16le", str(b)])
+        except RuntimeError:
+            continue
+        parts.append((b, d - 2 * M.MUSIC_TRIM_S))
+    if not parts:
+        return None
+    inputs, chain, last = [], "", "[0:a]"
+    for p, _ in parts:
+        inputs += ["-i", str(p)]
+    for k in range(1, len(parts)):
+        chain += f"{last}[{k}:a]acrossfade=d={x}:c1=qsin:c2=qsin[x{k}];"
+        last = f"[x{k}]"
+    total = sum(d for _, d in parts) - x * (len(parts) - 1)
+    graph = (chain + f"{last}asplit=3[a][b][c];"
+             f"[a]atrim=0:{x},asetpts=PTS-STARTPTS[head];[b]atrim={x}:{total - x},asetpts=PTS-STARTPTS[body];"
+             f"[c]atrim={total - x}:{total},asetpts=PTS-STARTPTS[tail];"
+             f"[tail][head]acrossfade=d={x}:c1=qsin:c2=qsin[seam];[seam][body]concat=n=2:v=0:a=1[o]")
+    unit = work / "music_unit.wav"
+    try:
+        _ffmpeg([*inputs, "-filter_complex", graph, "-map", "[o]", "-c:a", "pcm_s16le", str(unit)])
+    except RuntimeError:
+        return None
+    return unit
+
+
+def _music_bed(items: list[dict], total_s: float, work: Path, level: float, seed: int) -> Path | None:
+    """The music for the whole video: the cycle repeated with stream_loop, one fixed gain to `level` LUFS, a peak limit, soft fades."""
+    unit = _music_unit([media.path_of(i) for i in items], work, seed)
+    if unit is None:
+        return None
+    lufs = _loudness(unit)
+    gain = (level - lufs) if lufs is not None else 0.0
+    fade_out = min(4.0, total_s / 4)
+    bed = work / "music_bed.wav"
+    try:
+        _ffmpeg(["-stream_loop", "-1", "-i", str(unit), "-af",
+                 f"volume={gain:.2f}dB,alimiter=limit=0.5:level=disabled,afade=t=in:d=2,afade=t=out:st={max(0.0, total_s - fade_out):.2f}:d={fade_out:.2f}",
+                 "-t", f"{total_s:.2f}", "-c:a", "pcm_s16le", str(bed)])
+    except RuntimeError:
+        return None
+    return bed
+
+
 def _mix(rain: Path, music: Path | None, total_s: float, out: Path) -> None:
     """Combine rain (foreground) + optional music bed into the final WAV at FINAL_LUFS."""
     if music is None:
@@ -148,6 +210,7 @@ async def make(session_id: str, s: dict | None = None, key: str = "",
 
     # ── YuE2 ambient music (optional) ─────────────────────────────────────────
     music_item = None
+    takes: list[dict] = []
     music_error = ""
     if settings.get("music_enabled", True):
         scene = settings.get("scene") or M.DEFAULT_SCENE
@@ -157,15 +220,16 @@ async def make(session_id: str, s: dict | None = None, key: str = "",
             "plan": M.music_recipe(scene, settings.get("music_plan")),
             "seed": int(settings.get("music_seed") or settings.get("seed") or 7),      # its own seed: a new take does not touch the picture
         })
-        if progress:
-            progress(0, 3, "generating ambient music loop")
-        try:
-            music_item = await music_mod.make(
-                session_id, music_cfg, total_s, s, api_key, progress=None, force=False,
-            )
-        except MediaError as e:
-            music_item = None   # fallback: rain only, but say so (the card shows it)
-            music_error = str(e)[:300]
+        n_takes = M.take_count(total_s)
+        for k in range(n_takes):
+            if progress:
+                progress(0, 3, f"generating ambient music, take {k + 1} of {n_takes}")
+            cfg_k = {**music_cfg, "seed": int(music_cfg["seed"]) + k * 7919, "loopable": True}        # no intro and no outro: it joins to the next take
+            try:
+                takes.append(await music_mod.make(session_id, cfg_k, total_s, s, api_key, progress=None, force=False))
+            except MediaError as e:
+                music_error = str(e)[:300]                  # keep the takes that worked; with none, the video is rain only and the card says so
+        music_item = takes[0] if takes else None
 
     it = media.add(session_id, M.KIND_AUDIO, "audio", 0, "running",
                    {"total_s": total_s, "music": bool(music_item)})
@@ -179,11 +243,11 @@ async def make(session_id: str, s: dict | None = None, key: str = "",
         await asyncio.to_thread(_rain_loop, total_s, rain_wav, float(settings.get("rain_level") or M.RAIN_LUFS))
 
         music_bed: Path | None = None
-        if music_item:
-            music_bed = await asyncio.to_thread(
-                music_mod.bed_from_track, config.FFMPEG, music_item, total_s, work,
-                float(settings.get("music_level") or M.MUSIC_LUFS), True,
-            )
+        if takes:
+            music_bed = await asyncio.to_thread(_music_bed, takes, total_s, work, float(settings.get("music_level") or M.MUSIC_LUFS),
+                                                int(settings.get("music_seed") or settings.get("seed") or 7))
+            if music_bed is None:
+                music_error = music_error or "the music files could not be joined"
 
         out = work / "audio_mix.wav"
         await asyncio.to_thread(_mix, rain_wav, music_bed, total_s, out)
@@ -198,7 +262,7 @@ async def make(session_id: str, s: dict | None = None, key: str = "",
             progress(3, 3, "audio done")
 
         done = media.update(it["id"], status="done", file=f"audio/{name}",
-                            meta={"total_s": total_s, "music": bool(music_item), "music_id": (music_item or {}).get("id", ""),
+                            meta={"total_s": total_s, "music": bool(music_item), "music_id": (music_item or {}).get("id", ""), "music_takes": len(takes) if music_bed is not None else 0,
                                   "music_error": music_error, "rain_fallback": not RAIN_FILE.is_file()})
         shutil.rmtree(work, ignore_errors=True)      # the intermediate rain / music / mix files are about 2 GB each for 3 hours
         return done

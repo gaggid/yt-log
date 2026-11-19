@@ -183,11 +183,14 @@ def sections_for(total_s: float) -> int:
     return max(MIN_SECTIONS, min(MAX_SECTIONS, math.ceil(min(total_s, MAX_SECTIONS * SECTION_S) / SECTION_S)))
 
 
-def lyrics_for(sections: int) -> str:
+def lyrics_for(sections: int, loopable: bool = False) -> str:
     """Empty valid section tags only — no words under any tag forces YuE2 into instrumental mode.
-    [Instrumental] is not a recognised tag and gets treated as lyric text; use [verse]/[bridge] empty."""
-    middle = int(sections - 2)
+    [Instrumental] is not a recognised tag and gets treated as lyric text; use [verse]/[bridge] empty.
+    `loopable`: only middle sections, no [intro] and no [outro], so the track has no beginning or ending to hear when it comes round again."""
     tags = ["[verse]", "[bridge]"]
+    if loopable:
+        return "\n\n".join(tags[i % 2] for i in range(max(1, int(sections)))) + "\n"
+    middle = int(sections - 2)
     mid = "\n\n".join(tags[i % 2] for i in range(max(0, middle)))
     return "[intro]\n\n" + (mid + "\n\n" if mid else "") + "[outro]\n"
 
@@ -197,7 +200,7 @@ def request(cfg: dict, total_s: float) -> dict:
     if not cap:
         raise MediaError("the music is not planned yet")
     n = sections_for(total_s)
-    return {"model": MODEL, "caption": cap, "lyrics": lyrics_for(n), "cot": "full", "steps": 16, "duration": min(300, n * 30 + 20), "seed": int(cfg.get("seed", DEFAULT["seed"])),
+    return {"model": MODEL, "caption": cap, "lyrics": lyrics_for(n, bool(cfg.get("loopable"))), "cot": "full", "steps": 16, "duration": min(300, n * 30 + 20), "seed": int(cfg.get("seed", DEFAULT["seed"])),
             "response_format": "mp3"}
 
 

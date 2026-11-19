@@ -1,5 +1,6 @@
 """Rain clip: long wait, and a job the gateway still has is picked up instead of made again."""
 import asyncio
+from pathlib import Path
 
 import pytest
 
@@ -272,8 +273,8 @@ def test_regenerating_music_changes_seed_and_instrument_and_rebuilds_the_video(t
 
     async def fake_music(plan_id, cfg, total_s, s, key, progress=None, force=False):
         seeds.append(cfg["seed"])
-        it = media.add(plan_id, "music", "bgm", 0, "done", {"duration_s": 30.0})
-        _ff("-f", "lavfi", "-i", "sine=f=330:d=30", str(media.media_dir(plan_id, "music") / "bgm-a1.wav"))
+        it = media.add(plan_id, "music", "bgm", 0, "done", {"duration_s": 60.0})
+        _ff("-f", "lavfi", "-i", "sine=f=330:d=60", str(media.media_dir(plan_id, "music") / "bgm-a1.wav"))
         return media.update(it["id"], file="music/bgm-a1.wav")
 
     async def no_publish(*a, **k):
@@ -351,3 +352,41 @@ def test_a_session_left_running_by_a_restart_is_marked_failed_and_can_continue()
     now = store.get(s["id"])
     assert now["status"] == store.FAILED and now["step"] == "" and "restarted" in now["error"]
     assert store.get(other["id"])["status"] == store.NEW
+
+
+# ── music for a long video: several different takes, no intro or ending, a seamless cycle ───────
+
+def test_loopable_music_has_no_intro_or_outro_and_other_users_keep_theirs():
+    from story3 import music as music_mod
+    plain = music_mod.lyrics_for(5)
+    assert plain.startswith("[intro]") and "[outro]" in plain
+    loop = music_mod.lyrics_for(5, loopable=True)
+    assert "[intro]" not in loop and "[outro]" not in loop and loop.count("[") == 5
+    assert M.take_count(300) == 2 and M.take_count(60) == 1 and M.take_count(10800) == M.MUSIC_TAKES
+
+
+def test_the_music_cycle_joins_takes_and_repeats_without_a_gap(tmp_path):
+    import subprocess
+    import config
+    from relaxation import audio
+    srcs = []
+    for i, f in enumerate((220, 262, 330)):
+        p = tmp_path / f"t{i}.wav"
+        _ff("-f", "lavfi", "-i", f"sine=f={f}:d=40", "-af", "volume='min(1,t/3)':eval=frame,afade=t=out:st=36:d=4", str(p))   # each take swells in and dies away
+        srcs.append(p)
+    items = []
+    for i, p in enumerate(srcs):
+        items.append({"file": str(p)})
+    monkey = __import__("pytest").MonkeyPatch()
+    monkey.setattr(audio.media, "path_of", lambda it: Path(it["file"]))
+    try:
+        work = tmp_path / "w"
+        work.mkdir()
+        bed = audio._music_bed(items, 400.0, work, -20.0, 1)
+    finally:
+        monkey.undo()
+    assert bed is not None and abs(audio._rain_duration(bed) - 400.0) < 1
+    assert abs(audio._loudness(bed) - -20.0) < 3
+    log = subprocess.run([config.FFMPEG, "-hide_banner", "-nostats", "-i", str(bed), "-af", "silencedetect=n=-50dB:d=0.4", "-f", "null", "-"],
+                         capture_output=True, text=True).stderr
+    assert "silence_start" not in log.replace("silence_start: 0", "").replace("silence_start: -", "") or log.count("silence_start") <= 1   # only the soft fade-in at the very start may be quiet

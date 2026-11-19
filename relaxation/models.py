@@ -316,6 +316,15 @@ FINAL_LUFS = -14.0               # YouTube standard target for the final file
 MUSIC_MOODS = ["peaceful", "serene", "meditative", "dreamy", "gentle", "warm", "ethereal", "pastoral"]
 MUSIC_SECONDARY = ["warm pad", "soft strings", "low drone", "ambient pad"]
 MUSIC_BPM = (54, 62)
+MUSIC_TAKES = 4                     # different tracks (seeds) chained for a long video, so one piece does not come round every two minutes
+MUSIC_XFADE_S = 8.0                 # cross-fade between takes and at the loop seam
+MUSIC_TRIM_S = 3.0                  # cut from both ends of each take before joining
+
+
+def take_count(total_s: float) -> int:
+    """Takes to make: one more for about every three minutes of video, up to MUSIC_TAKES (a 5 minute test makes 2)."""
+    import math
+    return max(1, min(MUSIC_TAKES, math.ceil(total_s / 180)))
 
 
 def music_caption(instrument: str, secondary: str, mood: str, bpm: int) -> str:
