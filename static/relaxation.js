@@ -63,6 +63,8 @@ var showRelaxation = (function () {
     }).join('');
   }
 
+  const watching = new Map();       // session id -> seconds played; kept across the page's redraws so a playing video is not lost
+
   /* ── session card ──────────────────────────────────────────────────────────*/
   function sessionCard(s, onAction) {
     const pub = s.publish || {};
@@ -88,6 +90,7 @@ var showRelaxation = (function () {
   ${s.music_error ? `<div class="errbox mt-s">The video has rain only: the music could not be made (${s.music_error}). Use "New music".</div>` : ''}
   ${s.step ? `<div class="small mute mt-s">Working: ${STEP_LABELS[s.step] || s.step} <span class="spin"></span></div>` : ''}
 
+  ${s.video_removed ? `<div class="small mute mt-s">Posted to YouTube; the local video file was removed to free disk.</div>` : ''}
   ${s.thumb_url || s.scene_url ? `<img src="${s.thumb_url || s.scene_url}" style="max-width:320px;border-radius:8px;margin-top:10px;display:block" alt="${s.thumb_url ? 'YouTube thumbnail' : 'scene preview'}">` : ''}
 
   <div class="row mt">
@@ -103,11 +106,13 @@ var showRelaxation = (function () {
     ${ytId
       ? `<a href="https://youtu.be/${ytId}" target="_blank" class="btn">View on YouTube ↗</a>` : ''}
     ${finalReady
-      ? `<a href="/api/relaxation/${s.id}/download" class="btn small">Download</a>` : ''}
+      ? `<button class="small" data-action="watch" data-id="${s.id}">${watching.has(s.id) ? 'Hide player' : 'Watch'}</button>
+         <a href="/api/relaxation/${s.id}/download" class="btn small">Download</a>` : ''}
     ${(s.audio_ready || finalReady) && s.status !== 'running'
       ? `<button class="small" data-action="music" data-id="${s.id}" data-instrument="" title="Same instrument, a new take">New music</button>
          <button class="small" data-action="music" data-id="${s.id}" data-instrument="other" title="Another instrument of this theme">New music, other instrument</button>` : ''}
   </div>
+  ${finalReady && watching.has(s.id) && s.stream_url ? `<video class="rl-player" data-id="${s.id}" src="${s.stream_url}" controls preload="metadata" style="width:100%;max-width:960px;margin-top:10px;border-radius:8px;background:#000"></video><div class="small mute">Plays straight from the server; drag the bar to jump anywhere in the 3 hours.</div>` : ''}
   ${s.music_url ? `<div class="mt-s small mute">Music only: <audio controls preload="none" src="${s.music_url}" style="vertical-align:middle;height:30px"></audio></div>` : ''}
 
   ${hasMetadata ? `
@@ -146,6 +151,7 @@ var showRelaxation = (function () {
     }
 
     function render() {
+      document.querySelectorAll('video.rl-player').forEach(v => watching.set(v.dataset.id, v.currentTime || 0));     // keep the place when the page redraws
       const cards = sessions.length
         ? sessions.map(s => sessionCard(s)).join('')
         : '<div class="big-empty"><h2>No sessions yet</h2><p>Create one below to generate a 3-hour rain video.</p></div>';
@@ -187,6 +193,11 @@ var showRelaxation = (function () {
 </div>
 
 <div id="rl-sessions">${cards}</div>`;
+
+      document.querySelectorAll('video.rl-player').forEach(v => {
+        const t = watching.get(v.dataset.id) || 0;
+        if (t > 0) v.addEventListener('loadedmetadata', () => { v.currentTime = t; }, { once: true });
+      });
 
       document.getElementById('rl-d-save').onclick = async () => {
         try {
@@ -233,6 +244,14 @@ var showRelaxation = (function () {
           return;
         }
         if (action === 'run') { runSession(id); return; }
+        if (action === 'watch') {
+          if (watching.has(id)) {
+            document.querySelectorAll(`video.rl-player[data-id="${id}"]`).forEach(v => { v.pause(); v.remove(); });     // before render() reads the place
+            watching.delete(id);
+          } else watching.set(id, 0);
+          render();
+          return;
+        }
         if (action === 'music') {
           try { await api('POST', `/api/relaxation/${id}/music/regenerate`, { instrument: btn.dataset.instrument || '' }); }
           catch (e) { if (!e.message.includes('running')) { alert(e.message); return; } }

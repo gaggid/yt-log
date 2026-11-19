@@ -526,3 +526,53 @@ def test_the_storage_page_lists_rain_videos_with_their_title(tmp_path):
     assert p["kind"] == "rain" and p["bytes"] == 6000 and "Courtyard" in p["title"]
     r = storage.clear(sid, "folders", ["audio"], dry_run=False)
     assert r["freed_bytes"] == 2000 and (media.media_dir(sid) / "final" / "final-a1.mp4").exists()
+
+
+def test_drop_after_upload_frees_big_files_and_keeps_small(tmp_path):
+    sid = _session_with_scene(tmp_path)
+    kept = media.add(sid, M.KIND_RAIN, "rain", 0, "done", {})
+    d = media.media_dir(sid, "rain")
+    (d / "rain-a1.mp4").write_bytes(b"clip")
+    (d / "rain-a1-2k.mp4").write_bytes(b"2k" * 100)
+    media.update(kept["id"], file="rain/rain-a1.mp4")
+    rows = {}
+    for kind, sub, name in ((M.KIND_AUDIO, "audio", "audio-a1.wav"), (M.KIND_FINAL, "final", "final-a1.mp4")):
+        it = media.add(sid, kind, kind, 0, "done", {})
+        (media.media_dir(sid, sub) / name).write_bytes(b"x" * 1000)
+        rows[kind] = media.update(it["id"], file=f"{sub}/{name}")
+
+    assert store.drop_after_upload(sid) == 0                       # not on YouTube yet: nothing is removed
+    assert media.path_of(rows[M.KIND_FINAL]).is_file()
+
+    s = store.get(sid)
+    s["youtube_video_id"] = "abc"
+    s["status"] = store.UPLOADED
+    store.save(s)
+    assert store.drop_after_upload(sid) == 2200
+    assert not media.path_of(rows[M.KIND_FINAL]).exists() and not media.path_of(rows[M.KIND_AUDIO]).exists()
+    assert not (d / "rain-a1-2k.mp4").exists()
+    assert (d / "rain-a1.mp4").is_file() and store.chosen(sid, M.KIND_SCENE)      # small files stay
+    assert media.get(rows[M.KIND_FINAL]["id"])["meta"]["removed_after_upload"] is True
+    assert store.view(store.get(sid))["video_removed"] is True
+    assert store.drop_after_upload(sid) == 0                       # again: nothing left
+
+
+def test_stream_answers_byte_ranges(tmp_path):
+    """The page's player seeks in a 3 hour file with Range requests; there is no attachment header, so it plays inline."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from relaxation import api as rapi
+    sid = _session_with_scene(tmp_path)
+    it = media.add(sid, M.KIND_FINAL, M.KIND_FINAL, 0, "done", {})
+    data = bytes(range(256)) * 4
+    (media.media_dir(sid, "final") / "final-a1.mp4").write_bytes(data)
+    media.update(it["id"], file="final/final-a1.mp4")
+    assert "/stream?v=" in store.view(store.get(sid))["stream_url"]
+
+    app = FastAPI()
+    app.include_router(rapi.router)
+    c = TestClient(app)
+    r = c.get(f"/api/relaxation/{sid}/stream", headers={"Range": "bytes=100-199"})
+    assert r.status_code == 206 and r.content == data[100:200] and r.headers["content-range"] == "bytes 100-199/1024"
+    assert "attachment" not in r.headers.get("content-disposition", "")
+    assert c.get("/api/relaxation/rl-00000000/stream").status_code == 404

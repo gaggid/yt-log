@@ -1,4 +1,5 @@
 """/api/youtube: connect the channel, sync it, link videos to shorts, and read how the ideas performed."""
+import asyncio
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query
@@ -155,8 +156,9 @@ async def upload_video(body: _UploadReq):
                 except yt_upload.UploadError as e:
                     s["thumbnail_error"] = str(e)[:300]        # the video is up; the thumbnail can be set again in Studio
             rstore.save(s)
+            freed = await asyncio.to_thread(rstore.drop_after_upload, body.session_id)     # the video is on YouTube: free the disk
             sync.start()     # pull the new video into the local stats table
-            return f"Uploaded: https://youtu.be/{vid_id}"
+            return f"Uploaded: https://youtu.be/{vid_id}" + (f" (local video removed, {freed / 1e9:.1f} GB freed)" if freed else "")
         except yt_upload.UploadError as e:
             rstore.set_error(body.session_id, str(e))
             raise HTTPException(400, str(e))

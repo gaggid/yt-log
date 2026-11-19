@@ -169,6 +169,19 @@ async def download_video(session_id: str):
                         filename=f"{session_id}-{M.duration_label(_get(session_id).get('settings') or {}).replace(' ', '')}.mp4")
 
 
+@router.get("/{session_id}/stream")
+async def stream_video(session_id: str):
+    """The final MP4 for the page's player: no download header, and FileResponse answers byte-range requests, so the browser can seek
+    in a 3 hour file without loading it (the file has its index at the front, `-movflags +faststart`)."""
+    item = store.chosen(session_id, M.KIND_FINAL)
+    if not item:
+        raise HTTPException(404, "final video not ready")
+    path = media.path_of(item)
+    if not path.is_file():
+        raise HTTPException(404, "file missing on disk")
+    return FileResponse(path, media_type="video/mp4")   # no filename: no attachment header, so it plays inline
+
+
 # ── options ───────────────────────────────────────────────────────────────────
 
 @router.get("/options/scenes")

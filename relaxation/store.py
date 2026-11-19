@@ -155,9 +155,38 @@ def chosen(session_id: str, kind: str) -> dict | None:
     return (ok or items)[-1] if (ok or items) else None
 
 
+def drop_after_upload(session_id: str) -> int:
+    """After the video is on YouTube the local copy is not needed: remove the finished video (about 18 GB for 3 hours), the 2K rain clip
+    and the audio mix. Kept: scene picture, 720p rain clip, music takes, thumbnail (small; they make the video again if ever wanted).
+    The rows stay with no file and `meta.removed_after_upload`. Only when the session has a YouTube id. Returns the bytes freed."""
+    if not get(session_id).get("youtube_video_id"):
+        return 0
+    freed = 0
+    for kind in (M.KIND_FINAL, M.KIND_AUDIO):
+        for it in media.items(session_id, kind):
+            if it["file"]:
+                p = media.path_of(it)
+                try:
+                    freed += p.stat().st_size
+                    p.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    continue
+                media.update(it["id"], file="", meta={"removed_after_upload": True})
+    for p in media.media_dir(session_id).glob("rain/*-2k.mp4"):
+        try:
+            freed += p.stat().st_size
+            p.unlink()
+        except OSError:
+            pass
+    return freed
+
+
 def view(s: dict) -> dict:
     """The session dict augmented with per-step status for the UI."""
     out = {**s}
+    out["video_removed"] = bool(s.get("youtube_video_id")) and not chosen(s["id"], M.KIND_FINAL)
     final_done = bool(chosen(s["id"], M.KIND_FINAL))
     for key, kind in (("scene", M.KIND_SCENE), ("rain", M.KIND_RAIN), ("audio", M.KIND_AUDIO), ("final", M.KIND_FINAL)):
         item = chosen(s["id"], kind)
@@ -165,6 +194,7 @@ def view(s: dict) -> dict:
         if item:
             if kind == M.KIND_FINAL:
                 out["final_url"] = f"/api/relaxation/{s['id']}/download"
+                out["stream_url"] = f"/api/relaxation/{s['id']}/stream?v={item.get('updated_at') or item['id']}"     # new music changes the file
             elif kind == M.KIND_SCENE:
                 out["scene_url"] = f"/api/media/file/{s['id']}/{item['file']}"
     if final_done:
