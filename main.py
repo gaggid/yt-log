@@ -65,9 +65,12 @@ async def lifespan(app: FastAPI):
     _aq = asyncio.create_task(_shorts_api.autoqueue_forever())
     from youtube import sync as _yt_sync
     _yt = asyncio.create_task(_yt_sync.forever())
+    from relaxation import daily as _rl_daily
+    _rl = asyncio.create_task(_rl_daily.forever())        # the daily rain video, only when switched on
     yield
     _aq.cancel()
     _yt.cancel()
+    _rl.cancel()
     _vl_loop.stop()
 
 

@@ -19,6 +19,10 @@ CREATE TABLE IF NOT EXISTS relaxation_sessions(
   created_at REAL,
   updated_at REAL
 );
+CREATE TABLE IF NOT EXISTS relaxation_config(
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  data TEXT DEFAULT '{}'
+);
 """
 
 # status values
@@ -71,9 +75,8 @@ def _data_cols(s: dict) -> tuple[dict, dict]:
 def create(scene: str | None = None, hours: int | None = None, minutes: int | None = None) -> dict:
     ensure()
     sid = M.session_id()
-    settings = {**M.DEFAULT_SETTINGS}
-    if scene and scene in M.SCENES:
-        settings["scene"] = scene
+    from . import variety
+    settings = {**M.DEFAULT_SETTINGS, **variety.choose(scene)}      # theme (when not chosen), seed and music: different from the last videos
     if hours and 1 <= hours <= 8:
         settings["hours"] = hours
     if minutes and 1 <= minutes <= 480:

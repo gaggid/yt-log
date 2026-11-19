@@ -75,6 +75,7 @@ var showRelaxation = (function () {
   <div class="row">
     <div>
       <strong>${s.title || s.id}</strong>
+      ${(s.settings && s.settings.music_plan) ? `<span class="mute small" style="margin-left:8px">${s.settings.music_plan.instrument}, ${s.settings.music_plan.mood}, ${s.settings.music_plan.bpm} BPM</span>` : ''}
       <span style="margin-left:8px">${badge(s.status)}</span>
       <span style="margin-left:8px">${stepDots(s)}</span>
     </div>
@@ -122,12 +123,15 @@ var showRelaxation = (function () {
 
     let scenes = {};
     let sessions = [];
+    let daily = {};
 
     try {
-      const [sceneRes, sesRes] = await Promise.all([
+      const [sceneRes, sesRes, dailyRes] = await Promise.all([
         api('GET', '/api/relaxation/options/scenes'),
         api('GET', '/api/relaxation'),
+        api('GET', '/api/relaxation/daily'),
       ]);
+      daily = dailyRes || {};
       scenes = sceneRes.scenes || {};
       sessions = sesRes.sessions || [];
     } catch (e) {
@@ -144,11 +148,28 @@ var showRelaxation = (function () {
 <h2>Rain Channel</h2>
 <p class="mute small">Each session generates an ambient rain video (3 hours = 180 minutes by default) and posts it to YouTube.</p>
 
+<div class="card pad mb" id="rl-daily">
+  <h4>Daily run</h4>
+  <div class="row">
+    <label class="f"><input type="checkbox" id="rl-d-on" ${daily.enabled ? 'checked' : ''}> Make a new video every night</label>
+    <label class="f">From (hour, 0-18)
+      <input type="number" id="rl-d-hour" value="${daily.hour ?? 1}" min="0" max="18" style="width:70px">
+    </label>
+    <label class="f">Length (minutes)
+      <input type="number" id="rl-d-min" value="${daily.minutes ?? 180}" min="1" max="480" style="width:90px">
+    </label>
+    <button id="rl-d-save">Save</button>
+    <button id="rl-d-now">Make today's now</button>
+  </div>
+  <p class="mute small" style="margin:6px 0 0">Starts once a day, any time in the ${daily.window_h || 5} hours after the hour, when nothing else is running. A new theme, instrument and seed each time. Nothing is posted to YouTube by itself.${daily.done_today ? ' Today\'s run has started.' : ''}</p>
+</div>
+
 <div class="card pad mb">
   <h4>New session</h4>
   <div class="row">
     <label class="f">Scene
       <select id="rl-scene">
+        <option value="">Next theme (automatic)</option>
         ${Object.entries(scenes).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('')}
       </select>
     </label>
@@ -160,6 +181,25 @@ var showRelaxation = (function () {
 </div>
 
 <div id="rl-sessions">${cards}</div>`;
+
+      document.getElementById('rl-d-save').onclick = async () => {
+        try {
+          daily = await api('PUT', '/api/relaxation/daily', {
+            enabled: document.getElementById('rl-d-on').checked,
+            hour: parseInt(document.getElementById('rl-d-hour').value) || 0,
+            minutes: parseInt(document.getElementById('rl-d-min').value) || 180,
+          });
+          render();
+        } catch (e) { alert(e.message); }
+      };
+      document.getElementById('rl-d-now').onclick = async () => {
+        try {
+          const s = await api('POST', '/api/relaxation/daily/run-now');
+          sessions.unshift(s);
+          render();
+          runSession(s.id);
+        } catch (e) { alert(e.message); }
+      };
 
       document.getElementById('rl-create').onclick = async () => {
         const scene = document.getElementById('rl-scene').value;

@@ -11,7 +11,7 @@ from story.pipeline import manager
 from story3 import store as media
 from story3.voice import MediaError
 
-from . import auto, models as M, publish, store
+from . import auto, daily, models as M, publish, store
 
 router = APIRouter(prefix="/api/relaxation", tags=["relaxation"])
 
@@ -41,20 +41,56 @@ async def list_sessions():
 
 
 class _CreateReq(BaseModel):
-    scene: str = M.DEFAULT_SCENE
+    scene: str = ""                 # empty: the next theme in the rotation (relaxation/variety.py)
     hours: int = M.LOOP_HOURS
     minutes: int | None = None      # a short test run; wins over hours
 
 
 @router.post("")
 async def create_session(body: _CreateReq):
-    if body.scene not in M.SCENES:
+    if body.scene and body.scene not in M.SCENES:
         raise HTTPException(400, f"unknown scene '{body.scene}'; choose from {list(M.SCENES)}")
     if not (1 <= body.hours <= 8):
         raise HTTPException(400, "hours must be 1 to 8")
     if body.minutes is not None and not (1 <= body.minutes <= 480):
         raise HTTPException(400, "minutes must be 1 to 480")
     s = store.create(scene=body.scene, hours=body.hours, minutes=body.minutes)
+    return store.view(s)
+
+
+# ── the daily run (registered before /{session_id}) ───────────────────────────
+
+def _daily_view() -> dict:
+    cfg = daily.get_config()
+    return {**cfg, "window_h": daily.WINDOW_H, "today": daily.today(), "done_today": cfg["last_date"] == daily.today()}
+
+
+@router.get("/daily")
+async def daily_get():
+    return _daily_view()
+
+
+class _DailyReq(BaseModel):
+    enabled: bool | None = None
+    hour: int | None = None
+    minutes: int | None = None
+
+
+@router.put("/daily")
+async def daily_put(body: _DailyReq):
+    daily.save_config({k: v for k, v in body.model_dump().items() if v is not None})
+    return _daily_view()
+
+
+@router.post("/daily/run-now")
+async def daily_run_now(minutes: int | None = None):
+    """Make a new session the way the daily run does (new theme, instrument and seed) and start it now."""
+    if manager.busy():
+        raise HTTPException(409, "story processing is running; wait for it to finish")
+    try:
+        s = daily.start_session(minutes or daily.get_config()["minutes"])
+    except jobs.JobBusy as e:
+        raise HTTPException(409, str(e))
     return store.view(s)
 
 

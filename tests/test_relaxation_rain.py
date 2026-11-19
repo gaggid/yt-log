@@ -28,7 +28,7 @@ def test_limit_covers_estimate():
 
 def test_failed_attempt_resumes_same_job(tmp_path, monkeypatch):
     sid = _session_with_scene(tmp_path)
-    old = media.add(sid, M.KIND_RAIN, "rain", 0, "failed", {"frames": rain._FRAMES, "seed": 7, "job_id": "job_1", "error": "x"})
+    old = media.add(sid, M.KIND_RAIN, "rain", 0, "failed", {"frames": rain._FRAMES, "seed": store.get(sid)["settings"]["seed"], "job_id": "job_1", "error": "x"})
 
     async def resume(job_id, base, key, limit_s=0):
         assert job_id == "job_1" and limit_s == rain.RAIN_LIMIT_S
@@ -47,7 +47,7 @@ def test_failed_attempt_resumes_same_job(tmp_path, monkeypatch):
 
 def test_gone_job_starts_new_one(tmp_path, monkeypatch):
     sid = _session_with_scene(tmp_path)
-    old = media.add(sid, M.KIND_RAIN, "rain", 0, "failed", {"frames": rain._FRAMES, "seed": 7, "job_id": "job_1"})
+    old = media.add(sid, M.KIND_RAIN, "rain", 0, "failed", {"frames": rain._FRAMES, "seed": store.get(sid)["settings"]["seed"], "job_id": "job_1"})
     calls = []
 
     async def resume(*a, **k):
@@ -74,7 +74,7 @@ def test_gone_job_starts_new_one(tmp_path, monkeypatch):
 
 def test_still_running_resume_timeout_is_final(tmp_path, monkeypatch):
     sid = _session_with_scene(tmp_path)
-    media.add(sid, M.KIND_RAIN, "rain", 0, "failed", {"frames": rain._FRAMES, "seed": 7, "job_id": "job_1"})
+    media.add(sid, M.KIND_RAIN, "rain", 0, "failed", {"frames": rain._FRAMES, "seed": store.get(sid)["settings"]["seed"], "job_id": "job_1"})
 
     async def resume(*a, **k):
         raise wan.WanError("the clip did not finish within 66 minutes", lost=True)
@@ -129,3 +129,50 @@ def test_rain_bed_has_no_gap_at_the_restart(tmp_path, monkeypatch):
         seg = tmp_path / f"s{t}.wav"
         subprocess.run([config.FFMPEG, "-y", "-v", "error", "-ss", str(t - 3), "-t", "6", "-i", str(out), str(seg)], check=True)
         assert audio._loudness(seg) > -36, t
+
+
+# ── variety and the daily run ────────────────────────────────────────────────
+
+def test_every_theme_is_used_before_one_repeats_and_music_differs():
+    from relaxation import variety
+    seen, plans = [], []
+    for _ in range(len(M.SCENES)):
+        s = store.create()
+        seen.append(s["settings"]["scene"])
+        plans.append(s["settings"]["music_plan"])
+    assert sorted(seen) == sorted(M.SCENES)                          # all 12 themes once
+    for a, b in zip(plans, plans[1:]):                                # never the same instrument twice in a row
+        assert a["instrument"] != b["instrument"]
+    for p in plans:
+        assert "no percussion" in p["caption"] and "instrumental" in p["caption"] and p["caption"].count(",") <= 11
+        assert M.MUSIC_BPM[0] <= p["bpm"] <= M.MUSIC_BPM[1]
+    assert len({store.get(x["id"])["settings"]["seed"] for x in store.list_all()}) == len(M.SCENES)      # a new seed each time
+    assert variety.pick_scene(variety.history(), __import__("random").Random(1)) in M.SCENES
+
+
+def test_a_chosen_theme_is_kept_but_music_and_seed_still_change():
+    a = store.create(scene="courtyard")
+    b = store.create(scene="courtyard")
+    assert a["settings"]["scene"] == b["settings"]["scene"] == "courtyard"
+    assert a["settings"]["music_plan"]["instrument"] != b["settings"]["music_plan"]["instrument"]
+    assert a["settings"]["seed"] != b["settings"]["seed"]
+    assert M.music_recipe("courtyard", b["settings"]["music_plan"])["caption"] == b["settings"]["music_plan"]["caption"]
+
+
+def test_daily_run_once_a_day_inside_the_window(monkeypatch):
+    import time
+    from relaxation import daily
+    started = []
+    monkeypatch.setattr(daily, "start_session", lambda minutes: started.append(minutes) or {"id": "rl-x"})
+    monkeypatch.setattr(daily.jobs, "busy", lambda: False)
+    monkeypatch.setattr(daily.manager, "busy", lambda: False)
+    at = lambda h: time.mktime((2026, 11, 20, h, 10, 0, 0, 0, -1))
+    assert daily.tick(at(2)) is None                                  # switched off by default
+    daily.save_config({"enabled": True, "hour": 1, "minutes": 5})
+    assert daily.tick(at(0)) is None and daily.tick(at(7)) is None    # outside 01:00-06:00
+    monkeypatch.setattr(daily.jobs, "busy", lambda: True)
+    assert daily.tick(at(2)) is None and not started                  # another job running: wait
+    monkeypatch.setattr(daily.jobs, "busy", lambda: False)
+    assert daily.tick(at(2)) == "rl-x" and started == [5]
+    assert daily.tick(at(3)) is None and started == [5]               # only once that day
+    assert daily.tick(at(2) + 86400) == "rl-x" and started == [5, 5]  # and again the next day

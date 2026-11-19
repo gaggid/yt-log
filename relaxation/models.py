@@ -68,6 +68,7 @@ KIND_FINAL = "rl_final"      # 3-hour MP4
 SCENES: dict[str, dict] = {
     "night_city": {
         "label": "Tokyo Rain Garden",
+        "instruments": ["soft piano", "harp", "bamboo flute", "kalimba"],
         "prompt": (
             "First-person point of view from a low platform bed inside a Japanese bedroom at night, "
             "looking straight out through a wide open sliding wooden door at a private moss garden in "
@@ -85,6 +86,7 @@ SCENES: dict[str, dict] = {
     },
     "mountain_forest": {
         "label": "Scandinavian Forest Cabin",
+        "instruments": ["flute", "cello", "soft piano", "nylon guitar"],
         "prompt": (
             "First-person point of view from a cosy wooden bed inside a Nordic cabin bedroom, "
             "looking straight out through a floor-to-ceiling glass wall at a spruce and birch forest "
@@ -102,6 +104,7 @@ SCENES: dict[str, dict] = {
     },
     "ocean": {
         "label": "Bali Jungle Villa",
+        "instruments": ["cello", "kalimba", "harp", "bamboo flute"],
         "prompt": (
             "First-person point of view from a four-poster bed draped in white linen inside an open-air "
             "Balinese villa pavilion, looking straight out past the bed curtains at a lush terraced "
@@ -118,6 +121,7 @@ SCENES: dict[str, dict] = {
     },
     "countryside": {
         "label": "Alpine Mountain Chalet",
+        "instruments": ["nylon guitar", "soft piano", "cello", "harp"],
         "prompt": (
             "First-person point of view from a heavy carved-wood bed inside a Swiss alpine chalet "
             "bedroom, looking out through a wide low window with a thick stone sill at a steep "
@@ -134,6 +138,7 @@ SCENES: dict[str, dict] = {
     },
     "forest": {
         "label": "Glass Treehouse Forest",
+        "instruments": ["harp", "kalimba", "soft piano", "flute"],
         "prompt": (
             "First-person point of view from a low bed with linen sheets in a dim green-lit room high "
             "among the branches, looking straight out through floor-to-ceiling glass covered in rain "
@@ -145,6 +150,106 @@ SCENES: dict[str, dict] = {
             "Photorealistic, immersive ancient forest atmosphere, cinematic depth. "
             "Soft blue moonlit night, gently and evenly lit, every detail clearly visible, warm glow from the lamps, calm and inviting, not dark and not gloomy. "
             "No people, no text, no logo."
+        ),
+    },
+    "himalayan_ridge": {
+        "label": "Himalayan Mountain Lodge",
+        "instruments": ["bamboo flute", "singing bowls", "cello", "soft piano"],
+        "prompt": (
+            "First-person point of view from a wooden bed beside a wide window in a Himalayan mountain "
+            "lodge, looking straight out at a pine and rhododendron ridge with snow peaks half hidden in "
+            "rain clouds, rain running down the window glass, the thick wool blanket across the lower "
+            "foreground, a small oil lamp glowing warm amber on the sill at the edge of the frame, a "
+            "strand of wet colourful prayer flags hanging still on the porch rail just outside, a deep "
+            "valley below filled with drifting mist, rain falling in fine silver lines across the whole "
+            "view. Photorealistic, Himalayan atmosphere, calm and cinematic. Soft blue pre-dawn light, "
+            "gently and evenly lit, every detail clearly visible, calm and inviting, not dark and not "
+            "gloomy. No people, no text, no logo."
+        ),
+    },
+    "monastery_window": {
+        "label": "Mountain Monastery Window",
+        "instruments": ["singing bowls", "bamboo flute", "cello", "harp"],
+        "prompt": (
+            "First-person point of view sitting on a wide stone window seat with a folded saffron blanket "
+            "inside a mountain monastery room, looking straight out through a deep arched stone window at "
+            "a misty valley far below, terraced rooftops and white stupas in the rain, rain streaming off "
+            "the carved wooden eaves, a brass butter lamp burning warm gold on the sill at the edge of "
+            "the frame, dark wooden shutters folded open on both sides, distant peaks fading into "
+            "grey-blue cloud, rain falling in long thin lines. Photorealistic, serene monastery "
+            "atmosphere, calm and cinematic. Soft blue dusk light, gently and evenly lit, every detail "
+            "clearly visible, calm and inviting, not dark and not gloomy. No people, no text, no logo."
+        ),
+    },
+    "courtyard": {
+        "label": "Quiet Courtyard Veranda",
+        "instruments": ["nylon guitar", "harp", "soft piano", "bamboo flute"],
+        "prompt": (
+            "First-person point of view from a cushioned wooden swing seat on the covered veranda of a "
+            "traditional courtyard house, looking straight out at a quiet stone courtyard in steady rain, "
+            "a lotus pond in the centre with rain rings spreading across it, a banyan tree with glossy "
+            "wet leaves, terracotta roof tiles with rain pouring off the edge in a line of silver drops, "
+            "carved wooden pillars framing the view on both sides, a brass hanging lamp glowing warm at "
+            "the edge of the frame, wet stone floor reflecting the glow. Photorealistic, peaceful "
+            "courtyard atmosphere, calm and cinematic. Soft golden-blue evening light, gently and evenly "
+            "lit, every detail clearly visible, calm and inviting, not dark and not gloomy. No people, no "
+            "text, no logo."
+        ),
+    },
+    "old_town_lane": {
+        "label": "Old Town Lane Balcony",
+        "instruments": ["soft piano", "nylon guitar", "cello", "vibraphone"],
+        "prompt": (
+            "First-person point of view from a wooden balcony window on the first floor of an old town "
+            "house, looking down a narrow cobblestone lane in steady night rain, warm glowing windows and "
+            "hanging lanterns on old stone buildings on both sides, their light reflecting on the shining "
+            "wet stones, rain falling in long silver lines through the lamplight, small puddles with rain "
+            "rings, a wrought iron balcony rail and a pot of wet green plants in the lower foreground, a "
+            "street lamp softly glowing at the far end of the lane. Photorealistic, romantic old town "
+            "atmosphere, calm and cinematic. Soft blue night, gently and evenly lit, every detail clearly "
+            "visible, calm and inviting, not dark and not gloomy. No people, no text, no logo."
+        ),
+    },
+    "kerala_veranda": {
+        "label": "Kerala Monsoon Veranda",
+        "instruments": ["bamboo flute", "nylon guitar", "harp", "kalimba"],
+        "prompt": (
+            "First-person point of view from a cane reclining chair on the veranda of a traditional "
+            "Kerala house, looking straight out at a lush monsoon garden, coconut palms and banana plants "
+            "bending under heavy rain, the red clay tile roof edge pouring rain in strings of silver "
+            "drops, a wet red earth path, carved wooden pillars framing the view, a brass oil lamp "
+            "glowing warm at the edge of the frame, mist hanging over green rice fields in the distance. "
+            "Photorealistic, tropical monsoon atmosphere, calm and cinematic. Soft grey-green early "
+            "morning light, gently and evenly lit, every detail clearly visible, calm and inviting, not "
+            "dark and not gloomy. No people, no text, no logo."
+        ),
+    },
+    "lakeside_porch": {
+        "label": "Misty Lakeside Porch",
+        "instruments": ["nylon guitar", "cello", "soft piano", "flute"],
+        "prompt": (
+            "First-person point of view from a wooden rocking chair under the roof of a lakeside cabin "
+            "porch, looking straight out at a calm misty mountain lake in steady rain, rain rings "
+            "spreading across the whole water surface, pine-covered shores fading into mist, a wooden "
+            "jetty reaching into the lake, a wool blanket over the chair arm in the lower foreground, a "
+            "lantern glowing warm on the porch rail at the edge of the frame, rain streaming off the "
+            "porch roof edge in silver lines. Photorealistic, quiet lakeside atmosphere, calm and "
+            "cinematic. Soft blue-grey twilight, gently and evenly lit, every detail clearly visible, "
+            "calm and inviting, not dark and not gloomy. No people, no text, no logo."
+        ),
+    },
+    "bamboo_teahouse": {
+        "label": "Bamboo Grove Tea House",
+        "instruments": ["bamboo flute", "harp", "kalimba", "soft piano"],
+        "prompt": (
+            "First-person point of view from a tatami seat at a low wooden table in a Japanese tea house, "
+            "looking straight out through an open sliding door at a bamboo grove and a moss garden in "
+            "steady rain, a steaming iron teapot and a small clay cup on the table in the lower "
+            "foreground, a stone water basin overflowing with rain, tall green bamboo dripping, a paper "
+            "lantern glowing warm amber at the edge of the frame, wooden eaves dripping in a line of "
+            "silver drops. Photorealistic, tranquil tea house atmosphere, calm and cinematic. Soft blue "
+            "twilight, gently and evenly lit, every detail clearly visible, calm and inviting, not dark "
+            "and not gloomy. No people, no text, no logo."
         ),
     },
 }
@@ -175,45 +280,28 @@ RAIN_LUFS = -31.0                # rain BACKGROUND: felt, not noticed (11 LU und
 MUSIC_LUFS = -20.0               # ambient music FOREGROUND (the whole mix is then normalised to FINAL_LUFS)
 FINAL_LUFS = -14.0               # YouTube standard target for the final file
 
-# Per-scene YuE2 music recipes.
-# Caption rules: 8-12 comma-separated tags, language first, BPM explicit,
-# "no percussion" keeps drums out (caption-only control — no API flag exists),
-# "no vocals" + "instrumental" doubly enforce silence.
-# Instrument is the differentiator: each scene gets one that fits its mood.
-# Empty [verse]/[bridge] section tags = instrumental passage; [Instrumental]
-# is NOT a valid tag and gets sung as lyric text (see story3/music.py note).
-SCENE_MUSIC: dict[str, dict] = {
-    "night_city": {
-        "caption": "English, ambient, sleep music, tranquil, peaceful, 60 BPM, soft piano, warm pad, instrumental, no vocals, no percussion, soft dynamics",
-        "note": "soft piano — clean, intimate, pairs with Tokyo rain garden",
-    },
-    "mountain_forest": {
-        "caption": "English, ambient, sleep music, tranquil, serene, 58 BPM, flute, soft strings, instrumental, no vocals, no percussion, soft dynamics",
-        "note": "flute — airy and natural, matches Scandinavian forest and mist",
-    },
-    "ocean": {
-        "caption": "English, ambient, sleep music, tranquil, meditative, 56 BPM, cello, warm pad, instrumental, no vocals, no percussion, soft dynamics",
-        "note": "cello — deep and resonant, pairs with Bali jungle warmth",
-    },
-    "countryside": {
-        "caption": "English, ambient, sleep music, tranquil, pastoral, 60 BPM, nylon guitar, soft strings, instrumental, no vocals, no percussion, soft dynamics",
-        "note": "nylon guitar — organic warmth, suits Alpine mountain chalet",
-    },
-    "forest": {
-        "caption": "English, ambient, sleep music, tranquil, ethereal, 58 BPM, harp, warm pad, instrumental, no vocals, no percussion, soft dynamics",
-        "note": "harp — crystalline and floating, matches glass treehouse canopy",
-    },
-}
-
-# Fallback used when the scene has no entry above
-SLEEP_MUSIC_RECIPE = {
-    "caption": "English, ambient, sleep music, tranquil, peaceful, 60 BPM, soft piano, warm pad, instrumental, no vocals, no percussion, soft dynamics",
-}
+# Music: one YuE2 caption is built for every session (relaxation/variety.py picks the instrument, mood
+# and tempo so no two videos in a row sound alike). YuE2 reads six to twelve comma-separated tags,
+# language first; "no percussion" keeps drums out (caption-only control, no API flag exists) and
+# "instrumental, no vocals" says it twice. Empty [verse]/[bridge] section tags make an instrumental
+# passage; [Instrumental] is NOT a valid tag and gets sung as lyric text (see story3/music.py).
+MUSIC_MOODS = ["peaceful", "serene", "meditative", "dreamy", "gentle", "warm", "ethereal", "pastoral"]
+MUSIC_SECONDARY = ["warm pad", "soft strings", "low drone", "ambient pad"]
+MUSIC_BPM = (54, 62)
 
 
-def music_recipe(scene: str) -> dict:
-    """Return the music recipe dict (with 'caption' key) for a given scene."""
-    return SCENE_MUSIC.get(scene) or SLEEP_MUSIC_RECIPE
+def music_caption(instrument: str, secondary: str, mood: str, bpm: int) -> str:
+    return (f"English, ambient, sleep music, tranquil, {mood}, {int(bpm)} BPM, {instrument}, {secondary}, "
+            "instrumental, no vocals, no percussion, soft dynamics")
+
+
+def music_recipe(scene: str, plan: dict | None = None) -> dict:
+    """The music recipe dict (with a 'caption' key): the session's own plan when it has one, else the scene's first instrument."""
+    if plan and plan.get("caption"):
+        return {"caption": plan["caption"]}
+    ins = (SCENES.get(scene) or SCENES[DEFAULT_SCENE])["instruments"][0]
+    return {"caption": music_caption(ins, MUSIC_SECONDARY[0], MUSIC_MOODS[0], 58)}
+
 
 # ── default session settings ──────────────────────────────────────────────────
 DEFAULT_SETTINGS = {
@@ -234,5 +322,6 @@ UPLOAD_CHUNK = 8 * 1024 * 1024   # 8 MB upload chunks
 
 def session_id() -> str:
     import time
-    raw = f"rl-{time.time()}"
+    import uuid
+    raw = f"rl-{time.time()}-{uuid.uuid4().hex}"
     return "rl-" + hashlib.sha1(raw.encode()).hexdigest()[:8]

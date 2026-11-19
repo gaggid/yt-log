@@ -69,6 +69,13 @@ _SCENE_TAGS: dict[str, list[str]] = {
     "ocean": ["ocean rain sounds", "seaside rain", "coastal ambience"],
     "countryside": ["countryside rain", "farmhouse rain", "rain on window"],
     "forest": ["forest rain sounds", "jungle rain", "treehouse rain"],
+    "himalayan_ridge": ["himalayan rain", "mountain lodge rain", "rain on mountains"],
+    "monastery_window": ["monastery rain", "mountain rain sounds", "rain on temple"],
+    "courtyard": ["courtyard rain", "rain on roof tiles", "veranda rain"],
+    "old_town_lane": ["rain on cobblestone", "old town rain", "rainy night street"],
+    "kerala_veranda": ["monsoon rain sounds", "kerala rain", "tropical rain"],
+    "lakeside_porch": ["lake rain sounds", "rain on lake", "cabin porch rain"],
+    "bamboo_teahouse": ["bamboo rain sounds", "tea house rain", "japanese rain garden"],
 }
 _HASHTAGS = ["#RainSounds", "#SleepMusic", "#ASMRRain", "#AmbientRain", "#CozyRain"]
 
@@ -134,7 +141,7 @@ async def generate(session_id: str, s: dict | None = None, force: bool = False) 
         f"Scene: {MODS.SCENES.get(scene, {}).get('label', scene)}\n"
         f"Duration: {hours}\n"
         f"Today's date: {date.today().isoformat()}\n"
-        f"Music: soft ambient YuE2 bed under steady rain"
+        f"Music: soft ambient {(settings.get('music_plan') or {}).get('instrument', 'piano')} under steady rain"
     )
 
     try:
