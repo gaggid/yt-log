@@ -124,12 +124,12 @@ def _music_unit(srcs: list[Path], work: Path, seed: int) -> Path | None:
         try:
             _ffmpeg(["-i", str(p), "-af", _CLEAN_TAKE, "-c:a", "pcm_s16le", str(a)])
             d = _rain_duration(a)
-            if d < 2 * M.MUSIC_TRIM_S + 3 * x:
+            if d < M.MUSIC_TRIM_S + M.MUSIC_TRIM_END_S + 3 * x:
                 continue
-            _ffmpeg(["-i", str(a), "-af", f"atrim={M.MUSIC_TRIM_S}:{d - M.MUSIC_TRIM_S},asetpts=PTS-STARTPTS", "-c:a", "pcm_s16le", str(b)])
+            _ffmpeg(["-i", str(a), "-af", f"atrim={M.MUSIC_TRIM_S}:{d - M.MUSIC_TRIM_END_S},asetpts=PTS-STARTPTS", "-c:a", "pcm_s16le", str(b)])
         except RuntimeError:
             continue
-        parts.append((b, d - 2 * M.MUSIC_TRIM_S))
+        parts.append((b, d - M.MUSIC_TRIM_S - M.MUSIC_TRIM_END_S))
     if not parts:
         return None
     inputs, chain, last = [], "", "[0:a]"
@@ -305,6 +305,14 @@ async def regenerate_music(session_id: str, s: dict | None = None, key: str = ""
     plan = dict(st.get("music_plan") or {})
     old_instrument = plan.get("instrument", "")
     rng = random.Random()
+    if not instrument and (old_instrument in M.MUSIC_AVOID or not (M.MUSIC_BPM[0] <= int(plan.get("bpm") or 0) <= M.MUSIC_BPM[1])):
+        # a plan made before the owner's changes (a cello, or the slow tempo): update it, keeping what is still right
+        if old_instrument in M.MUSIC_AVOID:
+            instrument = "other"
+        else:
+            plan["bpm"] = rng.randint(*M.MUSIC_BPM)
+            plan["caption"] = M.music_caption(old_instrument, plan.get("secondary") or M.MUSIC_SECONDARY[0], plan.get("mood") or M.MUSIC_MOODS[0], plan["bpm"])
+            st["music_plan"] = plan
     if instrument:
         if instrument == "other":
             hist = [{"scene": scene, "instrument": old_instrument, "mood": plan.get("mood", "")}] + variety.history()

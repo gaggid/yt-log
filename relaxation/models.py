@@ -89,7 +89,7 @@ SCENES: dict[str, dict] = {
     "mountain_forest": {
         "label": "Scandinavian Forest Cabin",
         "flame": True,           # a real flame (candle, oil or butter lamp): it may flicker softly
-        "instruments": ["flute", "cello", "soft piano", "nylon guitar"],
+        "instruments": ["flute", "soft piano", "nylon guitar"],
         "prompt": (
             "First-person point of view from a cosy wooden bed inside a Nordic cabin bedroom, "
             "looking straight out through a floor-to-ceiling glass wall at a spruce and birch forest "
@@ -107,7 +107,7 @@ SCENES: dict[str, dict] = {
     },
     "ocean": {
         "label": "Bali Jungle Villa",
-        "instruments": ["cello", "kalimba", "harp", "bamboo flute"],
+        "instruments": ["kalimba", "harp", "bamboo flute"],
         "prompt": (
             "First-person point of view from a four-poster bed draped in white linen inside an open-air "
             "Balinese villa pavilion, looking straight out past the bed curtains at a lush terraced "
@@ -124,7 +124,7 @@ SCENES: dict[str, dict] = {
     },
     "countryside": {
         "label": "Alpine Mountain Chalet",
-        "instruments": ["nylon guitar", "soft piano", "cello", "harp"],
+        "instruments": ["nylon guitar", "soft piano", "harp"],
         "prompt": (
             "First-person point of view from a heavy carved-wood bed inside a Swiss alpine chalet "
             "bedroom, looking out through a wide low window with a thick stone sill at a steep "
@@ -158,7 +158,7 @@ SCENES: dict[str, dict] = {
     "himalayan_ridge": {
         "label": "Himalayan Mountain Lodge",
         "flame": True,           # a real flame (candle, oil or butter lamp): it may flicker softly
-        "instruments": ["bamboo flute", "singing bowls", "cello", "soft piano"],
+        "instruments": ["bamboo flute", "singing bowls", "soft piano"],
         "prompt": (
             "First-person point of view from a wooden bed beside a wide window in a Himalayan mountain "
             "lodge, looking straight out at a pine and rhododendron ridge with snow peaks half hidden in "
@@ -174,7 +174,7 @@ SCENES: dict[str, dict] = {
     "monastery_window": {
         "label": "Mountain Monastery Window",
         "flame": True,           # a real flame (candle, oil or butter lamp): it may flicker softly
-        "instruments": ["singing bowls", "bamboo flute", "cello", "harp"],
+        "instruments": ["singing bowls", "bamboo flute", "harp"],
         "prompt": (
             "First-person point of view sitting on a wide stone window seat with a folded saffron blanket "
             "inside a mountain monastery room, looking straight out through a deep arched stone window at "
@@ -203,7 +203,7 @@ SCENES: dict[str, dict] = {
     },
     "old_town_lane": {
         "label": "Old Town Lane Balcony",
-        "instruments": ["soft piano", "nylon guitar", "cello", "vibraphone"],
+        "instruments": ["soft piano", "nylon guitar", "vibraphone"],
         "prompt": (
             "First-person point of view from a wooden balcony window on the first floor of an old town "
             "house, looking down a narrow cobblestone lane in steady night rain, warm glowing windows and "
@@ -232,7 +232,7 @@ SCENES: dict[str, dict] = {
     },
     "lakeside_porch": {
         "label": "Misty Lakeside Porch",
-        "instruments": ["nylon guitar", "cello", "soft piano", "flute"],
+        "instruments": ["nylon guitar", "soft piano", "flute"],
         "prompt": (
             "First-person point of view from a wooden rocking chair under the roof of a lakeside cabin "
             "porch, looking straight out at a calm misty mountain lake in steady rain, rain rings "
@@ -394,10 +394,12 @@ FINAL_LUFS = -14.0               # YouTube standard target for the final file
 # passage; [Instrumental] is NOT a valid tag and gets sung as lyric text (see story3/music.py).
 MUSIC_MOODS = ["peaceful", "serene", "meditative", "dreamy", "gentle", "warm", "ethereal", "pastoral"]
 MUSIC_SECONDARY = ["warm pad", "soft strings", "low drone", "ambient pad"]
-MUSIC_BPM = (54, 62)
+MUSIC_BPM = (64, 72)                # the first 54-62 felt slow once the takes were instrumental-only (owner heard 68 as right, 2026-11-19)
+MUSIC_AVOID = ("cello",)           # heavy bass does not suit relaxing music (owner); a session that still names one gets another instrument
 MUSIC_TAKES = 4                     # different tracks (seeds) chained for a long video, so one piece does not come round every two minutes
 MUSIC_XFADE_S = 8.0                 # cross-fade between takes and at the loop seam
-MUSIC_TRIM_S = 3.0                  # cut from both ends of each take before joining
+MUSIC_TRIM_S = 3.0                  # cut from the start of each take before joining
+MUSIC_TRIM_END_S = 12.0             # and this much from its end: a take can end in a few seconds of wordless humming before it stops (heard on a guitar take)
 
 
 def take_count(total_s: float) -> int:
@@ -408,7 +410,7 @@ def take_count(total_s: float) -> int:
 
 def music_caption(instrument: str, secondary: str, mood: str, bpm: int) -> str:
     return (f"English, ambient, sleep music, tranquil, {mood}, {int(bpm)} BPM, {instrument}, {secondary}, "
-            "instrumental, no vocals, no percussion, soft dynamics")
+            "instrumental, no vocals, no percussion, soft dynamics")       # melody words (gentle flowing melody, soft arpeggios) were tried 2026-11-19; the owner preferred this original wording
 
 
 def music_recipe(scene: str, plan: dict | None = None) -> dict:

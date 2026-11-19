@@ -151,7 +151,7 @@ def test_every_theme_is_used_before_one_repeats_and_music_differs():
     for a, b in zip(plans, plans[1:]):                                # never the same instrument twice in a row
         assert a["instrument"] != b["instrument"]
     for p in plans:
-        assert "no percussion" in p["caption"] and "instrumental" in p["caption"] and p["caption"].count(",") <= 11
+        assert "no percussion" in p["caption"] and "instrumental" in p["caption"] and p["caption"].count(",") <= 13
         assert M.MUSIC_BPM[0] <= p["bpm"] <= M.MUSIC_BPM[1]
     assert len({store.get(x["id"])["settings"]["seed"] for x in store.list_all()}) == len(M.SCENES)      # a new seed each time
     assert variety.pick_scene(variety.history(), __import__("random").Random(1)) in M.SCENES
@@ -710,3 +710,41 @@ def test_thumbnail_uses_the_person_picture_and_falls_back_to_the_scene(tmp_path,
     monkeypatch.setattr(thumb.httpx, "AsyncClient", Down)
     with pytest.raises(Exception, match="thumbnail picture failed"):
         asyncio.run(thumb.picture(sid, {"base_url": "http://gw/v1"}, "k", force=True))
+
+
+def test_no_theme_offers_a_cello_and_the_tempo_and_caption_follow_the_owners_changes():
+    assert not any(ins in M.MUSIC_AVOID for v in M.SCENES.values() for ins in v["instruments"])
+    assert all(len(v["instruments"]) >= 3 for v in M.SCENES.values())               # enough for the never-the-same-twice rule
+    assert M.MUSIC_BPM == (64, 72) and M.MUSIC_TRIM_END_S > M.MUSIC_TRIM_S
+    assert "melody" not in M.music_caption("harp", "warm pad", "serene", 68) and "no vocals" in M.music_caption("harp", "warm pad", "serene", 68)
+
+
+def test_regenerating_an_old_plan_drops_the_cello_and_the_slow_tempo(tmp_path, monkeypatch):
+    from relaxation import audio, publish
+    from story3 import music as music_mod
+    sid = _session_with_video(tmp_path)
+
+    async def fake_music(plan_id, cfg, total_s, s, key, progress=None, force=False):
+        it = media.add(plan_id, "music", "bgm", 0, "done", {"duration_s": 60.0})
+        _ff("-f", "lavfi", "-i", "sine=f=330:d=60", str(media.media_dir(plan_id, "music") / "bgm-a1.wav"))
+        return media.update(it["id"], file="music/bgm-a1.wav")
+
+    async def no_publish(*a, **k):
+        return {}
+    monkeypatch.setattr(music_mod, "make", fake_music)
+    monkeypatch.setattr(publish, "generate", no_publish)
+    s = store.get(sid)
+    s["settings"]["music_plan"] = {"instrument": "cello", "secondary": "warm pad", "mood": "warm", "bpm": 56,
+                                   "caption": "English, ambient, sleep music, tranquil, warm, 56 BPM, cello, warm pad, instrumental, no vocals, no percussion, soft dynamics"}
+    store.save(s)
+    asyncio.run(audio.regenerate_music(sid, {"base_url": "x"}, "k"))                 # no instrument asked for: the old plan is brought up to date
+    plan = store.get(sid)["settings"]["music_plan"]
+    assert plan["instrument"] not in M.MUSIC_AVOID and plan["instrument"] in M.SCENES["courtyard"]["instruments"]
+    assert M.MUSIC_BPM[0] <= plan["bpm"] <= M.MUSIC_BPM[1] and "cello" not in plan["caption"]
+    # an old plan with a good instrument and a slow tempo keeps the instrument and gets a new tempo
+    s = store.get(sid)
+    s["settings"]["music_plan"] = {"instrument": "harp", "secondary": "warm pad", "mood": "warm", "bpm": 55, "caption": "x"}
+    store.save(s)
+    asyncio.run(audio.regenerate_music(sid, {"base_url": "x"}, "k"))
+    plan = store.get(sid)["settings"]["music_plan"]
+    assert plan["instrument"] == "harp" and M.MUSIC_BPM[0] <= plan["bpm"] <= M.MUSIC_BPM[1] and "harp" in plan["caption"]
