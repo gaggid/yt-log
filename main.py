@@ -51,6 +51,8 @@ _GIT = _git_info()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init()
+    from relaxation import store as _rl_store
+    _rl_store.repair()                           # a rain video left 'running' by a stopped server is marked failed so it can be continued
     from sim import store as _sim_store
     _sim_store.repair()                          # a story chapter left 'writing' by a stopped server is marked failed (docs/PLAN_simulation.md section 17)
     resumed = manager.resume_interrupted()      # unfinished sources continue after a restart / auto-deploy

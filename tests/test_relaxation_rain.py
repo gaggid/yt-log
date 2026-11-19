@@ -312,3 +312,42 @@ def test_scene_prompts_are_cinematic_and_loras_are_optional():
     assert "lora" not in b and b["size"] == M.IMAGE_SIZE                       # none unless a session asks for one
     b = image._body({"image_loras": [{"name": "purelens-realism", "strength": 0.6}]}, "courtyard", 5)
     assert b["lora"] == {"purelens-realism": 0.6} and b["prompt"].startswith("p3r4l4ns. First-person")
+
+
+# ── the video is encoded once and repeated; a restart does not leave a session 'running' ─────────
+
+def test_final_video_repeats_the_loop_without_re_encoding_and_keeps_exact_length(tmp_path):
+    import subprocess
+    import config
+    from relaxation import video
+    s = store.create(scene="courtyard", minutes=1)
+    sid = s["id"]
+    rain = media.add(sid, M.KIND_RAIN, "rain", 0, "done", {"upscaled": False})
+    aud = media.add(sid, M.KIND_AUDIO, "audio", 0, "done", {"total_s": 60.0})
+    _ff("-f", "lavfi", "-i", "testsrc=s=96x54:d=2:r=16", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(media.media_dir(sid, "rain") / "r.mp4"))
+    media.update(rain["id"], file="rain/r.mp4")
+    _ff("-f", "lavfi", "-i", "sine=f=330:d=60", str(media.media_dir(sid, "audio") / "a.wav"))
+    media.update(aud["id"], file="audio/a.wav")
+    final = asyncio.run(video.make(sid, {"base_url": "x"}, "k"))
+    assert final["status"] == "done"
+    path = media.path_of(final)
+    log = subprocess.run([config.FFMPEG, "-hide_banner", "-v", "error", "-i", str(path), "-f", "null", "-"], capture_output=True, text=True).stderr
+    assert log.strip() == "", log                                           # decodes cleanly through every repeat
+    info = subprocess.run([config.FFMPEG, "-hide_banner", "-i", str(path)], capture_output=True, text=True).stderr
+    assert "Duration: 00:01:00" in info or "Duration: 00:00:59.9" in info or "Duration: 00:01:01" in info
+    assert "Video: h264" in info and "Audio: aac" in info
+    n = subprocess.run([config.FFMPEG, "-hide_banner", "-i", str(path), "-map", "0:v:0", "-c", "copy", "-f", "null", "-"], capture_output=True, text=True).stderr
+    frames = int(__import__("re").findall(r"frame=\s*(\d+)", n)[-1])
+    assert abs(frames - 60 * M.OUT_FPS) <= 2 * M.OUT_FPS * 0.1 + 6         # 30 fps for 60 s, within a few frames
+    assert not list((media.media_dir(sid) / "work").glob("*"))
+
+
+def test_a_session_left_running_by_a_restart_is_marked_failed_and_can_continue():
+    s = store.create(scene="courtyard", minutes=1)
+    s["status"], s["step"] = store.RUNNING, "audio"
+    store.save(s)
+    other = store.create(scene="courtyard", minutes=1)               # not running: untouched
+    assert store.repair() == 1
+    now = store.get(s["id"])
+    assert now["status"] == store.FAILED and now["step"] == "" and "restarted" in now["error"]
+    assert store.get(other["id"])["status"] == store.NEW

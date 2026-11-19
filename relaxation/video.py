@@ -6,8 +6,11 @@ the mixed audio is embedded, and the result is encoded to H.264/AAC at 1920x1080
 
 Output: data/media/{session_id}/final/final-a{n}.mp4
 """
+import asyncio
 import hashlib
 import json
+import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -17,7 +20,7 @@ from story3.voice import MediaError
 
 from . import models as M, store
 
-VERSION = "v1"      # bump when encoding settings change
+VERSION = "v2"      # bump when encoding settings change (v2: the loop is encoded once and repeated by stream copy)
 
 
 def _ffmpeg(args: list[str], cwd: Path | None = None) -> None:
@@ -28,6 +31,35 @@ def _ffmpeg(args: list[str], cwd: Path | None = None) -> None:
     if r.returncode != 0:
         last = (r.stderr or r.stdout).strip().splitlines()
         raise RuntimeError((last[-1] if last else str(r.returncode))[:240])
+
+
+def _vf(w: int, h_px: int) -> str:
+    return (f"scale={w}:{h_px}:force_original_aspect_ratio=increase:flags=lanczos,"
+            f"crop={w}:{h_px},setsar=1,format=yuv420p")
+
+
+def _encode_by_loop(rain_path: Path, audio_path: Path, total_s: float, w: int, h_px: int, work: Path, out_path: Path) -> None:
+    """Encode the clip once as a closed one-GOP segment (no B-frames, so every repeat starts clean), then repeat it with
+    stream copy while the sound is encoded to AAC. A 3 hour video takes a few minutes instead of three quarters of an hour."""
+    seg = work / "loop.mp4"
+    frames = max(2, round(_clip_seconds(rain_path) * M.OUT_FPS))
+    _ffmpeg(["-i", str(rain_path), "-vf", _vf(w, h_px), "-an", "-r", str(M.OUT_FPS), "-frames:v", str(frames),
+             "-c:v", "libx264", "-preset", "slow", "-crf", "21", "-pix_fmt", "yuv420p", "-bf", "0",
+             "-x264-params", f"keyint={frames}:min-keyint={frames}:scenecut=0:open-gop=0", str(seg)])
+    _ffmpeg(["-stream_loop", "-1", "-i", str(seg), "-i", str(audio_path), "-map", "0:v:0", "-map", "1:a:0", "-t", f"{total_s:.2f}",
+             "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-shortest", "-movflags", "+faststart", str(out_path)])
+
+
+def _encode_full(rain_path: Path, audio_path: Path, total_s: float, w: int, h_px: int, out_path: Path) -> None:
+    _ffmpeg(["-stream_loop", "-1", "-i", str(rain_path), "-i", str(audio_path), "-t", f"{total_s:.2f}", "-vf", _vf(w, h_px),
+             "-c:v", "libx264", "-preset", "medium", "-crf", "23", "-pix_fmt", "yuv420p", "-r", str(M.OUT_FPS),
+             "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-shortest", "-movflags", "+faststart", str(out_path)])
+
+
+def _clip_seconds(path: Path) -> float:
+    r = subprocess.run([config.FFMPEG, "-hide_banner", "-i", str(path)], capture_output=True, text=True, encoding="utf-8", errors="replace")
+    m = re.search(r"Duration:\s*(\d+):(\d+):([\d.]+)", r.stderr or "")
+    return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3)) if m else 3.0
 
 
 def _out_size(upscaled: bool) -> tuple[int, int]:
@@ -87,24 +119,14 @@ async def make(session_id: str, s: dict | None = None, key: str = "",
         if progress:
             progress(0, 1, f"encoding {M.duration_label(settings)} loop ({w}x{h_px})")
 
-        # scale/pad rain clip to exact output size, loop it, embed audio, normalise loudness
-        # stream_loop -1 = infinite loop; -t trims to exact duration
-        vf = (
-            f"scale={w}:{h_px}:force_original_aspect_ratio=increase:flags=lanczos,"
-            f"crop={w}:{h_px},setsar=1,format=yuv420p"
-        )
-        _ffmpeg([
-            "-stream_loop", "-1", "-i", str(rain_path),
-            "-i", str(audio_path),
-            "-t", f"{total_s:.2f}",
-            "-vf", vf,
-            "-c:v", "libx264", "-preset", "medium", "-crf", "23",
-            "-pix_fmt", "yuv420p", "-r", str(M.OUT_FPS),
-            "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
-            "-shortest",
-            "-movflags", "+faststart",
-            str(out_path),
-        ])
+        # The picture is a loop, so it is encoded ONCE (seconds) and repeated by stream copy; only the sound is encoded for
+        # the whole length. The ffmpeg work runs in a thread so the app stays responsive for the minutes it takes.
+        work = media.media_dir(session_id, f"work/{it['id']}")
+        try:
+            await asyncio.to_thread(_encode_by_loop, rain_path, audio_path, total_s, w, h_px, work, out_path)
+        except RuntimeError:                                  # the loop copy did not work: encode all of it (slow, but sure)
+            await asyncio.to_thread(_encode_full, rain_path, audio_path, total_s, w, h_px, out_path)
+        shutil.rmtree(work, ignore_errors=True)
 
         size_mb = out_path.stat().st_size / (1024 * 1024)
         if progress:

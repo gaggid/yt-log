@@ -7,6 +7,7 @@ Music: an ambient-sleep YuE2 track made via story3/music.py from the session's o
 The YuE2 track is looped with cross-fades and mixed under the rain.
 
 Final: stereo 48kHz WAV normalised to FINAL_LUFS (-14), ready to embed in the MP4."""
+import asyncio
 import random
 import re
 import shutil
@@ -175,23 +176,23 @@ async def make(session_id: str, s: dict | None = None, key: str = "",
             progress(1, 3, "mixing rain + music")
 
         rain_wav = work / "rain.wav"
-        _rain_loop(total_s, rain_wav, float(settings.get("rain_level") or M.RAIN_LUFS))
+        await asyncio.to_thread(_rain_loop, total_s, rain_wav, float(settings.get("rain_level") or M.RAIN_LUFS))
 
         music_bed: Path | None = None
         if music_item:
-            music_bed = music_mod.bed_from_track(
-                config.FFMPEG, music_item, total_s, work,
-                float(settings.get("music_level") or M.MUSIC_LUFS), full=True,
+            music_bed = await asyncio.to_thread(
+                music_mod.bed_from_track, config.FFMPEG, music_item, total_s, work,
+                float(settings.get("music_level") or M.MUSIC_LUFS), True,
             )
 
         out = work / "audio_mix.wav"
-        _mix(rain_wav, music_bed, total_s, out)
+        await asyncio.to_thread(_mix, rain_wav, music_bed, total_s, out)
 
         # copy final mix to permanent location
         perm_dir = media.media_dir(session_id, "audio")
         name = f"audio-a{it['attempt']}.wav"
         perm = perm_dir / name
-        shutil.copy2(str(out), str(perm))
+        await asyncio.to_thread(shutil.copy2, str(out), str(perm))
 
         if progress:
             progress(3, 3, "audio done")
@@ -243,7 +244,7 @@ async def regenerate_music(session_id: str, s: dict | None = None, key: str = ""
     if store.chosen(session_id, M.KIND_FINAL):
         if progress:
             progress(2, 3, "putting the new sound into the video")
-        v = video.remux(session_id)
+        v = await asyncio.to_thread(video.remux, session_id)
     if plan.get("instrument") != old_instrument:
         try:
             await publish.generate(session_id, s, force=True)        # the description names the instrument

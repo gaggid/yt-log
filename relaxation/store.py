@@ -180,3 +180,18 @@ def view(s: dict) -> dict:
     if th:
         out["thumb_url"] = f"/api/media/file/{s['id']}/{th['file']}"
     return out
+
+
+def repair() -> int:
+    """At start-up: a session still marked running/uploading belonged to a job that died with the previous process.
+    Mark it failed (so the Generate button works again; finished steps are kept and skipped). Returns how many."""
+    ensure()
+    n = 0
+    for s in list_all():
+        if s.get("status") in (RUNNING, UPLOADING):
+            s["status"] = FAILED
+            s["step"] = ""
+            s["error"] = "interrupted: the app restarted while this was running. Press Generate to continue; finished steps are kept."
+            save(s)
+            n += 1
+    return n
