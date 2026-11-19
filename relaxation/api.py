@@ -1,4 +1,5 @@
 """FastAPI router for the relaxation channel (/api/relaxation)."""
+import asyncio
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -135,7 +136,42 @@ async def regenerate_music(session_id: str, body: _MusicReq):
         raise HTTPException(400, "that instrument is not one of this theme's")
 
     async def work(progress):
-        return await audio.regenerate_music(session_id, instrument=body.instrument, progress=progress)
+        # the card shows "Working: new music" while it runs (status running, step music), and the result or the error when it is over
+        sess = store.get(session_id)
+        sess.update(status=store.RUNNING, step="music", error="")
+        store.save(sess)
+        problem = ""
+        try:
+            await audio.regenerate_music(session_id, instrument=body.instrument, progress=progress)
+        except Exception as e:  # noqa: BLE001 - shown on the card; the job reports it too
+            problem = str(e)[:300]
+            raise
+        finally:
+            sess = store.get(session_id)
+            sess.update(status=store.READY, step="", error=problem)
+            store.save(sess)
+        return "New music is in the video."
+    return _start(session_id, work)
+
+
+class _ThumbReq(BaseModel):
+    person: str = ""              # "" the video's own, "woman" or "man"
+
+
+@router.post("/{session_id}/thumbnail")
+async def new_thumbnail(session_id: str, body: _ThumbReq):
+    """Draw the thumbnail picture again (a happy person by the rainy window) and lay the words on it. Needs the gateway (about a minute)."""
+    _get(session_id)
+    if body.person not in ("", "woman", "man"):
+        raise HTTPException(400, "person must be woman or man")
+
+    async def work(progress):
+        from . import thumb
+        progress(0, 2, "drawing the thumbnail picture")
+        await thumb.picture(session_id, force=True, person=body.person)
+        progress(1, 2, "laying the words on it")
+        await asyncio.to_thread(thumb.make, session_id, True)
+        return "New thumbnail is ready."
     return _start(session_id, work)
 
 

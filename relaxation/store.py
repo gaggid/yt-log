@@ -77,7 +77,8 @@ def create(scene: str | None = None, hours: int | None = None, minutes: int | No
     ensure()
     sid = M.session_id()
     from . import variety
-    settings = {**M.DEFAULT_SETTINGS, "rain_engine": M.RAIN_ENGINE, "youtube_slot": M.YOUTUBE_SLOT, **variety.choose(scene)}      # theme (when not chosen), seed and music: different from the last videos
+    settings = {**M.DEFAULT_SETTINGS, "rain_engine": M.RAIN_ENGINE, "youtube_slot": M.YOUTUBE_SLOT, **variety.choose(scene)}
+    settings["thumb_person"] = M.thumb_person(settings.get("seed"))      # theme (when not chosen), seed and music: different from the last videos
     if hours and 1 <= hours <= 8:
         settings["hours"] = hours
     if minutes and 1 <= minutes <= 480:

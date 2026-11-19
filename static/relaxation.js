@@ -17,6 +17,8 @@ var showRelaxation = (function () {
   const STEP_LABELS = {
     scene: '1. Room image',
     rain: '2. Rain drawn over the picture (4K)',
+    thumbnail: 'New thumbnail',
+    music: 'New music (4 takes, then the sound is swapped into the video: about 10 minutes)',
     upscale: '3. 2K upscale (old sessions)',
     audio: '4. Audio mix',
     video: '5. 3-hour video',
@@ -88,7 +90,8 @@ var showRelaxation = (function () {
   ${s.error ? `<div class="errbox mt-s">${s.error}</div>` : ''}
   ${s.rain_weak ? `<div class="errbox mt-s">The rain does not fall properly in this video (${Math.round((s.rain_motion.streak_same || 0) * 100)}% of the streaks stay in the same place; a good clip is under 85%).</div>` : ''}
   ${s.music_error ? `<div class="errbox mt-s">The video has rain only: the music could not be made (${s.music_error}). Use "New music".</div>` : ''}
-  ${s.step ? `<div class="small mute mt-s">Working: ${STEP_LABELS[s.step] || s.step} <span class="spin"></span></div>` : ''}
+  ${s.step ? `<div class="small mute mt-s">Working: ${STEP_LABELS[s.step] || s.step}${s._job && s._job.label ? ' — ' + s._job.label + (s._job.elapsed_s ? ' (' + Math.round(s._job.elapsed_s / 60) + ' min so far)' : '') : ''} <span class="spin"></span></div>` : ''}
+  ${s._done ? `<div class="small mt-s" style="color:var(--good,#3fb950)">${s._done}</div>` : ''}
 
   ${s.video_removed ? `<div class="small mute mt-s">Posted to YouTube; the local video file was removed to free disk.</div>` : ''}
   ${s.thumb_url || s.scene_url ? `<img src="${s.thumb_url || s.scene_url}" style="max-width:320px;border-radius:8px;margin-top:10px;display:block" alt="${s.thumb_url ? 'YouTube thumbnail' : 'scene preview'}">` : ''}
@@ -110,6 +113,9 @@ var showRelaxation = (function () {
     ${finalReady
       ? `<button class="small" data-action="watch" data-id="${s.id}">${watching.has(s.id) ? 'Hide player' : 'Watch'}</button>
          <a href="/api/relaxation/${s.id}/download" class="btn small">Download</a>` : ''}
+    ${finalReady && s.status !== 'running'
+      ? `<button class="small" data-action="thumb" data-id="${s.id}" data-person="woman" title="Draw the thumbnail again with a happy woman by the rainy window">New thumbnail: woman</button>
+         <button class="small" data-action="thumb" data-id="${s.id}" data-person="man" title="Draw the thumbnail again with a happy man by the rainy window">New thumbnail: man</button>` : ''}
     ${(s.audio_ready || finalReady) && s.status !== 'running'
       ? `<button class="small" data-action="music" data-id="${s.id}" data-instrument="" title="Same instrument, a new take">New music</button>
          <button class="small" data-action="music" data-id="${s.id}" data-instrument="other" title="Another instrument of this theme">New music, other instrument</button>` : ''}
@@ -254,13 +260,30 @@ var showRelaxation = (function () {
           render();
           return;
         }
-        if (action === 'music') {
-          try { await api('POST', `/api/relaxation/${id}/music/regenerate`, { instrument: btn.dataset.instrument || '' }); }
+        if (action === 'thumb') {
+          const i0 = sessions.findIndex(s => s.id === id);
+          try { await api('POST', `/api/relaxation/${id}/thumbnail`, { person: btn.dataset.person || '' }); }
           catch (e) { if (!e.message.includes('running')) { alert(e.message); return; } }
-          startPoll(id, async () => {
+          if (i0 >= 0) { sessions[i0] = { ...sessions[i0], status: 'running', step: 'thumbnail', error: '', _done: '', _job: { label: 'drawing the picture' } }; render(); }
+          startPoll(id, async (job) => {
             const updated = await api('GET', `/api/relaxation/${id}`);
             const idx = sessions.findIndex(s => s.id === id);
-            if (idx >= 0) sessions[idx] = { ...updated, status: updated.status };
+            const finished = job.state === 'done' || job.state === 'error';
+            if (idx >= 0) sessions[idx] = { ...updated, status: finished ? updated.status : 'running', step: finished ? '' : 'thumbnail', _job: finished ? null : job, _done: job.state === 'done' ? 'New thumbnail is ready (above).' : '', error: job.state === 'error' ? (job.error || updated.error) : updated.error };
+            render();
+          });
+          return;
+        }
+        if (action === 'music') {
+          const idx0 = sessions.findIndex(s => s.id === id);
+          try { await api('POST', `/api/relaxation/${id}/music/regenerate`, { instrument: btn.dataset.instrument || '' }); }
+          catch (e) { if (!e.message.includes('running')) { alert(e.message); return; } }
+          if (idx0 >= 0) { sessions[idx0] = { ...sessions[idx0], status: 'running', step: 'music', error: '', _done: '', _job: { label: 'starting' } }; render(); }     // show it at once
+          startPoll(id, async (job) => {
+            const updated = await api('GET', `/api/relaxation/${id}`);
+            const idx = sessions.findIndex(s => s.id === id);
+            const finished = job.state === 'done' || job.state === 'error';
+            if (idx >= 0) sessions[idx] = { ...updated, _job: finished ? null : job, _done: job.state === 'done' ? 'New music is in the video. Press Watch to listen.' : '', error: job.state === 'error' ? (job.error || updated.error) : updated.error };
             render();
           });
           return;
@@ -324,6 +347,17 @@ var showRelaxation = (function () {
     }
 
     render();
+    // opening the page while something runs (a run, or new music started earlier): follow it, so the card shows where it is
+    const going = sessions.find(s => s.status === 'running');
+    if (going) {
+      startPoll(going.id, async (job) => {
+        const updated = await api('GET', `/api/relaxation/${going.id}`);
+        const idx = sessions.findIndex(s => s.id === going.id);
+        const finished = job.state === 'done' || job.state === 'error';
+        if (idx >= 0) sessions[idx] = { ...updated, _job: finished ? null : job, _done: job.state === 'done' && job.note ? job.note : '', error: job.state === 'error' ? (job.error || updated.error) : updated.error };
+        render();
+      });
+    }
   }
 
   return showRelaxation;

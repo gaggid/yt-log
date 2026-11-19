@@ -60,6 +60,7 @@ KIND_RAIN = "rl_rain"        # Wan rain clip (MP4)
 KIND_AUDIO = "rl_audio"      # mixed rain + music (WAV then AAC embedded)
 KIND_FINAL = "rl_final"      # 3-hour MP4
 KIND_THUMB = "rl_thumb"      # the YouTube thumbnail (JPEG)
+KIND_THUMB_PIC = "rl_thumbpic"   # the picture under the thumbnail's words: a happy person by the rainy window (Qwen), no words in it
 
 # ── scene catalogue ───────────────────────────────────────────────────────────
 # Each scene = a Qwen image prompt seen in the FIRST PERSON from the bed, looking out at the rain
@@ -305,6 +306,39 @@ for _k, _v in SCENES.items():
         assert _a in _v["prompt"], (_k, _a)
         _v["prompt"] = _v["prompt"].replace(_a, _b, 1)
     _v["prompt"] = WET + _v["prompt"]
+# The thumbnail shows the FEELING of playing the music, not the place alone (owner, 2026-11-19): a happy young woman or man, cozy in a blanket
+# with a warm mug and headphones, watching the rain from a window that shows the video's own theme. The person sits on the right so the words
+# (laid on by code, on the left) never cover the face. The man/woman alternates by seed (`settings.thumb_person`).
+THUMB_VIEWS = {
+    "night_city": "a moss garden with stone lanterns and a koi pond",
+    "mountain_forest": "a spruce and birch forest",
+    "ocean": "a lush tropical garden with a lotus pond and palms",
+    "countryside": "a steep pine-covered mountain face in low cloud",
+    "forest": "an ancient rainforest canopy with hanging moss",
+    "himalayan_ridge": "a pine ridge with snow peaks in rain clouds",
+    "monastery_window": "terraced rooftops and white stupas in the mist",
+    "courtyard": "a quiet stone courtyard with a lotus pond",
+    "old_town_lane": "a narrow cobblestone lane with glowing lanterns",
+    "kerala_veranda": "coconut palms and banana plants",
+    "lakeside_porch": "a misty mountain lake",
+    "bamboo_teahouse": "a bamboo grove and a moss garden",
+}
+THUMB_PROMPT = ("Cozy lo-fi atmosphere. A happy young {who} with a warm gentle smile sits by a large rain-streaked window, wrapped in a soft knit blanket, "
+                "holding a steaming mug in both hands, headphones resting around the neck, relaxed and content, looking out at the rain. "
+                "Seen in a three-quarter view from inside the room, the person on the right side of the frame, the window on the left and in the centre showing {view} in falling rain, "
+                "raindrops running down the glass, warm golden lamp light inside against the cool blue rainy dusk outside, soft glowing bokeh lights, a small plant and a few books on the sill. "
+                "Photorealistic, cinematic, shallow depth of field, rich warm colour, uplifting and peaceful mood. No text, no logo.")
+THUMB_SIZE = "1280x720"
+
+
+def thumb_person(seed: int) -> str:
+    return "woman" if int(seed or 0) % 2 else "man"
+
+
+def thumb_prompt(scene: str, who: str) -> str:
+    return THUMB_PROMPT.format(who=who if who in ("woman", "man") else "woman", view=THUMB_VIEWS.get(scene) or THUMB_VIEWS[DEFAULT_SCENE])
+
+
 YOUTUBE_SLOT = "rain"           # which YouTube connection (youtube/slots.py) this pipeline posts to
 RAIN_ENGINE = "code"           # "code": rain drawn over the picture (relaxation/rainfx.py, default); "wan": the old Wan 2.2 image-to-video rain clip
 OUT_4K = (3840, 2160)          # the video of a code-rain session: the effects are drawn at this size; YouTube then offers every quality up to 2160p

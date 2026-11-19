@@ -1,9 +1,11 @@
 """The YouTube thumbnail of a rain video: the scene picture at 1280x720 with a short bold line of words laid on by code
 (never drawn by the image model, so the letters are always right). The picture does the work; the words say what it is
 ("RAIN SOUNDS", the length) in a size that still reads on a phone. JPEG under 2 MB, as the thumbnail upload requires."""
+import base64
 import io
 from pathlib import Path
 
+import httpx
 from PIL import Image, ImageDraw, ImageFont
 
 from story3 import store as media
@@ -77,13 +79,49 @@ def render(scene_path: Path, length_words: str) -> bytes:
     return buf.getvalue()
 
 
+async def picture(session_id: str, s: dict | None = None, key: str = "", force: bool = False, person: str = "") -> dict:
+    """The picture under the thumbnail's words: a happy person by the rainy window (Qwen, 1280x720). `person` = "woman" / "man" / "" (the session's own).
+    Returns the media row (kind rl_thumbpic). Raises MediaError when the gateway fails; the caller falls back to the scene picture."""
+    from story import settings as settings_mod
+    s = s or settings_mod.get()
+    key = key or settings_mod.api_key()
+    if not force:
+        have = store.chosen(session_id, M.KIND_THUMB_PIC)
+        if have:
+            return have
+    session = store.get(session_id)
+    st = session.setdefault("settings", {})
+    who = person or st.get("thumb_person") or M.thumb_person(st.get("seed"))
+    if person and person != st.get("thumb_person"):
+        st["thumb_person"] = person
+        store.save(session)
+    prompt = M.thumb_prompt(st.get("scene") or M.DEFAULT_SCENE, who)
+    seed = int(st.get("seed") or 7) + 3
+    it = media.add(session_id, M.KIND_THUMB_PIC, "thumbpic", 0, "running", {"person": who, "seed": seed})
+    try:
+        async with httpx.AsyncClient(timeout=900) as c:
+            r = await c.post(s["base_url"].rstrip("/") + "/images/generations", headers={"Authorization": f"Bearer {key}"},
+                             json={"model": s.get("image_model") or M.IMAGE_MODEL, "prompt": prompt, "size": M.THUMB_SIZE, "n": 1, "steps": M.IMAGE_STEPS,
+                                   "response_format": "b64_json", "seed": seed + (len(media.items(session_id, M.KIND_THUMB_PIC, "thumbpic")) - 1) * 7})
+        if r.status_code != 200:
+            raise MediaError(f"image gateway returned {r.status_code}: {r.text[:200]}")
+        data = base64.b64decode(r.json()["data"][0]["b64_json"])
+        name = f"pic-a{it['attempt']}.jpg"
+        (media.media_dir(session_id, "thumb") / name).write_bytes(data)
+        return media.update(it["id"], status="done", file=f"thumb/{name}", meta={"person": who, "seed": seed, "w": 1280, "h": 720})
+    except (MediaError, httpx.HTTPError, KeyError, ValueError, OSError) as e:
+        media.update(it["id"], status="failed", meta={"error": str(e)[:300]})
+        raise MediaError(f"thumbnail picture failed: {e}") from e
+
+
 def make(session_id: str, force: bool = False) -> dict:
-    """The thumbnail media row (kind rl_thumb). Needs the scene picture."""
+    """The thumbnail media row (kind rl_thumb). Uses the person picture when there is one, else the scene picture."""
     if not force:
         have = store.chosen(session_id, M.KIND_THUMB)
         if have:
             return have
-    scene_item = store.chosen(session_id, M.KIND_SCENE)
+    pic_item = store.chosen(session_id, M.KIND_THUMB_PIC)
+    scene_item = pic_item or store.chosen(session_id, M.KIND_SCENE)
     if not scene_item:
         raise MediaError("scene image not generated yet")
     src = media.path_of(scene_item)
@@ -95,7 +133,7 @@ def make(session_id: str, force: bool = False) -> dict:
         data = render(src, _length_words(settings))
         name = f"thumb-a{it['attempt']}.jpg"
         (media.media_dir(session_id, "thumb") / name).write_bytes(data)
-        return media.update(it["id"], status="done", file=f"thumb/{name}", meta={"w": SIZE[0], "h": SIZE[1], "bytes": len(data)})
+        return media.update(it["id"], status="done", file=f"thumb/{name}", meta={"w": SIZE[0], "h": SIZE[1], "bytes": len(data), "source": "person" if pic_item else "scene"})
     except OSError as e:
         media.update(it["id"], status="failed", meta={"error": str(e)[:300]})
         raise MediaError(f"thumbnail failed: {e}") from e

@@ -73,6 +73,10 @@ async def run(session_id: str, force: bool = False, progress=None) -> str:
 
         _step("thumbnail")
         try:
+            try:
+                await thumb.picture(session_id, s, key, force=force)            # a happy person by the rainy window; failing, the scene picture is used
+            except MediaError:
+                pass
             thumb.make(session_id, force=force)
             done.append("thumbnail")
         except Exception:  # noqa: BLE001 - the video is complete without it

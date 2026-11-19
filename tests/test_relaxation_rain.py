@@ -664,3 +664,49 @@ def test_video_uses_the_4k_size_and_a_bitrate_cap_for_the_code_loop():
     assert video._out_size(False, True) == M.OUT_4K == (3840, 2160)
     assert video._out_size(True) == (2560, 1440) and video._out_size(False) == (M.OUT_W, M.OUT_H)
     assert video.MAXRATE == "13M"
+
+
+def test_thumbnail_person_prompt_names_the_themes_view_and_alternates():
+    assert {M.thumb_person(s) for s in range(10)} == {"woman", "man"}
+    assert set(M.THUMB_VIEWS) == set(M.SCENES)
+    p = M.thumb_prompt("old_town_lane", "man")
+    assert "young man" in p and "cobblestone lane" in p and "right side of the frame" in p and "No text" in p
+    assert "young woman" in M.thumb_prompt("old_town_lane", "anything else")            # an unknown value never leaks into the prompt
+
+
+def test_thumbnail_uses_the_person_picture_and_falls_back_to_the_scene(tmp_path, monkeypatch):
+    import base64
+    import io
+    from PIL import Image
+    from relaxation import thumb
+    sid = _session_with_scene(tmp_path)
+    scene_path = media.path_of(store.chosen(sid, M.KIND_SCENE))
+    Image.new("RGB", (1280, 720), (20, 40, 80)).save(scene_path)
+    row = thumb.make(sid)                                               # no person picture: the scene picture
+    assert row["meta"]["source"] == "scene"
+    sent = {}
+    buf = io.BytesIO(); Image.new("RGB", (1280, 720), (200, 120, 40)).save(buf, "JPEG")
+
+    class FakeClient:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, url, headers=None, json=None):
+            sent.update(json=json, url=url)
+            import httpx
+            return httpx.Response(200, json={"data": [{"b64_json": base64.b64encode(buf.getvalue()).decode()}]})
+    monkeypatch.setattr(thumb.httpx, "AsyncClient", FakeClient)
+    pic = asyncio.run(thumb.picture(sid, {"base_url": "http://gw/v1"}, "k", person="man"))
+    assert pic["status"] == "done" and pic["meta"]["person"] == "man" and store.get(sid)["settings"]["thumb_person"] == "man"
+    assert "young man" in sent["json"]["prompt"] and sent["json"]["size"] == "1280x720" and sent["url"].endswith("/images/generations")
+    again = thumb.make(sid, force=True)
+    assert again["meta"]["source"] == "person" and again["id"] != row["id"]
+    assert asyncio.run(thumb.picture(sid, {"base_url": "http://gw/v1"}, "k"))["id"] == pic["id"]       # kept unless forced
+
+    class Down(FakeClient):
+        async def post(self, url, headers=None, json=None):
+            import httpx
+            return httpx.Response(500, text="boom")
+    monkeypatch.setattr(thumb.httpx, "AsyncClient", Down)
+    with pytest.raises(Exception, match="thumbnail picture failed"):
+        asyncio.run(thumb.picture(sid, {"base_url": "http://gw/v1"}, "k", force=True))
