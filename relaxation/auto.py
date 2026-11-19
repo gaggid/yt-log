@@ -11,6 +11,8 @@ Steps (in order):
 Each step checks if the result already exists and skips if so, unless force=True.
 The whole chain runs as a single background job via story2/jobs.py.
 """
+import asyncio
+
 from story import settings as settings_mod
 from story3.voice import MediaError
 
@@ -55,13 +57,15 @@ async def run(session_id: str, force: bool = False, progress=None) -> str:
             await rain.upscale(session_id, s, key, force=force)
             done.append("2K upscale")
 
-        _step("audio")
-        await audio.make(session_id, s, key, progress=_prog("audio"), force=force)
-        done.append("audio mix")
+        if force or not store.chosen(session_id, M.KIND_FINAL):        # a finished video holds its sound; the mix file is removed after it
+            _step("audio")
+            await audio.make(session_id, s, key, progress=_prog("audio"), force=force)
+            done.append("audio mix")
 
-        _step("video")
-        await video.make(session_id, s, key, progress=_prog("video"), force=force)
-        done.append("3-hour video")
+            _step("video")
+            await video.make(session_id, s, key, progress=_prog("video"), force=force)
+            done.append("3-hour video")
+            await asyncio.to_thread(audio.drop_mix, session_id)
 
         _step("publish")
         await publish.generate(session_id, s, force=force)

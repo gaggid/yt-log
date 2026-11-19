@@ -287,7 +287,8 @@ def test_regenerating_music_changes_seed_and_instrument_and_rebuilds_the_video(t
     assert after["music_plan"]["instrument"] != before["music_plan"]["instrument"]
     assert after["music_plan"]["instrument"] in M.SCENES["courtyard"]["instruments"]
     assert out["video"] and store.chosen(sid, M.KIND_FINAL)["attempt"] == 2
-    assert store.chosen(sid, M.KIND_AUDIO)["attempt"] == 2 and store.chosen(sid, M.KIND_AUDIO)["meta"]["music"] is True
+    a2 = [i for i in media.items(sid, M.KIND_AUDIO) if i["attempt"] == 2][0]
+    assert a2["status"] == "done" and a2["meta"]["music"] is True and a2["meta"]["mix_removed"] and a2["file"] == ""      # mixed, put into the video, then removed
     assert not list((media.media_dir(sid) / "work").glob("*"))           # the big intermediate files are removed
 
 
@@ -456,3 +457,72 @@ def test_the_loop_path_itself_works_and_has_no_step_at_the_seam(tmp_path):
     seg = subprocess.run([config.FFMPEG, "-hide_banner", "-i", str(work / "loop.mp4")], capture_output=True, text=True).stderr
     secs = float(re.search(r"Duration: 00:00:0?([\d.]+)", seg).group(1))
     assert abs(secs - (3.0 - M.SEAM_S)) < 0.2                       # the loop is the clip minus the seam
+
+
+# ── disk: deleting a session removes everything, the mix goes once the video exists, the storage page lists rain videos ──
+
+def _put(sid, kind, key, rel, size=1000, status="done"):
+    it = media.add(sid, kind, key, 0, status, {})
+    p = media.media_dir(sid) / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(b"x" * size)
+    return media.update(it["id"], file=rel)
+
+
+def test_deleting_a_session_removes_every_file_including_the_2k_clip_and_the_folder():
+    sid = store.create(scene="courtyard", minutes=1)["id"]
+    _put(sid, M.KIND_FINAL, "final", "final/final-a1.mp4")
+    _put(sid, M.KIND_RAIN, "rain", "rain/rain-a1.mp4")
+    (media.media_dir(sid) / "rain" / "rain-a1-2k.mp4").write_bytes(b"y" * 500)          # has no media row
+    (media.media_dir(sid) / "work" / "x").mkdir(parents=True)
+    (media.media_dir(sid) / "work" / "x" / "tmp.wav").write_bytes(b"z")
+    folder = media.media_dir(sid)
+    store.delete(sid)
+    assert not folder.exists()
+    assert media.items(sid) == []
+
+
+def test_the_audio_mix_is_removed_once_the_video_exists_and_the_card_still_shows_audio_ready():
+    from relaxation import audio
+    sid = store.create(scene="courtyard", minutes=1)["id"]
+    a = _put(sid, M.KIND_AUDIO, "audio", "audio/audio-a1.wav", 5000)
+    assert audio.drop_mix(sid) == 0 and (media.media_dir(sid) / "audio" / "audio-a1.wav").exists()        # no video yet: keep it
+    _put(sid, M.KIND_FINAL, "final", "final/final-a1.mp4")
+    assert audio.drop_mix(sid) == 5000
+    assert not (media.media_dir(sid) / "audio" / "audio-a1.wav").exists()
+    v = store.view(store.get(sid))
+    assert v["audio_ready"] and v["final_ready"] and store.chosen(sid, M.KIND_AUDIO) is None
+
+
+def test_a_finished_video_is_not_rebuilt_when_generate_is_pressed_again(monkeypatch):
+    from relaxation import auto, image, publish, thumb, video
+    from relaxation import audio as audio_mod
+    sid = store.create(scene="courtyard", minutes=1)["id"]
+    _put(sid, M.KIND_FINAL, "final", "final/final-a1.mp4")
+    calls = []
+
+    async def ok(name):
+        async def f(*a, **k):
+            calls.append(name)
+            return {}
+        return f
+    for mod, fn in ((image, "generate"), (rain, "generate"), (rain, "upscale"), (audio_mod, "make"), (video, "make"), (publish, "generate")):
+        monkeypatch.setattr(mod, fn, asyncio.run(ok(f"{mod.__name__}.{fn}")))
+    monkeypatch.setattr(thumb, "make", lambda *a, **k: calls.append("thumb"))
+    monkeypatch.setattr(auto.settings_mod, "get", lambda: {"base_url": "x"})
+    monkeypatch.setattr(auto.settings_mod, "api_key", lambda: "k")
+    asyncio.run(auto.run(sid))
+    assert not any(c.endswith("audio.make") or c.endswith("video.make") for c in calls)
+    assert store.get(sid)["status"] == store.READY
+
+
+def test_the_storage_page_lists_rain_videos_with_their_title(tmp_path):
+    from admin import storage
+    sid = store.create(scene="courtyard", minutes=1)["id"]
+    _put(sid, M.KIND_FINAL, "final", "final/final-a1.mp4", 4000)
+    _put(sid, M.KIND_AUDIO, "audio", "audio/audio-a1.wav", 2000)
+    ov = storage.overview()
+    p = next(x for x in ov["projects"] if x["id"] == sid)
+    assert p["kind"] == "rain" and p["bytes"] == 6000 and "Courtyard" in p["title"]
+    r = storage.clear(sid, "folders", ["audio"], dry_run=False)
+    assert r["freed_bytes"] == 2000 and (media.media_dir(sid) / "final" / "final-a1.mp4").exists()

@@ -2,6 +2,7 @@
 generated assets (scene image, rain clip, audio, final video) are rows in the existing
 `media` table (story3/store.py) with the session's id as `plan_id`."""
 import hashlib
+import shutil
 from pathlib import Path
 
 from story import db
@@ -143,13 +144,8 @@ def delete(session_id: str) -> None:
         except Exception:  # noqa: BLE001
             pass
     db.ex("DELETE FROM media WHERE plan_id=?", (session_id,))
-    # remove the media folder if empty
-    folder = media.media_dir(session_id)
-    try:
-        if folder.exists() and not any(folder.iterdir()):
-            folder.rmdir()
-    except OSError:
-        pass
+    # the whole folder: it holds only this session's files (some, like the 2K clip, have no media row)
+    shutil.rmtree(media.media_dir(session_id), ignore_errors=True)
 
 
 def chosen(session_id: str, kind: str) -> dict | None:
@@ -162,6 +158,7 @@ def chosen(session_id: str, kind: str) -> dict | None:
 def view(s: dict) -> dict:
     """The session dict augmented with per-step status for the UI."""
     out = {**s}
+    final_done = bool(chosen(s["id"], M.KIND_FINAL))
     for key, kind in (("scene", M.KIND_SCENE), ("rain", M.KIND_RAIN), ("audio", M.KIND_AUDIO), ("final", M.KIND_FINAL)):
         item = chosen(s["id"], kind)
         out[f"{key}_ready"] = bool(item)
@@ -170,6 +167,8 @@ def view(s: dict) -> dict:
                 out["final_url"] = f"/api/relaxation/{s['id']}/download"
             elif kind == M.KIND_SCENE:
                 out["scene_url"] = f"/api/media/file/{s['id']}/{item['file']}"
+    if final_done:
+        out["audio_ready"] = True                      # the mix is removed once the video is built (see audio.drop_mix)
     tracks = [i for i in media.items(s["id"], "music", "bgm") if i["status"] == "done" and i["file"]]
     if tracks:
         out["music_url"] = f"/api/media/file/{s['id']}/{tracks[-1]['file']}"

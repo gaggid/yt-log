@@ -271,6 +271,24 @@ async def make(session_id: str, s: dict | None = None, key: str = "",
         raise MediaError(f"audio mix failed: {e}") from e
 
 
+def drop_mix(session_id: str) -> int:
+    """Remove the audio mix file once the finished video holds it (about 2 GB for 3 hours). The row stays, without a file; a new mix is made
+    when the music is made again. Only when a finished video exists. Returns the bytes freed."""
+    if not store.chosen(session_id, M.KIND_FINAL):
+        return 0
+    freed = 0
+    for it in media.items(session_id, M.KIND_AUDIO):
+        if it["file"]:
+            p = media.path_of(it)
+            try:
+                freed += p.stat().st_size
+                p.unlink()
+            except OSError:
+                continue
+            media.update(it["id"], file="", meta={"mix_removed": True})
+    return freed
+
+
 async def regenerate_music(session_id: str, s: dict | None = None, key: str = "", instrument: str = "", progress=None) -> dict:
     """Make the music again (a new seed, so a new take) and put it into the finished video.
 
@@ -309,6 +327,7 @@ async def regenerate_music(session_id: str, s: dict | None = None, key: str = ""
         if progress:
             progress(2, 3, "putting the new sound into the video")
         v = await asyncio.to_thread(video.remux, session_id)
+        await asyncio.to_thread(drop_mix, session_id)
     if plan.get("instrument") != old_instrument:
         try:
             await publish.generate(session_id, s, force=True)        # the description names the instrument

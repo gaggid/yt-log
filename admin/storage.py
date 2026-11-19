@@ -19,7 +19,7 @@ import config
 from story import db
 from story3 import store as media
 
-ID_RE = re.compile(r"^(?:pl|sh|ch|sm)-[0-9a-f]{6,16}$")
+ID_RE = re.compile(r"^(?:pl|sh|ch|sm|rl)-[0-9a-f]{6,16}$")
 SPECIAL = {"wardrobe": "Wardrobe (garment pictures)"}
 # folder -> (what it holds, can the app make it again?)
 FOLDERS = {
@@ -29,6 +29,8 @@ FOLDERS = {
     "upload": ("Pictures you uploaded", False), "likeness": ("Photos used for a real person's likeness", False), "source": ("Photo a character was started from", False),
     "char_gen": ("Character pictures drawn from text", True), "char_sheet": ("Character sheet pictures", True), "char_edit": ("Character edits, looks and try-ons", True),
     "garment": ("Garment pictures", False), "panels": ("Story pictures (painted panels)", True),
+    "scene": ("Rain: scene pictures", True), "rain": ("Rain: clips and 2K versions", True), "audio": ("Rain: audio mixes", True), "music": ("Rain: music takes", True),
+    "thumb": ("Rain: YouTube thumbnails", True), "work": ("Rain: work files", True),
 }
 OTHER = {                                           # folders under data/ that only hold test output; the timing files the estimates read are kept
     "characters_probe": ("Character studio probe pictures", ("timings.json",)), "shorts_probe": ("Shorts probe clips", ("timings.json",)),
@@ -57,7 +59,7 @@ def _size(path: Path) -> tuple[int, int]:
 
 
 def kind_of(pid: str) -> str:
-    return {"pl": "long", "sh": "short", "ch": "character", "sm": "story"}.get(pid[:2], "special")
+    return {"pl": "long", "sh": "short", "ch": "character", "sm": "story", "rl": "rain"}.get(pid[:2], "special")
 
 
 def _titles() -> dict[str, dict]:
@@ -67,7 +69,7 @@ def _titles() -> dict[str, dict]:
             out[r["id"]] = {"title": r["title"] or r["id"], "status": r["status"], "updated_at": r["updated_at"]}
     except Exception:  # noqa: BLE001 - a table may not exist yet on a fresh install
         pass
-    for table, key in (("shorts", "title"), ("chars", "name"), ("sim_projects", "title")):
+    for table, key in (("shorts", "title"), ("chars", "name"), ("sim_projects", "title"), ("relaxation_sessions", "title")):
         try:
             for r in db.q(f"SELECT id, {key} AS t, status, updated_at FROM {table}"):
                 out[r["id"]] = {"title": r["t"] or r["id"], "status": r["status"], "updated_at": r["updated_at"]}
