@@ -46,11 +46,11 @@ async def _resume_previous(session_id: str, seed: int, base: str, api_key: str) 
     return it, data, res
 
 
-def _rain_body(image_data: bytes, seed: int) -> dict:
+def _rain_body(image_data: bytes, seed: int, scene: str = "") -> dict:
     img_b64 = base64.b64encode(image_data).decode()
     return {
         "model": M.I2V_MODEL,
-        "prompt": M.RAIN_MOTION,
+        "prompt": M.rain_motion(scene),
         "negative_prompt": M.RAIN_NEGATIVE,
         "image": f"data:image/jpeg;base64,{img_b64}",
         "end_image": f"data:image/jpeg;base64,{img_b64}",   # first = last frame: the clip loops without a jump
@@ -87,7 +87,7 @@ async def generate(session_id: str, s: dict | None = None, key: str = "", force:
 
     session = store.get(session_id)
     seed = int((session.get("settings") or {}).get("seed") or 7)
-    body = _rain_body(img_data, seed)
+    body = _rain_body(img_data, seed, (session.get("settings") or {}).get("scene") or "")
 
     resumed = None if force else await _resume_previous(session_id, seed, base, api_key)
     if resumed:

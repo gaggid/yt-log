@@ -176,3 +176,15 @@ def test_daily_run_once_a_day_inside_the_window(monkeypatch):
     assert daily.tick(at(2)) == "rl-x" and started == [5]
     assert daily.tick(at(3)) is None and started == [5]               # only once that day
     assert daily.tick(at(2) + 86400) == "rl-x" and started == [5, 5]  # and again the next day
+
+
+def test_only_themes_with_a_real_flame_let_it_flicker():
+    flame = {k for k, v in M.SCENES.items() if v.get("flame")}
+    assert flame == {"mountain_forest", "himalayan_ridge", "monastery_window", "kerala_veranda"}
+    for k in M.SCENES:
+        p = M.rain_motion(k)
+        assert ("flame flickers" in p) == (k in flame), k
+        assert "overall brightness never changes" in p
+    assert "flicker" not in M.RAIN_NEGATIVE.replace("flashing", "")        # the ban is on brightness change and flashing, not on a flame
+    assert "night" in M.SCENES["monastery_window"]["prompt"] and "dusk" not in M.SCENES["monastery_window"]["prompt"]
+    assert rain._rain_body(b"x", 7, "monastery_window")["prompt"] == M.rain_motion("monastery_window")

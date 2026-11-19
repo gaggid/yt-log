@@ -86,6 +86,7 @@ SCENES: dict[str, dict] = {
     },
     "mountain_forest": {
         "label": "Scandinavian Forest Cabin",
+        "flame": True,           # a real flame (candle, oil or butter lamp): it may flicker softly
         "instruments": ["flute", "cello", "soft piano", "nylon guitar"],
         "prompt": (
             "First-person point of view from a cosy wooden bed inside a Nordic cabin bedroom, "
@@ -154,6 +155,7 @@ SCENES: dict[str, dict] = {
     },
     "himalayan_ridge": {
         "label": "Himalayan Mountain Lodge",
+        "flame": True,           # a real flame (candle, oil or butter lamp): it may flicker softly
         "instruments": ["bamboo flute", "singing bowls", "cello", "soft piano"],
         "prompt": (
             "First-person point of view from a wooden bed beside a wide window in a Himalayan mountain "
@@ -169,6 +171,7 @@ SCENES: dict[str, dict] = {
     },
     "monastery_window": {
         "label": "Mountain Monastery Window",
+        "flame": True,           # a real flame (candle, oil or butter lamp): it may flicker softly
         "instruments": ["singing bowls", "bamboo flute", "cello", "harp"],
         "prompt": (
             "First-person point of view sitting on a wide stone window seat with a folded saffron blanket "
@@ -177,7 +180,7 @@ SCENES: dict[str, dict] = {
             "the carved wooden eaves, a brass butter lamp burning warm gold on the sill at the edge of "
             "the frame, dark wooden shutters folded open on both sides, distant peaks fading into "
             "grey-blue cloud, rain falling in long thin lines. Photorealistic, serene monastery "
-            "atmosphere, calm and cinematic. Soft blue dusk light, gently and evenly lit, every detail "
+            "atmosphere, calm and cinematic. Deep blue moonlit night with soft mist, a few warm lit windows glowing in the village far below, gently and evenly lit, every detail "
             "clearly visible, calm and inviting, not dark and not gloomy. No people, no text, no logo."
         ),
     },
@@ -212,6 +215,7 @@ SCENES: dict[str, dict] = {
     },
     "kerala_veranda": {
         "label": "Kerala Monsoon Veranda",
+        "flame": True,           # a real flame (candle, oil or butter lamp): it may flicker softly
         "instruments": ["bamboo flute", "nylon guitar", "harp", "kalimba"],
         "prompt": (
             "First-person point of view from a cane reclining chair on the veranda of a traditional "
@@ -259,17 +263,28 @@ DEFAULT_SCENE = "night_city"
 # ── Wan rain motion prompt ────────────────────────────────────────────────────
 # Applied to every scene. Describes only what MOVES: rain + light.
 # No style words, no composition (the image already shows those).
-RAIN_MOTION = (
+RAIN_MOTION_HEAD = (
     "Fine, thin rain falls fast and straight down in many long slender translucent streaks, "
     "the natural speed of real rain. Small bright splashes and rings appear where the drops land "
     "on water, wet ground and leaves, and the leaves tremble lightly under the drops. "
-    "Everything else stays perfectly still: the room, the lamps, the trees, the light and the camera. "
-    "The brightness never changes. Continuous natural motion, no scene cut."
 )
+RAIN_MOTION_TAIL = "The overall brightness never changes. Continuous natural motion, no scene cut."
+
+
+def rain_motion(scene: str = "") -> str:
+    """The motion prompt for a theme: only the rain moves. A theme with a real flame (`flame`) also lets that flame flicker very softly."""
+    if (SCENES.get(scene) or {}).get("flame"):
+        return (RAIN_MOTION_HEAD + "The lamp flame flickers very softly in place and its small glow barely changes. "
+                "Everything else stays perfectly still: the room, the trees, the other lights and the camera. " + RAIN_MOTION_TAIL)
+    return (RAIN_MOTION_HEAD + "Everything else stays perfectly still: the room, the lamps, the trees, the light and the camera. "
+            + RAIN_MOTION_TAIL)
+
+
+RAIN_MOTION = rain_motion()          # the default (no flame)
 
 RAIN_NEGATIVE = (
     "slime, goo, thick dripping liquid, blobs, globs, sticky strands, melting, wobbling water, "
-    "slow motion, floating drops, huge drops, darkening, brightness change, fade, flicker, "
+    "slow motion, floating drops, huge drops, darkening, overall brightness change, fade, flashing light, "
     "camera shake, camera movement, scene cut, jump cut, people, text, watermark, logo, morphing, "
     "blurry, pixelated, grainy"
 )
