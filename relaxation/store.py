@@ -176,6 +176,11 @@ def view(s: dict) -> dict:
     au = chosen(s["id"], M.KIND_AUDIO)
     if au and au["meta"].get("music_error"):
         out["music_error"] = au["meta"]["music_error"]
+    rn = chosen(s["id"], M.KIND_RAIN)
+    if rn and rn["meta"].get("motion"):
+        from . import motion
+        out["rain_motion"] = rn["meta"]["motion"]
+        out["rain_weak"] = motion.weak(rn["meta"]["motion"])
     th = chosen(s["id"], M.KIND_THUMB)
     if th:
         out["thumb_url"] = f"/api/media/file/{s['id']}/{th['file']}"

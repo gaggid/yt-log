@@ -84,6 +84,7 @@ var showRelaxation = (function () {
   </div>
 
   ${s.error ? `<div class="errbox mt-s">${s.error}</div>` : ''}
+  ${s.rain_weak ? `<div class="errbox mt-s">The rain hardly moves in this video (${s.rain_motion.changed_pixels_pct}% of the picture changes; a good clip is about 3%).</div>` : ''}
   ${s.music_error ? `<div class="errbox mt-s">The video has rain only: the music could not be made (${s.music_error}). Use "New music".</div>` : ''}
   ${s.step ? `<div class="small mute mt-s">Working: ${STEP_LABELS[s.step] || s.step} <span class="spin"></span></div>` : ''}
 

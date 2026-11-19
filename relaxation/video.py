@@ -42,10 +42,16 @@ def _encode_by_loop(rain_path: Path, audio_path: Path, total_s: float, w: int, h
     """Encode the clip once as a closed one-GOP segment (no B-frames, so every repeat starts clean), then repeat it with
     stream copy while the sound is encoded to AAC. A 3 hour video takes a few minutes instead of three quarters of an hour."""
     seg = work / "loop.mp4"
-    frames = max(2, round(_clip_seconds(rain_path) * M.OUT_FPS))
-    _ffmpeg(["-i", str(rain_path), "-vf", _vf(w, h_px), "-an", "-r", str(M.OUT_FPS), "-frames:v", str(frames),
+    d, x = _clip_seconds(rain_path), M.SEAM_S
+    # The clip drifts a little in brightness over its length (up to 12 % of a dark scene), so the end is cross-faded into the start:
+    # head + tail fade into one seam, then the body; the loop is x seconds shorter and has no step where it comes round.
+    vf = (f"[0:v]fps={M.OUT_FPS},{_vf(w, h_px)},split=3[a][b][c];"
+          f"[a]trim=0:{x},setpts=PTS-STARTPTS,fps={M.OUT_FPS}[head];[b]trim={x}:{d - x},setpts=PTS-STARTPTS,fps={M.OUT_FPS}[body];"
+          f"[c]trim={d - x}:{d},setpts=PTS-STARTPTS,fps={M.OUT_FPS}[tail];"
+          f"[tail][head]xfade=transition=fade:duration={x}:offset=0[seam];[seam][body]concat=n=2:v=1:a=0,format=yuv420p[v]")
+    _ffmpeg(["-i", str(rain_path), "-filter_complex", vf, "-map", "[v]", "-an", "-r", str(M.OUT_FPS),
              "-c:v", "libx264", "-preset", "slow", "-crf", "21", "-pix_fmt", "yuv420p", "-bf", "0",
-             "-x264-params", f"keyint={frames}:min-keyint={frames}:scenecut=0:open-gop=0", str(seg)])
+             "-x264-params", "keyint=1000:min-keyint=1000:scenecut=0:open-gop=0", str(seg)])
     _ffmpeg(["-stream_loop", "-1", "-i", str(seg), "-i", str(audio_path), "-map", "0:v:0", "-map", "1:a:0", "-t", f"{total_s:.2f}",
              "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-shortest", "-movflags", "+faststart", str(out_path)])
 

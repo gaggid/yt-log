@@ -9,7 +9,9 @@ import math
 from story3 import store as media
 from story3.voice import MediaError
 
-from . import models as M, store
+import asyncio
+
+from . import models as M, motion, store
 from shorts import wan
 
 # frames: I2V at 16 fps, CLIP_S seconds, rounded up to 4n+1 (3 s -> 49)
@@ -46,7 +48,7 @@ async def _resume_previous(session_id: str, seed: int, base: str, api_key: str) 
     return it, data, res
 
 
-def _rain_body(image_data: bytes, seed: int, scene: str = "") -> dict:
+def _rain_body(image_data: bytes, seed: int, scene: str = "", guidance: float = M.RAIN_GUIDANCE) -> dict:
     img_b64 = base64.b64encode(image_data).decode()
     return {
         "model": M.I2V_MODEL,
@@ -59,13 +61,48 @@ def _rain_body(image_data: bytes, seed: int, scene: str = "") -> dict:
         "fps": M.I2V_FPS,
         "speed_lora": False,
         "steps": 10,
+        "guidance": guidance,
+        "guidance_low": guidance,
         "seed": seed,
         "response_format": "mp4",
     }
 
 
+async def _clip(session_id: str, img_data: bytes, seed: int, scene: str, base: str, api_key: str, guidance: float, resume: bool) -> dict:
+    """One rain clip (one gateway job); a job the gateway still has for the same frames and seed is picked up instead of repeated."""
+    body = _rain_body(img_data, seed, scene, guidance)
+    resumed = await _resume_previous(session_id, seed, base, api_key) if resume else None
+    if resumed:
+        it, clip_data, res = resumed
+    else:
+        it = media.add(session_id, M.KIND_RAIN, "rain", 0, "running", {"frames": _FRAMES, "seed": seed, "guidance": guidance})
+    try:
+        if not resumed:
+            ans = await wan.submit(body, base, api_key, background=True)
+            if ans.get("id") and ans.get("status") not in ("succeeded", "completed"):
+                # store job id so a retry or a restart can resume
+                media.update(it["id"], meta={"job_id": ans["id"], "frames": _FRAMES, "seed": seed})
+                res = await wan.wait(ans["id"], base, api_key, limit_s=RAIN_LIMIT_S)
+            else:
+                res = wan._result(ans)
+            clip_data = await wan.fetch(res, base, api_key)
+        out_dir = media.media_dir(session_id, "rain")
+        name = f"rain-a{it['attempt']}.mp4"
+        (out_dir / name).write_bytes(clip_data)
+
+        duration_s = _FRAMES / M.I2V_FPS
+        row = media.update(it["id"], status="done", file=f"rain/{name}",
+                           meta={"frames": _FRAMES, "fps": M.I2V_FPS, "seed": seed, "guidance": guidance, "duration_s": round(duration_s, 2)})
+    except (wan.WanError, OSError) as e:
+        media.update(it["id"], status="failed", meta={"error": str(e)[:300]})
+        raise MediaError(f"rain clip failed: {e}") from e
+    m = await asyncio.to_thread(motion.measure, media.path_of(row))      # how much of the picture really moves
+    return media.update(row["id"], meta={"motion": m})
+
+
 async def generate(session_id: str, s: dict | None = None, key: str = "", force: bool = False) -> dict:
-    """Animate rain on the scene image. Requires the scene image to exist. Returns media row."""
+    """Animate rain on the scene image. Requires the scene image to exist. Returns media row.
+    A clip that barely moves (relaxation/motion.py) is made once more with another seed and a higher guidance; the clip that moves more is kept."""
     from story import settings as settings_mod
     s = s or settings_mod.get()
     api_key = key or settings_mod.api_key()
@@ -85,36 +122,17 @@ async def generate(session_id: str, s: dict | None = None, key: str = "", force:
         raise MediaError("scene image file missing")
     img_data = img_path.read_bytes()
 
-    session = store.get(session_id)
-    seed = int((session.get("settings") or {}).get("seed") or 7)
-    body = _rain_body(img_data, seed, (session.get("settings") or {}).get("scene") or "")
-
-    resumed = None if force else await _resume_previous(session_id, seed, base, api_key)
-    if resumed:
-        it, clip_data, res = resumed
-    else:
-        it = media.add(session_id, M.KIND_RAIN, "rain", 0, "running", {"frames": _FRAMES, "seed": seed})
-    try:
-        if not resumed:
-            ans = await wan.submit(body, base, api_key, background=True)
-            if ans.get("id") and ans.get("status") not in ("succeeded", "completed"):
-                # store job id so a retry or a restart can resume
-                media.update(it["id"], meta={"job_id": ans["id"], "frames": _FRAMES, "seed": seed})
-                res = await wan.wait(ans["id"], base, api_key, limit_s=RAIN_LIMIT_S)
-            else:
-                res = wan._result(ans)
-            clip_data = await wan.fetch(res, base, api_key)
-        out_dir = media.media_dir(session_id, "rain")
-        name = f"rain-a{it['attempt']}.mp4"
-        (out_dir / name).write_bytes(clip_data)
-
-        duration_s = _FRAMES / M.I2V_FPS
-        return media.update(it["id"], status="done", file=f"rain/{name}",
-                            meta={"frames": _FRAMES, "fps": M.I2V_FPS, "seed": seed,
-                                  "duration_s": round(duration_s, 2)})
-    except (wan.WanError, OSError) as e:
-        media.update(it["id"], status="failed", meta={"error": str(e)[:300]})
-        raise MediaError(f"rain clip failed: {e}") from e
+    st = store.get(session_id).get("settings") or {}
+    seed = int(st.get("seed") or 7)
+    scene = st.get("scene") or ""
+    row = await _clip(session_id, img_data, seed, scene, base, api_key, M.RAIN_GUIDANCE, resume=not force)
+    if motion.weak(row["meta"].get("motion") or {}) and st.get("rain_retry", True):
+        again = await _clip(session_id, img_data, seed + 1, scene, base, api_key, M.RAIN_GUIDANCE_RETRY, resume=False)
+        pct = lambda r: (r["meta"].get("motion") or {}).get("changed_pixels_pct", 0)
+        better, worse = (again, row) if pct(again) > pct(row) else (row, again)
+        media.update(worse["id"], status="failed", meta={"error": "less rain movement than the other attempt"})
+        row = media.get(better["id"])
+    return row
 
 
 async def upscale(session_id: str, s: dict | None = None, key: str = "", force: bool = False) -> dict:

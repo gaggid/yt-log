@@ -10,7 +10,7 @@ IMAGE_SIZE = "2048x1152"     # the room picture (Qwen): the gateway allows 23592
 CLIP_SIZE = "1280x720"       # Wan I2V 14B at its ceiling: the gateway caps wan-2.2-i2v-a14b at max_pixels 921600 (= 1280x720); the 2K upscale step follows
 OUT_W, OUT_H = 1920, 1080    # final video resolution (1080p 16:9)
 OUT_FPS = 30
-CLIP_S = 3.0                 # rain clip duration: 49 frames at 16 fps (first frame = last frame, so video.py loops it without a jump)
+CLIP_S = 3.5                 # rain clip duration: 57 frames at 16 fps; the 0.5 s seam cross-fade (SEAM_S) leaves a loop of about 3 s
 LOOP_HOURS = 3               # loop target
 LOOP_S = LOOP_HOURS * 3600   # 10800 seconds
 
@@ -266,6 +266,18 @@ CINEMATIC = ("Cinematic wide-angle photograph with a natural film look, vast lay
 for _k, _v in SCENES.items():
     assert "No people, no text, no logo." in _v["prompt"], _k
     _v["prompt"] = _v["prompt"].replace("No people, no text, no logo.", CINEMATIC + "No people, no text, no logo.")
+
+# Wan only continues the rain it can already see: a start picture with a bright sky and a few thin streaks gave a clip that
+# changed 0.03 % of its pixels (it "only flickered"); a picture with dense visible rain plus guidance 8 changed 5 %, ten
+# times more (docs/RUN_LOG.md, 2026-11-19). So every scene prompt asks for dense, bright rain streaks first, and the clip is
+# made with a higher guidance than the gateway's default.
+RAINY = ("Heavy rain: dense, long, bright silver streaks of falling rain fill the whole view and are clearly visible against "
+         "the scenery, with fine splashes on the wet surfaces. ")
+for _k, _v in SCENES.items():
+    _v["prompt"] = RAINY + _v["prompt"]
+RAIN_GUIDANCE = 8.0            # Wan guidance for the rain clip (high and low noise experts)
+RAIN_GUIDANCE_RETRY = 8.0       # the one retry (another seed) when the first clip barely moves; guidance 10 gave paint-splatter streaks
+SEAM_S = 0.5                    # video.py cross-fades the end of the clip into its start for this long, so the loop has no brightness step
 
 # Image LoRAs for the scene picture (names from GET /v1/images/loras on the gateway). Empty = none: only the detail fixer
 # the gateway applies to every picture. A session may carry `image_loras` (a list of {name, strength}); trigger words are added to the prompt.

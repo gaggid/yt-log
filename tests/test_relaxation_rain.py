@@ -90,8 +90,8 @@ def test_still_running_resume_timeout_is_final(tmp_path, monkeypatch):
 
 
 def test_clip_is_small_and_length_in_minutes():
-    assert M.CLIP_SIZE == "1280x720" and rain._FRAMES == 49
-    assert 1000 < M.estimate_rain_s(rain._FRAMES) < 2000 and 2800 < M.estimate_rain_s(81) < 3100 and M.estimate_rain_s(49, "832x480") < 600
+    assert M.CLIP_SIZE == "1280x720" and rain._FRAMES == 57
+    assert 1000 < M.estimate_rain_s(rain._FRAMES) < 2200 and 2800 < M.estimate_rain_s(81) < 3100 and M.estimate_rain_s(57, "832x480") < 700
     assert M.total_s({"minutes": 5, "hours": 3}) == 300 and M.total_s({"hours": 3}) == 10800 and M.total_s({}) == 10800
     assert M.duration_label({"minutes": 5}) == "5 minutes" and M.duration_label({"hours": 3}) == "3 hours"
     s = store.create(scene="forest", minutes=5)
@@ -100,7 +100,7 @@ def test_clip_is_small_and_length_in_minutes():
 
 def test_scene_prompts_are_first_person():
     for k, v in M.SCENES.items():
-        assert v["prompt"].startswith("First-person point of view"), k
+        assert v["prompt"].startswith("Heavy rain:") and "First-person point of view" in v["prompt"][:400], k
 
 
 def test_clip_starts_and_ends_on_the_scene_picture():
@@ -312,7 +312,7 @@ def test_scene_prompts_are_cinematic_and_loras_are_optional():
     b = image._body({}, "courtyard", 5)
     assert "lora" not in b and b["size"] == M.IMAGE_SIZE                       # none unless a session asks for one
     b = image._body({"image_loras": [{"name": "purelens-realism", "strength": 0.6}]}, "courtyard", 5)
-    assert b["lora"] == {"purelens-realism": 0.6} and b["prompt"].startswith("p3r4l4ns. First-person")
+    assert b["lora"] == {"purelens-realism": 0.6} and b["prompt"].startswith("p3r4l4ns. Heavy rain")
 
 
 # ── the video is encoded once and repeated; a restart does not leave a session 'running' ─────────
@@ -390,3 +390,69 @@ def test_the_music_cycle_joins_takes_and_repeats_without_a_gap(tmp_path):
     log = subprocess.run([config.FFMPEG, "-hide_banner", "-nostats", "-i", str(bed), "-af", "silencedetect=n=-50dB:d=0.4", "-f", "null", "-"],
                          capture_output=True, text=True).stderr
     assert "silence_start" not in log.replace("silence_start: 0", "").replace("silence_start: -", "") or log.count("silence_start") <= 1   # only the soft fade-in at the very start may be quiet
+
+
+# ── the rain must really move ────────────────────────────────────────────────
+
+def test_a_clip_that_barely_moves_is_made_again_and_the_better_one_is_kept(monkeypatch):
+    sid = _session_with_scene(None)
+    pcts = iter([0.3, 3.1])
+    calls = []
+
+    async def run_clip(*a, **k):
+        it = media.add(sid, M.KIND_RAIN, "rain", 0, "done", {"seed": a[2], "guidance": a[6]})
+        calls.append((a[2], a[6]))
+        return media.update(it["id"], file="rain/x.mp4", meta={"motion": {"changed_pixels_pct": next(pcts)}})
+    monkeypatch.setattr(rain, "_clip", run_clip)
+    got = asyncio.run(rain.generate(sid, _settings(), "k", force=True))
+    seed = store.get(sid)["settings"]["seed"]
+    assert calls == [(seed, M.RAIN_GUIDANCE), (seed + 1, M.RAIN_GUIDANCE_RETRY)]
+    assert got["meta"]["motion"]["changed_pixels_pct"] == 3.1 and store.chosen(sid, M.KIND_RAIN)["id"] == got["id"]
+    assert [i["status"] for i in media.items(sid, M.KIND_RAIN)].count("failed") == 1      # the weak one is out of the way
+
+
+def test_a_good_clip_is_made_once(monkeypatch):
+    sid = _session_with_scene(None)
+    calls = []
+
+    async def run_clip(*a, **k):
+        calls.append(1)
+        it = media.add(sid, M.KIND_RAIN, "rain", 0, "done", {})
+        return media.update(it["id"], file="rain/x.mp4", meta={"motion": {"changed_pixels_pct": 3.4}})
+    monkeypatch.setattr(rain, "_clip", run_clip)
+    asyncio.run(rain.generate(sid, _settings(), "k", force=True))
+    assert calls == [1]
+
+
+def test_clip_request_carries_guidance_and_the_scene_prompts_ask_for_dense_rain():
+    b = rain._rain_body(b"x", 7, "monastery_window")
+    assert b["guidance"] == b["guidance_low"] == M.RAIN_GUIDANCE >= 5
+    assert all(v["prompt"].startswith("Heavy rain: dense") for v in M.SCENES.values())
+
+
+def test_motion_measure_tells_a_still_clip_from_a_moving_one(tmp_path):
+    from relaxation import motion
+    still, moving = tmp_path / "still.mp4", tmp_path / "moving.mp4"
+    _ff("-f", "lavfi", "-i", "color=c=gray:s=160x90:d=3:r=16", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(still))
+    _ff("-f", "lavfi", "-i", "testsrc2=s=160x90:d=3:r=16", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(moving))
+    a, b = motion.measure(still), motion.measure(moving)
+    assert motion.weak(a) and a["changed_pixels_pct"] < 0.5
+    assert not motion.weak(b) and b["changed_pixels_pct"] > 2
+    assert motion.measure(tmp_path / "missing.mp4") == {} and not motion.weak({})
+
+
+def test_the_loop_path_itself_works_and_has_no_step_at_the_seam(tmp_path):
+    """Called directly: the fallback in video.make would hide a broken loop filter."""
+    import re
+    import subprocess
+    import config
+    from relaxation import video
+    clip, aud = tmp_path / "c.mp4", tmp_path / "a.wav"
+    _ff("-f", "lavfi", "-i", "testsrc2=s=128x72:d=3:r=16", "-vf", "eq=brightness='t*0.05'", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(clip))   # it brightens over its length
+    _ff("-f", "lavfi", "-i", "sine=f=330:d=10", str(aud))
+    work = tmp_path / "w"
+    work.mkdir()
+    video._encode_by_loop(clip, aud, 10.0, 128, 72, work, tmp_path / "o.mp4")
+    seg = subprocess.run([config.FFMPEG, "-hide_banner", "-i", str(work / "loop.mp4")], capture_output=True, text=True).stderr
+    secs = float(re.search(r"Duration: 00:00:0?([\d.]+)", seg).group(1))
+    assert abs(secs - (3.0 - M.SEAM_S)) < 0.2                       # the loop is the clip minus the seam
