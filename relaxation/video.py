@@ -53,7 +53,7 @@ async def make(session_id: str, s: dict | None = None, key: str = "",
 
     session = store.get(session_id)
     settings = session.get("settings") or {}
-    total_s = float(settings.get("hours") or M.LOOP_HOURS) * 3600
+    total_s = M.total_s(settings)
 
     # prefer the upscaled file if available
     upscaled_file = rain_item.get("meta", {}).get("upscaled_file")
@@ -85,7 +85,7 @@ async def make(session_id: str, s: dict | None = None, key: str = "",
 
     try:
         if progress:
-            progress(0, 1, f"encoding {total_s / 3600:.0f}-hour loop ({w}x{h_px})")
+            progress(0, 1, f"encoding {M.duration_label(settings)} loop ({w}x{h_px})")
 
         # scale/pad rain clip to exact output size, loop it, embed audio, normalise loudness
         # stream_loop -1 = infinite loop; -t trims to exact duration

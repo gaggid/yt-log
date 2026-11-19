@@ -94,7 +94,7 @@ async def make(session_id: str, s: dict | None = None, key: str = "",
 
     session = store.get(session_id)
     settings = session.get("settings") or {}
-    total_s = float(settings.get("hours") or M.LOOP_HOURS) * 3600
+    total_s = M.total_s(settings)
 
     # ── YuE2 ambient music (optional) ─────────────────────────────────────────
     music_item = None

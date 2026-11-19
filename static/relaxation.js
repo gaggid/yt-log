@@ -142,7 +142,7 @@ var showRelaxation = (function () {
 
       app.innerHTML = `
 <h2>Rain Channel</h2>
-<p class="mute small">Each session generates a 3-hour ambient rain video and posts it to YouTube.</p>
+<p class="mute small">Each session generates an ambient rain video (3 hours = 180 minutes by default) and posts it to YouTube.</p>
 
 <div class="card pad mb">
   <h4>New session</h4>
@@ -152,8 +152,8 @@ var showRelaxation = (function () {
         ${Object.entries(scenes).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('')}
       </select>
     </label>
-    <label class="f">Length (hours)
-      <input type="number" id="rl-hours" value="3" min="1" max="8" style="width:80px">
+    <label class="f">Length (minutes)
+      <input type="number" id="rl-minutes" value="180" min="1" max="480" style="width:90px">
     </label>
     <button class="primary" id="rl-create">Create &amp; Generate</button>
   </div>
@@ -163,9 +163,9 @@ var showRelaxation = (function () {
 
       document.getElementById('rl-create').onclick = async () => {
         const scene = document.getElementById('rl-scene').value;
-        const hours = parseInt(document.getElementById('rl-hours').value) || 3;
+        const minutes = parseInt(document.getElementById('rl-minutes').value) || 180;
         try {
-          const s = await api('POST', '/api/relaxation', { scene, hours });
+          const s = await api('POST', '/api/relaxation', { scene, minutes });
           sessions.unshift(s);
           render();
           runSession(s.id);

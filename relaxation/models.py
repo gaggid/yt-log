@@ -6,10 +6,11 @@ Each session generates one 3-hour ambient rain video:
 import hashlib
 
 # ── video geometry ────────────────────────────────────────────────────────────
-CLIP_SIZE = "1280x720"       # landscape 16:9 Wan I2V request size
+IMAGE_SIZE = "1280x720"      # the room picture (Qwen)
+CLIP_SIZE = "832x480"        # Wan I2V request size: the same 480p base the shorts use (480x832 turned); the 2K upscale step does the rest
 OUT_W, OUT_H = 1920, 1080    # final video resolution (1080p 16:9)
 OUT_FPS = 30
-CLIP_S = 9.0                 # target rain clip duration (Wan I2V at 16fps, max ~10s)
+CLIP_S = 5.0                 # rain clip duration: 81 frames at 16 fps; video.py loops it
 LOOP_HOURS = 3               # loop target
 LOOP_S = LOOP_HOURS * 3600   # 10800 seconds
 
@@ -21,18 +22,36 @@ I2V_FPS = 16
 I2V_MAX_FRAMES = 161         # Wan I2V hard limit
 I2V_STEPS = 10
 
-# Time estimate: 1280x720 is the native resolution for Wan I2V 14B.
-# Gateway docs give 0.59 s/frame/step at 480x832 (portrait shorts base).
-# 1280x720 = 921,600 px vs 480x832 = 399,360 px → 2.3x pixels → 2.3x time.
-# shorts/pipelines.py uses the 480p base + a 2.3x HD multiplier at call time;
-# we bake the 720p cost in directly since we never run at 480p here.
-I2V_S_PER_FRAME = 0.59 * 2.3 * I2V_STEPS   # ~13.6 s/frame at native 720p, 10 steps
+# Time estimate: the gateway docs give 0.59 s/frame/step at 480x832 (the shorts base), and 832x480
+# has the same pixel count. A first try at 1280x720 and 145 frames (2.3x the pixels, 1.8x the frames)
+# ran for 8 minutes without finishing one step with the 16 GB card's VRAM full, and the gateway
+# dropped the job ("ComfyUI request failed ... Read timed out"); the shorts never ask for more than
+# about 3 s at 480p.
+I2V_S_PER_FRAME = 0.59 * I2V_STEPS         # ~5.9 s/frame at 832x480, 10 steps
 OVERHEAD_S = 25                               # per request: load, queue, decode, download
 
 
 def estimate_rain_s(frames: int) -> int:
-    """Estimated gateway seconds for one rain clip at 1280x720."""
+    """Estimated gateway seconds for one rain clip at 832x480."""
     return int(OVERHEAD_S + frames * I2V_S_PER_FRAME)
+
+
+def total_s(settings: dict) -> float:
+    """Length of the finished video in seconds: `minutes` when set (test runs), else `hours`."""
+    if settings.get("minutes"):
+        return float(settings["minutes"]) * 60
+    return float(settings.get("hours") or LOOP_HOURS) * 3600
+
+
+def duration_label(settings: dict) -> str:
+    """'5 minutes' or '3 hours', for titles and messages."""
+    t = total_s(settings)
+    if t < 3600:
+        n = round(t / 60)
+        return f"{n} minute{'s' if n != 1 else ''}"
+    h = t / 3600
+    h = int(h) if abs(h - round(h)) < 0.01 else round(h, 1)
+    return f"{h} hour{'s' if h != 1 else ''}"
 
 # ── media row kinds ───────────────────────────────────────────────────────────
 KIND_SCENE = "rl_scene"      # Qwen room image
@@ -41,21 +60,23 @@ KIND_AUDIO = "rl_audio"      # mixed rain + music (WAV then AAC embedded)
 KIND_FINAL = "rl_final"      # 3-hour MP4
 
 # ── scene catalogue ───────────────────────────────────────────────────────────
-# Each scene = a Qwen image prompt for a cozy indoor room with that view outside.
+# Each scene = a Qwen image prompt seen in the FIRST PERSON from the bed, looking out at the rain
+# (never the building seen from outside: Qwen draws every word, so the building is never described).
 # Prompt order: composition first (Qwen weights early tokens most), then lighting,
 # then the window scene, then style. Positive words only — Qwen draws every word.
 SCENES: dict[str, dict] = {
     "night_city": {
         "label": "Tokyo Rain Garden",
         "prompt": (
-            "Traditional Japanese-style bedroom at night, wide sliding wooden door fully open to a "
-            "lush private garden, low platform bed with clean white linen on a dark wood frame, "
-            "a paper shoji lantern glowing warm amber inside, the garden outside lit by two stone "
-            "lanterns half-hidden in moss, a small koi pond with rain hammering its surface into "
-            "silver rings, ancient pine and maple trees with rain streaming off every branch, "
-            "hanging Spanish moss swaying slightly, large flat stones glistening wet, dense green "
-            "ferns at the base of every rock, rain falling in long silver threads through the dark "
-            "canopy, deep mist behind the trees, the wooden floor just inside catching the glow. "
+            "First-person point of view from a low platform bed inside a Japanese bedroom at night, "
+            "looking straight out through a wide open sliding wooden door at a private moss garden in "
+            "heavy rain, the door frame and the dark wooden floor edge framing the view, the soft edge "
+            "of a white linen blanket in the lower foreground, a paper shoji lantern glowing warm amber "
+            "at one side of the frame, outside two stone lanterns half-hidden in moss, a small koi pond "
+            "with rain hammering its surface into silver rings, ancient pine and maple trees with rain "
+            "streaming off every branch, large flat stones glistening wet, dense green ferns at the base "
+            "of every rock, rain falling in long silver threads through the dark canopy, deep mist "
+            "behind the trees. "
             "Photorealistic, cinematic, intimate and deeply calm, 8K detail. "
             "No people, no text, no logo."
         ),
@@ -63,14 +84,15 @@ SCENES: dict[str, dict] = {
     "mountain_forest": {
         "label": "Scandinavian Forest Cabin",
         "prompt": (
-            "Nordic pine cabin bedroom, floor-to-ceiling glass wall looking straight into a "
-            "spruce and birch forest in heavy rain, rain running in sheets down the cold glass, "
-            "the forest floor a carpet of dark wet moss and fallen needles, birch trunks white "
-            "against the grey-green depths, mist threading between the trees and softening the "
-            "distance, inside a low wooden bed with a thick cream wool blanket, a simple pine "
-            "nightstand, a single white candle burning, warm amber glow on the pale timber walls, "
-            "rain streaming off the sloped roof overhang just above the glass, pine branches dipping "
-            "and shedding water in the wind. "
+            "First-person point of view from a cosy wooden bed inside a Nordic cabin bedroom, "
+            "looking straight out through a floor-to-ceiling glass wall at a spruce and birch forest "
+            "in heavy rain, rain running in sheets down the cold glass, the thick cream wool blanket "
+            "across the lower foreground, a single white candle burning on a pine nightstand at the "
+            "edge of the frame, warm amber glow on the pale timber window frame, outside the forest "
+            "floor a carpet of dark wet moss and fallen needles, birch trunks white against the "
+            "grey-green depths, mist threading between the trees and softening the distance, pine "
+            "branches dipping and shedding water, rain streaming off the roof overhang just above the "
+            "glass. "
             "Photorealistic, Scandinavian minimalist, calm and cinematic. "
             "No people, no text, no logo."
         ),
@@ -78,14 +100,14 @@ SCENES: dict[str, dict] = {
     "ocean": {
         "label": "Bali Jungle Villa",
         "prompt": (
-            "Open-air Balinese villa bedroom, wide teak-wood pavilion with no wall on one side "
-            "facing a lush terraced garden in tropical rain, giant banana leaves with water "
-            "cascading off their tips in heavy silver drops, a lotus pond directly below with "
-            "rain pocking its surface, tall coconut palms swaying in the warm rain wind, "
-            "a distant misty volcanic ridge barely visible through the downpour, inside a "
-            "four-poster bed draped in white linen, a rattan lamp casting warm honey light, "
-            "dark teak floor with the rain just reaching the edge, tropical flowers on the "
-            "low side table, the air thick with the smell of wet earth and frangipani. "
+            "First-person point of view from a four-poster bed draped in white linen inside an open-air "
+            "Balinese villa pavilion, looking straight out past the bed curtains at a lush terraced "
+            "garden in tropical rain, the carved teak pillars and the edge of the roof framing the "
+            "view, giant banana leaves with water cascading off their tips in heavy silver drops, a "
+            "lotus pond just beyond the dark teak floor with rain pocking its surface, tall coconut "
+            "palms swaying in the warm rain wind, a distant misty volcanic ridge barely visible through "
+            "the downpour, a rattan lamp casting warm honey light at the edge of the frame, tropical "
+            "flowers on a low side table. "
             "Photorealistic, Balinese tropical atmosphere, lush and cinematic. "
             "No people, no text, no logo."
         ),
@@ -93,14 +115,14 @@ SCENES: dict[str, dict] = {
     "countryside": {
         "label": "Alpine Mountain Chalet",
         "prompt": (
-            "Swiss alpine chalet bedroom, wide low window with thick stone sill looking out at "
-            "a steep pine-covered mountain face in rain and low cloud, rain running in rivulets "
-            "down the aged wooden shutters, pine trees dense and dark outside with rain dripping "
-            "off every needle, a mountain stream barely audible through the glass, grey cloud "
-            "hugging the cliff face just above the treeline, inside a heavy carved-wood bed with "
-            "a thick feather duvet and checked wool blanket, an iron wall sconce with a warm "
-            "amber bulb, old wooden plank ceiling and beams, a ceramic mug on the stone sill, "
-            "the room built into the hillside like a shelter. "
+            "First-person point of view from a heavy carved-wood bed inside a Swiss alpine chalet "
+            "bedroom, looking out through a wide low window with a thick stone sill at a steep "
+            "pine-covered mountain face in rain and low cloud, the checked wool blanket and feather "
+            "duvet in the lower foreground, rain running in rivulets down the aged wooden shutters and "
+            "the window glass, an iron wall sconce with a warm amber bulb and old wooden beams at the "
+            "edge of the frame, a ceramic mug on the stone sill, outside the pine trees dense and dark "
+            "with rain dripping off every needle, grey cloud hugging the cliff face just above the "
+            "treeline. "
             "Photorealistic, Alpine atmosphere, cosy and cinematic. "
             "No people, no text, no logo."
         ),
@@ -108,14 +130,13 @@ SCENES: dict[str, dict] = {
     "forest": {
         "label": "Glass Treehouse Forest",
         "prompt": (
-            "Elevated glass treehouse bedroom deep in an ancient temperate rainforest, three glass "
-            "walls looking in every direction into the forest canopy at mid-height, enormous old-growth "
-            "trees with thick twisted trunks and wide canopies, rain pouring off every leaf in "
-            "curtains of water, the forest floor far below dark and wet, long hanging moss on every "
-            "branch swaying in the warm rain, ferns at every level, the inside of the room dim "
-            "and green-lit, a low bed with linen sheets, tiny warm fairy lights strung along the "
-            "beams, the glass completely surrounded by wet leaves and rain, no sky visible — only "
-            "layers of forest in every direction. "
+            "First-person point of view from a low bed with linen sheets in a dim green-lit room high "
+            "among the branches, looking straight out through floor-to-ceiling glass covered in rain "
+            "streaks at an ancient temperate rainforest canopy at eye level, the glass filling the "
+            "whole frame, tiny warm fairy lights along a wooden beam at the top edge, outside enormous "
+            "old-growth trees with thick twisted trunks and wide canopies, rain pouring off every leaf "
+            "in curtains of water, long hanging moss swaying in the warm rain, ferns at every level, "
+            "layers of misty forest in every direction, the forest floor far below dark and wet. "
             "Photorealistic, immersive ancient forest atmosphere, cinematic depth. "
             "No people, no text, no logo."
         ),
@@ -128,9 +149,9 @@ DEFAULT_SCENE = "night_city"
 # Applied to every scene. Describes only what MOVES: rain + light.
 # No style words, no composition (the image already shows those).
 RAIN_MOTION = (
-    "Raindrops fall steadily outside the window, streaking down the glass in long vertical lines. "
-    "Rivulets of water merge and run to the bottom of the pane. "
-    "The light on the wet surface outside shimmers gently as rain stirs it. "
+    "Rain falls steadily through the view outside in long thin vertical streaks. "
+    "Water drips from the leaves and edges, and rivulets run down any glass in front. "
+    "The light on the wet surfaces shimmers gently as rain stirs it, and a light mist drifts slowly. "
     "The scene holds still; only the rain moves. "
     "Continuous smooth motion, no camera shake, no scene cut."
 )

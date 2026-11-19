@@ -86,3 +86,17 @@ def test_still_running_resume_timeout_is_final(tmp_path, monkeypatch):
     monkeypatch.setattr(wan, "submit", submit)
     with pytest.raises(Exception, match="rain clip failed"):
         asyncio.run(rain.generate(sid, _settings(), "k"))
+
+
+def test_clip_is_small_and_length_in_minutes():
+    assert M.CLIP_SIZE == "832x480" and rain._FRAMES == 81
+    assert M.estimate_rain_s(rain._FRAMES) < 900
+    assert M.total_s({"minutes": 5, "hours": 3}) == 300 and M.total_s({"hours": 3}) == 10800 and M.total_s({}) == 10800
+    assert M.duration_label({"minutes": 5}) == "5 minutes" and M.duration_label({"hours": 3}) == "3 hours"
+    s = store.create(scene="forest", minutes=5)
+    assert s["settings"]["minutes"] == 5
+
+
+def test_scene_prompts_are_first_person():
+    for k, v in M.SCENES.items():
+        assert v["prompt"].startswith("First-person point of view"), k

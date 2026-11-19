@@ -68,7 +68,7 @@ def _data_cols(s: dict) -> tuple[dict, dict]:
     return cols, blob
 
 
-def create(scene: str | None = None, hours: int | None = None) -> dict:
+def create(scene: str | None = None, hours: int | None = None, minutes: int | None = None) -> dict:
     ensure()
     sid = M.session_id()
     settings = {**M.DEFAULT_SETTINGS}
@@ -76,6 +76,8 @@ def create(scene: str | None = None, hours: int | None = None) -> dict:
         settings["scene"] = scene
     if hours and 1 <= hours <= 8:
         settings["hours"] = hours
+    if minutes and 1 <= minutes <= 480:
+        settings["minutes"] = minutes      # wins over `hours` (M.total_s)
     scene_label = M.SCENES[settings["scene"]]["label"]
     import time
     from datetime import date

@@ -25,7 +25,7 @@ def _body(s: dict, scene: str, seed: int) -> dict:
     body: dict = {
         "model": s.get("image_model") or M.IMAGE_MODEL,
         "prompt": cfg["prompt"],
-        "size": M.CLIP_SIZE,
+        "size": M.IMAGE_SIZE,
         "n": 1,
         "steps": M.IMAGE_STEPS,
         "response_format": "b64_json",
@@ -71,7 +71,7 @@ async def generate(session_id: str, s: dict | None = None, key: str = "", force:
         (out_dir / name).write_bytes(img_bytes)
 
         return media.update(it["id"], status="done", file=f"scene/{name}",
-                            meta={"scene": scene, "seed": seed, "size": M.CLIP_SIZE})
+                            meta={"scene": scene, "seed": seed, "size": M.IMAGE_SIZE})
     except (httpx.HTTPError, OSError, KeyError) as e:
         media.update(it["id"], status="failed", meta={"error": str(e)[:300]})
         raise MediaError(f"scene image failed: {e}") from e

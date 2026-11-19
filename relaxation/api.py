@@ -43,6 +43,7 @@ async def list_sessions():
 class _CreateReq(BaseModel):
     scene: str = M.DEFAULT_SCENE
     hours: int = M.LOOP_HOURS
+    minutes: int | None = None      # a short test run; wins over hours
 
 
 @router.post("")
@@ -51,7 +52,9 @@ async def create_session(body: _CreateReq):
         raise HTTPException(400, f"unknown scene '{body.scene}'; choose from {list(M.SCENES)}")
     if not (1 <= body.hours <= 8):
         raise HTTPException(400, "hours must be 1 to 8")
-    s = store.create(scene=body.scene, hours=body.hours)
+    if body.minutes is not None and not (1 <= body.minutes <= 480):
+        raise HTTPException(400, "minutes must be 1 to 480")
+    s = store.create(scene=body.scene, hours=body.hours, minutes=body.minutes)
     return store.view(s)
 
 
@@ -111,7 +114,7 @@ async def download_video(session_id: str):
     if not path.is_file():
         raise HTTPException(404, "file missing on disk")
     return FileResponse(path, media_type="video/mp4",
-                        filename=f"{session_id}-{M.LOOP_HOURS}h.mp4")
+                        filename=f"{session_id}-{M.duration_label(_get(session_id).get('settings') or {}).replace(' ', '')}.mp4")
 
 
 # ── options ───────────────────────────────────────────────────────────────────
