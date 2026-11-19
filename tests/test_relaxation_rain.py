@@ -9,6 +9,12 @@ from shorts import wan
 from story3 import store as media
 
 
+@pytest.fixture(autouse=True)
+def _wan_engine_unless_asked(monkeypatch):
+    """Most of these tests are about the Wan rain clip, the old engine; the code engine tests ask for it by name."""
+    monkeypatch.setattr(M, "RAIN_ENGINE", "wan")
+
+
 def _session_with_scene(tmp_path):
     s = store.create()
     it = media.add(s["id"], M.KIND_SCENE, "scene", 0, "done", {})
@@ -100,7 +106,7 @@ def test_clip_is_small_and_length_in_minutes():
 
 def test_scene_prompts_are_first_person():
     for k, v in M.SCENES.items():
-        assert v["prompt"].startswith("Heavy rain:") and "First-person point of view" in v["prompt"][:400], k
+        assert v["prompt"].startswith(M.WET) and "First-person point of view" in v["prompt"][:500], k
 
 
 def test_clip_starts_and_ends_on_the_scene_picture():
@@ -313,7 +319,7 @@ def test_scene_prompts_are_cinematic_and_loras_are_optional():
     b = image._body({}, "courtyard", 5)
     assert "lora" not in b and b["size"] == M.IMAGE_SIZE                       # none unless a session asks for one
     b = image._body({"image_loras": [{"name": "purelens-realism", "strength": 0.6}]}, "courtyard", 5)
-    assert b["lora"] == {"purelens-realism": 0.6} and b["prompt"].startswith("p3r4l4ns. Heavy rain")
+    assert b["lora"] == {"purelens-realism": 0.6} and b["prompt"].startswith("p3r4l4ns. Just after heavy rain")
 
 
 # ── the video is encoded once and repeated; a restart does not leave a session 'running' ─────────
@@ -425,10 +431,10 @@ def test_a_good_clip_is_made_once(monkeypatch):
     assert calls == [1]
 
 
-def test_clip_request_carries_guidance_and_the_scene_prompts_ask_for_dense_rain():
+def test_clip_request_carries_guidance_and_the_scene_prompts_are_wet():
     b = rain._rain_body(b"x", 7, "monastery_window")
     assert b["guidance"] == b["guidance_low"] == M.RAIN_GUIDANCE >= 5
-    assert all(v["prompt"].startswith("Heavy rain: dense") for v in M.SCENES.values())
+    assert all(v["prompt"].startswith(M.WET) for v in M.SCENES.values())
 
 
 def test_motion_measure_tells_a_still_clip_from_a_moving_one(tmp_path):
@@ -576,3 +582,83 @@ def test_stream_answers_byte_ranges(tmp_path):
     assert r.status_code == 206 and r.content == data[100:200] and r.headers["content-range"] == "bytes 100-199/1024"
     assert "attachment" not in r.headers.get("content-disposition", "")
     assert c.get("/api/relaxation/rl-00000000/stream").status_code == 404
+
+
+def test_streaks_that_keep_their_places_are_weak(tmp_path):
+    """A clip with the same streak pattern in every frame (rain that does not fall) must fail the check; streaks that are new in
+    every frame pass."""
+    from relaxation import motion
+    fixed, falling = tmp_path / "fixed.mp4", tmp_path / "falling.mp4"
+    enc = ["-c:v", "libx264", "-crf", "12", "-pix_fmt", "yuv420p"]
+    _ff("-f", "lavfi", "-i", "color=c=0x303030:s=320x180:d=4:r=16", "-vf", "noise=alls=70:allf=u", *enc, str(fixed))
+    _ff("-f", "lavfi", "-i", "color=c=0x303030:s=320x180:d=4:r=16", "-vf", "noise=alls=70:allf=t+u", *enc, str(falling))
+    a, b = motion.measure(fixed), motion.measure(falling)
+    assert a["streak_same"] > motion.MAX_STREAK_SAME and motion.weak(a)
+    assert b["streak_same"] < 0.5 and not motion.weak(b)
+
+
+def test_no_scene_picture_asks_for_rain_in_the_air():
+    """The rain is drawn by code; a picture with streaks in it would show fixed lines under the falling ones."""
+    import re
+    for k, v in M.SCENES.items():
+        assert not re.search(r"rain (falling|pouring|streaming|hammering|running|pocking|dripping|rings)|rain streaks|falling rain|silver (lines|threads)", v["prompt"], re.I), k
+
+
+def test_code_engine_makes_a_4k_seamless_loop_and_skips_the_upscale(tmp_path, monkeypatch):
+    """rain.generate on a new session: the window finder (a fake here) and rainfx.render are used, no Wan job, no upscale step."""
+    from relaxation import rainfx, zones as zmod
+    from story import llm
+    monkeypatch.setattr(M, "RAIN_ENGINE", "code")
+    sid = _session_with_scene(tmp_path)
+    assert rain.engine(sid) == "code" and store.get(sid)["settings"]["rain_engine"] == "code"
+    asked = {}
+
+    async def fake_find(pic, backend, s):
+        asked["pic"] = pic
+        return {"view": [0.1, 0.1, 0.9, 0.9], "water": [[0.3, 0.7, 0.6, 0.85]], "hard": [], "source": "vision"}
+
+    def fake_render(pic, z, out, size, seed, loop_s, flame):
+        asked["size"], asked["flame"], asked["loop_s"] = size, flame, loop_s
+        out.write_bytes(b"mp4")
+        return out
+    monkeypatch.setattr(zmod, "find", fake_find)
+    monkeypatch.setattr(rainfx, "render", fake_render)
+    monkeypatch.setattr(llm, "ChatBackend", lambda s, k: object())
+
+    async def boom(*a, **k):
+        raise AssertionError("no Wan job for the code engine")
+    monkeypatch.setattr(wan, "submit", boom)
+    row = asyncio.run(rain.generate(sid, {"base_url": "http://gw/v1"}, "k"))
+    assert row["status"] == "done" and row["file"].startswith("rain/") and row["meta"]["engine"] == "code" and row["meta"]["seamless"]
+    assert asked["size"] == M.OUT_4K and asked["loop_s"] == rainfx.LOOP_S and row["meta"]["zones"]["water"]
+    assert asyncio.run(rain.generate(sid, {"base_url": "http://gw/v1"}, "k"))["id"] == row["id"]            # a finished one is kept
+
+
+def test_rainfx_renders_a_loop_that_comes_round_and_falls(tmp_path):
+    """A small real render: 2 s loop, rain in the view, every frame drawn; the last frame leads into the first (no jump), and the streaks move."""
+    from PIL import Image
+    from relaxation import motion, rainfx
+    pic = tmp_path / "p.jpg"
+    Image.new("RGB", (640, 360), (40, 60, 90)).save(pic)
+    out = tmp_path / "loop.mp4"
+    rainfx.render(pic, {"view": [0.1, 0.1, 0.9, 0.9], "water": [[0.2, 0.7, 0.8, 0.88]], "hard": [[0.2, 0.62, 0.5, 0.7]]}, out, size=(640, 360), seed=3, loop_s=2.0, flame=True)
+    m = motion.measure(out)
+    assert m["frames"] == int(round(rainfx.FPS * 2.0)) and m["changed_pixels_pct"] > 0.3
+    assert m["streak_same"] < motion.MAX_STREAK_SAME and not motion.weak(m)
+
+
+def test_zones_cleaning_keeps_splashes_to_the_ground_and_falls_back_on_nonsense():
+    from relaxation import zones
+    z = zones.clean(zones.ZonesOut(view=[0.1, 0.1, 0.9, 0.9], water=[[0.2, 0.2, 0.5, 0.4], [0.2, 0.7, 0.5, 0.85]], hard=[[0.0, 0.0, 1.0, 1.0]]))
+    assert z["view"] == [0.1, 0.1, 0.9, 0.9]
+    ground = 0.1 + 0.45 * 0.8
+    assert len(z["water"]) == 1                                       # the box above the ground is dropped, not flipped
+    assert all(b[1] >= ground - 1e-6 for b in z["water"] + z["hard"]) and z["hard"] and z["hard"][0][0] >= 0.1
+    assert zones.clean(zones.ZonesOut(view=[0.4, 0.4, 0.5, 0.5]))["source"] == "fallback"
+
+
+def test_video_uses_the_4k_size_and_a_bitrate_cap_for_the_code_loop():
+    from relaxation import video
+    assert video._out_size(False, True) == M.OUT_4K == (3840, 2160)
+    assert video._out_size(True) == (2560, 1440) and video._out_size(False) == (M.OUT_W, M.OUT_H)
+    assert video.MAXRATE == "13M"

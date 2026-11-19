@@ -267,17 +267,49 @@ for _k, _v in SCENES.items():
     assert "No people, no text, no logo." in _v["prompt"], _k
     _v["prompt"] = _v["prompt"].replace("No people, no text, no logo.", CINEMATIC + "No people, no text, no logo.")
 
-# Wan only continues the rain it can already see: a start picture with a bright sky and a few thin streaks gave a clip that
-# changed 0.03 % of its pixels (it "only flickered"); a picture with dense visible rain plus guidance 8 changed 5 %, ten
-# times more (docs/RUN_LOG.md, 2026-11-19). So every scene prompt asks for dense, bright rain streaks first, and the clip is
-# made with a higher guidance than the gateway's default.
-RAINY = ("Heavy rain: dense, long, bright silver streaks of falling rain fill the whole view and are clearly visible against "
-         "the scenery, with fine splashes on the wet surfaces. ")
+# The rain is drawn by code (relaxation/rainfx.py) over the picture, so the picture shows a WET scene with clear air: Wan keeps
+# the streaks of its start picture where they are, so streaks in the picture could never be made to fall (docs/RUN_LOG.md, 2026-11-19).
+# Every wording about rain in the air is swapped for water on the things (a pond, leaves, glass, stone) in code; a test checks that no
+# scene still asks for falling rain.
+WET = ("Just after heavy rain: every surface soaked and glistening, shining puddles, soft drifting mist, "
+       "the air between the camera and the scenery clear and still. ")
+_WET_SWAPS: dict[str, list[tuple[str, str]]] = {
+    "night_city": [("in heavy rain, the door frame", "after heavy rain, the door frame"),
+                   ("with rain hammering its surface into silver rings", "its dark surface glistening"),
+                   ("with rain streaming off every branch", "with water dripping from every branch"),
+                   ("rain falling in long silver threads through the dark canopy, deep mist", "deep mist")],
+    "mountain_forest": [("forest in heavy rain", "forest just after heavy rain"), ("rain running in sheets down the cold glass", "beads of water on the cold glass"),
+                        ("rain streaming off the roof overhang just above the glass", "water dripping from the roof overhang just above the glass")],
+    "ocean": [("in tropical rain", "just after tropical rain"), ("with rain pocking its surface", "with a glistening surface"),
+              ("in the warm rain wind", "in the warm wet wind")],
+    "countryside": [("in rain and low cloud", "in low cloud after rain"),
+                    ("rain running in rivulets down the aged wooden shutters and the window glass", "water beaded on the aged wooden shutters and the window glass"),
+                    ("with rain dripping off every needle", "with water dripping off every needle")],
+    "forest": [("covered in rain streaks", "covered in beads of water"), ("rain pouring off every leaf in curtains of water", "water dripping off every leaf"),
+               ("in the warm rain", "in the warm wet air")],
+    "himalayan_ridge": [("half hidden in rain clouds, rain running down the window glass", "half hidden in low rain clouds, the window glass beaded with water"),
+                        ("rain falling in fine silver lines across the whole view", "wet and silver in the pre-dawn mist")],
+    "monastery_window": [("in the rain", "after the rain"), ("rain streaming off the carved wooden eaves", "water dripping off the carved wooden eaves"),
+                         ("rain falling in long thin lines", "mist hanging over the valley")],
+    "courtyard": [("in steady rain", "after steady rain"), ("with rain rings spreading across it", "with a glistening surface"),
+                  ("with rain pouring off the edge in a line of silver drops", "with water dripping off the edge in a line of silver drops")],
+    "old_town_lane": [("in steady night rain", "after steady night rain"),
+                      ("rain falling in long silver lines through the lamplight, small puddles with rain rings", "small shining puddles")],
+    "kerala_veranda": [("bending under heavy rain", "heavy with rain water"), ("pouring rain in strings of silver drops", "dripping water in strings of silver drops")],
+    "lakeside_porch": [("in steady rain", "after steady rain"), ("rain rings spreading across the whole water surface", "a glassy water surface"),
+                       ("rain streaming off the porch roof edge in silver lines", "drops of water hanging along the porch roof edge")],
+    "bamboo_teahouse": [("in steady rain", "after steady rain"), ("overflowing with rain", "overflowing with water")],
+}
 for _k, _v in SCENES.items():
-    _v["prompt"] = RAINY + _v["prompt"]
-RAIN_GUIDANCE = 8.0            # Wan guidance for the rain clip (high and low noise experts)
-RAIN_GUIDANCE_RETRY = 8.0       # the one retry (another seed) when the first clip barely moves; guidance 10 gave paint-splatter streaks
-SEAM_S = 0.5                    # video.py cross-fades the end of the clip into its start for this long, so the loop has no brightness step
+    for _a, _b in _WET_SWAPS[_k]:
+        assert _a in _v["prompt"], (_k, _a)
+        _v["prompt"] = _v["prompt"].replace(_a, _b, 1)
+    _v["prompt"] = WET + _v["prompt"]
+RAIN_ENGINE = "code"           # "code": rain drawn over the picture (relaxation/rainfx.py, default); "wan": the old Wan 2.2 image-to-video rain clip
+OUT_4K = (3840, 2160)          # the video of a code-rain session: the effects are drawn at this size; YouTube then offers every quality up to 2160p
+RAIN_GUIDANCE = 8.0            # (Wan engine) guidance for the rain clip (high and low noise experts)
+RAIN_GUIDANCE_RETRY = 8.0       # (Wan engine) the one retry (another seed) when the first clip barely moves; guidance 10 gave paint-splatter streaks
+SEAM_S = 0.5                    # (Wan engine) video.py cross-fades the end of the clip into its start for this long, so the loop has no brightness step
 
 # Image LoRAs for the scene picture (names from GET /v1/images/loras on the gateway). Empty = none: only the detail fixer
 # the gateway applies to every picture. A session may carry `image_loras` (a list of {name, strength}); trigger words are added to the prompt.

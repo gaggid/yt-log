@@ -3,7 +3,7 @@
 Steps (in order):
   1. scene   — Qwen room image
   2. rain    — Wan I2V rain animation
-  3. upscale — 2K upscale of the rain clip
+  3. upscale — 2K upscale of the rain clip (old Wan sessions only; the code-drawn rain is 4K already)
   4. audio   — rain SFX + YuE2 music mix
   5. video   — 3-hour ffmpeg loop assembly
   6. publish — generate YouTube title/description/tags
@@ -51,9 +51,9 @@ async def run(session_id: str, force: bool = False, progress=None) -> str:
         item = await rain.generate(session_id, s, key, force=force)
         done.append("rain clip")
 
-        _step("upscale")
         sess = store.get(session_id)
-        if (sess.get("settings") or {}).get("upscale") == "2k":
+        if rain.engine(session_id) == "wan" and (sess.get("settings") or {}).get("upscale") == "2k":        # code rain is drawn at 4K already
+            _step("upscale")
             await rain.upscale(session_id, s, key, force=force)
             done.append("2K upscale")
 

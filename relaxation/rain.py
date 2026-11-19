@@ -100,9 +100,52 @@ async def _clip(session_id: str, img_data: bytes, seed: int, scene: str, base: s
     return media.update(row["id"], meta={"motion": m})
 
 
+async def generate_code(session_id: str, s: dict | None = None, key: str = "", force: bool = False) -> dict:
+    """The rain, drawn by code over the scene picture (relaxation/rainfx.py): the vision model finds the window and the surfaces
+    (relaxation/zones.py), then a 5 second loop is drawn at 4K. About a minute, no GPU. Returns the media row (rl_rain, meta.engine = "code")."""
+    from story import llm, settings as settings_mod
+    from . import rainfx, zones
+    s = s or settings_mod.get()
+    api_key = key or settings_mod.api_key()
+    if not force:
+        existing = store.chosen(session_id, M.KIND_RAIN)
+        if existing:
+            return existing
+    scene_item = store.chosen(session_id, M.KIND_SCENE)
+    if not scene_item:
+        raise MediaError("scene image not generated yet")
+    pic = media.path_of(scene_item)
+    if not pic.is_file():
+        raise MediaError("scene image file missing")
+    st = store.get(session_id).get("settings") or {}
+    seed = int(st.get("seed") or 7)
+    flame = bool((M.SCENES.get(st.get("scene") or "") or {}).get("flame"))
+    w, h = M.OUT_4K
+    it = media.add(session_id, M.KIND_RAIN, "rain", 0, "running", {"engine": "code", "seed": seed})
+    try:
+        z = await zones.find(pic, llm.ChatBackend(s, api_key), s)
+        media.update(it["id"], meta={"zones": z})
+        name = f"rain-a{it['attempt']}.mp4"
+        out = media.media_dir(session_id, "rain") / name
+        await asyncio.to_thread(rainfx.render, pic, z, out, (w, h), seed, rainfx.LOOP_S, flame)         # PIL work: off the event loop
+        return media.update(it["id"], status="done", file=f"rain/{name}",
+                            meta={"engine": "code", "seamless": True, "w": w, "h": h, "fps": rainfx.FPS, "loop_s": rainfx.LOOP_S, "seed": seed,
+                                  "zones": z, "flame": flame, "duration_s": rainfx.LOOP_S})
+    except (RuntimeError, OSError) as e:
+        media.update(it["id"], status="failed", meta={"error": str(e)[:300]})
+        raise MediaError(f"rain drawing failed: {e}") from e
+
+
+def engine(session_id: str) -> str:
+    """"code" (drawn over the picture) or "wan"; a session made before the code engine has no key and stays on Wan."""
+    return (store.get(session_id).get("settings") or {}).get("rain_engine") or "wan"
+
+
 async def generate(session_id: str, s: dict | None = None, key: str = "", force: bool = False) -> dict:
-    """Animate rain on the scene image. Requires the scene image to exist. Returns media row.
-    A clip that barely moves (relaxation/motion.py) is made once more with another seed and a higher guidance; the clip that moves more is kept."""
+    """Make the rain for the scene picture: drawn by code (default for new sessions) or, for older sessions, a Wan clip.
+    Wan: a clip that barely moves (relaxation/motion.py) is made once more with another seed and a higher guidance; the clip that moves more is kept."""
+    if engine(session_id) == "code":
+        return await generate_code(session_id, s, key, force)
     from story import settings as settings_mod
     s = s or settings_mod.get()
     api_key = key or settings_mod.api_key()

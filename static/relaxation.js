@@ -16,8 +16,8 @@ var showRelaxation = (function () {
 
   const STEP_LABELS = {
     scene: '1. Room image',
-    rain: '2. Rain animation',
-    upscale: '3. 2K upscale',
+    rain: '2. Rain drawn over the picture (4K)',
+    upscale: '3. 2K upscale (old sessions)',
     audio: '4. Audio mix',
     video: '5. 3-hour video',
     publish: '6. Metadata',
@@ -53,7 +53,7 @@ var showRelaxation = (function () {
   }
 
   function stepDots(s) {
-    const steps = ['scene', 'rain', 'upscale', 'audio', 'video', 'publish'];
+    const steps = ['scene', 'rain', 'audio', 'video', 'publish'];
     return steps.map(k => {
       const done = s[`${k === 'scene' ? 'scene' : k === 'final' ? 'final' : k}_ready`] ||
                    s[k + '_ready'] || false;
@@ -86,7 +86,7 @@ var showRelaxation = (function () {
   </div>
 
   ${s.error ? `<div class="errbox mt-s">${s.error}</div>` : ''}
-  ${s.rain_weak ? `<div class="errbox mt-s">The rain hardly moves in this video (${s.rain_motion.changed_pixels_pct}% of the picture changes; a good clip is about 3%).</div>` : ''}
+  ${s.rain_weak ? `<div class="errbox mt-s">The rain does not fall properly in this video (${Math.round((s.rain_motion.streak_same || 0) * 100)}% of the streaks stay in the same place; a good clip is under 85%).</div>` : ''}
   ${s.music_error ? `<div class="errbox mt-s">The video has rain only: the music could not be made (${s.music_error}). Use "New music".</div>` : ''}
   ${s.step ? `<div class="small mute mt-s">Working: ${STEP_LABELS[s.step] || s.step} <span class="spin"></span></div>` : ''}
 

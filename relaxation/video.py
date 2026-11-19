@@ -20,7 +20,8 @@ from story3.voice import MediaError
 
 from . import models as M, store
 
-VERSION = "v2"      # bump when encoding settings change (v2: the loop is encoded once and repeated by stream copy)
+VERSION = "v3"      # bump when encoding settings change (v2: the loop is encoded once and repeated by stream copy; v3: 4K code-drawn loop, capped bitrate)
+MAXRATE = "13M"     # 4K: about 17 GB for 3 hours (the buffer is one second of it, so the average cannot run far over); YouTube encodes its own versions, so more bits would be wasted
 
 
 def _ffmpeg(args: list[str], cwd: Path | None = None) -> None:
@@ -38,10 +39,17 @@ def _vf(w: int, h_px: int) -> str:
             f"crop={w}:{h_px},setsar=1,format=yuv420p")
 
 
-def _encode_by_loop(rain_path: Path, audio_path: Path, total_s: float, w: int, h_px: int, work: Path, out_path: Path) -> None:
+def _encode_by_loop(rain_path: Path, audio_path: Path, total_s: float, w: int, h_px: int, work: Path, out_path: Path, seamless: bool = False) -> None:
     """Encode the clip once as a closed one-GOP segment (no B-frames, so every repeat starts clean), then repeat it with
     stream copy while the sound is encoded to AAC. A 3 hour video takes a few minutes instead of three quarters of an hour."""
     seg = work / "loop.mp4"
+    if seamless:                       # a loop drawn by code comes round exactly: no seam to cross-fade, no change of frame rate
+        _ffmpeg(["-i", str(rain_path), "-vf", _vf(w, h_px), "-an", "-r", str(M.OUT_FPS),
+                 "-c:v", "libx264", "-preset", "slow", "-crf", "20", "-maxrate", MAXRATE, "-bufsize", MAXRATE, "-pix_fmt", "yuv420p", "-bf", "0",
+                 "-x264-params", "keyint=1000:min-keyint=1000:scenecut=0:open-gop=0", str(seg)])
+        _ffmpeg(["-stream_loop", "-1", "-i", str(seg), "-i", str(audio_path), "-map", "0:v:0", "-map", "1:a:0", "-t", f"{total_s:.2f}",
+                 "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-shortest", "-movflags", "+faststart", str(out_path)])
+        return
     d, x = _clip_seconds(rain_path), M.SEAM_S
     # The clip drifts a little in brightness over its length (up to 12 % of a dark scene), so the end is cross-faded into the start:
     # head + tail fade into one seam, then the body; the loop is x seconds shorter and has no step where it comes round.
@@ -58,7 +66,7 @@ def _encode_by_loop(rain_path: Path, audio_path: Path, total_s: float, w: int, h
 
 def _encode_full(rain_path: Path, audio_path: Path, total_s: float, w: int, h_px: int, out_path: Path) -> None:
     _ffmpeg(["-stream_loop", "-1", "-i", str(rain_path), "-i", str(audio_path), "-t", f"{total_s:.2f}", "-vf", _vf(w, h_px),
-             "-c:v", "libx264", "-preset", "medium", "-crf", "23", "-pix_fmt", "yuv420p", "-r", str(M.OUT_FPS),
+             "-c:v", "libx264", "-preset", "medium", "-crf", "23", "-maxrate", MAXRATE, "-bufsize", MAXRATE, "-pix_fmt", "yuv420p", "-r", str(M.OUT_FPS),
              "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-shortest", "-movflags", "+faststart", str(out_path)])
 
 
@@ -68,7 +76,9 @@ def _clip_seconds(path: Path) -> float:
     return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3)) if m else 3.0
 
 
-def _out_size(upscaled: bool) -> tuple[int, int]:
+def _out_size(upscaled: bool, code: bool = False) -> tuple[int, int]:
+    if code:
+        return M.OUT_4K
     return (2560, 1440) if upscaled else (M.OUT_W, M.OUT_H)
 
 
@@ -102,6 +112,7 @@ async def make(session_id: str, s: dict | None = None, key: str = "",
     if not upscaled_file:
         rain_path = media.path_of(rain_item)
     upscaled = bool(upscaled_file)
+    code = rain_item["meta"].get("engine") == "code"
 
     audio_path = media.path_of(audio_item)
     if not rain_path.is_file():
@@ -115,7 +126,7 @@ async def make(session_id: str, s: dict | None = None, key: str = "",
             if it["status"] == "done" and it["file"] and it["meta"].get("input_hash") == h:
                 return it
 
-    w, h_px = _out_size(upscaled)
+    w, h_px = _out_size(upscaled, code)
     it = media.add(session_id, M.KIND_FINAL, "final", 0, "running", {"input_hash": h})
     out_dir = media.media_dir(session_id, "final")
     name = f"final-a{it['attempt']}.mp4"
@@ -129,7 +140,7 @@ async def make(session_id: str, s: dict | None = None, key: str = "",
         # the whole length. The ffmpeg work runs in a thread so the app stays responsive for the minutes it takes.
         work = media.media_dir(session_id, f"work/{it['id']}")
         try:
-            await asyncio.to_thread(_encode_by_loop, rain_path, audio_path, total_s, w, h_px, work, out_path)
+            await asyncio.to_thread(_encode_by_loop, rain_path, audio_path, total_s, w, h_px, work, out_path, code)
         except RuntimeError:                                  # the loop copy did not work: encode all of it (slow, but sure)
             await asyncio.to_thread(_encode_full, rain_path, audio_path, total_s, w, h_px, out_path)
         shutil.rmtree(work, ignore_errors=True)
@@ -141,7 +152,7 @@ async def make(session_id: str, s: dict | None = None, key: str = "",
         return media.update(it["id"], status="done", file=f"final/{name}",
                             meta={"input_hash": h, "total_s": total_s,
                                   "size_mb": round(size_mb, 1), "w": w, "h": h_px,
-                                  "upscaled": upscaled})
+                                  "upscaled": upscaled, "engine": "code" if code else "wan"})
     except (RuntimeError, OSError) as e:
         media.update(it["id"], status="failed", meta={"error": str(e)[:300]})
         raise MediaError(f"video assembly failed: {e}") from e
