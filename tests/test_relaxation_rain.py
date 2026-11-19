@@ -369,6 +369,8 @@ def test_loopable_music_has_no_intro_or_outro_and_other_users_keep_theirs():
     assert plain.startswith("[intro]") and "[outro]" in plain
     loop = music_mod.lyrics_for(5, loopable=True)
     assert "[intro]" not in loop and "[outro]" not in loop and loop.count("[") == 5
+    assert loop.count("[instrumental]") == 5 and "[verse]" not in loop and "[bridge]" not in loop          # empty sung sections made wordless humming
+    assert "[instrumental]" not in plain and "[verse]" in music_mod.lyrics_for(6)                          # other users unchanged
     assert M.take_count(300) == 2 and M.take_count(60) == 1 and M.take_count(10800) == M.MUSIC_TAKES
 
 

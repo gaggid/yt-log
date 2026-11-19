@@ -32,6 +32,24 @@ function connectCard(s) {
     <a class="btn primary" href="/api/youtube/connect">Connect YouTube</a></div></div>`;
 }
 
+function slotsCard(s) {
+  const list = s.slots || [];
+  if (!list.length || !s.configured) return '';
+  const row = x => `<div class="row" style="gap:10px;flex-wrap:wrap;align-items:center;padding:6px 0;border-top:1px solid var(--line,#2a2a2a)">
+      <div><b>${esc(x.label)}</b><div class="small mute">${x.connected ? `Posts to <b>${esc(x.channel || 'the connected channel')}</b>${x.upload ? '' : ' · <span class="bad">no upload permission: disconnect and connect again</span>'}` : (x.broken ? esc(x.broken) : 'Not connected')}</div></div><span class="sp"></span>
+      ${x.connected ? badge('good', 'connected') : ''}
+      <a class="btn small ${x.connected ? '' : 'primary'}" href="/api/youtube/connect?slot=${encodeURIComponent(x.slot)}">${x.connected ? 'Change channel' : 'Connect'}</a>
+      ${x.connected ? `<button class="small bad" data-slot-off="${esc(x.slot)}">Disconnect</button>` : ''}</div>`;
+  return `<div class="card pad mt"><h4 style="margin:0 0 4px">Upload channels</h4><div class="small mute">One sign-in per channel, so each pipeline posts to its own. Pick the channel on Google's chooser; nothing here reads that channel's numbers.</div>${list.map(row).join('')}</div>`;
+}
+
+function wireSlots(body) {
+  body.querySelectorAll('[data-slot-off]').forEach(b => b.onclick = async () => {
+    const ok = await dialog({title: 'Disconnect this channel?', html: '<p>The saved sign-in is removed and Google is told to revoke it. Videos already posted stay on YouTube.</p>', buttons: [{label: 'Cancel', value: false}, {label: 'Disconnect', value: true, danger: true}]});
+    if (ok === true) { await act(null, () => api('/youtube/disconnect?slot=' + encodeURIComponent(b.dataset.slotOff), {method: 'POST'})); load(); }
+  });
+}
+
 function tiles(d) {
   const t = (label, v) => `<div class="card pad" style="min-width:130px"><div class="mute small">${label}</div><div style="font-size:22px;font-weight:700">${v}</div></div>`;
   return `<div class="row" style="gap:10px;flex-wrap:wrap">${t('Videos on channel', d.videos)}${t('Linked to an idea', d.linked)}${t('Views of linked', num(d.views))}${t('Best 7-day views', num(Math.max(0, ...d.rows.filter(r => r.v7_done).map(r => r.v7))))}</div>`;
@@ -71,7 +89,7 @@ function unlinkedBox(d) {
 
 function draw(body) {
   const s = D.status, sy = s.sync;
-  if (!s.connected) { body.innerHTML = connectCard(s); return; }
+  if (!s.connected) { body.innerHTML = connectCard(s) + slotsCard(s); wireSlots(body); return; }
   const last = sy.last;
   const note = sy.running ? `<span class="mute small"><span class="spin"></span> ${esc(sy.note || 'Syncing…')}</span>`
     : sy.error ? `<span class="bad small">${esc(sy.error)}</span>` : last ? `<span class="mute small">Synced ${ago(last.at)}: ${last.videos} videos${last.analytics_failed ? `, daily numbers failed for ${last.analytics_failed} (${esc(last.analytics_error)})` : ''}</span>` : '';
@@ -83,7 +101,8 @@ function draw(body) {
     <h4 class="mt">What works <span class="mute small">average views in the first 7 days, videos with 7 complete days (${g.n})</span></h4>
     ${g.n ? `<div class="row" style="gap:10px;flex-wrap:wrap;align-items:stretch">${groupTable('Idea score', g.score)}${groupTable('Picture style', g.style)}${groupTable('Tone', g.tone)}${groupTable('Attention mechanism', g.mechanism)}</div>` : '<div class="card pad mute">Shows up once a linked video is more than 9 days old.</div>'}
     <h4 class="mt">Ideas on the channel</h4>${rowsTable(D)}${unlinkedBox(D)}`;
-  body.innerHTML = header + (tab === 'learn' ? '<div id="yt-learn" class="mt"></div>' : perf);
+  body.innerHTML = header + (tab === 'learn' ? '<div id="yt-learn" class="mt"></div>' : perf) + slotsCard(s);
+  wireSlots(body);
   document.getElementById('yt-t-perf').onclick = () => { tab = 'performance'; draw(body); };
   document.getElementById('yt-t-learn').onclick = () => { tab = 'learn'; draw(body); };
   if (tab === 'learn') window.mountLearn(document.getElementById('yt-learn'));

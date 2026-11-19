@@ -5,6 +5,7 @@ from story import db
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS yt_auth(id INTEGER PRIMARY KEY CHECK(id=1), data TEXT DEFAULT '{}');
+CREATE TABLE IF NOT EXISTS yt_slots(slot TEXT PRIMARY KEY, data TEXT DEFAULT '{}');            -- the sign-ins of the upload channels (slot "main" stays in yt_auth)
 CREATE TABLE IF NOT EXISTS yt_kv(k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS yt_videos(
   video_id TEXT PRIMARY KEY, title TEXT DEFAULT '', published_at REAL DEFAULT 0, duration_s INTEGER DEFAULT 0,
@@ -24,21 +25,27 @@ def ensure() -> None:
         c.executescript(SCHEMA)
 
 
-def get_auth() -> dict:
+def get_auth(slot: str = "main") -> dict:
     ensure()
-    r = db.one("SELECT data FROM yt_auth WHERE id=1")
+    r = db.one("SELECT data FROM yt_auth WHERE id=1") if slot == "main" else db.one("SELECT data FROM yt_slots WHERE slot=?", (slot,))
     return db.jload(r["data"], {}) if r else {}
 
 
-def set_auth(data: dict) -> None:
+def set_auth(data: dict, slot: str = "main") -> None:
     ensure()
     with db.tx() as c:
-        c.execute("INSERT INTO yt_auth(id,data) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data", (db.jdump(data),))
+        if slot == "main":
+            c.execute("INSERT INTO yt_auth(id,data) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data", (db.jdump(data),))
+        else:
+            c.execute("INSERT INTO yt_slots(slot,data) VALUES(?,?) ON CONFLICT(slot) DO UPDATE SET data=excluded.data", (slot, db.jdump(data)))
 
 
-def clear_auth() -> None:
+def clear_auth(slot: str = "main") -> None:
     ensure()
-    db.ex("DELETE FROM yt_auth WHERE id=1")
+    if slot == "main":
+        db.ex("DELETE FROM yt_auth WHERE id=1")
+    else:
+        db.ex("DELETE FROM yt_slots WHERE slot=?", (slot,))
 
 
 def kv(key: str, default=None):

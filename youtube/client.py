@@ -10,8 +10,8 @@ ANALYTICS = "https://youtubeanalytics.googleapis.com/v2/reports"
 METRICS = ("views", "estimatedMinutesWatched", "averageViewDuration", "averageViewPercentage", "likes", "comments", "shares", "subscribersGained")
 
 
-async def _get(url: str, params: dict) -> dict:
-    tok = await oauth.access_token()
+async def _get(url: str, params: dict, slot: str = "main") -> dict:
+    tok = await oauth.access_token(slot)
     async with oauth.http() as c:
         r = await c.get(url, params=params, headers={"Authorization": f"Bearer {tok}"})
     if r.status_code == 401:
@@ -36,8 +36,8 @@ def parse_time(iso: str) -> float:
         return 0.0
 
 
-async def my_channel() -> dict:
-    j = await _get(f"{DATA}/channels", {"part": "snippet,contentDetails", "mine": "true"})
+async def my_channel(slot: str = "main") -> dict:
+    j = await _get(f"{DATA}/channels", {"part": "snippet,contentDetails", "mine": "true"}, slot)
     items = j.get("items") or []
     if not items:
         raise YTError("This Google account has no YouTube channel")

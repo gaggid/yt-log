@@ -21,6 +21,11 @@ SCOPES = (
     "https://www.googleapis.com/auth/yt-analytics.readonly",
     "https://www.googleapis.com/auth/youtube.upload",
 )
+UPLOAD_SLOT_SCOPES = (                              # an upload channel: its name (read) and the upload; no analytics
+    "https://www.googleapis.com/auth/youtube.readonly",
+    "https://www.googleapis.com/auth/youtube.upload",
+)
+UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
 STATE_TTL_S = 600
 
 TRANSPORT = None                                   # tests put an httpx.MockTransport here
@@ -54,26 +59,48 @@ def configured() -> bool:
     return bool(client_id() and client_secret() and redirect_uri())
 
 
-def make_state(now: float | None = None) -> str:
-    """A signed, expiring value that comes back from Google unchanged, so a callback that this app did not start is refused."""
+def make_state(now: float | None = None, slot: str = "main") -> str:
+    """A signed, expiring value that comes back from Google unchanged, so a callback that this app did not start is refused.
+    It also carries the slot the sign-in is for (slot `main` keeps the original three-part form)."""
     ts = str(int(now if now is not None else time.time()))
     nonce = secrets.token_hex(6)
-    return f"{ts}.{nonce}.{app_auth._sign(f'yt-oauth|{ts}|{nonce}')}"
+    if slot == "main":
+        return f"{ts}.{nonce}.{app_auth._sign(f'yt-oauth|{ts}|{nonce}')}"
+    return f"{ts}.{nonce}.{slot}.{app_auth._sign(f'yt-oauth|{ts}|{nonce}|{slot}')}"
+
+
+def _parse_state(state: str) -> tuple[str, str, str, str] | None:
+    parts = (state or "").split(".")
+    if len(parts) == 3:
+        return parts[0], parts[1], "main", parts[2]
+    if len(parts) == 4:
+        return parts[0], parts[1], parts[2], parts[3]
+    return None
 
 
 def check_state(state: str, now: float | None = None) -> bool:
-    try:
-        ts, nonce, sig = (state or "").split(".", 2)
-    except ValueError:
+    p = _parse_state(state)
+    if not p:
         return False
+    ts, nonce, slot, sig = p
+    signed = f"yt-oauth|{ts}|{nonce}" if slot == "main" else f"yt-oauth|{ts}|{nonce}|{slot}"
     fresh = ts.isdigit() and 0 <= (now if now is not None else time.time()) - int(ts) <= STATE_TTL_S
-    return fresh and secrets.compare_digest(sig, app_auth._sign(f"yt-oauth|{ts}|{nonce}"))
+    return fresh and secrets.compare_digest(sig, app_auth._sign(signed))
 
 
-def auth_url() -> str:
+def state_slot(state: str) -> str:
+    """The slot a checked state was made for."""
+    p = _parse_state(state)
+    return p[2] if p else "main"
+
+
+def auth_url(slot: str = "main") -> str:
     if not configured():
         raise YTError("YT_CLIENT_ID, YT_CLIENT_SECRET and YT_REDIRECT_URI are not all set in .env")
-    q = {"client_id": client_id(), "redirect_uri": redirect_uri(), "response_type": "code", "scope": " ".join(SCOPES), "access_type": "offline", "prompt": "consent", "state": make_state()}
+    scopes = SCOPES if slot == "main" else UPLOAD_SLOT_SCOPES
+    # an upload channel asks Google to show the account and channel chooser, so it is not silently the account that is already signed in
+    q = {"client_id": client_id(), "redirect_uri": redirect_uri(), "response_type": "code", "scope": " ".join(scopes), "access_type": "offline",
+         "prompt": "consent" if slot == "main" else "consent select_account", "state": make_state(slot=slot)}
     return AUTH_URL + "?" + urllib.parse.urlencode(q)
 
 
@@ -86,7 +113,7 @@ def _problem(r: httpx.Response) -> str:
         return r.text[:300] or f"HTTP {r.status_code}"
 
 
-async def exchange(code: str) -> dict:
+async def exchange(code: str, slot: str = "main") -> dict:
     """Trade the code from Google's redirect for tokens and keep them."""
     async with http() as c:
         r = await c.post(TOKEN_URL, data={"code": code, "client_id": client_id(), "client_secret": client_secret(), "redirect_uri": redirect_uri(), "grant_type": "authorization_code"})
@@ -95,14 +122,14 @@ async def exchange(code: str) -> dict:
     j = r.json()
     if not j.get("refresh_token"):
         raise YTError("Google gave no refresh token. Remove this app at myaccount.google.com/permissions and connect again.")
-    cur = store.get_auth()
+    cur = store.get_auth(slot)
     cur.update({"refresh_token": j["refresh_token"], "access_token": j["access_token"], "expires_at": time.time() + int(j.get("expires_in", 3600)), "scope": j.get("scope", ""), "connected_at": time.time(), "broken": ""})
-    store.set_auth(cur)
+    store.set_auth(cur, slot)
     return cur
 
 
-async def access_token() -> str:
-    a = store.get_auth()
+async def access_token(slot: str = "main") -> str:
+    a = store.get_auth(slot)
     if not a.get("refresh_token"):
         raise YTAuthError("YouTube is not connected")
     if a.get("access_token") and a.get("expires_at", 0) > time.time() + 60:
@@ -113,20 +140,25 @@ async def access_token() -> str:
         msg = _problem(r)
         if "invalid_grant" in r.text:
             a["broken"] = "The connection was withdrawn or expired. Connect again."
-            store.set_auth(a)
+            store.set_auth(a, slot)
             raise YTAuthError(a["broken"])
         raise YTError("Could not renew the YouTube connection: " + msg)
     j = r.json()
     a.update({"access_token": j["access_token"], "expires_at": time.time() + int(j.get("expires_in", 3600))})
-    store.set_auth(a)
+    store.set_auth(a, slot)
     return a["access_token"]
 
 
-async def revoke() -> None:
+def has_upload(slot: str = "main") -> bool:
+    """The saved sign-in of this slot may upload videos."""
+    return UPLOAD_SCOPE in (store.get_auth(slot).get("scope") or "")
+
+
+async def revoke(slot: str = "main") -> None:
     """Disconnect: tell Google (best effort) and forget the tokens."""
-    a = store.get_auth()
+    a = store.get_auth(slot)
     tok = a.get("refresh_token")
-    store.clear_auth()
+    store.clear_auth(slot)
     if tok:
         try:
             async with http() as c:

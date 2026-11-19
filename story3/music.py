@@ -185,11 +185,13 @@ def sections_for(total_s: float) -> int:
 
 def lyrics_for(sections: int, loopable: bool = False) -> str:
     """Empty valid section tags only — no words under any tag forces YuE2 into instrumental mode.
-    [Instrumental] is not a recognised tag and gets treated as lyric text; use [verse]/[bridge] empty.
-    `loopable`: only middle sections, no [intro] and no [outro], so the track has no beginning or ending to hear when it comes round again."""
+    `loopable` (the rain videos): only middle sections, no [intro] and no [outro], so the track has no beginning or ending to hear when it comes round
+    again, and every section is `[instrumental]`. An empty [verse] or [bridge] is a SUNG section with no words, and YuE2 fills it with wordless humming
+    (heard in a real take, 19 Nov 2026); `[instrumental]` is a real instrumental section (the YuE2 guide lists it) and, with the instrumental adapter
+    (`yue2.ar_lora` in the gateway's model config), gave a take with no vocals. The other users keep their empty [verse]/[bridge] tags."""
     tags = ["[verse]", "[bridge]"]
     if loopable:
-        return "\n\n".join(tags[i % 2] for i in range(max(1, int(sections)))) + "\n"
+        return "\n\n".join("[instrumental]" for _ in range(max(1, int(sections)))) + "\n"
     middle = int(sections - 2)
     mid = "\n\n".join(tags[i % 2] for i in range(max(0, middle)))
     return "[intro]\n\n" + (mid + "\n\n" if mid else "") + "[outro]\n"

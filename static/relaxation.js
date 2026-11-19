@@ -102,7 +102,9 @@ var showRelaxation = (function () {
     ${finalReady && !hasMetadata
       ? `<button data-action="metadata" data-id="${s.id}">Write metadata</button>` : ''}
     ${finalReady && hasMetadata && !ytId
-      ? `<button class="good" data-action="upload" data-id="${s.id}">Post to YouTube</button>` : ''}
+      ? (s.youtube_ready
+          ? `<button class="good" data-action="upload" data-id="${s.id}">Post to ${s.youtube_channel_name || 'YouTube'}</button>`
+          : `<span class="small mute">Not connected to ${s.youtube_channel_name || 'the rain channel'}: <a href="#/youtube">connect it on the YouTube page</a>.</span>`) : ''}
     ${ytId
       ? `<a href="https://youtu.be/${ytId}" target="_blank" class="btn">View on YouTube ↗</a>` : ''}
     ${finalReady

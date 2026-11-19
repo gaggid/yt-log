@@ -27,10 +27,9 @@ class UploadError(Exception):
     pass
 
 
-def _has_upload_scope() -> bool:
-    """Check if the stored token has the upload scope."""
-    a = oauth.store.get_auth()
-    return UPLOAD_SCOPE in (a.get("scope") or "")
+def _has_upload_scope(slot: str = "main") -> bool:
+    """Check if the stored token of this slot has the upload scope."""
+    return oauth.has_upload(slot)
 
 
 async def _initiate(tok: str, metadata: dict, file_size: int) -> str:
@@ -74,20 +73,20 @@ async def _resume_offset(uri: str, file_size: int) -> int:
 
 
 async def upload_file(path: Path, metadata: dict, progress=None,
-                      resume_uri: str | None = None, on_uri=None) -> str:
+                      resume_uri: str | None = None, on_uri=None, slot: str = "main") -> str:
     """Upload a video file and return the YouTube video id.
 
     `metadata` is the YouTube resource body (snippet, status).
     `resume_uri` lets a previous attempt continue from where it left off.
     `on_uri(uri)` is called the moment the URI is known, so the caller can persist it.
     """
-    if not _has_upload_scope():
+    if not _has_upload_scope(slot):
         raise UploadError(
             "The YouTube connection does not have upload permission. "
             "Disconnect and reconnect the channel to grant upload access."
         )
 
-    tok = await oauth.access_token()
+    tok = await oauth.access_token(slot)
     file_size = path.stat().st_size
 
     if resume_uri:
@@ -111,7 +110,7 @@ async def upload_file(path: Path, metadata: dict, progress=None,
                 break
             end = sent + len(chunk) - 1
             # access token may expire during a long upload; refresh before each chunk
-            tok = await oauth.access_token()
+            tok = await oauth.access_token(slot)
             async with httpx.AsyncClient(timeout=TIMEOUT_S) as c:
                 r = await c.put(
                     uri,
@@ -168,9 +167,9 @@ def build_metadata(publish: dict) -> dict:
 THUMB_API = "https://www.googleapis.com/upload/youtube/v3/thumbnails/set"
 
 
-async def upload_thumbnail(video_id: str, path: Path) -> None:
+async def upload_thumbnail(video_id: str, path: Path, slot: str = "main") -> None:
     """Set the custom thumbnail of an uploaded video (JPEG under 2 MB; the channel must be verified for custom thumbnails)."""
-    tok = await oauth.access_token()
+    tok = await oauth.access_token(slot)
     async with httpx.AsyncClient(timeout=TIMEOUT_S) as c:
         r = await c.post(THUMB_API, params={"videoId": video_id, "uploadType": "media"}, content=path.read_bytes(),
                          headers={"Authorization": f"Bearer {tok}", "Content-Type": "image/jpeg"})

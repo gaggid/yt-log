@@ -18,7 +18,7 @@ import config
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 FPS = 30                     # the video's frame rate (models.OUT_FPS): the loop is stream-copied, so it is drawn at the final rate
-LOOP_S = 5.0                # 4 s was 25 % faster: the passes per loop are whole numbers, so a slower rain needs a longer loop
+LOOP_S = 10.0               # a drizzle: the same whole passes per loop in a loop twice as long as the 5 s version, so the rain falls half as fast (4 s -> 5 s -> 10 s, each owner-requested)
 TINT = (208, 224, 255)
 
 # (drops per million pixels of view, length range px at 1280 wide, width at 1280, brightness range, passes per loop to choose from)
@@ -28,7 +28,7 @@ LAYERS = [
     (230, (160, 300), 2.2, (0.32, 0.52), (5, 6, 7)),       # near: long, bright, fast
 ]
 GAIN = 0.9
-STREAK_DENSITY = 0.20        # the first version was heavy downpour; a third fewer streaks (owner, 2026-11-19). Splashes unchanged.
+STREAK_DENSITY = 0.10        # drizzle, not downpour (owner): 1.0 was the first version, 0.67, then 0.20, now 0.10. Splashes unchanged.
 
 
 def _box(frac: list, w: int, h: int) -> tuple[int, int, int, int]:
@@ -163,8 +163,8 @@ class _Splashes:
 GLASS = True
 SMUDGE = 0.60                # how strongly the smudged patches blur the view (0 to 1)
 BOKEH = 0.55                 # brightness of the soft discs the lights turn into inside the smudges
-BEADS = (380, 55)            # small and large beads of water standing on the glass (per view of 1280x720)
-RUNNERS = 14                 # drops that slide down slowly
+BEADS = (95, 14)            # small and large beads of water standing on the glass (per view of 1280x720); the first version had (380, 55), which distorted the picture too much (owner: at least 70 % fewer)
+RUNNERS = 18                 # drops that creep down the glass (per view of 1280x720): 14 before, +30 % (owner)
 
 
 def _lum_peaks(base, view, limit=40):
@@ -273,8 +273,8 @@ def glass_base(base, view, rng):
 
 
 class _Runners:
-    """A few larger drops that slide down the glass slowly, stopping and starting, with a wet trail behind them. Each makes one slide per loop
-    and is faded in and out at its ends, so the loop's start and end meet unseen."""
+    """A few larger drops that creep down the glass: a short slide, a long pause, another slide (a drop on glass sticks, gathers water, then runs),
+    with a thin wet trail behind them. Each makes one such journey per loop, faded in and out at its ends so the loop's start and end meet unseen."""
 
     def __init__(self, rng, w, h, view, n_frames, base):
         s = w / 1280
@@ -283,26 +283,57 @@ class _Runners:
         self.items = []
         for _ in range(max(3, int(RUNNERS * (x1 - x0) * (y1 - y0) / (1280 * 720)))):
             r = rng.uniform(4.5, 8.5) * s
-            travel = rng.uniform(0.22, 0.42) * (y1 - y0)
+            travel = rng.uniform(0.05, 0.11) * (y1 - y0)
             self.items.append({"x": rng.uniform(x0 + 10 * s, x1 - 10 * s), "y": rng.uniform(y0, y1 - travel), "travel": travel, "r": r,
-                               "ph": rng.randrange(n_frames), "stut": rng.uniform(0.04, 0.09), "k": rng.choice((1, 2))})
+                               "ph": rng.randrange(n_frames), "knots": self._knots(rng)})
+
+    @staticmethod
+    def _knots(rng):
+        """The journey as [(u, share of the travel done)] knots: pause, slide, pause, slide ... Times are fractions of the loop (they add up to 1),
+        a slide takes about 1.5 to 3 s of a 10 s loop and each pause about 1 to 2.5 s; the slides' lengths differ."""
+        moves = rng.choice((2, 3, 3, 4))
+        parts = [("hold", rng.uniform(0.04, 0.12))]
+        for _ in range(moves):
+            parts += [("move", rng.uniform(0.10, 0.20), rng.uniform(0.5, 1.5)), ("hold", rng.uniform(0.06, 0.16))]
+        total = sum(p[1] for p in parts)
+        dist = sum(p[2] for p in parts if p[0] == "move")
+        knots, u, d = [(0.0, 0.0)], 0.0, 0.0
+        for p in parts:
+            u += p[1] / total
+            if p[0] == "move":
+                d += p[2] / dist
+            knots.append((min(1.0, u), min(1.0, d)))
+        return knots
 
     def _pos(self, it, f):
         u = ((f - it["ph"]) % self.n) / self.n
-        y = it["y"] + it["travel"] * (u - it["stut"] * math.sin(2 * math.pi * it["k"] * u) / (2 * math.pi * it["k"]) * 2.5)
-        return u, y
+        k = it["knots"]
+        share = 1.0
+        for (u0, d0), (u1, d1) in zip(k, k[1:]):
+            if u0 <= u <= u1:
+                if d1 == d0 or u1 == u0:
+                    share = d0                                     # a pause: the drop stands still
+                else:
+                    x = (u - u0) / (u1 - u0)
+                    share = d0 + (d1 - d0) * x * x * (3 - 2 * x)    # a slide: it gathers speed and slows down
+                break
+        return u, it["y"] + it["travel"] * share
+
+    @staticmethod
+    def _alpha(u):
+        return min(1.0, 12 * u, 12 * (1 - u))
 
     def trails(self, d, f):
         for it in self.items:
             u, y = self._pos(it, f)
-            al = min(1.0, 5 * u, 5 * (1 - u))
+            al = self._alpha(u)
             if al > 0.02:
                 d.line([(it["x"], it["y"]), (it["x"], y)], fill=int(70 * al), width=max(1, int(it["r"] * 0.28)))
 
     def drops(self, im, f):
         for it in self.items:
             u, y = self._pos(it, f)
-            al = min(1.0, 5 * u, 5 * (1 - u))
+            al = self._alpha(u)
             if al < 0.05:
                 continue
             r, x = it["r"], it["x"]

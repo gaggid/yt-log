@@ -6,15 +6,28 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
-from . import oauth, store, sync
+from . import client, oauth, slots, store, sync
 
 router = APIRouter(prefix="/api/youtube", tags=["youtube"])
+
+
+def slot_status(slot: str) -> dict:
+    """One connection slot: connected, the channel's name, and whether it may upload."""
+    a = store.get_auth(slot)
+    return {"slot": slot, "label": slots.label(slot), "connected": bool(a.get("refresh_token")) and not a.get("broken"), "broken": a.get("broken", ""),
+            "channel": a.get("channel_title", ""), "upload": oauth.has_upload(slot)}
 
 
 def _status() -> dict:
     a = store.get_auth()
     return {"configured": oauth.configured(), "connected": bool(a.get("refresh_token")) and not a.get("broken"), "broken": a.get("broken", ""), "channel": a.get("channel_title", ""),
-            "redirect_uri": oauth.redirect_uri(), "sync": sync.state()}
+            "redirect_uri": oauth.redirect_uri(), "sync": sync.state(), "slots": [slot_status(s) for s in slots.upload_slots()]}
+
+
+def _slot(name: str) -> str:
+    if not slots.valid(name):
+        raise HTTPException(400, "unknown YouTube channel slot: " + name)
+    return name
 
 
 @router.get("/status")
@@ -23,10 +36,11 @@ async def status():
 
 
 @router.get("/connect")
-async def connect():
-    """Send the browser to Google's consent screen. Open it from the same address the app is used on (the login cookie must come back with the callback)."""
+async def connect(slot: str = Query("main")):
+    """Send the browser to Google's consent screen. Open it from the same address the app is used on (the login cookie must come back with the callback).
+    `slot` picks the channel connection: `main` (analytics) or an upload channel such as `rain`."""
     try:
-        return RedirectResponse(oauth.auth_url())
+        return RedirectResponse(oauth.auth_url(_slot(slot)))
     except oauth.YTError as e:
         raise HTTPException(400, str(e))
 
@@ -37,17 +51,26 @@ async def callback(code: str = "", state: str = "", error: str = Query("")):
         return RedirectResponse(f"/#/youtube?error={quote(error)}")
     if not oauth.check_state(state):
         return RedirectResponse("/#/youtube?error=" + quote("the sign-in did not start here or took too long; try Connect again"))
+    slot = oauth.state_slot(state)
+    if not slots.valid(slot):
+        return RedirectResponse("/#/youtube?error=" + quote("unknown channel slot"))
     try:
-        await oauth.exchange(code)
+        await oauth.exchange(code, slot)
+        if slot != slots.MAIN:                                   # an upload channel is not synced: just learn its name
+            ch = await client.my_channel(slot)
+            a = store.get_auth(slot)
+            a.update({"channel_id": ch["id"], "channel_title": ch["title"]})
+            store.set_auth(a, slot)
     except oauth.YTError as e:
         return RedirectResponse("/#/youtube?error=" + quote(str(e)))
-    sync.start()
-    return RedirectResponse("/#/youtube?connected=1")
+    if slot == slots.MAIN:
+        sync.start()
+    return RedirectResponse(f"/#/youtube?connected=1&slot={slot}")
 
 
 @router.post("/disconnect")
-async def disconnect():
-    await oauth.revoke()
+async def disconnect(slot: str = Query("main")):
+    await oauth.revoke(_slot(slot))
     return _status()
 
 
@@ -104,14 +127,18 @@ async def upload_video(body: _UploadReq):
     from relaxation.store import SessionError
     from . import upload as yt_upload
 
-    st = _status()
-    if not st["connected"]:
-        raise HTTPException(400, "YouTube is not connected")
-
     try:
         session = rstore.get(body.session_id)
     except SessionError as e:
         raise HTTPException(404, str(e))
+    slot = (session.get("settings") or {}).get("youtube_slot") or RM.YOUTUBE_SLOT          # this pipeline's own channel; never another slot's sign-in
+    if not slots.valid(slot):
+        raise HTTPException(400, "unknown YouTube channel slot: " + slot)
+    st = slot_status(slot)
+    if not st["connected"]:
+        raise HTTPException(400, f"The {slots.label(slot)} is not connected. Connect it on the YouTube page first.")
+    if not st["upload"]:
+        raise HTTPException(400, f"The {slots.label(slot)} has no upload permission. Disconnect it and connect it again on the YouTube page.")
 
     final_item = rstore.chosen(body.session_id, RM.KIND_FINAL)
     if not final_item:
@@ -142,22 +169,25 @@ async def upload_video(body: _UploadReq):
                 progress=progress,
                 resume_uri=(session.get("upload_uri") or None),
                 on_uri=on_uri,
+                slot=slot,
             )
             s = rstore.get(body.session_id)
             s["youtube_video_id"] = vid_id
+            s["youtube_channel"] = st["channel"]
             s["status"] = rstore.UPLOADED
             s["upload_uri"] = ""
             th = rstore.chosen(body.session_id, RM.KIND_THUMB)
             s["thumbnail_set"] = False
             if th and media.path_of(th).is_file():
                 try:
-                    await yt_upload.upload_thumbnail(vid_id, media.path_of(th))
+                    await yt_upload.upload_thumbnail(vid_id, media.path_of(th), slot=slot)
                     s["thumbnail_set"] = True
                 except yt_upload.UploadError as e:
                     s["thumbnail_error"] = str(e)[:300]        # the video is up; the thumbnail can be set again in Studio
             rstore.save(s)
             freed = await asyncio.to_thread(rstore.drop_after_upload, body.session_id)     # the video is on YouTube: free the disk
-            sync.start()     # pull the new video into the local stats table
+            if slot == slots.MAIN:
+                sync.start()     # pull the new video into the local stats table (only the main channel is synced)
             return f"Uploaded: https://youtu.be/{vid_id}" + (f" (local video removed, {freed / 1e9:.1f} GB freed)" if freed else "")
         except yt_upload.UploadError as e:
             rstore.set_error(body.session_id, str(e))

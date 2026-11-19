@@ -305,6 +305,7 @@ for _k, _v in SCENES.items():
         assert _a in _v["prompt"], (_k, _a)
         _v["prompt"] = _v["prompt"].replace(_a, _b, 1)
     _v["prompt"] = WET + _v["prompt"]
+YOUTUBE_SLOT = "rain"           # which YouTube connection (youtube/slots.py) this pipeline posts to
 RAIN_ENGINE = "code"           # "code": rain drawn over the picture (relaxation/rainfx.py, default); "wan": the old Wan 2.2 image-to-video rain clip
 OUT_4K = (3840, 2160)          # the video of a code-rain session: the effects are drawn at this size; YouTube then offers every quality up to 2160p
 RAIN_GUIDANCE = 8.0            # (Wan engine) guidance for the rain clip (high and low noise experts)

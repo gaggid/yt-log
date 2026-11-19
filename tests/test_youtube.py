@@ -206,3 +206,72 @@ def test_public_comments_of_the_best_videos_are_kept_and_a_video_with_comments_o
     asyncio.run(sync.run())
     assert [c["text"] for c in fbstore.comments("AAAAAAAAAAA")] == ["Please explain how it works"] and fbstore.comments("AAAAAAAAAAA")[0]["likes"] == 7
     assert fbstore.comments("BBBBBBBBBBB") == []
+
+
+def test_each_slot_keeps_its_own_sign_in_and_state_carries_the_slot(g):
+    """One sign-in per channel: a rain slot next to the main one; disconnecting one leaves the other; the OAuth state names its slot."""
+    from urllib.parse import parse_qs, urlparse
+    connect()
+    asyncio.run(oauth.exchange("code", "rain"))
+    assert store.get_auth()["refresh_token"] == "rt1" and store.get_auth("rain")["refresh_token"] == "rt1"
+    a = store.get_auth("rain"); a.update({"channel_title": "Rain", "scope": oauth.UPLOAD_SCOPE}); store.set_auth(a, "rain")
+    assert "channel_title" not in store.get_auth() and oauth.has_upload("rain") and not oauth.has_upload("main")
+    assert asyncio.run(oauth.access_token("rain")) == "at1"
+    asyncio.run(oauth.revoke("rain"))
+    assert store.get_auth("rain") == {} and store.get_auth()["refresh_token"] == "rt1"
+
+    s = oauth.make_state(1000, "rain")
+    assert oauth.check_state(s, 1100) and oauth.state_slot(s) == "rain" and not oauth.check_state(s.replace(".rain.", ".main."), 1100)
+    assert len(oauth.make_state(1000).split(".")) == 3 and oauth.state_slot(oauth.make_state(1000)) == "main"      # the original form is kept
+    q = parse_qs(urlparse(oauth.auth_url("rain")).query)
+    assert set(q["scope"][0].split()) == set(oauth.UPLOAD_SLOT_SCOPES) and "select_account" in q["prompt"][0]      # no analytics, and Google shows its account chooser
+    assert oauth.state_slot(q["state"][0]) == "rain"
+
+
+def test_the_api_connects_an_upload_channel_and_a_rain_video_never_uses_another_slot(env, monkeypatch):
+    import main
+    import config
+    from fastapi.testclient import TestClient
+    from relaxation import store as rstore
+    monkeypatch.setenv("YT_CLIENT_ID", "cid"); monkeypatch.setenv("YT_CLIENT_SECRET", "sec"); monkeypatch.setenv("YT_REDIRECT_URI", "https://app.example/api/youtube/callback")
+    monkeypatch.setattr(config, "DATA_DIR", env)
+    monkeypatch.setattr(httpx, "AsyncClient", httpx._client.AsyncClient)
+    monkeypatch.setattr(oauth, "TRANSPORT", httpx.MockTransport(Google([])))
+    with TestClient(main.app, follow_redirects=False) as c:
+        c.cookies.set("yt_session", __import__("auth").make_token())
+        assert c.get("/api/youtube/connect", params={"slot": "nope"}).status_code == 400
+        r = c.get("/api/youtube/connect", params={"slot": "rain"})
+        assert r.status_code in (302, 307) and "select_account" in r.headers["location"]
+        slots_ = {x["slot"]: x for x in c.get("/api/youtube/status").json()["slots"]}
+        assert slots_["rain"]["connected"] is False
+
+        # the main channel is connected, the rain channel is not: a rain video must not go to the main channel
+        connect()
+        sess = rstore.create(scene="old_town_lane")
+        assert sess["settings"]["youtube_slot"] == "rain"
+        r = c.post("/api/youtube/upload-video", json={"session_id": sess["id"]})
+        assert r.status_code == 400 and "not connected" in r.json()["detail"] and "Rain channel" in r.json()["detail"]
+
+        # the callback of a rain sign-in saves the rain slot (and the channel's name), not the main one
+        monkeypatch.setattr(oauth, "TRANSPORT", httpx.MockTransport(_RainGoogle()))
+        state = oauth.make_state(slot="rain")
+        r = c.get("/api/youtube/callback", params={"code": "x", "state": state})
+        assert "connected=1" in r.headers["location"] and "slot=rain" in r.headers["location"]
+        st = {x["slot"]: x for x in c.get("/api/youtube/status").json()["slots"]}["rain"]
+        assert st["connected"] and st["channel"] == "Rain Sounds" and st["upload"]
+        assert c.get("/api/relaxation/" + sess["id"]).json()["youtube_ready"] is True
+        assert c.post("/api/youtube/disconnect", params={"slot": "rain"}).json()["slots"][0]["connected"] is False
+        assert store.get_auth()["refresh_token"] == "rt1"                       # main untouched
+
+
+class _RainGoogle:
+    """The token endpoint hands out the upload scope; the channels endpoint names the rain channel."""
+
+    def __call__(self, req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/token":
+            return httpx.Response(200, json={"access_token": "rat", "refresh_token": "rrt", "expires_in": 3600, "scope": oauth.UPLOAD_SCOPE + " https://www.googleapis.com/auth/youtube.readonly"})
+        if req.url.path == "/revoke":
+            return httpx.Response(200)
+        if req.url.path.endswith("/channels"):
+            return httpx.Response(200, json={"items": [{"id": "UCrain", "snippet": {"title": "Rain Sounds"}, "contentDetails": {"relatedPlaylists": {"uploads": "UUr"}}}]})
+        return httpx.Response(404, json={"error": {"message": "unexpected " + str(req.url)}})

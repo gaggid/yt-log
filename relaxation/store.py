@@ -77,7 +77,7 @@ def create(scene: str | None = None, hours: int | None = None, minutes: int | No
     ensure()
     sid = M.session_id()
     from . import variety
-    settings = {**M.DEFAULT_SETTINGS, "rain_engine": M.RAIN_ENGINE, **variety.choose(scene)}      # theme (when not chosen), seed and music: different from the last videos
+    settings = {**M.DEFAULT_SETTINGS, "rain_engine": M.RAIN_ENGINE, "youtube_slot": M.YOUTUBE_SLOT, **variety.choose(scene)}      # theme (when not chosen), seed and music: different from the last videos
     if hours and 1 <= hours <= 8:
         settings["hours"] = hours
     if minutes and 1 <= minutes <= 480:
@@ -210,6 +210,15 @@ def view(s: dict) -> dict:
         from . import motion
         out["rain_motion"] = rn["meta"]["motion"]
         out["rain_weak"] = motion.weak(rn["meta"]["motion"])
+    try:                                          # the channel this video will be posted to, from its own connection slot
+        from youtube import api as ytapi
+        slot = (s.get("settings") or {}).get("youtube_slot") or M.YOUTUBE_SLOT
+        st = ytapi.slot_status(slot)
+        out["youtube_slot"] = slot
+        out["youtube_channel_name"] = st["channel"] or st["label"]
+        out["youtube_ready"] = bool(st["connected"] and st["upload"])
+    except Exception:  # noqa: BLE001 - the page works without it
+        out["youtube_ready"] = False
     th = chosen(s["id"], M.KIND_THUMB)
     if th:
         out["thumb_url"] = f"/api/media/file/{s['id']}/{th['file']}"
