@@ -7,7 +7,7 @@ import hashlib
 
 # ── video geometry ────────────────────────────────────────────────────────────
 IMAGE_SIZE = "1280x720"      # the room picture (Qwen)
-CLIP_SIZE = "832x480"        # Wan I2V request size: the same 480p base the shorts use (480x832 turned); the 2K upscale step does the rest
+CLIP_SIZE = "1280x720"       # Wan I2V 14B at its ceiling: the gateway caps wan-2.2-i2v-a14b at max_pixels 921600 (= 1280x720); the 2K upscale step follows
 OUT_W, OUT_H = 1920, 1080    # final video resolution (1080p 16:9)
 OUT_FPS = 30
 CLIP_S = 5.0                 # rain clip duration: 81 frames at 16 fps; video.py loops it
@@ -22,18 +22,19 @@ I2V_FPS = 16
 I2V_MAX_FRAMES = 161         # Wan I2V hard limit
 I2V_STEPS = 10
 
-# Time estimate: the gateway docs give 0.59 s/frame/step at 480x832 (the shorts base), and 832x480
-# has the same pixel count. A first try at 1280x720 and 145 frames (2.3x the pixels, 1.8x the frames)
-# ran for 8 minutes without finishing one step with the 16 GB card's VRAM full, and the gateway
-# dropped the job ("ComfyUI request failed ... Read timed out"); the shorts never ask for more than
-# about 3 s at 480p.
-I2V_S_PER_FRAME = 0.59 * I2V_STEPS         # ~5.9 s/frame at 832x480, 10 steps
+# Time estimate. Measured in the gateway docs (RTX 4060 Ti 16 GB, 14B image-to-video, 10 steps, no speed
+# LoRA): 480x640, 81 frames took 495 s, about 0.59 s per frame per step at 480x832-sized pictures. The
+# cost grows faster than the pixel count (the 5B model took 3.2x the time per step for 2.26x the pixels
+# at 1280x704), so the estimate scales with pixels ** 1.4. The first 1280x720 try used 145 frames and was
+# dropped by the gateway ("ComfyUI request failed ... Read timed out") after 489 s, still on its first step.
+I2V_S_PER_FRAME_480 = 0.59 * I2V_STEPS      # ~5.9 s/frame at 832x480, 10 steps
 OVERHEAD_S = 25                               # per request: load, queue, decode, download
 
 
-def estimate_rain_s(frames: int) -> int:
-    """Estimated gateway seconds for one rain clip at 832x480."""
-    return int(OVERHEAD_S + frames * I2V_S_PER_FRAME)
+def estimate_rain_s(frames: int, size: str = "") -> int:
+    """Estimated gateway seconds for one rain clip (default: the clip size above)."""
+    w, h = (int(x) for x in (size or CLIP_SIZE).split("x"))
+    return int(OVERHEAD_S + frames * I2V_S_PER_FRAME_480 * (w * h / (832 * 480)) ** 1.4)
 
 
 def total_s(settings: dict) -> float:
