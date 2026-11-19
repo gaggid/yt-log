@@ -53,6 +53,7 @@ def _rain_body(image_data: bytes, seed: int) -> dict:
         "prompt": M.RAIN_MOTION,
         "negative_prompt": M.RAIN_NEGATIVE,
         "image": f"data:image/jpeg;base64,{img_b64}",
+        "end_image": f"data:image/jpeg;base64,{img_b64}",   # first = last frame: the clip loops without a jump
         "size": M.CLIP_SIZE,
         "num_frames": _FRAMES,
         "fps": M.I2V_FPS,

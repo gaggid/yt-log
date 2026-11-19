@@ -30,15 +30,15 @@ def _ffmpeg(args: list[str], cwd: Path | None = None) -> None:
         raise RuntimeError((last[-1] if last else str(r.returncode))[:240])
 
 
-def _rain_loop(total_s: float, out: Path) -> None:
-    """Loop rain.mp3 (or pink noise fallback) to total_s, normalise to RAIN_LUFS."""
+def _rain_loop(total_s: float, out: Path, level: float = M.RAIN_LUFS) -> None:
+    """Loop rain.mp3 (or pink noise fallback) to total_s, normalise to `level` (the rain is the background)."""
     fade_out = min(5.0, total_s / 10)
     if RAIN_FILE.is_file():
         # loop the file, highpass to cut mud (100 Hz), normalise
         graph = (
             f"aloop=loop=-1:size=2e9,atrim=0:{total_s:.2f},asetpts=PTS-STARTPTS,"
             f"highpass=f=100,"
-            f"loudnorm=I={M.RAIN_LUFS}:TP=-1.5:LRA=9,"
+            f"loudnorm=I={level}:TP=-1.5:LRA=9,"
             f"afade=t=in:d=3,afade=t=out:st={max(0.0, total_s - fade_out):.2f}:d={fade_out:.2f},"
             f"aresample=48000,aformat=channel_layouts=stereo[o]"
         )
@@ -50,7 +50,7 @@ def _rain_loop(total_s: float, out: Path) -> None:
         graph = (
             f"anoisesrc=colour=pink:r=48000:d={total_s:.2f}:a=0.25,"
             f"highpass=f=200,lowpass=f=8000,"
-            f"loudnorm=I={M.RAIN_LUFS}:TP=-1.5:LRA=9,"
+            f"loudnorm=I={level}:TP=-1.5:LRA=9,"
             f"afade=t=in:d=3,afade=t=out:st={max(0.0, total_s - fade_out):.2f}:d={fade_out:.2f},"
             f"aformat=channel_layouts=stereo[o]"
         )
@@ -67,12 +67,13 @@ def _mix(rain: Path, music: Path | None, total_s: float, out: Path) -> None:
                  "-t", f"{total_s:.2f}", "-c:a", "pcm_s16le", str(out)])
         return
 
-    # rain at RAIN_LUFS already; duck music further, then mix and normalise
+    # both are already at their own levels (music in front, rain behind, set in make()): add them,
+    # normalise the sum and hold the peak. The old code ducked the music a second time here (-16 dB
+    # on top of its own -34 LUFS), which made it inaudible.
     graph = (
-        "[0:a]anull[rain];"
-        f"[1:a]volume={M.MUSIC_LUFS - M.RAIN_LUFS:.1f}dB[bed];"
-        "[rain][bed]amix=inputs=2:normalize=0,"
-        f"loudnorm=I={M.FINAL_LUFS}:TP=-1.5:LRA=11,"
+        "[0:a][1:a]amix=inputs=2:normalize=0,"
+        f"loudnorm=I={M.FINAL_LUFS}:TP=-2:LRA=11,"
+        "alimiter=limit=0.84:level=disabled,"
         "aresample=48000[o]"
     )
     _ffmpeg(["-i", str(rain), "-i", str(music),
@@ -124,13 +125,13 @@ async def make(session_id: str, s: dict | None = None, key: str = "",
             progress(1, 3, "mixing rain + music")
 
         rain_wav = work / "rain.wav"
-        _rain_loop(total_s, rain_wav)
+        _rain_loop(total_s, rain_wav, float(settings.get("rain_level") or M.RAIN_LUFS))
 
         music_bed: Path | None = None
         if music_item:
             music_bed = music_mod.bed_from_track(
                 config.FFMPEG, music_item, total_s, work,
-                float(settings.get("music_level") or M.MUSIC_LUFS),
+                float(settings.get("music_level") or M.MUSIC_LUFS), full=True,
             )
 
         out = work / "audio_mix.wav"

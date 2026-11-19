@@ -261,8 +261,9 @@ def _run(ffmpeg: str, args: list[str], cwd: Path | None = None) -> None:
         raise RuntimeError(((r.stderr or r.stdout).strip().splitlines() or [str(r.returncode)])[-1][:240])
 
 
-def bed_from_track(ffmpeg: str, item: dict, total_s: float, work: Path, level_lufs: float) -> Path | None:
-    """The track looped with cross-fades to `total_s`, levelled to `level_lufs`, faded in and out, as a 24 kHz mono wav (the bed `audio.mix_args` ducks under the voice). None when ffmpeg fails."""
+def bed_from_track(ffmpeg: str, item: dict, total_s: float, work: Path, level_lufs: float, full: bool = False) -> Path | None:
+    """The track looped with cross-fades to `total_s`, levelled to `level_lufs`, faded in and out, as a 24 kHz mono wav (the bed `audio.mix_args` ducks under the voice). None when ffmpeg fails.
+    `full`: a bed that is the main sound (not under a voice): 48 kHz stereo, and the silence at the end of the track is cut off before looping."""
     src = store.path_of(item)
     dur = float(item["meta"].get("duration_s") or 0)
     if not src.is_file() or dur < 8 or total_s <= 0:
@@ -272,15 +273,19 @@ def bed_from_track(ffmpeg: str, item: dict, total_s: float, work: Path, level_lu
     for _ in range(n):
         inputs += ["-i", str(src)]
     chain, last = "", "[0:a]"
+    if full:
+        trim = "areverse,silenceremove=start_periods=1:start_threshold=-50dB,areverse"
+        chain = "".join(f"[{k}:a]{trim}[t{k}];" for k in range(n))
+        last = "[t0]"
     for k in range(1, n):
-        chain += f"{last}[{k}:a]acrossfade=d={CROSSFADE_S}:c1=tri:c2=tri[x{k}];"
+        chain += f"{last}[{('t' + str(k)) if full else (str(k) + ':a')}]acrossfade=d={CROSSFADE_S}:c1=tri:c2=tri[x{k}];"
         last = f"[x{k}]"
     fade_out = min(4.0, total_s / 4)
-    graph = (chain + f"{last}atrim=0:{total_s:.2f},asetpts=PTS-STARTPTS,aresample=24000,aformat=channel_layouts=mono,loudnorm=I={level_lufs}:TP=-6:LRA=7,"
+    graph = (chain + f"{last}atrim=0:{total_s:.2f},asetpts=PTS-STARTPTS,{'aresample=48000,aformat=channel_layouts=stereo' if full else 'aresample=24000,aformat=channel_layouts=mono'},loudnorm=I={level_lufs}:TP=-6:LRA=7,"
              f"afade=t=in:d=2,afade=t=out:st={max(0.0, total_s - fade_out):.2f}:d={fade_out:.2f}[o]")
     out = work / "music_bed.wav"
     try:
-        _run(ffmpeg, [*inputs, "-filter_complex", graph, "-map", "[o]", "-c:a", "pcm_s16le", "-ar", "24000", "-ac", "1", str(out)], cwd=work)
+        _run(ffmpeg, [*inputs, "-filter_complex", graph, "-map", "[o]", "-c:a", "pcm_s16le", "-ar", "48000" if full else "24000", "-ac", "2" if full else "1", str(out)], cwd=work)
     except (RuntimeError, OSError):
         return None
     return out

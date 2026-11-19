@@ -100,3 +100,13 @@ def test_clip_is_small_and_length_in_minutes():
 def test_scene_prompts_are_first_person():
     for k, v in M.SCENES.items():
         assert v["prompt"].startswith("First-person point of view"), k
+
+
+def test_clip_starts_and_ends_on_the_scene_picture():
+    b = rain._rain_body(b"jpg", 7)
+    assert b["end_image"] == b["image"] and b["speed_lora"] is False and b["size"] == M.CLIP_SIZE
+    assert "slime" in b["negative_prompt"]
+
+
+def test_mix_has_music_in_front_of_rain():
+    assert M.MUSIC_LUFS - M.RAIN_LUFS >= 9

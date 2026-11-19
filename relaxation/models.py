@@ -79,6 +79,7 @@ SCENES: dict[str, dict] = {
             "of every rock, rain falling in long silver threads through the dark canopy, deep mist "
             "behind the trees. "
             "Photorealistic, cinematic, intimate and deeply calm, 8K detail. "
+            "Soft blue moonlit night, gently and evenly lit, every detail clearly visible, warm glow from the lamps, calm and inviting, not dark and not gloomy. "
             "No people, no text, no logo."
         ),
     },
@@ -95,6 +96,7 @@ SCENES: dict[str, dict] = {
             "branches dipping and shedding water, rain streaming off the roof overhang just above the "
             "glass. "
             "Photorealistic, Scandinavian minimalist, calm and cinematic. "
+            "Soft blue moonlit night, gently and evenly lit, every detail clearly visible, warm glow from the lamps, calm and inviting, not dark and not gloomy. "
             "No people, no text, no logo."
         ),
     },
@@ -110,6 +112,7 @@ SCENES: dict[str, dict] = {
             "the downpour, a rattan lamp casting warm honey light at the edge of the frame, tropical "
             "flowers on a low side table. "
             "Photorealistic, Balinese tropical atmosphere, lush and cinematic. "
+            "Soft blue moonlit night, gently and evenly lit, every detail clearly visible, warm glow from the lamps, calm and inviting, not dark and not gloomy. "
             "No people, no text, no logo."
         ),
     },
@@ -125,6 +128,7 @@ SCENES: dict[str, dict] = {
             "with rain dripping off every needle, grey cloud hugging the cliff face just above the "
             "treeline. "
             "Photorealistic, Alpine atmosphere, cosy and cinematic. "
+            "Soft blue moonlit night, gently and evenly lit, every detail clearly visible, warm glow from the lamps, calm and inviting, not dark and not gloomy. "
             "No people, no text, no logo."
         ),
     },
@@ -139,6 +143,7 @@ SCENES: dict[str, dict] = {
             "in curtains of water, long hanging moss swaying in the warm rain, ferns at every level, "
             "layers of misty forest in every direction, the forest floor far below dark and wet. "
             "Photorealistic, immersive ancient forest atmosphere, cinematic depth. "
+            "Soft blue moonlit night, gently and evenly lit, every detail clearly visible, warm glow from the lamps, calm and inviting, not dark and not gloomy. "
             "No people, no text, no logo."
         ),
     },
@@ -150,22 +155,24 @@ DEFAULT_SCENE = "night_city"
 # Applied to every scene. Describes only what MOVES: rain + light.
 # No style words, no composition (the image already shows those).
 RAIN_MOTION = (
-    "Rain falls steadily through the view outside in long thin vertical streaks. "
-    "Water drips from the leaves and edges, and rivulets run down any glass in front. "
-    "The light on the wet surfaces shimmers gently as rain stirs it, and a light mist drifts slowly. "
-    "The scene holds still; only the rain moves. "
-    "Continuous smooth motion, no camera shake, no scene cut."
+    "Fine, thin rain falls fast and straight down in many long slender translucent streaks, "
+    "the natural speed of real rain. Small bright splashes and rings appear where the drops land "
+    "on water, wet ground and leaves, and the leaves tremble lightly under the drops. "
+    "Everything else stays perfectly still: the room, the lamps, the trees, the light and the camera. "
+    "The brightness never changes. Continuous natural motion, no scene cut."
 )
 
 RAIN_NEGATIVE = (
-    "camera shake, sudden light change, scene cut, jump cut, people appearing, text, watermark, "
-    "logo, flicker, morphing, blurry, pixelated, grainy"
+    "slime, goo, thick dripping liquid, blobs, globs, sticky strands, melting, wobbling water, "
+    "slow motion, floating drops, huge drops, darkening, brightness change, fade, flicker, "
+    "camera shake, camera movement, scene cut, jump cut, people, text, watermark, logo, morphing, "
+    "blurry, pixelated, grainy"
 )
 
 # ── audio ─────────────────────────────────────────────────────────────────────
 RAIN_ASSET = "rain.mp3"          # expected in relaxation/assets/; fallback = pink noise
-RAIN_LUFS = -18.0                # rain foreground target loudness
-MUSIC_LUFS = -34.0               # ambient music bed loudness (ducked well below rain)
+RAIN_LUFS = -31.0                # rain BACKGROUND: felt, not noticed (11 LU under the music)
+MUSIC_LUFS = -20.0               # ambient music FOREGROUND (the whole mix is then normalised to FINAL_LUFS)
 FINAL_LUFS = -14.0               # YouTube standard target for the final file
 
 # Per-scene YuE2 music recipes.
