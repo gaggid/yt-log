@@ -188,3 +188,40 @@ def test_only_themes_with_a_real_flame_let_it_flicker():
     assert "flicker" not in M.RAIN_NEGATIVE.replace("flashing", "")        # the ban is on brightness change and flashing, not on a flame
     assert "night" in M.SCENES["monastery_window"]["prompt"] and "dusk" not in M.SCENES["monastery_window"]["prompt"]
     assert rain._rain_body(b"x", 7, "monastery_window")["prompt"] == M.rain_motion("monastery_window")
+
+
+# ── YouTube text, thumbnail, upload fields ───────────────────────────────────
+
+def test_titles_descriptions_and_tags_follow_the_search_rules():
+    from relaxation import seo
+    titles = set()
+    for k in M.SCENES:
+        t = seo.title(k, "3 hours", "rl-" + k)
+        titles.add(t)
+        assert len(t) <= seo.TITLE_MAX and "Rain" in t and "3 Hours" in t and seo.place_of(k, True) in t or seo.place_of(k) in t
+        d = seo.description(k, "3 hours", "harp")
+        assert d.split("\n")[0].startswith("3 hours of calming rain sounds at ") and len(d.split("\n")[0]) <= 150, k
+        assert seo.place_of(k) in d.split("\n")[0] and "AI-generated" in d
+        assert d.splitlines()[-1].count("#") == 3                       # three hashtags, never more
+        tg = seo.tags(k, "harp")
+        assert tg[0] == "rain sounds" and len(tg) <= 15 and sum(len(x) + 1 for x in tg) <= 450
+    assert len(titles) == len(M.SCENES)                                 # no two themes share a title
+    assert seo.title("courtyard", "5 minutes", "a") .startswith(("5 Minutes", "Rain Sounds for Sleeping"))
+
+
+def test_youtube_upload_body_declares_what_it_should():
+    from youtube import upload
+    b = upload.build_metadata({"title": "t", "description": "d", "tags": ["a"], "category_id": "10"})
+    assert b["status"]["selfDeclaredMadeForKids"] is False and "madeForKids" not in b["status"]
+    assert b["status"]["containsSyntheticMedia"] is True and b["status"]["privacyStatus"] == "public"
+    assert b["snippet"]["defaultLanguage"] == "en" and b["snippet"]["categoryId"] == "10"
+
+
+def test_thumbnail_is_1280x720_jpeg_under_2mb(tmp_path):
+    from PIL import Image
+    from relaxation import thumb
+    src = tmp_path / "s.png"
+    Image.new("RGB", (2048, 1152), (30, 60, 90)).save(src)
+    data = thumb.render(src, "3 HOURS")
+    im = Image.open(__import__("io").BytesIO(data))
+    assert im.size == (1280, 720) and im.format == "JPEG" and len(data) < 2_000_000

@@ -146,6 +146,14 @@ async def upload_video(body: _UploadReq):
             s["youtube_video_id"] = vid_id
             s["status"] = rstore.UPLOADED
             s["upload_uri"] = ""
+            th = rstore.chosen(body.session_id, RM.KIND_THUMB)
+            s["thumbnail_set"] = False
+            if th and media.path_of(th).is_file():
+                try:
+                    await yt_upload.upload_thumbnail(vid_id, media.path_of(th))
+                    s["thumbnail_set"] = True
+                except yt_upload.UploadError as e:
+                    s["thumbnail_error"] = str(e)[:300]        # the video is up; the thumbnail can be set again in Studio
             rstore.save(s)
             sync.start()     # pull the new video into the local stats table
             return f"Uploaded: https://youtu.be/{vid_id}"

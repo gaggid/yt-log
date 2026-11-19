@@ -59,6 +59,7 @@ KIND_SCENE = "rl_scene"      # Qwen room image
 KIND_RAIN = "rl_rain"        # Wan rain clip (MP4)
 KIND_AUDIO = "rl_audio"      # mixed rain + music (WAV then AAC embedded)
 KIND_FINAL = "rl_final"      # 3-hour MP4
+KIND_THUMB = "rl_thumb"      # the YouTube thumbnail (JPEG)
 
 # ── scene catalogue ───────────────────────────────────────────────────────────
 # Each scene = a Qwen image prompt seen in the FIRST PERSON from the bed, looking out at the rain

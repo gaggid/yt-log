@@ -86,7 +86,7 @@ var showRelaxation = (function () {
   ${s.error ? `<div class="errbox mt-s">${s.error}</div>` : ''}
   ${s.step ? `<div class="small mute mt-s">Working: ${STEP_LABELS[s.step] || s.step} <span class="spin"></span></div>` : ''}
 
-  ${s.scene_url ? `<img src="${s.scene_url}" style="max-width:320px;border-radius:8px;margin-top:10px;display:block" alt="scene preview">` : ''}
+  ${s.thumb_url || s.scene_url ? `<img src="${s.thumb_url || s.scene_url}" style="max-width:320px;border-radius:8px;margin-top:10px;display:block" alt="${s.thumb_url ? 'YouTube thumbnail' : 'scene preview'}">` : ''}
 
   <div class="row mt">
     ${s.status === 'new' || s.status === 'failed'

@@ -143,16 +143,36 @@ async def upload_file(path: Path, metadata: dict, progress=None,
 
 
 def build_metadata(publish: dict) -> dict:
-    """The YouTube resource body from a session's publish dict."""
+    """The YouTube resource body from a session's publish dict.
+    `selfDeclaredMadeForKids` is the writable field (`madeForKids` is output only). `containsSyntheticMedia` is the
+    "altered or synthetic content" disclosure: the rain scenes are realistic AI pictures, so it is declared."""
     return {
         "snippet": {
             "title": (publish.get("title") or "")[:100],
             "description": (publish.get("description") or "")[:5000],
             "tags": (publish.get("tags") or [])[:15],
             "categoryId": str(publish.get("category_id") or "10"),
+            "defaultLanguage": "en",
+            "defaultAudioLanguage": "en",
         },
         "status": {
             "privacyStatus": "public",
-            "madeForKids": False,
+            "selfDeclaredMadeForKids": False,
+            "containsSyntheticMedia": True,
+            "embeddable": True,
+            "publicStatsViewable": True,
         },
     }
+
+
+THUMB_API = "https://www.googleapis.com/upload/youtube/v3/thumbnails/set"
+
+
+async def upload_thumbnail(video_id: str, path: Path) -> None:
+    """Set the custom thumbnail of an uploaded video (JPEG under 2 MB; the channel must be verified for custom thumbnails)."""
+    tok = await oauth.access_token()
+    async with httpx.AsyncClient(timeout=TIMEOUT_S) as c:
+        r = await c.post(THUMB_API, params={"videoId": video_id, "uploadType": "media"}, content=path.read_bytes(),
+                         headers={"Authorization": f"Bearer {tok}", "Content-Type": "image/jpeg"})
+    if r.status_code not in (200, 201):
+        raise UploadError(f"thumbnail not set: {r.status_code} {r.text[:200]}")

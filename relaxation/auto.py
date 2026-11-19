@@ -14,7 +14,7 @@ The whole chain runs as a single background job via story2/jobs.py.
 from story import settings as settings_mod
 from story3.voice import MediaError
 
-from . import audio, image, models as M, publish, rain, store, video
+from . import audio, image, models as M, publish, rain, store, thumb, video
 
 
 async def run(session_id: str, force: bool = False, progress=None) -> str:
@@ -65,6 +65,13 @@ async def run(session_id: str, force: bool = False, progress=None) -> str:
         _step("publish")
         await publish.generate(session_id, s, force=force)
         done.append("metadata")
+
+        _step("thumbnail")
+        try:
+            thumb.make(session_id, force=force)
+            done.append("thumbnail")
+        except Exception:  # noqa: BLE001 - the video is complete without it
+            pass
 
         sess = store.get(session_id)
         sess["status"] = store.READY

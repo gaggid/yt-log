@@ -170,4 +170,7 @@ def view(s: dict) -> dict:
                 out["final_url"] = f"/api/relaxation/{s['id']}/download"
             elif kind == M.KIND_SCENE:
                 out["scene_url"] = f"/api/media/file/{s['id']}/{item['file']}"
+    th = chosen(s["id"], M.KIND_THUMB)
+    if th:
+        out["thumb_url"] = f"/api/media/file/{s['id']}/{th['file']}"
     return out
