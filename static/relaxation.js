@@ -54,6 +54,17 @@ var showRelaxation = (function () {
     return `<span class="badge ${STATUS_CLASS[status] || ''}">${status}</span>`;
   }
 
+  // Posting to YouTube: a bar with the megabytes sent, the percent and the time left (from the upload job; before it is known, a plain note)
+  function uploadBox(s) {
+    const j = s._job && s._job.kind === 'yt_upload' ? s._job : null;
+    if (!j || !j.total) return `<div class="small mt-s">Posting to YouTube: starting<span class="spin"></span></div>`;
+    const pct = Math.min(100, Math.round(100 * j.done / j.total));
+    const mb = x => Math.round(x / 1048576).toLocaleString();
+    const eta = j.eta_s ? ` · about ${Math.max(1, Math.round(j.eta_s / 60))} min left` : '';
+    return `<div class="mt-s"><div class="small">Posting to YouTube: <b>${pct}%</b> · ${mb(j.done)} of ${mb(j.total)} MB${eta} <span class="spin"></span></div>
+      <div style="height:8px;background:var(--border,#30363d);border-radius:4px;margin-top:4px;max-width:420px"><div style="height:8px;width:${pct}%;background:var(--good,#3fb950);border-radius:4px"></div></div></div>`;
+  }
+
   function stepDots(s) {
     const steps = ['scene', 'rain', 'audio', 'video', 'publish'];
     return steps.map(k => {
@@ -91,6 +102,7 @@ var showRelaxation = (function () {
   ${s.rain_weak ? `<div class="errbox mt-s">The rain does not fall properly in this video (${Math.round((s.rain_motion.streak_same || 0) * 100)}% of the streaks stay in the same place; a good clip is under 85%).</div>` : ''}
   ${s.music_error ? `<div class="errbox mt-s">The video has rain only: the music could not be made (${s.music_error}). Use "New music".</div>` : ''}
   ${s.step ? `<div class="small mute mt-s">Working: ${STEP_LABELS[s.step] || s.step}${s._job && s._job.label ? ' — ' + s._job.label + (s._job.elapsed_s ? ' (' + Math.round(s._job.elapsed_s / 60) + ' min so far)' : '') : ''} <span class="spin"></span></div>` : ''}
+  ${s.status === 'uploading' ? uploadBox(s) : ''}
   ${s._done ? `<div class="small mt-s" style="color:var(--good,#3fb950)">${s._done}</div>` : ''}
 
   ${s.video_removed ? `<div class="small mute mt-s">Posted to YouTube; the local video file was removed to free disk.</div>` : ''}
@@ -302,7 +314,7 @@ var showRelaxation = (function () {
           btn.disabled = true;
           try {
             await api('POST', '/api/youtube/upload-video', { session_id: id });
-            pollUpload(id);
+            followUpload(id);
           } catch (e) { alert(e.message); btn.disabled = false; }
           return;
         }
@@ -331,24 +343,23 @@ var showRelaxation = (function () {
       if (idx >= 0) { sessions[idx] = { ...sessions[idx], status: 'running' }; render(); }
     }
 
-    async function pollUpload(id) {
-      const t = setInterval(async () => {
-        try {
-          const job = await api('GET', `/api/relaxation/${id}/run`);
-          if (job.state === 'done' || job.state === 'error') {
-            clearInterval(t);
-            const updated = await api('GET', `/api/relaxation/${id}`);
-            const idx = sessions.findIndex(s => s.id === id);
-            if (idx >= 0) sessions[idx] = updated;
-            render();
-          }
-        } catch (_) {}
-      }, 3000);
+    // follow a YouTube upload: the card shows the bar while it runs, then the link (or the error) when it ends
+    function followUpload(id) {
+      const i0 = sessions.findIndex(s => s.id === id);
+      if (i0 >= 0) { sessions[i0] = { ...sessions[i0], status: 'uploading', error: '', _done: '', _job: null }; render(); }
+      startPoll(id, async (job) => {
+        const finished = job.state === 'done' || job.state === 'error';
+        const updated = await api('GET', `/api/relaxation/${id}`);
+        const idx = sessions.findIndex(s => s.id === id);
+        if (idx >= 0) sessions[idx] = { ...updated, status: finished ? updated.status : 'uploading', _job: finished ? null : job,
+          _done: job.state === 'done' ? (job.note || 'Posted to YouTube.') : '', error: job.state === 'error' ? (job.error || updated.error) : updated.error };
+        render();
+      });
     }
 
     render();
     // opening the page while something runs (a run, or new music started earlier): follow it, so the card shows where it is
-    const going = sessions.find(s => s.status === 'running');
+    const going = sessions.find(s => s.status === 'running' || s.status === 'uploading');
     if (going) {
       startPoll(going.id, async (job) => {
         const updated = await api('GET', `/api/relaxation/${going.id}`);

@@ -121,7 +121,10 @@ async def run_session(session_id: str, force: bool = False):
 
 @router.get("/{session_id}/run")
 async def run_status(session_id: str):
-    return jobs.status(session_id)
+    j = jobs.status(session_id)
+    if j.get("state") == "idle":
+        j = jobs.status(session_id + ":upload")          # the YouTube upload is its own job (youtube/api.py); the page follows it here
+    return j
 
 
 class _MusicReq(BaseModel):

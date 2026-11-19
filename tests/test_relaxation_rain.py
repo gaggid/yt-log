@@ -586,6 +586,27 @@ def test_stream_answers_byte_ranges(tmp_path):
     assert c.get("/api/relaxation/rl-00000000/stream").status_code == 404
 
 
+def test_run_status_follows_the_youtube_upload_job(tmp_path):
+    """The page polls /run for a session; while the YouTube upload (its own job, keyed `<id>:upload`) runs, that call shows its progress."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from relaxation import api as rapi
+    from story2 import jobs
+    sid = _session_with_scene(tmp_path)
+    app = FastAPI()
+    app.include_router(rapi.router)
+    c = TestClient(app)
+    jobs._jobs.pop(sid, None)
+    jobs._jobs.pop(sid + ":upload", None)
+    assert c.get(f"/api/relaxation/{sid}/run").json()["state"] == "idle"
+    jobs._jobs[sid + ":upload"] = {"state": "running", "kind": "yt_upload", "started": 0, "done": 100, "total": 400, "label": "uploading 100 / 400 MB", "error": ""}
+    try:
+        j = c.get(f"/api/relaxation/{sid}/run").json()
+        assert j["kind"] == "yt_upload" and j["done"] == 100 and j["total"] == 400
+    finally:
+        jobs._jobs.pop(sid + ":upload", None)
+
+
 def test_streaks_that_keep_their_places_are_weak(tmp_path):
     """A clip with the same streak pattern in every frame (rain that does not fall) must fail the check; streaks that are new in
     every frame pass."""
