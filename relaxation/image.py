@@ -30,6 +30,12 @@ def _body(s: dict, scene: str, seed: int) -> dict:
         "steps": M.IMAGE_STEPS,
         "response_format": "b64_json",
     }
+    loras = [x for x in (s.get("image_loras") or M.IMAGE_LORAS) if x.get("name")]
+    if loras:
+        body["lora"] = {x["name"]: float(x.get("strength", 0.7)) for x in loras}
+        trig = " ".join(dict.fromkeys(M.LORA_TRIGGERS[x["name"]] for x in loras if x["name"] in M.LORA_TRIGGERS))
+        if trig:
+            body["prompt"] = f"{trig}. {body['prompt']}"
     if seed:
         body["seed"] = seed
     return body

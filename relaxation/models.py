@@ -259,6 +259,18 @@ SCENES: dict[str, dict] = {
     },
 }
 
+# One cinematic sentence for every scene, added in code so the twelve prompts stay about their place. Qwen draws every
+# word, so it is all positive wording: a wide lens, depth in layers, natural film colour, fine detail.
+CINEMATIC = ("Cinematic wide-angle photograph with a natural film look, vast layered depth with soft atmospheric haze "
+             "in the distance, rich but natural colour, crisp fine detail. ")
+for _k, _v in SCENES.items():
+    assert "No people, no text, no logo." in _v["prompt"], _k
+    _v["prompt"] = _v["prompt"].replace("No people, no text, no logo.", CINEMATIC + "No people, no text, no logo.")
+
+# Image LoRAs for the scene picture (names from GET /v1/images/loras on the gateway). Empty = none: only the detail fixer
+# the gateway applies to every picture. A session may carry `image_loras` (a list of {name, strength}); trigger words are added to the prompt.
+IMAGE_LORAS: list[dict] = []
+LORA_TRIGGERS = {"purelens-realism": "p3r4l4ns"}
 DEFAULT_SCENE = "night_city"
 
 # ── Wan rain motion prompt ────────────────────────────────────────────────────

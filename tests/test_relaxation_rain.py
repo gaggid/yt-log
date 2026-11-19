@@ -302,3 +302,13 @@ def test_a_music_failure_is_recorded_not_hidden(tmp_path, monkeypatch):
     a = asyncio.run(audio.make(sid, {"base_url": "x"}, "k", force=True))
     assert a["meta"]["music"] is False and "gateway busy" in a["meta"]["music_error"]
     assert "gateway busy" in store.view(store.get(sid))["music_error"]
+
+
+def test_scene_prompts_are_cinematic_and_loras_are_optional():
+    from relaxation import image
+    for k, v in M.SCENES.items():
+        assert v["prompt"].count("Cinematic wide-angle photograph") == 1 and v["prompt"].rstrip().endswith("No people, no text, no logo."), k
+    b = image._body({}, "courtyard", 5)
+    assert "lora" not in b and b["size"] == M.IMAGE_SIZE                       # none unless a session asks for one
+    b = image._body({"image_loras": [{"name": "purelens-realism", "strength": 0.6}]}, "courtyard", 5)
+    assert b["lora"] == {"purelens-realism": 0.6} and b["prompt"].startswith("p3r4l4ns. First-person")
