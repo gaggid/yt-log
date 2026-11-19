@@ -28,6 +28,7 @@ LAYERS = [
     (230, (160, 300), 2.2, (0.32, 0.52), (5, 6, 7)),       # near: long, bright, fast
 ]
 GAIN = 0.9
+STREAKS = False             # falling streaks look sub-standard (owner, 2026-11-19): the scene is glass drops, mist, bokeh, ripples and splashes only
 STREAK_DENSITY = 0.10        # drizzle, not downpour (owner): 1.0 was the first version, 0.67, then 0.20, now 0.10. Splashes unchanged.
 
 
@@ -98,7 +99,7 @@ class _Splashes:
             n = max(3, int((x1 - x0) * (y1 - y0) / (2500 * s * s)))
             for _ in range(min(n, 220)):
                 self.ripples.append(self._event(rng, (x0, y0, x1, y1), s, 3, (14, 26), 'ripple'))
-        for b in zones["hard"]:
+        for b in (zones["hard"] if ROCK_BURSTS else []):
             x0, y0, x1, y1 = _box(b, w, h)
             n = max(3, int((x1 - x0) * (y1 - y0) / (4000 * s * s)))
             for _ in range(min(n, 220)):
@@ -163,8 +164,10 @@ class _Splashes:
 GLASS = True
 SMUDGE = 0.60                # how strongly the smudged patches blur the view (0 to 1)
 BOKEH = 0.55                 # brightness of the soft discs the lights turn into inside the smudges
+ROCK_BURSTS = False          # droplet bursts on stones and other hard surfaces: off (owner, 2026-11-19); ripples on water stay
+MIST = 0.22                  # soft haze over the view, thicker in the distance (top), so the outside looks misty (0 = none)
 BEADS = (95, 14)            # small and large beads of water standing on the glass (per view of 1280x720); the first version had (380, 55), which distorted the picture too much (owner: at least 70 % fewer)
-RUNNERS = 18                 # drops that creep down the glass (per view of 1280x720): 14 before, +30 % (owner)
+RUNNERS = 27                 # drops that creep down the glass (per view of 1280x720): 14, then 18 (+30 %), now 27 (+50 %, owner 2026-11-19)
 
 
 def _lum_peaks(base, view, limit=40):
@@ -226,6 +229,12 @@ def drop_patch(base, x, y, rx, ry, rng_seed=0):
     return patch.resize((pw, ph), Image.LANCZOS), int(x - cx), int(y - cy)
 
 
+def inside_view(view, w, h):
+    m = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(m).rectangle(view, fill=255)
+    return m.filter(ImageFilter.GaussianBlur(max(2, int(w * 0.006))))
+
+
 def glass_base(base, view, rng):
     """The picture seen through a dirty, wet window: (picture with smudges, bokeh and standing beads, strongly blurred copy for the sliding drops)."""
     w, h = base.size
@@ -250,6 +259,11 @@ def glass_base(base, view, rng):
     inside = inside.filter(ImageFilter.GaussianBlur(max(2, int(w * 0.006))))
     m = ImageChops.multiply(m, inside).point(lambda v: int(v * SMUDGE))
     out = Image.composite(blur, base, m)
+    if MIST > 0:
+        haze = blur.filter(ImageFilter.GaussianBlur(10 * s)).point(lambda v: min(255, int(v * 0.8 + 62)))      # a pale, lifted, very soft copy
+        grad = Image.linear_gradient("L").rotate(180).resize((w, h))                  # 255 at the top of the picture, 0 at the bottom
+        grad = ImageChops.multiply(grad, inside_view(view, w, h)).point(lambda v: int(MIST * (0.35 * 255 + 0.65 * v)))
+        out = Image.composite(haze, out, ImageChops.multiply(grad, Image.new("L", (w, h), 255)))
     # bokeh: every light inside a smudge becomes a soft disc
     discs = Image.new("RGB", (w, h), (0, 0, 0))
     dd = ImageDraw.Draw(discs)
@@ -396,7 +410,8 @@ def render(picture: Path, zones: dict | None, out: Path, size: tuple[int, int] =
     try:
         for f in range(n):
             a = Image.new("L", (w, h), 0)
-            streaks.draw(ImageDraw.Draw(a), f)
+            if STREAKS:
+                streaks.draw(ImageDraw.Draw(a), f)
             if runners:
                 runners.trails(ImageDraw.Draw(a), f)
             b = Image.new("L", (w, h), 0)
