@@ -12,7 +12,7 @@ from story3.voice import MediaError
 from . import models as M, store
 from shorts import wan
 
-# frames: I2V at 16fps, target ~9s → need ceil(9*16)=144, nearest 4n+1 = 145
+# frames: I2V at 16 fps, CLIP_S seconds, rounded up to 4n+1 (3 s -> 49)
 _FRAMES = 4 * math.ceil((math.ceil(M.CLIP_S * M.I2V_FPS) - 1) / 4) + 1
 _FRAMES = min(_FRAMES, M.I2V_MAX_FRAMES)   # hard cap
 

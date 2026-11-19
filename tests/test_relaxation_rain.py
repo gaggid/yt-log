@@ -89,8 +89,8 @@ def test_still_running_resume_timeout_is_final(tmp_path, monkeypatch):
 
 
 def test_clip_is_small_and_length_in_minutes():
-    assert M.CLIP_SIZE == "1280x720" and rain._FRAMES == 81
-    assert 900 < M.estimate_rain_s(rain._FRAMES) < 2400 and M.estimate_rain_s(81, "832x480") < 600
+    assert M.CLIP_SIZE == "1280x720" and rain._FRAMES == 49
+    assert 1000 < M.estimate_rain_s(rain._FRAMES) < 2000 and 2800 < M.estimate_rain_s(81) < 3100 and M.estimate_rain_s(49, "832x480") < 600
     assert M.total_s({"minutes": 5, "hours": 3}) == 300 and M.total_s({"hours": 3}) == 10800 and M.total_s({}) == 10800
     assert M.duration_label({"minutes": 5}) == "5 minutes" and M.duration_label({"hours": 3}) == "3 hours"
     s = store.create(scene="forest", minutes=5)
