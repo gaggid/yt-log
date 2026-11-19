@@ -84,6 +84,7 @@ var showRelaxation = (function () {
   </div>
 
   ${s.error ? `<div class="errbox mt-s">${s.error}</div>` : ''}
+  ${s.music_error ? `<div class="errbox mt-s">The video has rain only: the music could not be made (${s.music_error}). Use "New music".</div>` : ''}
   ${s.step ? `<div class="small mute mt-s">Working: ${STEP_LABELS[s.step] || s.step} <span class="spin"></span></div>` : ''}
 
   ${s.thumb_url || s.scene_url ? `<img src="${s.thumb_url || s.scene_url}" style="max-width:320px;border-radius:8px;margin-top:10px;display:block" alt="${s.thumb_url ? 'YouTube thumbnail' : 'scene preview'}">` : ''}
@@ -102,7 +103,11 @@ var showRelaxation = (function () {
       ? `<a href="https://youtu.be/${ytId}" target="_blank" class="btn">View on YouTube ↗</a>` : ''}
     ${finalReady
       ? `<a href="/api/relaxation/${s.id}/download" class="btn small">Download</a>` : ''}
+    ${(s.audio_ready || finalReady) && s.status !== 'running'
+      ? `<button class="small" data-action="music" data-id="${s.id}" data-instrument="" title="Same instrument, a new take">New music</button>
+         <button class="small" data-action="music" data-id="${s.id}" data-instrument="other" title="Another instrument of this theme">New music, other instrument</button>` : ''}
   </div>
+  ${s.music_url ? `<div class="mt-s small mute">Music only: <audio controls preload="none" src="${s.music_url}" style="vertical-align:middle;height:30px"></audio></div>` : ''}
 
   ${hasMetadata ? `
   <details class="mt" style="font-size:13px">
@@ -227,6 +232,17 @@ var showRelaxation = (function () {
           return;
         }
         if (action === 'run') { runSession(id); return; }
+        if (action === 'music') {
+          try { await api('POST', `/api/relaxation/${id}/music/regenerate`, { instrument: btn.dataset.instrument || '' }); }
+          catch (e) { if (!e.message.includes('running')) { alert(e.message); return; } }
+          startPoll(id, async () => {
+            const updated = await api('GET', `/api/relaxation/${id}`);
+            const idx = sessions.findIndex(s => s.id === id);
+            if (idx >= 0) sessions[idx] = { ...updated, status: updated.status };
+            render();
+          });
+          return;
+        }
         if (action === 'metadata') {
           btn.disabled = true;
           try {

@@ -170,6 +170,12 @@ def view(s: dict) -> dict:
                 out["final_url"] = f"/api/relaxation/{s['id']}/download"
             elif kind == M.KIND_SCENE:
                 out["scene_url"] = f"/api/media/file/{s['id']}/{item['file']}"
+    tracks = [i for i in media.items(s["id"], "music", "bgm") if i["status"] == "done" and i["file"]]
+    if tracks:
+        out["music_url"] = f"/api/media/file/{s['id']}/{tracks[-1]['file']}"
+    au = chosen(s["id"], M.KIND_AUDIO)
+    if au and au["meta"].get("music_error"):
+        out["music_error"] = au["meta"]["music_error"]
     th = chosen(s["id"], M.KIND_THUMB)
     if th:
         out["thumb_url"] = f"/api/media/file/{s['id']}/{th['file']}"

@@ -7,7 +7,9 @@ Music: an ambient-sleep YuE2 track made via story3/music.py from the session's o
 The YuE2 track is looped with cross-fades and mixed under the rain.
 
 Final: stereo 48kHz WAV normalised to FINAL_LUFS (-14), ready to embed in the MP4."""
+import random
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -145,13 +147,14 @@ async def make(session_id: str, s: dict | None = None, key: str = "",
 
     # ── YuE2 ambient music (optional) ─────────────────────────────────────────
     music_item = None
+    music_error = ""
     if settings.get("music_enabled", True):
         scene = settings.get("scene") or M.DEFAULT_SCENE
         music_cfg = music_mod.norm({
             "enabled": True,
             "level": float(settings.get("music_level") or M.MUSIC_LUFS),
             "plan": M.music_recipe(scene, settings.get("music_plan")),
-            "seed": int(settings.get("seed") or 7),
+            "seed": int(settings.get("music_seed") or settings.get("seed") or 7),      # its own seed: a new take does not touch the picture
         })
         if progress:
             progress(0, 3, "generating ambient music loop")
@@ -159,8 +162,9 @@ async def make(session_id: str, s: dict | None = None, key: str = "",
             music_item = await music_mod.make(
                 session_id, music_cfg, total_s, s, api_key, progress=None, force=False,
             )
-        except MediaError:
-            music_item = None   # fallback: rain only
+        except MediaError as e:
+            music_item = None   # fallback: rain only, but say so (the card shows it)
+            music_error = str(e)[:300]
 
     it = media.add(session_id, M.KIND_AUDIO, "audio", 0, "running",
                    {"total_s": total_s, "music": bool(music_item)})
@@ -187,15 +191,64 @@ async def make(session_id: str, s: dict | None = None, key: str = "",
         perm_dir = media.media_dir(session_id, "audio")
         name = f"audio-a{it['attempt']}.wav"
         perm = perm_dir / name
-        import shutil
         shutil.copy2(str(out), str(perm))
 
         if progress:
             progress(3, 3, "audio done")
 
-        return media.update(it["id"], status="done", file=f"audio/{name}",
-                            meta={"total_s": total_s, "music": bool(music_item),
-                                  "rain_fallback": not RAIN_FILE.is_file()})
+        done = media.update(it["id"], status="done", file=f"audio/{name}",
+                            meta={"total_s": total_s, "music": bool(music_item), "music_id": (music_item or {}).get("id", ""),
+                                  "music_error": music_error, "rain_fallback": not RAIN_FILE.is_file()})
+        shutil.rmtree(work, ignore_errors=True)      # the intermediate rain / music / mix files are about 2 GB each for 3 hours
+        return done
     except (RuntimeError, OSError) as e:
         media.update(it["id"], status="failed", meta={"error": str(e)[:300]})
         raise MediaError(f"audio mix failed: {e}") from e
+
+
+async def regenerate_music(session_id: str, s: dict | None = None, key: str = "", instrument: str = "", progress=None) -> dict:
+    """Make the music again (a new seed, so a new take) and put it into the finished video.
+
+    `instrument`: "" keeps the instrument, "other" picks another of the theme's instruments, or a name to use.
+    The audio is mixed again; when the video exists its picture is copied (no re-encode) and only the sound is replaced,
+    so this takes minutes, not the encode of the whole video. Returns {audio, video}."""
+    from story import settings as settings_mod
+    from . import publish, variety, video
+    s = s or settings_mod.get()
+    key = key or settings_mod.api_key()
+    session = store.get(session_id)
+    st = session.setdefault("settings", {})
+    scene = st.get("scene") or M.DEFAULT_SCENE
+    plan = dict(st.get("music_plan") or {})
+    old_instrument = plan.get("instrument", "")
+    rng = random.Random()
+    if instrument:
+        if instrument == "other":
+            hist = [{"scene": scene, "instrument": old_instrument, "mood": plan.get("mood", "")}] + variety.history()
+            plan = variety.pick_music(scene, hist, rng)
+        else:
+            plan = {**plan, "instrument": instrument}
+            plan["caption"] = M.music_caption(instrument, plan.get("secondary") or M.MUSIC_SECONDARY[0], plan.get("mood") or M.MUSIC_MOODS[0], int(plan.get("bpm") or 58))
+        st["music_plan"] = plan
+    st["music_seed"] = rng.randrange(1, 2 ** 31 - 1)
+    st["music_enabled"] = True
+    store.save(session)
+
+    if progress:
+        progress(0, 3, "making new music")
+    a = await make(session_id, s, key, progress=progress, force=True)
+    if not a["meta"].get("music"):
+        raise MediaError("the new music could not be made: " + (a["meta"].get("music_error") or "see the gateway"))
+    v = None
+    if store.chosen(session_id, M.KIND_FINAL):
+        if progress:
+            progress(2, 3, "putting the new sound into the video")
+        v = video.remux(session_id)
+    if plan.get("instrument") != old_instrument:
+        try:
+            await publish.generate(session_id, s, force=True)        # the description names the instrument
+        except Exception:  # noqa: BLE001 - not worth failing the new music for
+            pass
+    if progress:
+        progress(3, 3, "done")
+    return {"audio": a["id"], "video": (v or {}).get("id", "")}

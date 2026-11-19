@@ -11,7 +11,7 @@ from story.pipeline import manager
 from story3 import store as media
 from story3.voice import MediaError
 
-from . import auto, daily, models as M, publish, store
+from . import audio, auto, daily, models as M, publish, store
 
 router = APIRouter(prefix="/api/relaxation", tags=["relaxation"])
 
@@ -121,6 +121,22 @@ async def run_session(session_id: str, force: bool = False):
 @router.get("/{session_id}/run")
 async def run_status(session_id: str):
     return jobs.status(session_id)
+
+
+class _MusicReq(BaseModel):
+    instrument: str = ""            # "" same instrument, "other" another one of the theme's, or a name
+
+
+@router.post("/{session_id}/music/regenerate")
+async def regenerate_music(session_id: str, body: _MusicReq):
+    """Make the music again with a new seed and put it into the finished video (the picture is copied, not re-encoded)."""
+    s = _get(session_id)
+    if body.instrument and body.instrument != "other" and body.instrument not in (M.SCENES.get((s.get("settings") or {}).get("scene")) or {}).get("instruments", []):
+        raise HTTPException(400, "that instrument is not one of this theme's")
+
+    async def work(progress):
+        return await audio.regenerate_music(session_id, instrument=body.instrument, progress=progress)
+    return _start(session_id, work)
 
 
 # ── publish metadata ──────────────────────────────────────────────────────────

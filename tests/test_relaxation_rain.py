@@ -225,3 +225,80 @@ def test_thumbnail_is_1280x720_jpeg_under_2mb(tmp_path):
     data = thumb.render(src, "3 HOURS")
     im = Image.open(__import__("io").BytesIO(data))
     assert im.size == (1280, 720) and im.format == "JPEG" and len(data) < 2_000_000
+
+
+# ── regenerate the music and put it into the finished video ──────────────────
+
+def _ff(*args):
+    import subprocess
+    import config
+    subprocess.run([config.FFMPEG, "-y", "-v", "error", *args], check=True)
+
+
+def _session_with_video(tmp_path):
+    s = store.create(scene="courtyard", minutes=1)
+    sid = s["id"]
+    rain = media.add(sid, M.KIND_RAIN, "rain", 0, "done", {"upscaled": False})
+    final = media.add(sid, M.KIND_FINAL, "final", 0, "done", {"total_s": 60.0, "upscaled": False})
+    aud = media.add(sid, M.KIND_AUDIO, "audio", 0, "done", {"total_s": 60.0})
+    d = media.media_dir(sid, "final")
+    _ff("-f", "lavfi", "-i", "color=c=blue:s=64x64:d=3:r=10", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "3", "-c:v", "libx264", "-c:a", "aac", str(d / "final-a1.mp4"))
+    media.update(final["id"], file="final/final-a1.mp4")
+    media.update(rain["id"], file="rain/r.mp4")
+    a = media.media_dir(sid, "audio")
+    _ff("-f", "lavfi", "-i", "sine=f=440:d=3", str(a / "audio-a1.wav"))
+    media.update(aud["id"], file="audio/audio-a1.wav")
+    return sid
+
+
+def test_remux_replaces_only_the_sound(tmp_path):
+    import subprocess
+    import config
+    from relaxation import video
+    sid = _session_with_video(tmp_path)
+    new = video.remux(sid)
+    assert new["attempt"] == 2 and new["status"] == "done" and new["meta"]["remux_of"]
+    assert store.chosen(sid, M.KIND_FINAL)["id"] == new["id"]
+    info = subprocess.run([config.FFMPEG, "-hide_banner", "-i", str(media.path_of(new))], capture_output=True, text=True).stderr
+    assert "Video: h264" in info and "Audio: aac" in info and "64x64" in info
+
+
+def test_regenerating_music_changes_seed_and_instrument_and_rebuilds_the_video(tmp_path, monkeypatch):
+    from relaxation import audio, publish
+    from story3 import music as music_mod
+    sid = _session_with_video(tmp_path)
+    before = store.get(sid)["settings"]
+    seeds = []
+
+    async def fake_music(plan_id, cfg, total_s, s, key, progress=None, force=False):
+        seeds.append(cfg["seed"])
+        it = media.add(plan_id, "music", "bgm", 0, "done", {"duration_s": 30.0})
+        _ff("-f", "lavfi", "-i", "sine=f=330:d=30", str(media.media_dir(plan_id, "music") / "bgm-a1.wav"))
+        return media.update(it["id"], file="music/bgm-a1.wav")
+
+    async def no_publish(*a, **k):
+        return {}
+    monkeypatch.setattr(music_mod, "make", fake_music)
+    monkeypatch.setattr(publish, "generate", no_publish)
+    out = asyncio.run(audio.regenerate_music(sid, {"base_url": "x"}, "k", instrument="other"))
+    after = store.get(sid)["settings"]
+    assert after["music_seed"] != before.get("music_seed") and seeds == [after["music_seed"]]
+    assert after["music_plan"]["instrument"] != before["music_plan"]["instrument"]
+    assert after["music_plan"]["instrument"] in M.SCENES["courtyard"]["instruments"]
+    assert out["video"] and store.chosen(sid, M.KIND_FINAL)["attempt"] == 2
+    assert store.chosen(sid, M.KIND_AUDIO)["attempt"] == 2 and store.chosen(sid, M.KIND_AUDIO)["meta"]["music"] is True
+    assert not list((media.media_dir(sid) / "work").glob("*"))           # the big intermediate files are removed
+
+
+def test_a_music_failure_is_recorded_not_hidden(tmp_path, monkeypatch):
+    from relaxation import audio
+    from story3 import music as music_mod
+    from story3.voice import MediaError
+    sid = _session_with_video(tmp_path)
+
+    async def broken(*a, **k):
+        raise MediaError("the music could not be made: gateway busy")
+    monkeypatch.setattr(music_mod, "make", broken)
+    a = asyncio.run(audio.make(sid, {"base_url": "x"}, "k", force=True))
+    assert a["meta"]["music"] is False and "gateway busy" in a["meta"]["music_error"]
+    assert "gateway busy" in store.view(store.get(sid))["music_error"]

@@ -117,3 +117,30 @@ async def make(session_id: str, s: dict | None = None, key: str = "",
     except (RuntimeError, OSError) as e:
         media.update(it["id"], status="failed", meta={"error": str(e)[:300]})
         raise MediaError(f"video assembly failed: {e}") from e
+
+
+def remux(session_id: str) -> dict:
+    """Replace the sound of the finished video with the current audio mix, copying the picture as it is (no re-encode).
+    Makes a new rl_final attempt; the earlier one stays on disk until the storage page clears it."""
+    final = store.chosen(session_id, M.KIND_FINAL)
+    audio_item = store.chosen(session_id, M.KIND_AUDIO)
+    rain_item = store.chosen(session_id, M.KIND_RAIN)
+    if not (final and audio_item and rain_item):
+        raise MediaError("the video or its sound is not ready")
+    src, snd = media.path_of(final), media.path_of(audio_item)
+    if not src.is_file() or not snd.is_file():
+        raise MediaError("the video or audio file is missing")
+    meta = dict(final["meta"])
+    it = media.add(session_id, M.KIND_FINAL, "final", 0, "running", {"remux_of": final["id"]})
+    name = f"final-a{it['attempt']}.mp4"
+    out = media.media_dir(session_id, "final") / name
+    try:
+        _ffmpeg(["-i", str(src), "-i", str(snd), "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy",
+                 "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-shortest", "-movflags", "+faststart", str(out)])
+        total_s = float(meta.get("total_s") or audio_item["meta"].get("total_s") or 0)
+        h = _input_hash(rain_item, audio_item, total_s, bool(meta.get("upscaled")))
+        return media.update(it["id"], status="done", file=f"final/{name}",
+                            meta={**meta, "input_hash": h, "size_mb": round(out.stat().st_size / (1024 * 1024), 1), "remux_of": final["id"]})
+    except (RuntimeError, OSError) as e:
+        media.update(it["id"], status="failed", meta={"error": str(e)[:300]})
+        raise MediaError(f"putting the new sound into the video failed: {e}") from e
