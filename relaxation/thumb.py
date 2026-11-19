@@ -6,77 +6,45 @@ import io
 from pathlib import Path
 
 import httpx
-from PIL import Image, ImageDraw, ImageFont
 
 from story3 import store as media
 from story3.voice import MediaError
 
-from . import models as M, store
+from . import models as M, store, thumbrender
 
-SIZE = (1280, 720)
-FONTS = ["impact.ttf", "arialbd.ttf", "segoeuib.ttf", "DejaVuSans-Bold.ttf"]
-MAX_BYTES = 1_900_000
-
-
-def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    for name in FONTS:
-        try:
-            return ImageFont.truetype(name, size)
-        except OSError:
-            continue
-    return ImageFont.load_default()
-
-
-def _fit(draw: ImageDraw.ImageDraw, text: str, size: int, max_w: int):
-    while size > 24:
-        f = _font(size)
-        if draw.textlength(text, font=f) <= max_w:
-            return f
-        size -= 4
-    return _font(24)
+SIZE = thumbrender.SIZE
+MAX_BYTES = thumbrender.MAX_BYTES
 
 
 def _length_words(settings: dict) -> str:
     return M.duration_label(settings).upper()                  # '3 HOURS', '5 MINUTES'
 
 
-def render(scene_path: Path, length_words: str) -> bytes:
-    im = Image.open(scene_path).convert("RGB")
-    w, h = im.size
-    k = max(SIZE[0] / w, SIZE[1] / h)                         # cover
-    im = im.resize((round(w * k), round(h * k)), Image.LANCZOS)
-    l, t = (im.width - SIZE[0]) // 2, (im.height - SIZE[1]) // 2
-    im = im.crop((l, t, l + SIZE[0], t + SIZE[1]))
+def render(scene_path: Path, length_words: str, spec: dict | None = None) -> bytes:
+    """The thumbnail JPEG: the picture with the words laid on by code (relaxation/thumbrender.py: layout, font, colours and words differ per video)."""
+    return thumbrender.render(scene_path, length_words, spec)
 
-    # a soft dark wash on the left so the words read on any picture
-    wash = Image.new("L", SIZE, 0)
-    px = wash.load()
-    for x in range(SIZE[0]):
-        a = int(max(0, 1 - x / (SIZE[0] * 0.62)) ** 1.4 * 190)
-        for y in range(SIZE[1]):
-            px[x, y] = a
-    im = Image.composite(Image.new("RGB", SIZE, (6, 10, 18)), im, wash)
 
-    d = ImageDraw.Draw(im)
-    x0, max_w = 56, int(SIZE[0] * 0.5)
-    lines = [("RAIN SOUNDS", 118, (255, 255, 255)), (length_words, 150, (255, 214, 130)), ("SLEEP  ·  STUDY  ·  RELAX", 40, (214, 226, 240))]
-    heights = []
-    for text, size, _ in lines:
-        f = _fit(d, text, size, max_w if size > 60 else int(SIZE[0] * 0.46))
-        bb = d.textbbox((0, 0), text, font=f)
-        heights.append((f, bb[3] - bb[1]))
-    total = sum(hh for _, hh in heights) + 26 * (len(lines) - 1)
-    y = (SIZE[1] - total) // 2
-    for (text, _, color), (f, hh) in zip(lines, heights):
-        d.text((x0 + 3, y + 3), text, font=f, fill=(0, 0, 0))             # a hard shadow for contrast
-        d.text((x0, y), text, font=f, fill=color)
-        y += hh + 26
-    for q in (90, 84, 78, 70):
-        buf = io.BytesIO()
-        im.save(buf, "JPEG", quality=q, optimize=True)
-        if buf.tell() <= MAX_BYTES:
-            break
-    return buf.getvalue()
+def reroll(session_id: str, person: str = "") -> dict:
+    """New thumbnail seeds for a session (what is shown, who, the layout, the font, the colours, the words), avoiding what the last videos used. `person` = "woman" or
+    "man" forces a person of that kind. Saved in the session; returns the seeds."""
+    import random
+    from . import looks, variety
+    session = store.get(session_id)
+    st = session.setdefault("settings", {})
+    scene = st.get("scene") or M.DEFAULT_SCENE
+    angle = st.get("angle") if st.get("angle") in looks.ANGLES else "calm"
+    hist = [h for h in variety.history() if h.get("id") != session_id]
+    rng = random.Random()
+    t = looks.pick_thumb(angle, scene, hist, rng)
+    if person in ("woman", "man", "person"):                 # "person": a person at the window, either kind
+        who = person if person in looks.WHO else rng.choice(looks.WHO)
+        t.update(subject="person", who=who, hair=rng.choice(looks.HAIR[who]))
+    ang = looks.ANGLES[angle]
+    t["headline"], t["subline"] = rng.choice(ang["headlines"]), ang["tail"]
+    st["thumb"], st["thumb_person"], st["thumb_prompt"] = t, t["who"], looks.thumb_prompt(scene, t)
+    store.save(session)
+    return t
 
 
 async def picture(session_id: str, s: dict | None = None, key: str = "", force: bool = False, person: str = "") -> dict:
@@ -91,11 +59,20 @@ async def picture(session_id: str, s: dict | None = None, key: str = "", force: 
             return have
     session = store.get(session_id)
     st = session.setdefault("settings", {})
-    who = person or st.get("thumb_person") or M.thumb_person(st.get("seed"))
-    if person and person != st.get("thumb_person"):
-        st["thumb_person"] = person
+    from . import looks
+    scene = st.get("scene") or M.DEFAULT_SCENE
+    t = dict(st.get("thumb") or {})
+    who = person or st.get("thumb_person") or t.get("who") or M.thumb_person(st.get("seed"))
+    if person and (person != t.get("who") or t.get("subject") != "person"):
+        t = {**(t if t.get("layout") else looks.pick_thumb(st.get("angle") or "calm", scene, [], __import__("random").Random(int(st.get("seed") or 1)))), "subject": "person", "who": person}
+        st["thumb"], st["thumb_person"], st["thumb_prompt"] = t, person, looks.thumb_prompt(scene, t)
         store.save(session)
-    prompt = M.thumb_prompt(st.get("scene") or M.DEFAULT_SCENE, who)
+    if st.get("thumb_prompt"):
+        prompt = st["thumb_prompt"]                      # written for this video (relaxation/director.py), or built from its seeds
+    elif t.get("layout"):
+        prompt = looks.thumb_prompt(scene, t)
+    else:
+        prompt = M.thumb_prompt(scene, who)
     seed = int(st.get("seed") or 7) + 3
     it = media.add(session_id, M.KIND_THUMB_PIC, "thumbpic", 0, "running", {"person": who, "seed": seed})
     try:
@@ -108,7 +85,7 @@ async def picture(session_id: str, s: dict | None = None, key: str = "", force: 
         data = base64.b64decode(r.json()["data"][0]["b64_json"])
         name = f"pic-a{it['attempt']}.jpg"
         (media.media_dir(session_id, "thumb") / name).write_bytes(data)
-        return media.update(it["id"], status="done", file=f"thumb/{name}", meta={"person": who, "seed": seed, "w": 1280, "h": 720})
+        return media.update(it["id"], status="done", file=f"thumb/{name}", meta={"person": who, "subject": t.get("subject", "person"), "seed": seed, "w": 1280, "h": 720})
     except (MediaError, httpx.HTTPError, KeyError, ValueError, OSError) as e:
         media.update(it["id"], status="failed", meta={"error": str(e)[:300]})
         raise MediaError(f"thumbnail picture failed: {e}") from e
@@ -128,9 +105,12 @@ def make(session_id: str, force: bool = False) -> dict:
     if not src.is_file():
         raise MediaError("scene image file missing")
     settings = (store.get(session_id).get("settings") or {})
-    it = media.add(session_id, M.KIND_THUMB, "thumb", 0, "running", {})
+    spec = dict(settings.get("thumb") or {})
+    if not pic_item:
+        spec["side"] = "right"                               # the scene picture has no subject to keep clear: the words go to the left
+    it = media.add(session_id, M.KIND_THUMB, "thumb", 0, "running", {"layout": spec.get("layout", ""), "headline": spec.get("headline", "")})
     try:
-        data = render(src, _length_words(settings))
+        data = render(src, _length_words(settings), spec)
         name = f"thumb-a{it['attempt']}.jpg"
         (media.media_dir(session_id, "thumb") / name).write_bytes(data)
         return media.update(it["id"], status="done", file=f"thumb/{name}", meta={"w": SIZE[0], "h": SIZE[1], "bytes": len(data), "source": "person" if pic_item else "scene"})

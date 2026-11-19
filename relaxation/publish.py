@@ -56,6 +56,22 @@ async def generate(session_id: str, s: dict | None = None, force: bool = False) 
     if not force and existing.get("title") and existing.get("nh") == narration_hash(session):
         return existing
 
+    copy = settings.get("copy") or {}
+    angle = settings.get("angle") or ""
+    if copy.get("title") and angle in seo.looks_angles():
+        # written for this video's angle (who it is for, when, where, how) by relaxation/director.py; see the hook, the sections and the hashtags in seo.py
+        publish = {
+            "title": copy["title"],
+            "description": seo.description_from_copy(scene, angle, length, instrument, copy),
+            "hashtags": seo.hashtags_for(angle),
+            "tags": seo.tags_for(scene, angle, instrument),
+            "nh": narration_hash(session),
+            "category_id": MODS.YT_CATEGORY_MUSIC,
+            "angle": angle,
+        }
+        session["publish"] = publish
+        store.save(session)
+        return publish
     paragraph = ""
     try:
         backend = llm.ChatBackend(s, settings_mod.api_key())

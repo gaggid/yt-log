@@ -97,3 +97,111 @@ def description(scene: str, length: str, instrument: str, scene_paragraph: str =
         "Subscribe for a new rain video every night. What are you doing while it rains?",
         " ".join(HASHTAGS),
     ])[:4800]
+
+
+# ── text that follows the video's angle (who it is for, when, where, why), relaxation/looks.py ANGLES ───────────────────────────────────────────
+ANGLE_HASHTAGS = {"sleep": "#SleepMusic", "study": "#StudyMusic", "work": "#FocusMusic", "read": "#ReadingMusic", "calm": "#RelaxingMusic", "noise": "#WhiteNoise",
+                  "meditate": "#MeditationMusic", "rainy": "#CozyRain", "late": "#LateNightMusic"}
+HOW_POOL = ["keep the volume low, just above the sound of the room", "set the sleep timer in the YouTube app if you want it to stop on its own",
+            "use a speaker across the room or soft headphones, whichever is more comfortable", "dim the screen or turn it face down: the sound does the work",
+            "leave one warm lamp on and let the room settle", "play it on loop in the background: it does not need your attention"]
+
+
+def _L(length: str) -> str:
+    return length.title()
+
+
+def _ins_title(instrument: str) -> str:
+    return "Soft Music" if instrument in ("", "other") else instrument.title()
+
+
+def fallback_title(scene: str, angle: str, length: str, instrument: str, key: str, recent: list[str]) -> str:
+    """A title from the angle's patterns: the first that fits 70 characters and is not close to a recent title; patterns rotate by `key`."""
+    import difflib
+    pats = looks_angles()[angle]["titles"]
+    n = _pick(key or scene, len(pats))
+    pats = pats[n:] + pats[:n]
+    best = ""
+    for short in (False, True):
+        place = place_of(scene, short).removeprefix("a ").removeprefix("an ")
+        for p in pats:
+            t = p.format(L=_L(length), Place=place, Ins=_ins_title(instrument))
+            if len(t) > TITLE_MAX:
+                continue
+            best = best or t
+            if all(difflib.SequenceMatcher(None, t.lower(), r.lower()).ratio() <= 0.72 for r in recent):
+                return t
+    return best or title(scene, length, key)
+
+
+def looks_angles() -> dict:
+    from . import looks
+    return looks.ANGLES
+
+
+def fallback_copy(scene: str, angle: str, length: str, instrument: str, look: dict, key: str, recent: list[str]) -> dict:
+    """The whole text of the upload from code alone (the chat model writes a better version; this one is true and different from video to video)."""
+    from . import looks
+    ang = looks.ANGLES[angle]
+    parts = looks.look_parts(scene, look)
+    place = place_of(scene)
+    ins_text = looks.INSTRUMENT_TEXT.get(instrument, "soft instrumental music")
+    n = _pick(key or scene, 997)
+    aud = [ang["audience"][(n + i) % len(ang["audience"])] for i in range(min(4, len(ang["audience"])))]
+    when = [w.format(L_lower=length) for w in (ang["when"][(n + i) % len(ang["when"])] for i in range(min(3, len(ang["when"]))))]
+    how = [HOW_POOL[(n + i) % len(HOW_POOL)] for i in range(3)]
+    hook = ""
+    for k in (3, 2, 1):                                     # as many of the audiences as fit in the hook (about 190 characters)
+        who = ", ".join(aud[:k - 1]) + (" and " if k > 1 else "") + aud[k - 1]
+        hook = f"{_L(length)} of gentle rain and {ins_text} at {place}, made for {who}."
+        if len(hook) <= 190:
+            break
+    hook = hook[:190]
+    lamp = parts["lamp"][0]
+    cap = lambda x: x[0].upper() + x[1:]                    # noqa: E731
+    paragraph = (f"The view from inside {place} just after the rain: {parts['season'][0]}, and {parts['air'][0]}. "
+                 f"{cap(lamp)}. {cap(ins_text)} plays softly under the sound of the rain.")
+    return {"title": fallback_title(scene, angle, length, instrument, key, recent), "hook": hook, "scene_paragraph": paragraph, "audience": aud, "when": when, "how": how,
+            "about": f"The scene is {place}, made with AI.", "source": "code"}
+
+
+def tags_for(scene: str, angle: str, instrument: str = "") -> list[str]:
+    from . import looks
+    first = list(looks.ANGLES[angle]["tags"])
+    words = list((PLACES.get(scene) or {}).get("words", []))
+    out = []
+    for t in [BASE_TAGS[0], first[0], BASE_TAGS[1], *first[1:], *words, *BASE_TAGS[2:]] + ([f"{instrument} and rain"] if instrument and instrument != "other" else []):
+        if t.lower() not in [x.lower() for x in out]:
+            out.append(t)
+    keep, total = [], 0
+    for t in out:
+        total += len(t) + 1
+        if total > 450 or len(keep) >= 15:
+            break
+        keep.append(t)
+    return keep
+
+
+def hashtags_for(angle: str) -> list[str]:
+    return ["#RainSounds", ANGLE_HASHTAGS.get(angle, "#SleepMusic"), "#RainAmbience"]
+
+
+def description_from_copy(scene: str, angle: str, length: str, instrument: str, c: dict) -> str:
+    """The description: a hook that carries the keywords (search shows the first ~150 characters), then what, who, when, where, how, the scene, the AI note, a
+    question, three hashtags. Every part follows the video's angle."""
+    from . import looks
+    ang = looks.ANGLES[angle]
+    place = place_of(scene)
+    bullets = lambda items: "\n".join(f"• {x[0].upper() + x[1:]}" if x else "" for x in items)       # noqa: E731
+    ins_text = looks.INSTRUMENT_TEXT.get(instrument, "soft instrumental music")
+    return "\n\n".join([
+        c["hook"],
+        f"WHAT YOU WILL HEAR\n{c['scene_paragraph']} The music is instrumental: {ins_text}, slow and calm, with no singing and no drums.",
+        f"WHO IT IS FOR\n{bullets(c['audience'])}",
+        f"WHEN TO PLAY IT\n{bullets(c['when'])}",
+        f"WHERE IT WORKS\n{ang['where'][0].upper() + ang['where'][1:]}. {ang['why'][0].upper() + ang['why'][1:]}.",
+        f"HOW TO USE IT\n{bullets(c['how'])}",
+        f"ABOUT THE SCENE\n{c.get('about') or 'The scene is ' + place + '.'} The picture and the music are AI-generated.",
+        "Where are you listening from, and what are you doing while it rains? Tell us in the comments. A new rain video every day: subscribe so you can find the next one.",
+        " ".join(hashtags_for(angle)),
+    ])[:4800]

@@ -119,7 +119,7 @@ async def generate_code(session_id: str, s: dict | None = None, key: str = "", f
         raise MediaError("scene image file missing")
     st = store.get(session_id).get("settings") or {}
     seed = int(st.get("seed") or 7)
-    flame = bool((M.SCENES.get(st.get("scene") or "") or {}).get("flame"))
+    flame = bool(st["flame"]) if "flame" in st else bool((M.SCENES.get(st.get("scene") or "") or {}).get("flame"))     # the lamp of THIS picture (director.py) burns or does not
     w, h = M.OUT_4K
     it = media.add(session_id, M.KIND_RAIN, "rain", 0, "running", {"engine": "code", "seed": seed})
     try:

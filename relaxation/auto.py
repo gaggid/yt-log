@@ -16,7 +16,7 @@ import asyncio
 from story import settings as settings_mod
 from story3.voice import MediaError
 
-from . import audio, image, models as M, publish, rain, store, thumb, video
+from . import audio, director, image, models as M, publish, rain, store, thumb, video
 
 
 async def run(session_id: str, force: bool = False, progress=None) -> str:
@@ -43,6 +43,12 @@ async def run(session_id: str, force: bool = False, progress=None) -> str:
             pass
 
     try:
+        _step("plan")
+        try:
+            await director.plan(session_id, s, force=False)          # the prompt, the thumbnail concept and the upload text of THIS video; the stand-ins carry a model failure
+        except Exception:  # noqa: BLE001 - never stops a run
+            pass
+
         _step("scene")
         item = await image.generate(session_id, s, key, force=force)
         done.append("scene image")

@@ -21,10 +21,12 @@ def _client(timeout: float) -> httpx.AsyncClient:
 
 
 def _body(s: dict, scene: str, seed: int) -> dict:
+    """The request for the scene picture. `s` is the session's settings: its `scene_prompt` (written for this video by relaxation/director.py from the light, lamp,
+    season, air, camera and grade picked for it) wins over the theme's fixed prompt, so two videos of one theme never draw the same picture."""
     cfg = M.SCENES.get(scene) or M.SCENES[M.DEFAULT_SCENE]
     body: dict = {
         "model": s.get("image_model") or M.IMAGE_MODEL,
-        "prompt": cfg["prompt"],
+        "prompt": s.get("scene_prompt") or cfg["prompt"],
         "size": M.IMAGE_SIZE,
         "n": 1,
         "steps": M.IMAGE_STEPS,
@@ -59,7 +61,7 @@ async def generate(session_id: str, s: dict | None = None, key: str = "", force:
     scene = settings.get("scene") or M.DEFAULT_SCENE
     body = _body(settings, scene, seed)
 
-    it = media.add(session_id, M.KIND_SCENE, "scene", 0, "running", {"scene": scene, "seed": seed})
+    it = media.add(session_id, M.KIND_SCENE, "scene", 0, "running", {"scene": scene, "seed": seed, "look": settings.get("look") or {}})
     try:
         async with _client(TIMEOUT_S) as c:
             r = await c.post(

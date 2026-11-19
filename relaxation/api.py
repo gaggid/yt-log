@@ -165,13 +165,14 @@ class _ThumbReq(BaseModel):
 async def new_thumbnail(session_id: str, body: _ThumbReq):
     """Draw the thumbnail picture again (a happy person by the rainy window) and lay the words on it. Needs the gateway (about a minute)."""
     _get(session_id)
-    if body.person not in ("", "woman", "man"):
-        raise HTTPException(400, "person must be woman or man")
+    if body.person not in ("", "woman", "man", "person"):
+        raise HTTPException(400, "person must be woman, man or person")
 
     async def work(progress):
         from . import thumb
         progress(0, 2, "drawing the thumbnail picture")
-        await thumb.picture(session_id, force=True, person=body.person)
+        await asyncio.to_thread(thumb.reroll, session_id, body.person)          # a new subject, layout, font, colours and words: not the same design again
+        await thumb.picture(session_id, force=True)
         progress(1, 2, "laying the words on it")
         await asyncio.to_thread(thumb.make, session_id, True)
         return "New thumbnail is ready."

@@ -8,18 +8,19 @@ Every choice looks at the sessions already made (newest first), so nothing repea
 The music caption is built from these in code (models.music_caption), never by a model, so it always stays calm, instrumental and without drums."""
 import random
 
-from . import models as M, store
+from . import looks, models as M, store
 
 RECENT_INSTRUMENTS = 7
 
 
 def history() -> list[dict]:
-    """Sessions made so far, newest first, as {scene, instrument, mood}."""
+    """Sessions made so far, newest first, as {id, scene, instrument, mood, look, angle, thumb, title}."""
     out = []
     for s in store.list_all():
         st = s.get("settings") or {}
         mp = st.get("music_plan") or {}
-        out.append({"scene": st.get("scene", ""), "instrument": mp.get("instrument", ""), "mood": mp.get("mood", "")})
+        out.append({"id": s.get("id", ""), "scene": st.get("scene", ""), "instrument": mp.get("instrument", ""), "mood": mp.get("mood", ""), "look": st.get("look") or {},
+                    "angle": st.get("angle", ""), "thumb": st.get("thumb") or {}, "title": ((s.get("publish") or {}).get("title") or (st.get("copy") or {}).get("title") or "")})
     return out
 
 
@@ -53,8 +54,13 @@ def pick_music(scene: str, hist: list[dict], rng: random.Random) -> dict:
 
 
 def choose(scene: str | None = None, rng: random.Random | None = None) -> dict:
-    """The variable parts of a new session: {scene, seed, music_plan}. `scene` fixes the theme (the person chose it)."""
+    """The variable parts of a new session: {scene, seed, music_plan, angle, look, thumb}. `scene` fixes the theme (the person chose it). The look (light, lamp,
+    season ...), the angle of the text and the thumbnail seeds avoid what the last videos used (relaxation/looks.py); the chat model writes the real prompts
+    and text from them (relaxation/director.py)."""
     rng = rng or random.Random()
     hist = history()
     scene = scene if scene in M.SCENES else pick_scene(hist, rng)
-    return {"scene": scene, "seed": rng.randrange(1, 2 ** 31 - 1), "music_plan": pick_music(scene, hist, rng)}
+    angle = looks.pick_angle(hist, rng)
+    thumb = looks.pick_thumb(angle, scene, hist, rng)
+    return {"scene": scene, "seed": rng.randrange(1, 2 ** 31 - 1), "music_plan": pick_music(scene, hist, rng), "angle": angle,
+            "look": looks.pick_look(scene, hist, rng), "thumb": thumb, "thumb_person": thumb["who"]}

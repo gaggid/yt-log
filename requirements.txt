@@ -16,3 +16,4 @@ Pillow
 jsonschema
 # Shorts: fetch the YouTube video a remix is driven by
 yt-dlp
+numpy

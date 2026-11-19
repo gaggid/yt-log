@@ -17,6 +17,8 @@ from pathlib import Path
 import config
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
+from . import glassfx
+
 FPS = 30                     # the video's frame rate (models.OUT_FPS): the loop is stream-copied, so it is drawn at the final rate
 LOOP_S = 10.0               # a drizzle: the same whole passes per loop in a loop twice as long as the 5 s version, so the rain falls half as fast (4 s -> 5 s -> 10 s, each owner-requested)
 TINT = (208, 224, 255)
@@ -165,7 +167,9 @@ GLASS = True
 SMUDGE = 0.60                # how strongly the smudged patches blur the view (0 to 1)
 BOKEH = 0.55                 # brightness of the soft discs the lights turn into inside the smudges
 ROCK_BURSTS = False          # droplet bursts on stones and other hard surfaces: off (owner, 2026-11-19); ripples on water stay
-MIST = 0.22                  # soft haze over the view, thicker in the distance (top), so the outside looks misty (0 = none)
+FOG = 0.38                   # how foggy the whole window glass is (0 = clear): the scene is a little soft and the drops and wiped trails show it sharp
+DRIZZLE = 240               # tiny drops standing on the glass (per view of 1280x720)
+MIST = 0.12                  # soft haze over the view, thicker in the distance (top), so the outside looks misty (0 = none)
 BEADS = (95, 14)            # small and large beads of water standing on the glass (per view of 1280x720); the first version had (380, 55), which distorted the picture too much (owner: at least 70 % fewer)
 RUNNERS = 27                 # drops that creep down the glass (per view of 1280x720): 14, then 18 (+30 %), now 27 (+50 %, owner 2026-11-19)
 
@@ -192,41 +196,6 @@ def _lum_peaks(base, view, limit=40):
                 peaks.append((v, x * cell + cell // 2, y * cell + cell // 2, cols[x, y]))
     peaks.sort(reverse=True)
     return [(x, y, c) for _v, x, y, c in peaks[:limit]]
-
-
-def _lens(blur, x, y, r):
-    """Colour of a drop of water: it shows the scene behind it, brighter."""
-    w, h = blur.size
-    c = blur.getpixel((int(min(w - 1, max(0, x))), int(min(h - 1, max(0, y + r)))))
-    return tuple(min(255, int(v * 1.35 + 18)) for v in c)
-
-
-def drop_patch(base, x, y, rx, ry, rng_seed=0):
-    """A drop of water on glass as RGBA: a small upside-down copy of the scene behind it (a drop is a lens), a faint dark edge on top and a faint
-    bright edge below, no white dot. Returns (patch, left, top)."""
-    w, h = base.size
-    k = 4
-    pw, ph = int(rx * 2 + 4), int(ry * 2 + 4)
-    cx, cy = pw / 2, ph / 2
-    # the scene seen through it: a wider piece of the picture squeezed in and turned round
-    span = 3.0
-    left, top = x - rx * span, y - ry * span * 0.8
-    src = base.crop((int(max(0, left)), int(max(0, top)), int(min(w, left + 2 * rx * span)), int(min(h, top + 2 * ry * span))))
-    if src.width < 2 or src.height < 2:
-        src = base.crop((int(min(max(0, x), w - 2)), int(min(max(0, y), h - 2)), int(min(max(0, x), w - 2)) + 2, int(min(max(0, y), h - 2)) + 2))
-    body = src.resize((pw * k, ph * k), Image.BILINEAR).transpose(Image.ROTATE_180)
-    body = body.point(lambda v: min(255, int(v * 1.12 + 6)))
-    mask = Image.new("L", (pw * k, ph * k), 0)
-    ImageDraw.Draw(mask).ellipse([2 * k, 2 * k, (pw - 2) * k, (ph - 2) * k], fill=235)
-    patch = body.convert("RGBA")
-    patch.putalpha(mask)
-    rim = Image.new("RGBA", (pw * k, ph * k), (0, 0, 0, 0))
-    rd = ImageDraw.Draw(rim)
-    box = [2 * k, 2 * k, (pw - 2) * k, (ph - 2) * k]
-    rd.arc(box, 195, 345, fill=(0, 0, 0, 105), width=max(2, int(k * 0.9)))            # the upper edge is dark
-    rd.arc(box, 15, 165, fill=(255, 255, 255, 85), width=max(2, int(k * 0.8)))        # the lower edge catches light
-    patch = Image.alpha_composite(patch, rim)
-    return patch.resize((pw, ph), Image.LANCZOS), int(x - cx), int(y - cy)
 
 
 def inside_view(view, w, h):
@@ -259,6 +228,9 @@ def glass_base(base, view, rng):
     inside = inside.filter(ImageFilter.GaussianBlur(max(2, int(w * 0.006))))
     m = ImageChops.multiply(m, inside).point(lambda v: int(v * SMUDGE))
     out = Image.composite(blur, base, m)
+    if FOG > 0:                                                # the whole glass is a little fogged; drops and wiped trails stay sharp
+        soft = base.filter(ImageFilter.GaussianBlur(3.2 * s))
+        out = Image.composite(soft, out, inside.point(lambda v: int(v * FOG)))
     if MIST > 0:
         haze = blur.filter(ImageFilter.GaussianBlur(10 * s)).point(lambda v: min(255, int(v * 0.8 + 62)))      # a pale, lifted, very soft copy
         grad = Image.linear_gradient("L").rotate(180).resize((w, h))                  # 255 at the top of the picture, 0 at the bottom
@@ -274,15 +246,14 @@ def glass_base(base, view, rng):
     discs = discs.filter(ImageFilter.GaussianBlur(1.4 * s))
     gate = m.point(lambda v: min(255, int(v * BOKEH / SMUDGE)))
     out = ImageChops.screen(out, Image.composite(discs, Image.new("RGB", (w, h), (0, 0, 0)), gate))
-    # beads of water standing on the glass: mostly small, some larger, none perfectly round
+    # drops of water standing on the glass: tiny ones (drizzle), small and larger beads; each is a lens that shows the sharp scene flipped (relaxation/glassfx.py)
+    src = glassfx.arr(base)
     area = vw * vh / (1280 * 720)
-    n_small, n_big = int(BEADS[0] * area), int(BEADS[1] * area)
-    for i in range(n_small + n_big):
-        r = (rng.uniform(1.8, 3.8) if i < n_small else rng.uniform(5, 9.5)) * s
-        x, y = rng.uniform(vx0, vx1), rng.uniform(vy0, vy1)
-        rx, ry = r * rng.uniform(0.85, 1.1), r * rng.uniform(0.95, 1.35)
-        patch, px0, py0 = drop_patch(base, x, y, rx, ry)
-        out.paste(patch, (px0, py0), patch)
+    for kind, n, (lo, hi), mag in (("drizzle", int(DRIZZLE * area), (1.0, 2.2), 1.7), ("small", int(BEADS[0] * area), (1.8, 3.8), 2.0), ("big", int(BEADS[1] * area), (5.0, 9.5), 2.2)):
+        for _ in range(n):
+            r = rng.uniform(lo, hi) * s
+            x, y = rng.uniform(vx0, vx1), rng.uniform(vy0, vy1)
+            glassfx.paste(out, glassfx.sprite(src, x, y, r * rng.uniform(0.85, 1.1), r * rng.uniform(0.95, 1.3), mag=mag, tear=0.12 if kind != "big" else 0.2, gain=0.85 if kind == "drizzle" else 1.0))
     return out, blur
 
 
@@ -293,7 +264,7 @@ class _Runners:
     def __init__(self, rng, w, h, view, n_frames, base):
         s = w / 1280
         x0, y0, x1, y1 = view
-        self.n, self.s, self.base = n_frames, s, base
+        self.n, self.s, self.src = n_frames, s, glassfx.arr(base)          # `base`: the sharp picture the drops look at
         self.items = []
         for _ in range(max(3, int(RUNNERS * (x1 - x0) * (y1 - y0) / (1280 * 720)))):
             r = rng.uniform(4.5, 8.5) * s
@@ -338,11 +309,14 @@ class _Runners:
         return min(1.0, 12 * u, 12 * (1 - u))
 
     def trails(self, d, f):
+        """A wet trail behind each drop: the fog is wiped away along its path (drawn as a mask; the sharp picture shows through it), strongest at the drop and fading above."""
         for it in self.items:
             u, y = self._pos(it, f)
             al = self._alpha(u)
             if al > 0.02:
-                d.line([(it["x"], it["y"]), (it["x"], y)], fill=int(70 * al), width=max(1, int(it["r"] * 0.28)))
+                wd = max(2, int(it["r"] * 0.55))
+                d.line([(it["x"], it["y"]), (it["x"], y)], fill=int(120 * al), width=wd + 2)
+                d.line([(it["x"], it["y"]), (it["x"], y)], fill=int(215 * al), width=wd)
 
     def drops(self, im, f):
         for it in self.items:
@@ -351,10 +325,7 @@ class _Runners:
             if al < 0.05:
                 continue
             r, x = it["r"], it["x"]
-            patch, px0, py0 = drop_patch(self.base, x, y, r * 0.85, r * 1.25)
-            if al < 1:
-                patch.putalpha(patch.split()[3].point(lambda v: int(v * al)))
-            im.paste(patch, (px0, py0), patch)
+            glassfx.paste(im, glassfx.sprite(self.src, x, y, r * 0.8, r * 1.25, mag=2.2, tear=0.3, gain=al))
 
 
 # ── lamps: a soft glow around every bright light, in the room and outside; a real flame also flickers a little ─────────────────────────────
@@ -394,9 +365,11 @@ def render(picture: Path, zones: dict | None, out: Path, size: tuple[int, int] =
     mask = mask.filter(ImageFilter.GaussianBlur(soft))
     rng = random.Random(seed)
     runners = None
+    sharp = base                                              # the picture as drawn: what the drops and the wiped trails show
+    sharp_glow = lamp_glow(sharp)[0] if BLOOM > 0 else sharp
     if GLASS:
-        base, blur = glass_base(base, view, random.Random(seed + 1))
-        runners = _Runners(random.Random(seed + 2), w, h, view, n, base)
+        base, blur = glass_base(sharp, view, random.Random(seed + 1))
+        runners = _Runners(random.Random(seed + 2), w, h, view, n, sharp_glow)
     hot = None
     if BLOOM > 0:
         base, hot = lamp_glow(base)
@@ -412,13 +385,16 @@ def render(picture: Path, zones: dict | None, out: Path, size: tuple[int, int] =
             a = Image.new("L", (w, h), 0)
             if STREAKS:
                 streaks.draw(ImageDraw.Draw(a), f)
-            if runners:
-                runners.trails(ImageDraw.Draw(a), f)
+            glass = base
+            if runners:                                        # the fog is wiped along the path of every running drop: the sharp picture shows through
+                tr = Image.new("L", (w, h), 0)
+                runners.trails(ImageDraw.Draw(tr), f)
+                glass = Image.composite(sharp_glow, base, ImageChops.multiply(tr, mask))
             b = Image.new("L", (w, h), 0)
             splashes.draw(ImageDraw.Draw(b), f)
             b = b.filter(ImageFilter.GaussianBlur(max(0.6, 0.8 * w / 1280))).point(lambda v: int(v * 0.85))       # soft, not drawn circles
             a = ImageChops.multiply(ImageChops.lighter(a, b), mask).point(lambda v: int(v * GAIN))
-            frame = Image.composite(tint, base, a)
+            frame = Image.composite(tint, glass, a)
             if flame and hot is not None:
                 g = 0.55 + FLICKER * 3 * (math.sin(2 * math.pi * 3 * f / n + ph[0]) * 0.6 + math.sin(2 * math.pi * 7 * f / n + ph[1]) * 0.4)
                 frame = ImageChops.screen(frame, hot.point(lambda v, g=g: min(255, int(v * g))))

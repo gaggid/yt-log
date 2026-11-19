@@ -15,6 +15,7 @@ var showRelaxation = (function () {
   }
 
   const STEP_LABELS = {
+    plan: '0. Planning the look and the text',
     scene: '1. Room image',
     rain: '2. Rain drawn over the picture (4K)',
     thumbnail: 'New thumbnail',
@@ -126,8 +127,8 @@ var showRelaxation = (function () {
       ? `<button class="small" data-action="watch" data-id="${s.id}">${watching.has(s.id) ? 'Hide player' : 'Watch'}</button>
          <a href="/api/relaxation/${s.id}/download" class="btn small">Download</a>` : ''}
     ${finalReady && s.status !== 'running'
-      ? `<button class="small" data-action="thumb" data-id="${s.id}" data-person="woman" title="Draw the thumbnail again with a happy woman by the rainy window">New thumbnail: woman</button>
-         <button class="small" data-action="thumb" data-id="${s.id}" data-person="man" title="Draw the thumbnail again with a happy man by the rainy window">New thumbnail: man</button>` : ''}
+      ? `<button class="small" data-action="thumb" data-id="${s.id}" data-person="" title="A new thumbnail: a different picture, layout, font and words (the place from outside, a landscape, raindrops, an animal, an object ...)">New thumbnail</button>
+         <button class="small" data-action="thumb" data-id="${s.id}" data-person="person" title="A new thumbnail with a person by the rainy window">New thumbnail with a person</button>` : ''}
     ${(s.audio_ready || finalReady) && s.status !== 'running'
       ? `<button class="small" data-action="music" data-id="${s.id}" data-instrument="" title="Same instrument, a new take">New music</button>
          <button class="small" data-action="music" data-id="${s.id}" data-instrument="other" title="Another instrument of this theme">New music, other instrument</button>` : ''}
