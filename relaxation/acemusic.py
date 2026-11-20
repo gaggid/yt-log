@@ -81,14 +81,25 @@ def _hash(body: dict) -> str:
     return hashlib.sha1(json.dumps({k: v for k, v in body.items() if k != "wait"}, sort_keys=True).encode()).hexdigest()[:12]
 
 
+def _load_problem(err: str) -> bool:
+    low = err.lower()
+    return "failed to load" in low or "not ready" in low
+
+
 async def _one(body: dict, s: dict, api_key: str) -> bytes:
+    """One song from the gateway. A cold start of the model can fail (it took 3 to 6 minutes and the gateway gives up after 300 s; the next start finds the files in memory and is faster):
+    that is waited out and tried again; any other error is final."""
     from shorts import wan
-    try:
-        ans = await wan.submit(body, s["base_url"], api_key, True, "/audio/music")
-        res = wan._result(ans) if ans.get("status") == "succeeded" or not ans.get("id") else await wan.wait(ans["id"], s["base_url"], api_key, 1800)
-        return await wan.fetch(res, s["base_url"], api_key)
-    except wan.WanError as e:
-        raise MediaError(f"the music could not be made: {e}") from e
+    for n in range(M.ACE_LOAD_TRIES):
+        try:
+            ans = await wan.submit(body, s["base_url"], api_key, True, "/audio/music")
+            res = wan._result(ans) if ans.get("status") == "succeeded" or not ans.get("id") else await wan.wait(ans["id"], s["base_url"], api_key, 1800)
+            return await wan.fetch(res, s["base_url"], api_key)
+        except wan.WanError as e:
+            if _load_problem(str(e)) and n < M.ACE_LOAD_TRIES - 1:
+                await asyncio.sleep(M.ACE_LOAD_WAIT_S)
+                continue
+            raise MediaError(f"the music could not be made: {e}") from e
 
 
 async def make_take(session_id: str, plan: dict, total_s: float, k: int, seed: int, s: dict, api_key: str, force: bool = False) -> dict:
@@ -137,4 +148,6 @@ async def make_takes(session_id: str, plan: dict, settings: dict, total_s: float
             takes.append(await make_take(session_id, plan, total_s, k, seed0 + k * 7919, s, api_key))
         except MediaError as e:
             err = str(e)[:300]
+            if _load_problem(err) and not takes:          # the model does not start: the other takes would fail the same way, so stop and let the caller use the other engine
+                break
     return takes, err

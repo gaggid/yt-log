@@ -150,3 +150,68 @@ def test_switching_the_engine_makes_a_new_plan_for_that_engine(monkeypatch):
     assert plan["engine"] == "acestep" and plan["bpm"] == 56 and "layers" in plan
     asyncio.run(audio.regenerate_music(sid, {"base_url": "x"}, "k", engine="acestep", instrument="other"))
     assert captured["plan"]["engine"] == "acestep"
+
+
+# ── the first start of the model can take longer than the gateway waits (2026-11-20, a real run lost its music) ─────────────────────────────────────────────────────────────
+def test_a_start_that_failed_is_waited_out_and_tried_again(monkeypatch):
+    from shorts import wan
+    monkeypatch.setattr(M, "ACE_LOAD_WAIT_S", 0.0)
+    calls = []
+
+    async def submit(body, base, key, background=False, path=""):
+        calls.append(1)
+        if len(calls) < 3:
+            raise wan.WanError("the model server did not take the request: Model failed to load: ACE-Step server not ready after 300s")
+        return {"status": "succeeded", "url": "u"}
+
+    async def fetch(res, base, key):
+        return b"audio"
+    monkeypatch.setattr(wan, "submit", submit)
+    monkeypatch.setattr(wan, "fetch", fetch)
+    assert asyncio.run(acemusic._one({}, {"base_url": "x"}, "k")) == b"audio" and len(calls) == 3
+
+    async def other_error(*a, **k):
+        raise wan.WanError("invalid_input: bad bpm")
+    monkeypatch.setattr(wan, "submit", other_error)
+    from story3.voice import MediaError
+    with pytest.raises(MediaError, match="invalid_input"):
+        asyncio.run(acemusic._one({}, {"base_url": "x"}, "k"))
+
+
+def test_when_the_model_does_not_start_the_video_gets_yue2_music_not_none(monkeypatch):
+    from relaxation import audio
+    from story3 import music as music_mod
+    s = store.create(scene="forest", minutes=1)
+    sid = s["id"]
+    sess = store.get(sid)
+    sess["settings"]["music_plan"] = variety.pick_music("forest", [], random.Random(4), engine="acestep")
+    store.save(sess)
+    asked = []
+
+    async def ace_fails(session_id, plan, settings, total_s, st, key, progress=None):
+        return [], "the music could not be made: Model failed to load: ACE-Step server not ready after 300s"
+
+    async def fake_yue(plan_id, cfg, total_s, st, key, progress=None, force=False):
+        asked.append(cfg["plan"]["caption"])
+        it = media.add(plan_id, "music", "bgm", 0, "done", {"duration_s": 60.0})
+        _ff("-f", "lavfi", "-i", "sine=f=330:d=60", str(media.media_dir(plan_id, "music") / "bgm-a1.wav"))
+        return media.update(it["id"], file="music/bgm-a1.wav")
+    monkeypatch.setattr(acemusic, "make_takes", ace_fails)
+    monkeypatch.setattr(music_mod, "make", fake_yue)
+    a = asyncio.run(audio.make(sid, {"base_url": "x"}, "k", force=True))
+    assert a["meta"]["music"] is True and a["meta"]["music_engine"] == "yue2" and "ACE-Step failed" in a["meta"]["music_note"] and not a["meta"]["music_error"]
+    assert asked and asked[0].startswith("English, ambient, sleep music") and "layered" not in asked[0]          # a YuE2 caption, not the ACE-Step one
+
+
+def test_the_other_takes_are_not_tried_when_the_first_one_cannot_start(monkeypatch):
+    s = store.create(scene="forest", minutes=180)
+    plan = variety.pick_music("forest", [], random.Random(2), engine="acestep")
+    tried = []
+
+    async def make_take(session_id, plan_, total_s, k, seed, st, key, force=False):
+        tried.append(k)
+        from story3.voice import MediaError
+        raise MediaError("the music could not be made: Model failed to load: not ready after 300s")
+    monkeypatch.setattr(acemusic, "make_take", make_take)
+    takes, err = asyncio.run(acemusic.make_takes(s["id"], plan, {"seed": 1}, 3 * 3600.0, {"base_url": "x"}, "k"))
+    assert takes == [] and tried == [0] and "not ready" in err

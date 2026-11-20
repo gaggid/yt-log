@@ -214,6 +214,7 @@ async def make(session_id: str, s: dict | None = None, key: str = "",
     music_item = None
     takes: list[dict] = []
     music_error = ""
+    engine_used, music_note = "yue2", ""
     if settings.get("music_enabled", True):
         scene = settings.get("scene") or M.DEFAULT_SCENE
         music_cfg = music_mod.norm({
@@ -225,7 +226,13 @@ async def make(session_id: str, s: dict | None = None, key: str = "",
         plan_now = settings.get("music_plan") or {}
         if plan_now.get("engine") == "acestep" and plan_now.get("layers"):
             takes, music_error = await acemusic.make_takes(session_id, plan_now, settings, total_s, s, api_key, progress)         # ACE-Step: 10 minute takes
-        else:
+            if takes:
+                engine_used = "acestep"
+            else:                           # the model did not load or the gateway was busy: the video gets YuE2 music, not none (2026-11-20: the first start took over 5 minutes)
+                music_note = f"ACE-Step failed ({music_error[:200]}); YuE2 music was used instead"
+                music_error = ""
+                music_cfg["plan"] = {"caption": M.music_caption(plan_now.get("instrument") or M.SCENES[scene]["instruments"][0], M.MUSIC_SECONDARY[0], M.MUSIC_MOODS[0], 68)}
+        if not takes:
             n_takes = M.take_count(total_s)
             for k in range(n_takes):
                 if progress:
@@ -268,7 +275,7 @@ async def make(session_id: str, s: dict | None = None, key: str = "",
             progress(3, 3, "audio done")
 
         done = media.update(it["id"], status="done", file=f"audio/{name}",
-                            meta={"total_s": total_s, "music": bool(music_item), "music_id": (music_item or {}).get("id", ""), "music_takes": len(takes) if music_bed is not None else 0, "music_engine": (settings.get("music_plan") or {}).get("engine", "yue2"),
+                            meta={"total_s": total_s, "music": bool(music_item), "music_id": (music_item or {}).get("id", ""), "music_takes": len(takes) if music_bed is not None else 0, "music_engine": engine_used, "music_note": music_note,
                                   "music_error": music_error, "rain_fallback": not RAIN_FILE.is_file()})
         shutil.rmtree(work, ignore_errors=True)      # the intermediate rain / music / mix files are about 2 GB each for 3 hours
         return done
