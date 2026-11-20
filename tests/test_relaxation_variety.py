@@ -56,7 +56,7 @@ def test_the_description_answers_what_who_when_where_how_and_has_no_health_claim
     look = looks.pick_look("courtyard", [], random.Random(2))
     c = seo.fallback_copy("courtyard", "study", "3 hours", "soft piano", look, "k", [])
     d = seo.description_from_copy("courtyard", "study", "3 hours", "soft piano", c)
-    for part in ("WHAT YOU WILL HEAR", "WHO IT IS FOR", "WHEN TO PLAY IT", "WHERE IT WORKS", "HOW TO USE IT", "ABOUT THE SCENE", "AI-generated"):
+    for part in ("WHAT YOU WILL HEAR", "WHO IT IS FOR", "WHEN TO PLAY IT", "WHERE IT WORKS", "HOW TO USE IT", "ABOUT THE SCENE"):
         assert part in d
     assert d.splitlines()[0] == c["hook"] and len(c["hook"]) <= 190 and d.rstrip().endswith("#StudyMusic #RainAmbience")
     assert not director.BAN.search(d)
@@ -156,7 +156,8 @@ def test_publish_text_follows_the_directors_copy_and_the_angle(monkeypatch):
     from relaxation import publish
     sid, st = _plan(monkeypatch, {"rl_visual": llm.LLMError("x"), "rl_copy": llm.LLMError("x")})
     pub = asyncio.run(publish.generate(sid, {"base_url": "http://gw/v1"}))
-    assert pub["title"] == st["copy"]["title"] and pub["angle"] == st["angle"] and "WHO IT IS FOR" in pub["description"]
+    assert pub["title"] == st["copy"]["title"] and pub["angle"] == st["angle"]
+    assert any(h.lower() in pub["description"].lower() for h in seo.SECTION_HEADS["who"]) and pub["layout"] and "AI-generated" not in pub["description"]        # the shape differs per video: some heading of the audience section is there
     assert pub["hashtags"][1] == seo.ANGLE_HASHTAGS[st["angle"]]
 
 
@@ -282,3 +283,24 @@ def test_a_picture_with_wrong_words_is_drawn_again_and_after_three_tries_the_wor
     store.save(s1)
     drawn.clear()
     assert asyncio.run(thumb.picture(s1["id"], {"base_url": "http://gw/v1"}, "k"))["status"] == "done" and len(drawn) == 1
+
+
+def test_the_description_has_a_different_shape_every_video_and_no_ai_line():
+    look = looks.pick_look("courtyard", [], random.Random(2))
+    c = seo.fallback_copy("courtyard", "study", "3 hours", "soft piano", look, "k", [])
+    recent, sigs, descs = [], [], []
+    for i in range(16):
+        lay = seo.pick_layout(f"rl-{i:04d}", recent)
+        assert seo.pick_layout(f"rl-{i:04d}", recent) == lay                                    # the same video always gets the same shape
+        d = seo.description_from_copy("courtyard", "study", "3 hours", "soft piano", c, lay)
+        assert d.splitlines()[0] == c["hook"] and d.rstrip().endswith("#StudyMusic #RainAmbience") and "AI-generated" not in d and len(d) < 4800
+        assert 3 + 1 <= len(lay["order"]) <= 6 and {"hear", "who", "when"} <= set(lay["order"])
+        assert all(seo.SECTION_HEADS[k][lay["heads"][k]].lower() in d.lower() for k in lay["order"])
+        assert "three times a week" in d or "every few days" in d
+        assert not director.BAN.search(d)
+        sigs.append(lay["sig"])
+        descs.append(d)
+        recent.insert(0, lay["sig"])
+    assert len(set(sigs)) >= 14 and all(sigs[i] != sigs[i + 1] for i in range(len(sigs) - 1))   # the shape differs from video to video
+    assert len({tuple(s.split("|")[0].split(">")) for s in sigs}) >= 8                           # and so does the order of the sections
+    assert len({d.split("\n\n")[-2] for d in descs}) == len(seo.CLOSERS)                         # every closing line is used

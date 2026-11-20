@@ -177,7 +177,7 @@ def test_daily_run_once_a_day_inside_the_window(monkeypatch):
     monkeypatch.setattr(daily.manager, "busy", lambda: False)
     at = lambda h: time.mktime((2026, 11, 20, h, 10, 0, 0, 0, -1))
     assert daily.tick(at(2)) is None                                  # switched off by default
-    daily.save_config({"enabled": True, "hour": 1, "minutes": 5})
+    daily.save_config({"enabled": True, "hour": 1, "minutes": 5, "days": list(range(7))})          # every day for this test; the default is three days a week
     assert daily.tick(at(0)) is None and daily.tick(at(7)) is None    # outside 01:00-06:00
     monkeypatch.setattr(daily.jobs, "busy", lambda: True)
     assert daily.tick(at(2)) is None and not started                  # another job running: wait
@@ -210,7 +210,7 @@ def test_titles_descriptions_and_tags_follow_the_search_rules():
         assert len(t) <= seo.TITLE_MAX and "Rain" in t and "3 Hours" in t and seo.place_of(k, True) in t or seo.place_of(k) in t
         d = seo.description(k, "3 hours", "harp")
         assert d.split("\n")[0].startswith("3 hours of calming rain sounds at ") and len(d.split("\n")[0]) <= 150, k
-        assert seo.place_of(k) in d.split("\n")[0] and "AI-generated" in d
+        assert seo.place_of(k) in d.split("\n")[0] and "AI-generated" not in d      # the disclosure is the YouTube flag (youtube/upload.py), not a line in the text (owner, 2026-11-20)
         assert d.splitlines()[-1].count("#") == 3                       # three hashtags, never more
         tg = seo.tags(k, "harp")
         assert tg[0] == "rain sounds" and len(tg) <= 15 and sum(len(x) + 1 for x in tg) <= 450
@@ -809,3 +809,40 @@ def test_a_busy_gateway_is_waited_for_not_turned_into_a_scene_picture_thumbnail(
     monkeypatch.setattr(thumb, "CONCURRENCY_WAIT_S", 0.0)
     with pytest.raises(Exception, match="429"):
         asyncio.run(thumb.picture(sid, {"base_url": "http://gw/v1"}, "k", force=True))
+
+
+def test_the_default_schedule_is_three_videos_a_week(monkeypatch):
+    import time
+    from relaxation import daily
+    started = []
+    monkeypatch.setattr(daily, "start_session", lambda minutes: started.append(minutes) or {"id": "rl-x"})
+    monkeypatch.setattr(daily.jobs, "busy", lambda: False)
+    monkeypatch.setattr(daily.manager, "busy", lambda: False)
+    daily.save_config({"enabled": True, "hour": 1, "minutes": 5})
+    assert daily.get_config()["days"] == [0, 2, 4]                                                    # Monday, Wednesday, Friday
+    ran = []
+    for day in range(16, 23):                                                                          # 16 November 2026 is a Monday
+        if daily.tick(time.mktime((2026, 11, day, 2, 10, 0, 0, 0, -1))):
+            ran.append(time.strftime("%a", time.strptime(f"2026-11-{day}", "%Y-%m-%d")))
+    assert ran == ["Mon", "Wed", "Fri"] and len(started) == 3
+    assert daily.save_config({"days": [6, 6, 9, -1]})["days"] == [6]                                  # invalid days are dropped
+    assert daily.save_config({"days": []})["days"] == [6]                                              # never no day at all
+
+
+def test_the_card_follows_a_running_upload_not_an_old_finished_job(monkeypatch):
+    """2026-11-20: Post to YouTube showed 'New thumbnail is ready' because the finished thumbnail job answered first while the upload job was running."""
+    from relaxation import api
+    from story2 import jobs
+    sid = store.create()["id"]
+    monkeypatch.setattr(jobs, "_jobs", {})
+    assert asyncio.run(api.run_status(sid))["state"] == "idle"
+    jobs._jobs[sid] = {"state": "done", "kind": "relaxation", "started": 100.0, "finished": 200.0, "done": 1, "total": 1}
+    assert asyncio.run(api.run_status(sid))["state"] == "done"                                   # only the old job: it answers
+    jobs._jobs[sid + ":upload"] = {"state": "running", "kind": "yt_upload", "started": 300.0, "done": 40, "total": 100}
+    assert asyncio.run(api.run_status(sid))["kind"] == "yt_upload"                               # the running upload wins over the finished thumbnail job
+    jobs._jobs[sid + ":upload"] = {"state": "done", "kind": "yt_upload", "started": 300.0, "finished": 900.0, "done": 1, "total": 1}
+    assert asyncio.run(api.run_status(sid))["kind"] == "yt_upload"                               # two finished jobs: the newer one
+    jobs._jobs[sid] = {"state": "done", "kind": "relaxation", "started": 950.0, "finished": 990.0, "done": 1, "total": 1}
+    assert asyncio.run(api.run_status(sid))["kind"] == "relaxation"
+    jobs._jobs[sid] = {"state": "running", "kind": "relaxation", "started": 995.0, "done": 0, "total": 3}
+    assert asyncio.run(api.run_status(sid))["state"] == "running" and asyncio.run(api.run_status(sid))["kind"] == "relaxation"

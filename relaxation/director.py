@@ -81,7 +81,7 @@ Return ONLY a JSON object: {"prompt": "<the image prompt>", "text": "<the exact 
 COPY_SYSTEM = """\
 [TASK:rl_copy]
 You write the YouTube title and description parts for a calm rain-ambience video, for the viewer who would actually search for it. The text answers what, who, when,
-where and why, and is true of the video: rain and soft instrumental music, no singing, made by AI. English only.
+where and why, and is true of the video: rain and soft instrumental music, no singing. English only.
 
 Return these fields:
 - title: at most 70 characters. Keywords people type come FIRST, then the length and the place. Must contain the word "rain" and the length given. Use the ANGLE

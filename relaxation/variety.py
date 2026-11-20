@@ -20,7 +20,8 @@ def history() -> list[dict]:
         st = s.get("settings") or {}
         mp = st.get("music_plan") or {}
         out.append({"id": s.get("id", ""), "scene": st.get("scene", ""), "instrument": mp.get("instrument", ""), "mood": mp.get("mood", ""), "engine": mp.get("engine", "yue2"), "style": mp.get("style", ""), "key": mp.get("key", ""), "look": st.get("look") or {},
-                    "angle": st.get("angle", ""), "thumb": st.get("thumb") or {}, "title": ((s.get("publish") or {}).get("title") or (st.get("copy") or {}).get("title") or "")})
+                    "angle": st.get("angle", ""), "thumb": st.get("thumb") or {}, "title": ((s.get("publish") or {}).get("title") or (st.get("copy") or {}).get("title") or ""),
+                    "desc_layout": (s.get("publish") or {}).get("layout", "")})
     return out
 
 

@@ -63,7 +63,7 @@ async def create_session(body: _CreateReq):
 
 def _daily_view() -> dict:
     cfg = daily.get_config()
-    return {**cfg, "window_h": daily.WINDOW_H, "today": daily.today(), "done_today": cfg["last_date"] == daily.today()}
+    return {**cfg, "window_h": daily.WINDOW_H, "today": daily.today(), "done_today": cfg["last_date"] == daily.today(), "day_names": daily.DAY_NAMES}
 
 
 @router.get("/daily")
@@ -75,6 +75,7 @@ class _DailyReq(BaseModel):
     enabled: bool | None = None
     hour: int | None = None
     minutes: int | None = None
+    days: list[int] | None = None        # 0 = Monday ... 6 = Sunday
 
 
 @router.put("/daily")
@@ -122,8 +123,13 @@ async def run_session(session_id: str, force: bool = False):
 @router.get("/{session_id}/run")
 async def run_status(session_id: str):
     j = jobs.status(session_id)
-    if j.get("state") == "idle":
-        j = jobs.status(session_id + ":upload")          # the YouTube upload is its own job (youtube/api.py); the page follows it here
+    u = jobs.status(session_id + ":upload")             # the YouTube upload is its own job (youtube/api.py); the page follows it here
+    if u.get("state") == "idle" or j.get("state") == "running":
+        return j if j.get("state") != "idle" else u
+    # a finished job stays in memory until the next one starts: an old "New thumbnail" must not hide an upload that is running (2026-11-20: the card said
+    # "New thumbnail is ready" while 40 % of the video was already on YouTube), and of two finished jobs the newer one is the answer
+    if u.get("state") == "running" or j.get("state") == "idle" or (u.get("finished") or 0) > (j.get("finished") or 0):
+        return u
     return j
 
 

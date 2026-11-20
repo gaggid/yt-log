@@ -93,8 +93,7 @@ def description(scene: str, length: str, instrument: str, scene_paragraph: str =
         hook,
         para,
         "Use it for: falling asleep, studying, reading, working, meditation or simply a quiet room.",
-        "The scene and the music are AI-generated.",
-        "Subscribe for a new rain video every night. What are you doing while it rains?",
+        "Subscribe for a new rain video three times a week. What are you doing while it rains?",
         " ".join(HASHTAGS),
     ])[:4800]
 
@@ -162,7 +161,7 @@ def fallback_copy(scene: str, angle: str, length: str, instrument: str, look: di
     paragraph = (f"The view from inside {place} just after the rain: {parts['season'][0]}, and {parts['air'][0]}. "
                  f"{cap(lamp)}. {cap(ins_text)} plays softly under the sound of the rain.")
     return {"title": fallback_title(scene, angle, length, instrument, key, recent), "hook": hook, "scene_paragraph": paragraph, "audience": aud, "when": when, "how": how,
-            "about": f"The scene is {place}, made with AI.", "source": "code"}
+            "about": f"The scene is {place}.", "source": "code"}
 
 
 def tags_for(scene: str, angle: str, instrument: str = "") -> list[str]:
@@ -186,22 +185,74 @@ def hashtags_for(angle: str) -> list[str]:
     return ["#RainSounds", ANGLE_HASHTAGS.get(angle, "#SleepMusic"), "#RainAmbience"]
 
 
-def description_from_copy(scene: str, angle: str, length: str, instrument: str, c: dict) -> str:
-    """The description: a hook that carries the keywords (search shows the first ~150 characters), then what, who, when, where, how, the scene, the AI note, a
-    question, three hashtags. Every part follows the video's angle."""
+# The shape of the description changes from video to video (owner, 2026-11-20: repetitive, template-like text is what YouTube's inauthentic-content rule looks at): which sections
+# there are, their order, their headings, how a heading is written, the bullet sign and the closing lines. The hook stays first and the three hashtags last.
+SECTION_HEADS = {
+    "hear": ["WHAT YOU WILL HEAR", "THE SOUND", "WHAT IS PLAYING", "LISTEN FOR"],
+    "who": ["WHO IT IS FOR", "MADE FOR", "GOOD COMPANY FOR", "BEST FOR"],
+    "when": ["WHEN TO PLAY IT", "BEST TIMES", "WHEN IT HELPS MOST", "PLAY IT WHEN"],
+    "where": ["WHERE IT WORKS", "WHERE TO LISTEN", "GOOD PLACES FOR IT"],
+    "how": ["HOW TO USE IT", "LISTENING TIPS", "MAKE THE MOST OF IT", "SMALL TIPS"],
+    "scene": ["ABOUT THE SCENE", "THE PLACE", "THE VIEW", "WHERE THIS IS"],
+}
+HEAD_STYLES = ["caps", "title", "dash"]
+BULLETS = ["•", "–", "·", "→"]
+CLOSERS = [
+    "Where are you listening from, and what are you doing while it rains? Tell us in the comments. New rain videos arrive three times a week: subscribe so you can find the next one.",
+    "Tell us where you are and what the weather is like there tonight. Subscribe for a new rain video three times a week.",
+    "Leave a comment: what are you working on, reading or dreaming about right now? A new scene comes every few days, so subscribe if you want the next one.",
+    "If you enjoyed it, a like and a comment help others find it. Each rain video is a new place, a new instrument and a new mood, three times a week.",
+]
+DEFAULT_LAYOUT = {"order": ["hear", "who", "when", "where", "how", "scene"], "heads": {k: 0 for k in SECTION_HEADS}, "style": "caps", "bullet": "•", "closer": 0, "sig": "default"}
+
+
+def pick_layout(key: str, recent: list[str]) -> dict:
+    """The shape of one video's description, drawn from `key` (the session id, so a second call gives the same shape) and different from the last videos' (`recent`: their signatures).
+    The sections 'hear', 'who' and 'when' are always there (the keywords of the search), one to three of 'where', 'how', 'scene' are added, and the order is shuffled."""
+    import random
+    rng = random.Random(int(hashlib.sha1(key.encode()).hexdigest()[:12], 16))
+    last = [r for r in recent[:6] if r]
+    best = None
+    for _ in range(60):
+        extra = rng.sample(["where", "how", "scene"], rng.choice((1, 2, 3)))
+        order = ["hear", "who", "when", *extra]
+        rng.shuffle(order)
+        heads = {k: rng.randrange(len(SECTION_HEADS[k])) for k in SECTION_HEADS}
+        style, bullet, closer = rng.choice(HEAD_STYLES), rng.choice(BULLETS), rng.randrange(len(CLOSERS))
+        sig = f"{'>'.join(order)}|{style}|{bullet}|{closer}|{''.join(str(heads[k]) for k in order)}"
+        best = {"order": order, "heads": heads, "style": style, "bullet": bullet, "closer": closer, "sig": sig}
+        if sig not in last and not any(order[:2] == r.split("|")[0].split(">")[:2] for r in last[:3]):          # not a shape of the last videos, and not the same two sections first as one of the last three
+            return best
+    return best
+
+
+def _head(text: str, style: str) -> str:
+    if style == "title":
+        return text.title().replace("'S", "'s")
+    if style == "dash":
+        return f"— {text} —"
+    return text
+
+
+def description_from_copy(scene: str, angle: str, length: str, instrument: str, c: dict, layout: dict | None = None) -> str:
+    """The description: a hook that carries the keywords (search shows the first ~150 characters), then the sections of `layout` (what, who, when and some of where, how, the scene, in a
+    different shape each video), a closing question and three hashtags. Every part follows the video's angle. There is no AI line: the disclosure is YouTube's own flag."""
     from . import looks
+    lay = layout or DEFAULT_LAYOUT
     ang = looks.ANGLES[angle]
     place = place_of(scene)
-    bullets = lambda items: "\n".join(f"• {x[0].upper() + x[1:]}" if x else "" for x in items)       # noqa: E731
+    bullets = lambda items: "\n".join(f"{lay['bullet']} {x[0].upper() + x[1:]}" if x else "" for x in items)       # noqa: E731
     ins_text = looks.INSTRUMENT_TEXT.get(instrument, "soft instrumental music")
-    return "\n\n".join([
-        c["hook"],
-        f"WHAT YOU WILL HEAR\n{c['scene_paragraph']} The music is instrumental: {ins_text}, slow and calm, with no singing and no drums.",
-        f"WHO IT IS FOR\n{bullets(c['audience'])}",
-        f"WHEN TO PLAY IT\n{bullets(c['when'])}",
-        f"WHERE IT WORKS\n{ang['where'][0].upper() + ang['where'][1:]}. {ang['why'][0].upper() + ang['why'][1:]}.",
-        f"HOW TO USE IT\n{bullets(c['how'])}",
-        f"ABOUT THE SCENE\n{c.get('about') or 'The scene is ' + place + '.'} The picture and the music are AI-generated.",
-        "Where are you listening from, and what are you doing while it rains? Tell us in the comments. A new rain video every day: subscribe so you can find the next one.",
-        " ".join(hashtags_for(angle)),
-    ])[:4800]
+    body = {
+        "hear": f"{c['scene_paragraph']} The music is instrumental: {ins_text}, slow and calm, with no singing and no drums.",
+        "who": bullets(c["audience"]),
+        "when": bullets(c["when"]),
+        "where": f"{ang['where'][0].upper() + ang['where'][1:]}. {ang['why'][0].upper() + ang['why'][1:]}.",
+        "how": bullets(c["how"]),
+        "scene": c.get("about") or "The scene is " + place + ".",
+    }
+    parts = [c["hook"]]
+    for k in lay["order"]:
+        parts.append(f"{_head(SECTION_HEADS[k][lay['heads'][k]], lay['style'])}\n{body[k]}")
+    parts += [CLOSERS[lay["closer"]], " ".join(hashtags_for(angle))]
+    return "\n\n".join(parts)[:4800]

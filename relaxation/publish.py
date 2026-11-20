@@ -1,7 +1,7 @@
 """YouTube upload text for a rain video.
 
 The title, tags, hashtags and the bones of the description are made in code (relaxation/seo.py: keyword first,
-a place that differs by theme, three hashtags, the AI disclosure, nothing untrue). The chat model writes only two plain
+a place that differs by theme, three hashtags, nothing untrue; the AI disclosure is YouTube's own flag set at upload, not a line of text; the shape of the description changes from video to video). The chat model writes only two plain
 sentences about what the viewer sees and hears; when it fails a template sentence is used, so a video is never left without text.
 Category is Music (10); not made for kids; the master is -14 LUFS."""
 import hashlib
@@ -60,9 +60,13 @@ async def generate(session_id: str, s: dict | None = None, force: bool = False) 
     angle = settings.get("angle") or ""
     if copy.get("title") and angle in seo.looks_angles():
         # written for this video's angle (who it is for, when, where, how) by relaxation/director.py; see the hook, the sections and the hashtags in seo.py
+        from . import variety
+        recent = [h.get("desc_layout") for h in variety.history() if h["id"] != session_id]
+        layout = seo.pick_layout(session_id, recent)
         publish = {
             "title": copy["title"],
-            "description": seo.description_from_copy(scene, angle, length, instrument, copy),
+            "description": seo.description_from_copy(scene, angle, length, instrument, copy, layout),
+            "layout": layout["sig"],
             "hashtags": seo.hashtags_for(angle),
             "tags": seo.tags_for(scene, angle, instrument),
             "nh": narration_hash(session),

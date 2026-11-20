@@ -186,7 +186,8 @@ var showRelaxation = (function () {
 <div class="card pad mb" id="rl-daily">
   <h4>Daily run</h4>
   <div class="row">
-    <label class="f"><input type="checkbox" id="rl-d-on" ${daily.enabled ? 'checked' : ''}> Make a new video every night</label>
+    <label class="f"><input type="checkbox" id="rl-d-on" ${daily.enabled ? 'checked' : ''}> Make a new video on these days</label>
+    ${(daily.day_names || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']).map((n, i) => `<label class="f"><input type="checkbox" class="rl-d-day" value="${i}" ${(daily.days || [0, 2, 4]).includes(i) ? 'checked' : ''}> ${n}</label>`).join('')}
     <label class="f">From (hour, 0-18)
       <input type="number" id="rl-d-hour" value="${daily.hour ?? 1}" min="0" max="18" style="width:70px">
     </label>
@@ -196,7 +197,7 @@ var showRelaxation = (function () {
     <button id="rl-d-save">Save</button>
     <button id="rl-d-now">Make today's now</button>
   </div>
-  <p class="mute small" style="margin:6px 0 0">Starts once a day, any time in the ${daily.window_h || 5} hours after the hour, when nothing else is running. A new theme, instrument and seed each time. Nothing is posted to YouTube by itself.${daily.done_today ? ' Today\'s run has started.' : ''}</p>
+  <p class="mute small" style="margin:6px 0 0">Starts once on each ticked day (three a week by default: fewer, more varied videos), any time in the ${daily.window_h || 5} hours after the hour, when nothing else is running. A new theme, instrument and seed each time. Nothing is posted to YouTube by itself.${daily.done_today ? ' Today\'s run has started.' : ''}</p>
 </div>
 
 <div class="card pad mb">
@@ -228,6 +229,7 @@ var showRelaxation = (function () {
             enabled: document.getElementById('rl-d-on').checked,
             hour: parseInt(document.getElementById('rl-d-hour').value) || 0,
             minutes: parseInt(document.getElementById('rl-d-min').value) || 180,
+            days: [...document.querySelectorAll('.rl-d-day')].filter(x => x.checked).map(x => parseInt(x.value)),
           });
           render();
         } catch (e) { alert(e.message); }
