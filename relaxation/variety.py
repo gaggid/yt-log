@@ -19,7 +19,7 @@ def history() -> list[dict]:
     for s in store.list_all():
         st = s.get("settings") or {}
         mp = st.get("music_plan") or {}
-        out.append({"id": s.get("id", ""), "scene": st.get("scene", ""), "instrument": mp.get("instrument", ""), "mood": mp.get("mood", ""), "look": st.get("look") or {},
+        out.append({"id": s.get("id", ""), "scene": st.get("scene", ""), "instrument": mp.get("instrument", ""), "mood": mp.get("mood", ""), "engine": mp.get("engine", "yue2"), "style": mp.get("style", ""), "key": mp.get("key", ""), "look": st.get("look") or {},
                     "angle": st.get("angle", ""), "thumb": st.get("thumb") or {}, "title": ((s.get("publish") or {}).get("title") or (st.get("copy") or {}).get("title") or "")})
     return out
 
@@ -36,7 +36,15 @@ def pick_scene(hist: list[dict], rng: random.Random) -> str:
     return rng.choice([k for k in M.SCENES if last[k] == oldest])
 
 
-def pick_music(scene: str, hist: list[dict], rng: random.Random) -> dict:
+def pick_engine(hist: list[dict], rng: random.Random) -> str:
+    """The music engine: the one used less in the last six videos, so both get the same number of videos to be compared on (owner, 2026-11-20); a tie is drawn."""
+    recent = [h.get("engine") or "yue2" for h in hist[:6]]
+    count = {e: recent.count(e) for e in M.MUSIC_ENGINES}
+    low = min(count.values())
+    return rng.choice([e for e in M.MUSIC_ENGINES if count[e] == low])
+
+
+def pick_music(scene: str, hist: list[dict], rng: random.Random, engine: str | None = None) -> dict:
     options = list((M.SCENES.get(scene) or M.SCENES[M.DEFAULT_SCENE])["instruments"])
     recent = [h["instrument"] for h in hist[:RECENT_INSTRUMENTS] if h["instrument"]]
     fresh = [i for i in options if i not in recent]
@@ -45,11 +53,14 @@ def pick_music(scene: str, hist: list[dict], rng: random.Random) -> dict:
         age = {i: (recent.index(i) if i in recent else 99) for i in options if i != previous}
         fresh = [max(age, key=age.get)] if age else options
     instrument = rng.choice(fresh)
+    engine = engine if engine in M.MUSIC_ENGINES else pick_engine(hist, rng)
+    if engine == "acestep":
+        return M.ace_plan(instrument, hist, rng)
     secondary = rng.choice([s for s in M.MUSIC_SECONDARY])
     moods = [m for m in M.MUSIC_MOODS if m not in [h["mood"] for h in hist[:2]]]
     mood = rng.choice(moods or M.MUSIC_MOODS)
     bpm = rng.randint(*M.MUSIC_BPM)
-    return {"instrument": instrument, "secondary": secondary, "mood": mood, "bpm": bpm,
+    return {"engine": "yue2", "instrument": instrument, "secondary": secondary, "mood": mood, "bpm": bpm,
             "caption": M.music_caption(instrument, secondary, mood, bpm)}
 
 

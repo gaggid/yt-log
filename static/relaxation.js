@@ -91,7 +91,7 @@ var showRelaxation = (function () {
   <div class="row">
     <div>
       <strong>${s.title || s.id}</strong>
-      ${(s.settings && s.settings.music_plan) ? `<span class="mute small" style="margin-left:8px">${s.settings.music_plan.instrument}, ${s.settings.music_plan.mood}, ${s.settings.music_plan.bpm} BPM</span>` : ''}
+      ${(s.settings && s.settings.music_plan) ? `<span class="mute small" style="margin-left:8px">${s.settings.music_plan.engine === 'acestep' ? 'ACE-Step: ' + (s.settings.music_plan.style || '') + ', ' + (s.settings.music_plan.key || '') + ', ' : 'YuE2: '}${s.settings.music_plan.instrument}, ${s.settings.music_plan.mood}, ${s.settings.music_plan.bpm} BPM</span>` : ''}
       <span style="margin-left:8px">${badge(s.status)}</span>
       <span style="margin-left:8px">${stepDots(s)}</span>
     </div>
@@ -131,7 +131,9 @@ var showRelaxation = (function () {
          <button class="small" data-action="thumb" data-id="${s.id}" data-person="person" title="A new thumbnail with a person by the rainy window">New thumbnail with a person</button>` : ''}
     ${(s.audio_ready || finalReady) && s.status !== 'running'
       ? `<button class="small" data-action="music" data-id="${s.id}" data-instrument="" title="Same instrument, a new take">New music</button>
-         <button class="small" data-action="music" data-id="${s.id}" data-instrument="other" title="Another instrument of this theme">New music, other instrument</button>` : ''}
+         <button class="small" data-action="music" data-id="${s.id}" data-instrument="other" title="Another instrument of this theme">New music, other instrument</button>
+         <button class="small" data-action="music" data-id="${s.id}" data-instrument="" data-engine="acestep" title="Make the music with ACE-Step 1.5 (56 BPM, four 10 minute takes)">New music with ACE-Step</button>
+         <button class="small" data-action="music" data-id="${s.id}" data-instrument="" data-engine="yue2" title="Make the music with YuE2">New music with YuE2</button>` : ''}
   </div>
   ${finalReady && watching.has(s.id) && s.stream_url ? `<video class="rl-player" data-id="${s.id}" src="${s.stream_url}" controls preload="metadata" style="width:100%;max-width:960px;margin-top:10px;border-radius:8px;background:#000"></video><div class="small mute">Plays straight from the server; drag the bar to jump anywhere in the 3 hours.</div>` : ''}
   ${s.music_url ? `<div class="mt-s small mute">Music only: <audio controls preload="none" src="${s.music_url}" style="vertical-align:middle;height:30px"></audio></div>` : ''}
@@ -289,7 +291,7 @@ var showRelaxation = (function () {
         }
         if (action === 'music') {
           const idx0 = sessions.findIndex(s => s.id === id);
-          try { await api('POST', `/api/relaxation/${id}/music/regenerate`, { instrument: btn.dataset.instrument || '' }); }
+          try { await api('POST', `/api/relaxation/${id}/music/regenerate`, { instrument: btn.dataset.instrument || '', engine: btn.dataset.engine || '' }); }
           catch (e) { if (!e.message.includes('running')) { alert(e.message); return; } }
           if (idx0 >= 0) { sessions[idx0] = { ...sessions[idx0], status: 'running', step: 'music', error: '', _done: '', _job: { label: 'starting' } }; render(); }     // show it at once
           startPoll(id, async (job) => {

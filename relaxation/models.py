@@ -421,6 +421,78 @@ def music_recipe(scene: str, plan: dict | None = None) -> dict:
     return {"caption": music_caption(ins, MUSIC_SECONDARY[0], MUSIC_MOODS[0], 58)}
 
 
+# ── the second music engine, ACE-Step 1.5 (relaxation/acemusic.py; owner 2026-11-20: 56 bpm, between this and YuE2, and compare the views later) ─────────────────
+MUSIC_ENGINES = ("yue2", "acestep")
+ACE_MODEL = "acestep"
+ACE_BPM = 56                         # 56 felt best (64, 70 and 76 were tried); the takes stay calm in a minor key
+ACE_KEYS = ["A minor", "D minor", "E minor"]
+ACE_TAKES = 4                        # distinct 10 minute takes for a 3 hour video: about 40 minutes before the music comes round again
+ACE_TAKE_S = 600                     # the longest the model makes
+ACE_TRIES = 3                        # seeds tried for one take when it comes out too bright, too busy or opens with a grind
+ACE_MAX_BRIGHT = 1500                # Hz: above this a take is upbeat, not calm (the YuE2 takes the owner liked are 520-940)
+ACE_MAX_PULSE = 0.9
+# The layers of a take, in the order the listener finds them. `lead` is the session's own instrument (from the theme); the rest come from the style, so the genre feel changes from day to day.
+ACE_STYLES = {
+    "ambient": {"pad": "warm pads", "second": "soft felt piano", "accent": "kalimba bells", "pulse": "soft frame drum"},
+    "himalayan": {"pad": "tanpura drone", "second": "singing bowls", "accent": "soft temple bells", "pulse": "soft hand drum"},
+    "tape": {"pad": "warm tape pads", "second": "soft felt piano", "accent": "glass bells", "pulse": "muted heartbeat drum"},
+    "acoustic": {"pad": "warm string pads", "second": "fingerpicked nylon guitar", "accent": "soft harp", "pulse": "soft shaker and frame drum"},
+    "musicbox": {"pad": "warm drone pads", "second": "soft music box", "accent": "celeste bells", "pulse": "soft frame drum"},
+}
+
+
+def ace_take_count(total_s: float) -> int:
+    import math
+    return max(1, min(ACE_TAKES, math.ceil(total_s / ACE_TAKE_S)))
+
+
+def ace_caption(plan: dict) -> str:
+    """The caption of an ACE-Step take, from the plan's layers: the calm words that measured closest to the YuE2 takes (beatless, dark, muffled, distant, soft dynamics)."""
+    L = plan["layers"]
+    return (f"ambient, sleep music, tranquil, layered, slowly evolving, {L['pad']}, {L['second']}, {L['lead']}, {L['accent']}, {L['pulse']}, "
+            "beatless, dark, muffled, distant, soft dynamics, no vocals")
+
+
+def ace_lyrics(plan: dict, k: int = 0) -> str:
+    """Section tags only (no words): the pad alone first, then the layers one by one, all together, then back to the pad. The middle order turns by one for every take."""
+    L = plan["layers"]
+    order = list(plan.get("order") or ["second", "lead", "accent"])
+    r = k % len(order)
+    order = order[r:] + order[:r]
+    mood = {"second": "dreamy", "lead": "low energy", "accent": "dreamy"}
+    parts = [f"[Intro - {L['pad']} only, low energy]"]
+    for key in order:
+        parts.append(f"[Instrumental - {'sparse ' if key == 'second' else ''}{L[key]} {'enters' if key == 'second' else 'joins' if key == 'lead' else 'twinkle'}, {mood[key]}]")
+    parts.append(f"[Instrumental - {L['pulse']} joins, low energy]")
+    parts.append("[Instrumental - all layers together, calm, melancholic]")
+    parts.append(f"[Outro - {L['lead']} and {L['pulse']} fade, {L['pad']} only, fade out]")
+    return "\n\n".join(parts)
+
+
+def ace_plan(instrument: str, hist: list[dict], rng) -> dict:
+    """The music plan of an ACE-Step session: the lead instrument, a style not used in the last three videos, a minor key not used in the last two, a random order of the middle layers."""
+    last = instrument.split()[-1]
+    recent_styles = [h.get("style") for h in hist[:3]]
+    pool = [k for k, v in ACE_STYLES.items() if last not in v["second"] and last not in v["accent"]]
+    styles = [k for k in pool if k not in recent_styles] or pool or list(ACE_STYLES)
+    style = rng.choice(styles)
+    recent_keys = [h.get("key") for h in hist[:2]]
+    key = rng.choice([k for k in ACE_KEYS if k not in recent_keys] or ACE_KEYS)
+    order = ["second", "lead", "accent"]
+    rng.shuffle(order)
+    plan = {"engine": "acestep", "instrument": instrument, "style": style, "key": key, "bpm": ACE_BPM, "order": order, "mood": "tranquil", "secondary": ACE_STYLES[style]["pad"],
+            "layers": {**ACE_STYLES[style], "lead": instrument}}
+    plan["caption"] = ace_caption(plan)
+    return plan
+
+
+def ace_set_lead(plan: dict, instrument: str) -> dict:
+    """The same plan with another lead instrument (the caption follows)."""
+    out = {**plan, "instrument": instrument, "layers": {**plan["layers"], "lead": instrument}}
+    out["caption"] = ace_caption(out)
+    return out
+
+
 # ── default session settings ──────────────────────────────────────────────────
 DEFAULT_SETTINGS = {
     "scene": DEFAULT_SCENE,

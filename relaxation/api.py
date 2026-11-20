@@ -129,12 +129,15 @@ async def run_status(session_id: str):
 
 class _MusicReq(BaseModel):
     instrument: str = ""            # "" same instrument, "other" another one of the theme's, or a name
+    engine: str = ""                # "" keeps the music engine, "yue2" or "acestep" switches it
 
 
 @router.post("/{session_id}/music/regenerate")
 async def regenerate_music(session_id: str, body: _MusicReq):
     """Make the music again with a new seed and put it into the finished video (the picture is copied, not re-encoded)."""
     s = _get(session_id)
+    if body.engine not in ("",) + tuple(M.MUSIC_ENGINES):
+        raise HTTPException(400, "engine must be yue2 or acestep")
     if body.instrument and body.instrument != "other" and body.instrument not in (M.SCENES.get((s.get("settings") or {}).get("scene")) or {}).get("instruments", []):
         raise HTTPException(400, "that instrument is not one of this theme's")
 
@@ -145,7 +148,7 @@ async def regenerate_music(session_id: str, body: _MusicReq):
         store.save(sess)
         problem = ""
         try:
-            await audio.regenerate_music(session_id, instrument=body.instrument, progress=progress)
+            await audio.regenerate_music(session_id, instrument=body.instrument, engine=body.engine, progress=progress)
         except Exception as e:  # noqa: BLE001 - shown on the card; the job reports it too
             problem = str(e)[:300]
             raise

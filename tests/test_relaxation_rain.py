@@ -13,6 +13,8 @@ from story3 import store as media
 def _wan_engine_unless_asked(monkeypatch):
     """Most of these tests are about the Wan rain clip, the old engine; the code engine tests ask for it by name."""
     monkeypatch.setattr(M, "RAIN_ENGINE", "wan")
+    from relaxation import variety
+    monkeypatch.setattr(variety, "pick_engine", lambda hist, rng: "yue2")            # the tests of this file are about the YuE2 music; tests/test_relaxation_acemusic.py asks for ACE-Step by name
 
 
 def _session_with_scene(tmp_path):

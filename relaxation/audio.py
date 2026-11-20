@@ -18,7 +18,7 @@ import config
 from story3 import store as media, music as music_mod
 from story3.voice import MediaError
 
-from . import models as M, store
+from . import acemusic, models as M, store
 
 ASSETS_DIR = Path(__file__).with_name("assets")
 RAIN_FILE = ASSETS_DIR / M.RAIN_ASSET
@@ -111,25 +111,27 @@ _CLEAN_TAKE = ("silenceremove=start_periods=1:start_threshold=-50dB,areverse,"
                "silenceremove=start_periods=1:start_threshold=-50dB,areverse,aresample=48000,aformat=channel_layouts=stereo")
 
 
-def _music_unit(srcs: list[Path], work: Path, seed: int) -> Path | None:
+def _music_unit(srcs: list[Path], work: Path, seed: int, starts: list[float] | None = None) -> Path | None:
     """One seamless cycle of several takes: each take is cleaned (silence off both ends) and trimmed, the takes are joined in a
     shuffled order with long equal-power cross-fades, and the end of the cycle is cross-faded into its start, so repeating the
     cycle has no gap, no click and no intro or ending to hear. None when nothing usable."""
     x = M.MUSIC_XFADE_S
-    order = list(srcs)
+    order = list(range(len(srcs)))
     random.Random(seed).shuffle(order)
     parts: list[tuple[Path, float]] = []
-    for i, p in enumerate(order):
+    for i, j in enumerate(order):
+        p = srcs[j]
+        cut = M.MUSIC_TRIM_S + (starts[j] if starts else 0.0)             # an ACE-Step take that opens with a grind is cut at the point where it settles
         a, b = work / f"take{i}a.wav", work / f"take{i}.wav"
         try:
             _ffmpeg(["-i", str(p), "-af", _CLEAN_TAKE, "-c:a", "pcm_s16le", str(a)])
             d = _rain_duration(a)
-            if d < M.MUSIC_TRIM_S + M.MUSIC_TRIM_END_S + 3 * x:
+            if d < cut + M.MUSIC_TRIM_END_S + 3 * x:
                 continue
-            _ffmpeg(["-i", str(a), "-af", f"atrim={M.MUSIC_TRIM_S}:{d - M.MUSIC_TRIM_END_S},asetpts=PTS-STARTPTS", "-c:a", "pcm_s16le", str(b)])
+            _ffmpeg(["-i", str(a), "-af", f"atrim={cut}:{d - M.MUSIC_TRIM_END_S},asetpts=PTS-STARTPTS", "-c:a", "pcm_s16le", str(b)])
         except RuntimeError:
             continue
-        parts.append((b, d - M.MUSIC_TRIM_S - M.MUSIC_TRIM_END_S))
+        parts.append((b, d - cut - M.MUSIC_TRIM_END_S))
     if not parts:
         return None
     inputs, chain, last = [], "", "[0:a]"
@@ -153,7 +155,7 @@ def _music_unit(srcs: list[Path], work: Path, seed: int) -> Path | None:
 
 def _music_bed(items: list[dict], total_s: float, work: Path, level: float, seed: int) -> Path | None:
     """The music for the whole video: the cycle repeated with stream_loop, one fixed gain to `level` LUFS, a peak limit, soft fades."""
-    unit = _music_unit([media.path_of(i) for i in items], work, seed)
+    unit = _music_unit([media.path_of(i) for i in items], work, seed, [float((i.get("meta") or {}).get("trim_s") or 0) for i in items])
     if unit is None:
         return None
     lufs = _loudness(unit)
@@ -220,15 +222,19 @@ async def make(session_id: str, s: dict | None = None, key: str = "",
             "plan": M.music_recipe(scene, settings.get("music_plan")),
             "seed": int(settings.get("music_seed") or settings.get("seed") or 7),      # its own seed: a new take does not touch the picture
         })
-        n_takes = M.take_count(total_s)
-        for k in range(n_takes):
-            if progress:
-                progress(0, 3, f"generating ambient music, take {k + 1} of {n_takes}")
-            cfg_k = {**music_cfg, "seed": int(music_cfg["seed"]) + k * 7919, "loopable": True}        # no intro and no outro: it joins to the next take
-            try:
-                takes.append(await music_mod.make(session_id, cfg_k, total_s, s, api_key, progress=None, force=False))
-            except MediaError as e:
-                music_error = str(e)[:300]                  # keep the takes that worked; with none, the video is rain only and the card says so
+        plan_now = settings.get("music_plan") or {}
+        if plan_now.get("engine") == "acestep" and plan_now.get("layers"):
+            takes, music_error = await acemusic.make_takes(session_id, plan_now, settings, total_s, s, api_key, progress)         # ACE-Step: 10 minute takes
+        else:
+            n_takes = M.take_count(total_s)
+            for k in range(n_takes):
+                if progress:
+                    progress(0, 3, f"generating ambient music, take {k + 1} of {n_takes}")
+                cfg_k = {**music_cfg, "seed": int(music_cfg["seed"]) + k * 7919, "loopable": True}        # no intro and no outro: it joins to the next take
+                try:
+                    takes.append(await music_mod.make(session_id, cfg_k, total_s, s, api_key, progress=None, force=False))
+                except MediaError as e:
+                    music_error = str(e)[:300]                  # keep the takes that worked; with none, the video is rain only and the card says so
         music_item = takes[0] if takes else None
 
     it = media.add(session_id, M.KIND_AUDIO, "audio", 0, "running",
@@ -262,7 +268,7 @@ async def make(session_id: str, s: dict | None = None, key: str = "",
             progress(3, 3, "audio done")
 
         done = media.update(it["id"], status="done", file=f"audio/{name}",
-                            meta={"total_s": total_s, "music": bool(music_item), "music_id": (music_item or {}).get("id", ""), "music_takes": len(takes) if music_bed is not None else 0,
+                            meta={"total_s": total_s, "music": bool(music_item), "music_id": (music_item or {}).get("id", ""), "music_takes": len(takes) if music_bed is not None else 0, "music_engine": (settings.get("music_plan") or {}).get("engine", "yue2"),
                                   "music_error": music_error, "rain_fallback": not RAIN_FILE.is_file()})
         shutil.rmtree(work, ignore_errors=True)      # the intermediate rain / music / mix files are about 2 GB each for 3 hours
         return done
@@ -289,10 +295,10 @@ def drop_mix(session_id: str) -> int:
     return freed
 
 
-async def regenerate_music(session_id: str, s: dict | None = None, key: str = "", instrument: str = "", progress=None) -> dict:
+async def regenerate_music(session_id: str, s: dict | None = None, key: str = "", instrument: str = "", progress=None, engine: str = "") -> dict:
     """Make the music again (a new seed, so a new take) and put it into the finished video.
 
-    `instrument`: "" keeps the instrument, "other" picks another of the theme's instruments, or a name to use.
+    `instrument`: "" keeps the instrument, "other" picks another of the theme's instruments, or a name to use. `engine`: "" keeps the music engine, "yue2" or "acestep" switches it.
     The audio is mixed again; when the video exists its picture is copied (no re-encode) and only the sound is replaced,
     so this takes minutes, not the encode of the whole video. Returns {audio, video}."""
     from story import settings as settings_mod
@@ -305,7 +311,13 @@ async def regenerate_music(session_id: str, s: dict | None = None, key: str = ""
     plan = dict(st.get("music_plan") or {})
     old_instrument = plan.get("instrument", "")
     rng = random.Random()
-    if not instrument and (old_instrument in M.MUSIC_AVOID or not (M.MUSIC_BPM[0] <= int(plan.get("bpm") or 0) <= M.MUSIC_BPM[1])):
+    if engine in M.MUSIC_ENGINES and engine != plan.get("engine", "yue2"):
+        hist = [{"scene": scene, "instrument": old_instrument, "mood": plan.get("mood", "")}] + variety.history()
+        plan = variety.pick_music(scene, hist, rng, engine=engine)
+        st["music_plan"] = plan
+        old_instrument = plan.get("instrument", old_instrument)
+        instrument = ""
+    if plan.get("engine", "yue2") == "yue2" and not instrument and (old_instrument in M.MUSIC_AVOID or not (M.MUSIC_BPM[0] <= int(plan.get("bpm") or 0) <= M.MUSIC_BPM[1])):
         # a plan made before the owner's changes (a cello, or the slow tempo): update it, keeping what is still right
         if old_instrument in M.MUSIC_AVOID:
             instrument = "other"
@@ -316,7 +328,9 @@ async def regenerate_music(session_id: str, s: dict | None = None, key: str = ""
     if instrument:
         if instrument == "other":
             hist = [{"scene": scene, "instrument": old_instrument, "mood": plan.get("mood", "")}] + variety.history()
-            plan = variety.pick_music(scene, hist, rng)
+            plan = variety.pick_music(scene, hist, rng, engine=plan.get("engine", "yue2"))
+        elif plan.get("engine") == "acestep":
+            plan = M.ace_set_lead(plan, instrument)
         else:
             plan = {**plan, "instrument": instrument}
             plan["caption"] = M.music_caption(instrument, plan.get("secondary") or M.MUSIC_SECONDARY[0], plan.get("mood") or M.MUSIC_MOODS[0], int(plan.get("bpm") or 58))
