@@ -775,3 +775,37 @@ def test_regenerating_an_old_plan_drops_the_cello_and_the_slow_tempo(tmp_path, m
     asyncio.run(audio.regenerate_music(sid, {"base_url": "x"}, "k"))
     plan = store.get(sid)["settings"]["music_plan"]
     assert plan["instrument"] == "harp" and M.MUSIC_BPM[0] <= plan["bpm"] <= M.MUSIC_BPM[1] and "harp" in plan["caption"]
+
+
+def test_a_busy_gateway_is_waited_for_not_turned_into_a_scene_picture_thumbnail(tmp_path, monkeypatch):
+    """2026-11-20: the thumbnail picture got HTTP 429 (the key allows one request at a time), the step fell back to the scene picture with code text and nobody noticed."""
+    import base64
+    import io
+    import httpx
+    from PIL import Image
+    from relaxation import thumb
+    sid = _session_with_scene(tmp_path)
+    buf = io.BytesIO(); Image.new("RGB", (1280, 720), (200, 120, 40)).save(buf, "JPEG")
+    sent = []
+
+    class FakeClient:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, url, headers=None, json=None):
+            sent.append(1)
+            if len(sent) < 3:
+                return httpx.Response(429, text='{"error":{"code":"concurrency_limit"}}')
+            return httpx.Response(200, json={"data": [{"b64_json": base64.b64encode(buf.getvalue()).decode()}]})
+    monkeypatch.setattr(thumb.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(thumb, "CONCURRENCY_POLL_S", 0.0)
+    pic = asyncio.run(thumb.picture(sid, {"base_url": "http://gw/v1"}, "k"))
+    assert pic["status"] == "done" and len(sent) == 3
+
+    class Always429(FakeClient):
+        async def post(self, url, headers=None, json=None):
+            return httpx.Response(429, text='{"error":{"code":"concurrency_limit"}}')
+    monkeypatch.setattr(thumb.httpx, "AsyncClient", Always429)
+    monkeypatch.setattr(thumb, "CONCURRENCY_WAIT_S", 0.0)
+    with pytest.raises(Exception, match="429"):
+        asyncio.run(thumb.picture(sid, {"base_url": "http://gw/v1"}, "k", force=True))

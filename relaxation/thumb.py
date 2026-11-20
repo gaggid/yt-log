@@ -3,6 +3,7 @@
 Since 2026-11-20 the image model draws the big words INTO the picture (huge, bold, the length and the instrument: "3 HOURS BAMBOO FLUTE"), from a prompt that the art model
 wrote (relaxation/director.py `plan_thumb`). A vision model reads the words back (relaxation/thumbcheck.py) and the picture is drawn again when a word is wrong; after three
 wrong tries the picture is drawn without words and the words are laid on by code (relaxation/thumbrender.py), so the letters are always right in the end."""
+import asyncio
 import base64
 import io
 from pathlib import Path
@@ -15,6 +16,8 @@ from story3.voice import MediaError
 from . import models as M, store, thumbcheck, thumbrender
 
 SIZE = thumbrender.SIZE
+CONCURRENCY_WAIT_S = 900.0              # the gateway answers 429 while another request of the key is running (the unfinished picture of a stopped app can hold it); wait up to this long
+CONCURRENCY_POLL_S = 15.0
 MAX_BYTES = thumbrender.MAX_BYTES
 
 
@@ -54,10 +57,17 @@ async def _draw(session_id: str, s: dict, key: str, prompt: str, seed: int, meta
     """One picture from the image model as a numbered attempt (kind rl_thumbpic). Raises MediaError when the gateway fails."""
     it = media.add(session_id, M.KIND_THUMB_PIC, "thumbpic", 0, "running", {**meta, "seed": seed})
     try:
-        async with httpx.AsyncClient(timeout=900) as c:
-            r = await c.post(s["base_url"].rstrip("/") + "/images/generations", headers={"Authorization": f"Bearer {key}"},
-                             json={"model": s.get("image_model") or M.IMAGE_MODEL, "prompt": prompt, "size": M.THUMB_SIZE, "n": 1, "steps": M.IMAGE_STEPS,
-                                   "response_format": "b64_json", "seed": seed + (len(media.items(session_id, M.KIND_THUMB_PIC, "thumbpic")) - 1) * 7})
+        payload = {"model": s.get("image_model") or M.IMAGE_MODEL, "prompt": prompt, "size": M.THUMB_SIZE, "n": 1, "steps": M.IMAGE_STEPS,
+                   "response_format": "b64_json", "seed": seed + (len(media.items(session_id, M.KIND_THUMB_PIC, "thumbpic")) - 1) * 7}
+        waited = 0.0
+        while True:
+            async with httpx.AsyncClient(timeout=900) as c:
+                r = await c.post(s["base_url"].rstrip("/") + "/images/generations", headers={"Authorization": f"Bearer {key}"}, json=payload)
+            if r.status_code == 429 and "concurrency_limit" in r.text and waited < CONCURRENCY_WAIT_S:       # the key serves one request at a time and another one holds it: wait, do not fall back to the scene picture
+                await asyncio.sleep(CONCURRENCY_POLL_S)
+                waited += CONCURRENCY_POLL_S
+                continue
+            break
         if r.status_code != 200:
             raise MediaError(f"image gateway returned {r.status_code}: {r.text[:200]}")
         data = base64.b64decode(r.json()["data"][0]["b64_json"])
