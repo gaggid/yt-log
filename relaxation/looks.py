@@ -201,7 +201,7 @@ def _only_after_rain(t: str) -> bool:
 # The thumbnail is a different PICTURE each time (owner, 2026-11-19: "why do we always show a man or woman with a mug"): the place seen from outside, a wide
 # landscape in rain, macro raindrops with bokeh, a still life, an animal, an object, a person walking with an umbrella; a person at the window is the rare one.
 # Rain is visible in a thumbnail (it is a still picture, so it may fall in fine lines).
-SUBJECT_WEIGHTS = [("exterior", 18), ("landscape", 18), ("macro", 14), ("still", 12), ("animal", 10), ("object", 10), ("walk", 8), ("person", 6), ("back", 4)]
+SUBJECT_WEIGHTS = [("person", 26), ("instrument", 22), ("exterior", 12), ("landscape", 10), ("macro", 8), ("animal", 8), ("object", 6), ("still", 4), ("walk", 2), ("back", 2)]
 SUBJECTS = [k for k, w in SUBJECT_WEIGHTS for _ in range(w)]
 THUMB_PLACES = {
     "night_city": ("a traditional Japanese house with a glowing paper-screen veranda beside a moss garden and a stone lantern", "a hidden moss garden with a koi pond, maples and stone lanterns"),
@@ -249,7 +249,12 @@ ACTIVITY = {
 }
 THUMB_LIGHT = ["warm golden lamp light against the cool blue rainy dusk", "soft silver grey daylight on a rainy afternoon", "peach and rose sunset glow through the clouds and rain",
                "deep blue moonlit night with warm lights glowing", "soft green-grey misty morning light", "violet twilight with warm lights glowing"]
-SIDES_T = ["right", "left", "right", "left", "centre"]
+SIDES_T = ["right", "left"]                      # the side the subject is on; the big words take the open side
+# The lettering drawn INTO the picture by the image model (owner, 2026-11-20): huge, heavy, in colours that come from the picture. Colours and type style are seeds so
+# two thumbnails in a row never wear the same words.
+TEXT_COLORS = ["warm gold and cream white", "soft peach and cream white", "pale aqua and white", "lilac and cream white", "sunset orange and pale yellow",
+               "mint green and cream white", "rose pink and white", "sky blue and white"]
+TYPE_STYLES = ["a tall, heavy condensed sans-serif", "a chunky rounded sans-serif", "a heavy slab serif", "a bold geometric sans-serif", "a heavy, friendly, slightly rounded block typeface"]
 LAYOUTS = ["side", "bottom", "top", "badge", "stack"]
 FONTS = [("impact.ttf", "Impact"), ("georgiab.ttf", "Georgia Bold"), ("segoeuib.ttf", "Segoe UI Bold"), ("bahnschrift.ttf", "Bahnschrift"), ("trebucbd.ttf", "Trebuchet Bold"),
          ("constanb.ttf", "Constantia Bold"), ("arialbd.ttf", "Arial Bold")]
@@ -274,15 +279,16 @@ def pick_thumb(angle: str, scene: str, hist: list[dict], rng: random.Random) -> 
     obj = fresh([o[0] for o in OBJECTS], "object")
     return {"subject": subject, "who": who, "ethnic": rng.choice(ETHNIC), "age": rng.choice(["in their twenties", "in their early thirties"]), "outfit": rng.choice(OUTFITS),
             "hair": rng.choice(HAIR[who]), "activity": angle if angle in ACTIVITY else "calm", "light": rng.choice(THUMB_LIGHT), "side": fresh(SIDES_T, "side", 2),
-            "layout": fresh(LAYOUTS, "layout", 2), "font": fresh([f[0] for f in FONTS], "font", 3), "palette": rng.randrange(len(PALETTES)), "animal": animal, "object": obj}
+            "layout": fresh(LAYOUTS, "layout", 2), "font": fresh([f[0] for f in FONTS], "font", 3), "palette": rng.randrange(len(PALETTES)), "animal": animal, "object": obj,
+            "text_colors": fresh(TEXT_COLORS, "text_colors", 3), "type_style": fresh(TYPE_STYLES, "type_style", 2)}
 
 
 def _entry(pool, key):
     return next((x for x in pool if x[0] == key), pool[0])
 
 
-def thumb_prompt(scene: str, t: dict) -> str:
-    """The picture prompt of a thumbnail from its seeds (the stand-in for the model's prompt, and the model's starting point)."""
+def _thumb_core(scene: str, t: dict, instrument: str = "") -> tuple[str, str, str, str]:
+    """(body, composition, light, subject) of a thumbnail from its seeds."""
     view = M.THUMB_VIEWS.get(scene) or M.THUMB_VIEWS[M.DEFAULT_SCENE]
     ext, wide = THUMB_PLACES.get(scene) or THUMB_PLACES["courtyard"]
     side = t.get("side", "right")
@@ -299,6 +305,9 @@ def thumb_prompt(scene: str, t: dict) -> str:
         body = f"Extreme close-up macro of raindrops on window glass, each drop a tiny lens showing {view} upside down, soft glowing warm bokeh lights behind, shallow depth of field"
     elif sub == "still":
         body = f"A steaming mug of tea, an open book and a small glowing candle on a windowsill, rain on the glass behind showing {view}"
+    elif sub == "instrument":
+        ins = instrument or "soft piano"
+        body = f"A {ins} resting on a warm wooden windowsill beside a steaming cup of tea, a rain-covered window behind it showing {view}, raindrops running down the glass"
     elif sub == "animal":
         a = _entry(ANIMALS, t.get("animal", "cat"))
         body = f"{a[1].format(view=view)[0].upper() + a[1].format(view=view)[1:]}, {rain if a[0] in ('owl', 'deer', 'ducks') else 'raindrops running down the glass'}"
@@ -313,11 +322,23 @@ def thumb_prompt(scene: str, t: dict) -> str:
     else:
         who = f"A happy young {t.get('who', 'woman')} {t.get('age', 'in their twenties')}, {t.get('ethnic', 'South Asian')}, with {t.get('hair', 'short dark hair')}, wearing {t.get('outfit', OUTFITS[0])}, {ACTIVITY.get(t.get('activity'), ACTIVITY['calm'])}"
         body = f"{who}, seen in a three-quarter view beside a large rain-covered window showing {view}"
+    return body, comp, light, sub
+
+
+def thumb_seed(scene: str, t: dict, instrument: str = "") -> str:
+    """The idea of a thumbnail from its seeds, in plain words: what it shows, where it sits, the light. The art model builds the real prompt from this."""
+    body, comp, light, _ = _thumb_core(scene, t, instrument)
+    return f"{body}. {comp}. {light.capitalize()}."
+
+
+def thumb_prompt(scene: str, t: dict, instrument: str = "") -> str:
+    """The picture prompt of a thumbnail from its seeds, with no words in it (the stand-in for the model's prompt; the words are then laid on by code)."""
+    body, comp, light, sub = _thumb_core(scene, t, instrument)
     return (f"{body}. {comp}. {light.capitalize()}. Photorealistic, cinematic, shallow depth of field, rich colour, a calm and uplifting mood, a clear single focal point. "
             + ("No text, no logo." if sub in PERSON_SUBJECTS else "No people, no text, no logo."))
 
 
-def thumb_problems(t: dict, text: str) -> list[str]:
+def thumb_problems(t: dict, text: str, instrument: str = "") -> list[str]:
     low = (text or "").lower()
     out = []
     if not 250 <= len(text or "") <= 1800:
@@ -328,7 +349,8 @@ def thumb_problems(t: dict, text: str) -> list[str]:
         out.append("the rain must be visible in the picture: say it")
     sub = t.get("subject", "exterior")
     must = {"person": [t.get("who", "woman")], "back": ["behind"], "walk": ["umbrella"], "exterior": ["outside"], "landscape": ["wide"], "macro": ["macro"], "still": ["mug"],
-            "animal": [t.get("animal", "cat")], "object": [(_entry(OBJECTS, t.get("object", "lantern"))[0])]}.get(sub, [])
+            "animal": [t.get("animal", "cat")], "object": [(_entry(OBJECTS, t.get("object", "lantern"))[0])],
+            "instrument": [instrument.split()[-1]] if instrument else []}.get(sub, [])
     for w in must:
         if w.lower() not in low:
             out.append(f"'{w}' is not in the prompt")

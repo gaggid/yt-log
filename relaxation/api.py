@@ -169,11 +169,13 @@ async def new_thumbnail(session_id: str, body: _ThumbReq):
         raise HTTPException(400, "person must be woman, man or person")
 
     async def work(progress):
-        from . import thumb
-        progress(0, 2, "drawing the thumbnail picture")
-        await asyncio.to_thread(thumb.reroll, session_id, body.person)          # a new subject, layout, font, colours and words: not the same design again
+        from . import director, thumb
+        progress(0, 3, "choosing a new thumbnail idea")
+        await asyncio.to_thread(thumb.reroll, session_id, body.person)          # a new subject, lettering colours and type style: not the same design again
+        await director.plan_thumb(session_id)                                    # the art model writes the picture prompt, the big words inside it
+        progress(1, 3, "drawing the thumbnail picture")
         await thumb.picture(session_id, force=True)
-        progress(1, 2, "laying the words on it")
+        progress(2, 3, "saving the thumbnail")
         await asyncio.to_thread(thumb.make, session_id, True)
         return "New thumbnail is ready."
     return _start(session_id, work)

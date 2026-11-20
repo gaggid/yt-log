@@ -17,7 +17,7 @@ import re
 from story import llm, settings as settings_mod
 from story2.schemas import M, Str, StrList
 
-from . import looks, models as MODS, seo, store, variety
+from . import looks, models as MODS, seo, store, thumbcheck, variety
 
 BAN = re.compile(r"\b(cures?|treat(?:s|ment)?|heal(?:s|ing)?|therap\w+|insomnia|anxiety|depress\w*|adhd|clinical\w*|proven|guarantee\w*|instantly|miracle|doctors?|medical|"
                  r"better sleep|sleep better|no ads|ad-free)\b", re.I)
@@ -27,9 +27,13 @@ STOCK = ("immerse", "embark", "experience the", "transport yourself", "journey")
 # ── what the model returns ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 class VisualOut(M):
     scene_prompt: Str
-    thumb_prompt: Str
-    headline: Str
-    subline: Str = ""
+
+
+class ThumbOut(M):
+    prompt: Str
+    text: Str = ""
+    summary: Str = ""
+    has_person: bool = False
 
 
 class CopyOut(M):
@@ -44,19 +48,35 @@ class CopyOut(M):
 
 VISUAL_SYSTEM = """\
 [TASK:rl_visual]
-You are the art director of a calm rain-ambience YouTube channel. You write two picture prompts for an image model and the words of a thumbnail.
+You are the art director of a calm rain-ambience YouTube channel. You write the picture prompt of the video's scene for an image model.
 
-1. scene_prompt: the picture that the video shows, seen in the first person from inside a room, looking out. Start from the BASE PROMPT and keep its place, its
+scene_prompt: the picture that the video shows, seen in the first person from inside a room, looking out. Start from the BASE PROMPT and keep its place, its
    composition and its layers of depth, but weave in EVERY seed given (light, lamp and its side, season, air, camera, grade, extra thing) so that this picture is
    clearly different from the recent ones listed. Write the way a photographer describes one real moment: concrete, positive words only (say what is there, never
    what is not), no filler adjectives. The picture is WET (just after rain: soaked surfaces, beads of water on glass, puddles, mist) but the AIR is clear: never
    write falling rain, rain streaks, downpour or heavy rain. No person, no text, no logo. 120 to 260 words. End with exactly: No people, no text, no logo.
-2. thumb_prompt: start from the THUMBNAIL BASE and improve it with the same care. Keep the subject kind, the side the subject is on, who it is and what they do.
-   Warm, cozy, uplifting. Photorealistic. End with: No text, no logo.
-3. headline: the big words laid on the thumbnail by code: 2 or 3 words, capital letters, at most 16 characters, true to the video (no claims about health).
-   subline: 2 to 4 words, capital letters, at most 24 characters.
 
-Return ONLY a JSON object: {{"scene_prompt": "...", "thumb_prompt": "...", "headline": "...", "subline": "..."}}"""
+Return ONLY a JSON object: {"scene_prompt": "..."}"""
+
+THUMB_MODEL = "qwen3.8-27b-Q3_S"          # the owner chose this gateway model for the thumbnail prompt (2026-11-20)
+
+THUMB_SYSTEM = """\
+[TASK:rl_thumb]
+You are the art director of a YouTube channel of calm rain and sleep music. You write ONE prompt for an image model (Qwen Image) that draws the thumbnail of a video.
+
+The thumbnail must make a tired person scrolling at night feel calm and want to click: it reflects calm, cozy, sleepy rain music. It is a single clear picture with one focal point, readable at small size, rich but soft colour, photorealistic or softly painterly (your choice), 16:9.
+
+You decide the picture yourself, with full freedom: the subject, the framing, the light, the colour palette, the mood, the details. Use the FACTS (place, instrument, length, who it is for) as raw material. Good subjects: a happy person in the rainy place, the instrument resting at a rain-covered window, the place seen from outside, a wide landscape in rain, macro raindrops on glass with glowing bokeh, an animal, a still life, an object. Write it out richly and concretely, as a photographer would describe one real moment.
+YOU choose whether a person is in the picture. A happy person (a man or a woman) makes a warm, human thumbnail; a picture with no person can be calmer and more atmospheric. Look at RECENT (each line says whether it had a person) and choose what keeps the channel page varied: do not repeat the last pictures' subject, framing or palette, and aim for about four thumbnails in ten with a person over time. The OPTIONAL PERSON line gives a person to use if you choose one (you may adapt the clothes and the activity to the scene).
+IF YOU INCLUDE A PERSON: they are the hero, seen from the waist up with the face clearly visible, natural and attractive, not a close-up, HAPPY and relaxed (a real warm smile or a soft blissful closed-eye smile), fully dressed in cozy modest clothes; describe them concretely (age range, look, hair, clothes, what they do, where they look) and set has_person to true.
+IF YOU DO NOT: no people anywhere in the picture, and has_person is false.
+Rain must be visible (drops on glass, fine silver lines, wet surfaces, ripples, mist).
+
+THE WORDS IN THE PICTURE: Qwen Image draws text. The picture carries exactly the TEXT given, split over two or three stacked lines, and nothing else is lettered. The words are a main part of the thumbnail and must read at a glance when it is shown the size of a postage stamp. In the prompt, put the exact words in double quotes (every word, every number) and say: huge, bold, heavy, impactful lettering that fills about 40 percent of the picture's width and a third of its height, in the open space on the side given (compose the picture so that space exists, with the subject on the other side), the number or the first line even larger. Describe the lettering with the TYPE and COLOURS given (add a soft dark outline or shadow and a gentle glow so it pops from the background yet stays calm and cozy, never harsh). No logo, no watermark, no channel name, no small print.
+
+Write positive words only (say what is there, never what is not), concrete and visual, 90 to 200 words, one flowing paragraph.
+
+Return ONLY a JSON object: {"prompt": "<the image prompt>", "text": "<the exact words in the picture>", "summary": "<5 to 10 words: what the picture shows>", "has_person": <true or false>}"""
 
 COPY_SYSTEM = """\
 [TASK:rl_copy]
@@ -130,6 +150,98 @@ def copy_problems(c: CopyOut, length: str, recent: list[str]) -> list[str]:
     return out
 
 
+_PERSON_WORDS = re.compile(r"\b(woman|man|girl|boy|person|people|he|she|his|her)\b")
+
+
+def thumb_text(st: dict, instrument: str) -> str:
+    """The big words drawn into the thumbnail: the length and the instrument ('3 HOURS BAMBOO FLUTE')."""
+    return f"{MODS.duration_label(st)} {instrument}".upper().strip()
+
+
+def thumb_model_problems(t: dict, expected: str, prompt: str, instrument: str = "", has_person: bool | None = None) -> list[str]:
+    """Plain-code checks of the art model's thumbnail prompt: the exact words are in it, in quotes, large and bold; rain is visible; and the picture agrees with what the
+    model declared: a person is happy, no person means no person. `has_person` None = the seed's subject decides (the stand-in tests)."""
+    low = (prompt or "").lower()
+    out = []
+    if not 350 <= len(prompt or "") <= 2600:
+        out.append("the prompt must be 90 to 200 words")
+    if '"' not in (prompt or "") and "\u201c" not in (prompt or ""):
+        out.append("put the exact words of the TEXT in double quotes")
+    have = set(thumbcheck.norm(prompt).split())
+    missing = [w for w in thumbcheck.norm(expected).split() if w not in have]
+    if missing:
+        out.append(f"every word of the TEXT must be in the prompt, missing: {' '.join(missing)}")
+    if not re.search(r"\b(bold|heavy|huge)\b", low):
+        out.append("say that the lettering is huge, bold and heavy")
+    if "rain" not in low:
+        out.append("the rain must be visible in the picture: say it")
+    person = (t.get("subject") in looks.PERSON_SUBJECTS) if has_person is None else has_person
+    if person:
+        if not re.search(r"\b(smil\w*|happy|joy\w*|content|blissful)\b", low):
+            out.append("the person must be happy: say how they smile")
+        if not _PERSON_WORDS.search(low):
+            out.append("has_person is true but no person is described")
+    elif _PERSON_WORDS.search(low.replace("no people", "")):
+        out.append("has_person is false but a person is in the prompt: remove them or set has_person to true")
+    return out
+
+
+async def plan_thumb(session_id: str, s: dict | None = None, backend=None) -> dict:
+    """Write the thumbnail picture prompt of this session with the art model, the big words inside it. Never raises: when the model fails or breaks a rule the code prompt
+    (no words in it) is stored and `thumb.text_in_picture` is False, so thumb.make lays the words on by code instead."""
+    s = s or settings_mod.get()
+    session = store.get(session_id)
+    if ensure_seeds(session):
+        store.save(session)
+    st = session["settings"]
+    scene = st.get("scene") or MODS.DEFAULT_SCENE
+    angle = st["angle"]
+    t = dict(st["thumb"])
+    length = MODS.duration_label(st)
+    instrument = (st.get("music_plan") or {}).get("instrument", "soft piano")
+    hist = [h for h in variety.history() if h.get("id") != session_id]
+    stand_in = looks.thumb_prompt(scene, t, instrument)
+    ang = looks.ANGLES[angle]
+    t["headline"] = ang["headlines"][int(st.get("seed") or 0) % len(ang["headlines"])]
+    t["subline"] = ang["tail"]
+    t["text"] = thumb_text(st, instrument)
+    t["text_in_picture"] = False
+    prompt, note = stand_in, ""
+    try:
+        if backend is None:
+            backend = llm.ChatBackend({**s, "model": THUMB_MODEL}, settings_mod.api_key())
+        caller = llm.JsonCaller(backend, {**s, "model": THUMB_MODEL})
+    except Exception as e:                                   # noqa: BLE001  no gateway key (a scratch copy)
+        caller, note = None, f"thumb: stand-in (no model: {str(e)[:80]})"
+    if caller:
+        view = MODS.THUMB_VIEWS.get(scene) or MODS.THUMB_VIEWS[MODS.DEFAULT_SCENE]
+        open_side = {"right": "left", "left": "right"}.get(t.get("side", "right"), "left")
+        recent = [f"{(h.get('thumb') or {}).get('summary')} ({'with a person' if (h.get('thumb') or {}).get('has_person') else 'no person'})" for h in hist[:6]
+                  if (h.get("thumb") or {}).get("summary")]
+        person_seed = (f"a happy {t.get('who', 'woman')} {t.get('age', 'in their twenties')}, {t.get('ethnic', 'South Asian')}, with {t.get('hair', 'short dark hair')}, "
+                       f"in {t.get('outfit', looks.OUTFITS[0])}")
+        user = (f"FACTS\nPlace: {seo.place_of(scene)} ({MODS.SCENES[scene]['label']}). Outside the window: {view}\n"
+                f"Music: {instrument} ({looks.INSTRUMENT_TEXT.get(instrument, 'soft instrumental music')}), {length}\n"
+                f"Who it is for: {ang['label']} ({'; '.join(ang['audience'][:2])})\n"
+                f"Light you may use: {t.get('light', looks.THUMB_LIGHT[0])}\n"
+                f"OPTIONAL PERSON: {person_seed}\n\n"
+                f"TEXT to draw in the picture: {t['text']}\nTYPE: {t.get('type_style', looks.TYPE_STYLES[0])}\nCOLOURS: {t.get('text_colors', looks.TEXT_COLORS[0])}\n"
+                f"The big words go on the {open_side} side; the subject is on the {t.get('side', 'right')}.\n\nRECENT thumbnails to be different from: {recent or ['(none yet)']}")
+        try:
+            res = await caller.call(THUMB_SYSTEM, user, ThumbOut, validate=lambda v: _raise(thumb_model_problems(t, t["text"], v.prompt, instrument, v.has_person)))
+            prompt, t["summary"], t["text_in_picture"], t["has_person"] = res.value.prompt.strip(), res.value.summary.strip(), True, bool(res.value.has_person)
+            note = "thumb: model"
+        except Exception as e:                               # noqa: BLE001  a model failure must never stop a run
+            note = f"thumb: stand-in ({str(e)[:120]})"
+    t["planned"] = True
+    session = store.get(session_id)
+    st = session["settings"]
+    st["thumb"], st["thumb_prompt"] = t, prompt
+    st["director_notes"] = [n for n in (st.get("director_notes") or []) if not n.startswith("thumb:")] + [note]
+    store.save(session)
+    return st
+
+
 def thumb_words_problems(headline: str, subline: str) -> list[str]:
     out = []
     if not re.fullmatch(r"[A-Z0-9 &+'!?.,-]{3,16}", (headline or "").strip()) or _words(headline) > 3:
@@ -190,15 +302,16 @@ async def plan(session_id: str, s: dict | None = None, force: bool = False) -> d
         store.save(session)
     st = session["settings"]
     if not force and st.get("director_hash") == seeds_hash(st) and st.get("scene_prompt") and (st.get("copy") or {}).get("title"):
+        if not (st.get("thumb") or {}).get("planned"):          # a session planned before the thumbnail had its own model call
+            return await plan_thumb(session_id, s)
         return st
     scene = st.get("scene") or MODS.DEFAULT_SCENE
-    look, angle, thumb = st["look"], st["angle"], dict(st["thumb"])
+    look, angle = st["look"], st["angle"]
     hist = [h for h in variety.history() if h.get("id") != session_id]
     length = MODS.duration_label(st)
     instrument = (st.get("music_plan") or {}).get("instrument", "soft piano")
     base_prompt = MODS.SCENES[scene]["prompt"]
     stand_in = looks.compose_prompt(scene, look)
-    thumb_stand_in = looks.thumb_prompt(scene, thumb)
     notes: list[str] = []
 
     backend = None
@@ -208,37 +321,27 @@ async def plan(session_id: str, s: dict | None = None, force: bool = False) -> d
         notes.append(f"no model: {str(e)[:80]}")
     caller = llm.JsonCaller(backend, s) if backend else None
 
-    # 1. the pictures and the words on the thumbnail
-    scene_prompt, thumb_prompt = stand_in, thumb_stand_in
-    headline = ""
-    subline = ""
+    # 1. the scene picture (the thumbnail has its own call, plan_thumb, with its own model)
+    scene_prompt = stand_in
     if caller:
         wet = MODS.WET
         base_wo_wet = base_prompt[len(wet):] if base_prompt.startswith(wet) else base_prompt
         base_wo_wet = " ".join(looks._LIGHT_SENT.sub("", base_wo_wet).split())            # the base light sentence goes: the seed's light replaces it
         user = (f"BASE PROMPT (the place of this video):\n{base_wo_wet}\n\nSEEDS to weave in (all of them):\n{_seed_text(scene, look)}\n\n"
                 f"RECENT PICTURES to be different from:\n{_recent_looks(hist)}\n\n"
-                f"THUMBNAIL BASE:\n{thumb_stand_in}\n\nVideo angle: {looks.ANGLES[angle]['label']}; length {length}; instrument {instrument}; place {seo.place_of(scene)}.")
+                f"Video angle: {looks.ANGLES[angle]['label']}; length {length}; instrument {instrument}; place {seo.place_of(scene)}.")
 
         def check(v: VisualOut) -> None:
-            bad = looks.prompt_problems(scene, look, v.scene_prompt) + [f"thumb_prompt: {p}" for p in looks.thumb_problems(thumb, v.thumb_prompt)] \
-                + thumb_words_problems(v.headline.strip().upper(), v.subline.strip().upper())
+            bad = looks.prompt_problems(scene, look, v.scene_prompt)
             if bad:
                 raise ValueError("; ".join(bad)[:700])
         try:
             res = await caller.call(VISUAL_SYSTEM, user, VisualOut, validate=check)
             v = res.value
             scene_prompt = wet + " " + v.scene_prompt.strip() if not v.scene_prompt.strip().startswith(wet[:20]) else v.scene_prompt.strip()
-            thumb_prompt = v.thumb_prompt.strip()
-            headline, subline = v.headline.strip().upper(), v.subline.strip().upper()
             notes.append("visual: model")
         except Exception as e:                           # noqa: BLE001  a model failure must never stop a run
             notes.append(f"visual: stand-in ({str(e)[:120]})")
-    if not headline:
-        ang = looks.ANGLES[angle]
-        headline = ang["headlines"][int(st.get("seed") or 0) % len(ang["headlines"])]
-        subline = ang["tail"]
-    thumb["headline"], thumb["subline"] = headline, subline
 
     # 2. the YouTube text
     copy = seo.fallback_copy(scene, angle, length, instrument, look, session_id, _recent_text(hist, "title"))
@@ -262,13 +365,13 @@ async def plan(session_id: str, s: dict | None = None, force: bool = False) -> d
 
     session = store.get(session_id)
     st = session["settings"]
-    st["scene_prompt"], st["thumb_prompt"], st["thumb"], st["copy"] = scene_prompt, thumb_prompt, thumb, copy
+    st["scene_prompt"], st["copy"] = scene_prompt, copy
     st["flame"] = bool(look.get("flame"))
     st["director_hash"] = seeds_hash(st)
     st["director_notes"] = notes
     session["publish"] = {}                                   # the upload text is written again from the new copy
     store.save(session)
-    return st
+    return await plan_thumb(session_id, s)
 
 
 def _raise(problems: list[str]) -> None:

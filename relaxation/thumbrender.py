@@ -190,3 +190,14 @@ def render(scene_path: Path, length_words: str, spec: dict | None = None) -> byt
         if buf.tell() <= MAX_BYTES:
             break
     return buf.getvalue()
+
+
+def plain(picture_path: Path) -> bytes:
+    """The picture as the thumbnail JPEG, with nothing laid on it: the image model drew the big words into it (relaxation/thumbcheck.py read them back)."""
+    im = Image.open(picture_path).convert("RGB").resize(SIZE, Image.LANCZOS)
+    for q in (92, 88, 84, 78, 70):
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", quality=q, optimize=True)
+        if buf.tell() <= MAX_BYTES:
+            break
+    return buf.getvalue()

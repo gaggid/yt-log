@@ -1,4 +1,4 @@
-"""Rain drawn by code over the scene picture, as a perfect loop.
+﻿"""Rain drawn by code over the scene picture, as a perfect loop.
 
 Wan 2.2 keeps the streaks of its start picture where they are (they shimmer, they do not fall), so the picture is drawn WITHOUT rain in the
 air and the rain is added here: falling streaks in three depth layers, ripples on water and small bursts on stone, only inside the area
@@ -15,9 +15,10 @@ import subprocess
 from pathlib import Path
 
 import config
+import numpy as np
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
-from . import glassfx
+from . import dropsim, glassfx
 
 FPS = 30                     # the video's frame rate (models.OUT_FPS): the loop is stream-copied, so it is drawn at the final rate
 LOOP_S = 10.0               # a drizzle: the same whole passes per loop in a loop twice as long as the 5 s version, so the rain falls half as fast (4 s -> 5 s -> 10 s, each owner-requested)
@@ -162,16 +163,19 @@ class _Splashes:
                     d.ellipse([p["x"] - rr, p["y"] - rr * 0.35, p["x"] + rr, p["y"] + rr * 0.35], outline=int(255 * (1 - age / 0.3) * p["bright"]))
 
 
-# ── the window glass: smudges that turn lights into bokeh, beads of water, and a few drops that slide down ─────────────────────────────────
+# â”€â”€ the window glass: smudges that turn lights into bokeh, beads of water, and a few drops that slide down â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 GLASS = True
 SMUDGE = 0.60                # how strongly the smudged patches blur the view (0 to 1)
 BOKEH = 0.55                 # brightness of the soft discs the lights turn into inside the smudges
 RIPPLES = False              # ripples on water: off (owner, 2026-11-20: only the drops on the glass, nothing falling and no ripples)
 ROCK_BURSTS = False          # droplet bursts on stones and other hard surfaces: off (owner, 2026-11-19); ripples on water stay
-FOG = 0.38                   # how foggy the whole window glass is (0 = clear): the scene is a little soft and the drops and wiped trails show it sharp
+FOG = 0.80                   # how foggy the whole window glass is (0 = clear): the scene is a little soft and the drops and wiped trails show it sharp
 DRIZZLE = 240               # tiny drops standing on the glass (per view of 1280x720)
+FROST = 0.17                 # a darker, speckled frost over the glass that is strongest where the view outside is bright (owner, 2026-11-20: a clear lens over a bright sky shows nothing)
 MIST = 0.12                  # soft haze over the view, thicker in the distance (top), so the outside looks misty (0 = none)
+BEAD_R = ((1.5, 3.0), (2.8, 5.4))  # radius of the small and the large beads in pixels of a 1280 wide picture: the glass is far from the viewer, so they are small (owner, 2026-11-20); was (1.8, 3.8), (5.0, 9.5)
 BEADS = (95, 14)            # small and large beads of water standing on the glass (per view of 1280x720); the first version had (380, 55), which distorted the picture too much (owner: at least 70 % fewer)
+PHYSICS = True                # drops with the physics of the Codrops demo (relaxation/dropsim.py): run, stop, leave trail drops, take in smaller drops (owner, 2026-11-20); False = the older sliding drops
 RUNNERS = 45                 # drops that creep down the glass (per view of 1280x720): 14, 18, 27, now 45 (owner 2026-11-20: more, and faster)
 
 
@@ -205,8 +209,9 @@ def inside_view(view, w, h):
     return m.filter(ImageFilter.GaussianBlur(max(2, int(w * 0.006))))
 
 
-def glass_base(base, view, rng):
-    """The picture seen through a dirty, wet window: (picture with smudges, bokeh and standing beads, strongly blurred copy for the sliding drops)."""
+def glass_base(base, view, rng, drizzle=None):
+    """The picture seen through a dirty, wet window: (picture with smudges, bokeh and standing beads, strongly blurred copy for the sliding drops). `drizzle`: [(x, y, r)] of the tiny
+    standing drops to bake in (the physics engine keeps the ones that a running drop wipes out of the picture); None = random ones."""
     w, h = base.size
     s = w / 1280
     vx0, vy0, vx1, vy1 = view
@@ -232,6 +237,16 @@ def glass_base(base, view, rng):
     if FOG > 0:                                                # the whole glass is a little fogged; drops and wiped trails stay sharp
         soft = base.filter(ImageFilter.GaussianBlur(3.2 * s))
         out = Image.composite(soft, out, inside.point(lambda v: int(v * FOG)))
+    if FROST > 0:
+        rs = np.random.RandomState(rng.randrange(2 ** 31))
+        fine = Image.fromarray((rs.rand(max(8, int(h / 1.4)), max(8, int(w / 1.4))) * 255).astype("uint8")).resize((w, h), Image.BICUBIC).filter(ImageFilter.GaussianBlur(0.55 * s))
+        coarse = Image.fromarray((rs.rand(max(4, h // 40), max(4, w // 40)) * 255).astype("uint8")).resize((w, h), Image.BICUBIC)
+        n = np.clip((np.asarray(fine, np.float32) / 255 - 0.5) * 3.2 + 0.5, 0, 1) * (0.55 + 0.45 * np.asarray(coarse, np.float32) / 255)      # a fine grain, denser in some places than in others
+        bright = np.asarray(blur.convert("L"), np.float32) / 255
+        amt = FROST * (0.25 + 0.75 * np.clip((bright - 0.3) / 0.6, 0, 1)) * (np.asarray(inside, np.float32) / 255)       # darker where the outside is bright
+        arr = np.asarray(out, np.float32) * (1 - amt * n)[..., None]
+        arr[..., 2] += amt * n * 6                                                                                  # a little cool, like wet glass
+        out = Image.fromarray(np.clip(arr, 0, 255).astype("uint8"))
     if MIST > 0:
         haze = blur.filter(ImageFilter.GaussianBlur(10 * s)).point(lambda v: min(255, int(v * 0.8 + 62)))      # a pale, lifted, very soft copy
         grad = Image.linear_gradient("L").rotate(180).resize((w, h))                  # 255 at the top of the picture, 0 at the bottom
@@ -250,11 +265,13 @@ def glass_base(base, view, rng):
     # drops of water standing on the glass: tiny ones (drizzle), small and larger beads; each is a lens that shows the sharp scene flipped (relaxation/glassfx.py)
     src = glassfx.arr(base)
     area = vw * vh / (1280 * 720)
-    for kind, n, (lo, hi), mag in (("drizzle", int(DRIZZLE * area), (1.0, 2.2), 1.7), ("small", int(BEADS[0] * area), (1.8, 3.8), 2.0), ("big", int(BEADS[1] * area), (5.0, 9.5), 2.2)):
+    for x, y, r in drizzle or []:
+        glassfx.paste(out, glassfx.sprite(src, x, y, r, r * 1.15, mag=1.7, tear=0.12, gain=0.9, punch=2.4, shade=0.55))
+    for kind, n, (lo, hi), mag in (("drizzle", 0 if drizzle is not None else int(DRIZZLE * area), (1.0, 2.2), 1.7), ("small", int(BEADS[0] * area), BEAD_R[0], 2.0), ("big", int(BEADS[1] * area), BEAD_R[1], 2.2)):
         for _ in range(n):
             r = rng.uniform(lo, hi) * s
             x, y = rng.uniform(vx0, vx1), rng.uniform(vy0, vy1)
-            glassfx.paste(out, glassfx.sprite(src, x, y, r * rng.uniform(0.85, 1.1), r * rng.uniform(0.95, 1.3), mag=mag, tear=0.12 if kind != "big" else 0.2, gain=0.85 if kind == "drizzle" else 1.0))
+            glassfx.paste(out, glassfx.sprite(src, x, y, r * rng.uniform(0.85, 1.1), r * rng.uniform(0.95, 1.3), mag=mag, tear=0.12 if kind != "big" else 0.2, gain=0.85 if kind == "drizzle" else 1.0, punch={"drizzle": 2.4, "small": 1.7, "big": 1.3}[kind], shade={"drizzle": 0.55, "small": 0.35, "big": 0.25}[kind]))
     return out, blur
 
 
@@ -329,7 +346,7 @@ class _Runners:
             glassfx.paste(im, glassfx.sprite(self.src, x, y, r * 0.8, r * 1.25, mag=2.2, tear=0.3, gain=al))
 
 
-# ── lamps: a soft glow around every bright light, in the room and outside; a real flame also flickers a little ─────────────────────────────
+# â”€â”€ lamps: a soft glow around every bright light, in the room and outside; a real flame also flickers a little â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 BLOOM = 0.60                 # strength of the glow around lamps (0 = off)
 BLOOM_FROM = 185             # brightness (0-255) from which a pixel counts as a light
 FLICKER = 0.07               # how much a flame's glow rises and falls (whole cycles per loop, so the loop stays seamless)
@@ -353,7 +370,7 @@ def lamp_glow(base, hot_from=235):
 
 
 def render(picture: Path, zones: dict | None, out: Path, size: tuple[int, int] = (2560, 1440), seed: int = 7, loop_s: float = LOOP_S,
-           flame: bool = False) -> Path:
+           flame: bool = False, physics: bool | None = None) -> Path:
     """Write a `loop_s` second loop of the picture with rain in `zones` to `out` (H.264). Returns `out`. `flame`: the scene has a real flame (candle, oil lamp), whose glow flickers."""
     w, h = size
     n = int(round(FPS * loop_s))
@@ -366,11 +383,16 @@ def render(picture: Path, zones: dict | None, out: Path, size: tuple[int, int] =
     mask = mask.filter(ImageFilter.GaussianBlur(soft))
     rng = random.Random(seed)
     runners = None
+    sim = None
     sharp = base                                              # the picture as drawn: what the drops and the wiped trails show
     sharp_glow = lamp_glow(sharp)[0] if BLOOM > 0 else sharp
     if GLASS:
-        base, blur = glass_base(sharp, view, random.Random(seed + 1))
-        runners = _Runners(random.Random(seed + 2), w, h, view, n, sharp_glow)
+        if PHYSICS if physics is None else physics:
+            sim = dropsim.Sim(random.Random(seed + 2), view, n, w / 1280)
+            base, blur = glass_base(sharp, view, random.Random(seed + 1), drizzle=sim.static_drizzle)
+        else:
+            base, blur = glass_base(sharp, view, random.Random(seed + 1))
+            runners = _Runners(random.Random(seed + 2), w, h, view, n, sharp_glow)
     hot = None
     if BLOOM > 0:
         base, hot = lamp_glow(base)
@@ -381,12 +403,23 @@ def render(picture: Path, zones: dict | None, out: Path, size: tuple[int, int] =
     cmd = [config.FFMPEG, "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", str(FPS), "-i", "-",
            "-c:v", "libx264", "-preset", "medium", "-crf", "17", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(out)]
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+    sim_src = glassfx.arr(sharp_glow) if sim else None
+    wet = Image.new("L", (w, h), 0)                           # where running drops wiped the fog: it dries again within a few seconds
+    dry = [int(v * 0.975) for v in range(256)]
+    if sim:
+        for f0 in range(n - 150, n):                          # the wet paths of the end of the loop are already there at its start, so the loop is seamless
+            wet = wet.point(dry)
+            sim.trails(ImageDraw.Draw(wet), f0)
     try:
         for f in range(n):
             a = Image.new("L", (w, h), 0)
             if STREAKS:
                 streaks.draw(ImageDraw.Draw(a), f)
             glass = base
+            if sim:
+                wet = wet.point(dry)
+                sim.trails(ImageDraw.Draw(wet), f)
+                glass = Image.composite(sharp_glow, base, ImageChops.multiply(wet, mask))
             if runners:                                        # the fog is wiped along the path of every running drop: the sharp picture shows through
                 tr = Image.new("L", (w, h), 0)
                 runners.trails(ImageDraw.Draw(tr), f)
@@ -401,6 +434,8 @@ def render(picture: Path, zones: dict | None, out: Path, size: tuple[int, int] =
                 frame = ImageChops.screen(frame, hot.point(lambda v, g=g: min(255, int(v * g))))
             if runners:
                 runners.drops(frame, f)
+            if sim:
+                sim.paste(frame, sim_src, f)
             p.stdin.write(frame.tobytes())
     finally:
         p.stdin.close()
